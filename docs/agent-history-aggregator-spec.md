@@ -1117,7 +1117,7 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 | `MohammadErfan-Jabbari/pi-session-inspect` | Read-only local session inspection | Local inspection rather than cross-machine bundle ingest. |
 | `Dwsy/pi-session-manager` | Session manager UI, SQLite search, external sessions | Heavier workbench; not a Go CLI archive format. |
 | `badlogic/pi-share-hf` | Incremental collection, redaction, review, upload | Public dataset pipeline; v1 here is private local corpus and does not redact. |
-| `adewale/claude-history-explorer` | Concrete Claude Code JSONL discovery/parsing, `agent-*.jsonl`, rich read-only UX | Single-machine Python explorer rather than multi-machine immutable bundle corpus. |
+| `adewale/claude-history-explorer` | Concrete Claude Code JSONL discovery/parsing, `agent-*.jsonl`, rich read-only UX, verifiable trust model | Single-machine Python explorer rather than multi-machine immutable bundle corpus; see `docs/comparisons/claude-history-explorer.md`. |
 | `adewale/testing-best-practices` | Table-driven Go tests, real fixtures, golden files, property/fuzz tests, doc-sync tests, test-quality antipatterns | Testing guidance rather than an agent-history product. |
 
 Remembered line:

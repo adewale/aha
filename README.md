@@ -8,6 +8,8 @@ V1 supports Pi and Claude Code sessions, deterministic `tar.zst` bundles, SQLite
 
 V1 does **not** redact secrets. Bundles may contain credentials, private prompts, source code, tool output, images, filesystem paths, and API responses. Do not upload bundles or corpora publicly unless you have reviewed them yourself.
 
+See `docs/trust.md` for the v1 trust model and verification commands.
+
 ## Build
 
 ```bash
@@ -86,3 +88,4 @@ CLI flags override config values.
 - Deterministic bundles require identical input files plus pinned/generated capture metadata. Tests pin `captured_at` and `bundle_id`.
 - Image prompt reconstruction metadata is stored for embedded/base64 image content, including prompt order, source reference, MIME type, hash, and dimensions when available.
 - See `docs/lessons-learned.md` for the rollback/reimplementation lessons that shaped v1.
+- See `docs/comparisons/claude-history-explorer.md` for what `aha` adopted from Claude History Explorer and where it intentionally differs.

@@ -33,6 +33,13 @@ Current counts after cycle 10:
 - V2/later items: redaction/public dataset prep, Windows support, configurable project grouping, opt-in tool-output indexing, source-native branch/thread reads, conflict UX refinements, and OCR/captioning.
 - Accepted residual regrets are documented below; none are P0/P1 for v1.
 
+## Claude History Explorer comparison lessons
+
+- CHE has no `LESSONS_LEARNED.md` in the checkout inspected; its `TRUST.md`, architecture docs, parser/project code, and tests serve as the practical lessons corpus.
+- CHE's strongest reusable lesson is verifiable trust: state read-only/no-network claims and back them with static tests and user-verifiable commands.
+- CHE's parser confirms the importance of line-by-line JSONL parsing, malformed-line tolerance, `agent-*` subagent recognition, and careful treatment of `tool_result` blocks.
+- AHA intentionally differs from CHE by snapshotting immutable multi-source bundles and ingesting into SQLite rather than searching one live Claude tree on demand.
+
 ## Product lessons
 
 - The bundle is the receipt; the corpus is the index. Ingest must trust bundled bytes over mutable live paths.
@@ -81,6 +88,7 @@ Additional testing lessons:
 - Do not claim v1 completion from passing tests alone; require fresh adversarial review.
 - Keep cycle accounting from day one: implementation attempts, rollbacks, lesson commits, and stop reasons.
 - Add doc-sync tests for process/accounting invariants once the spec depends on them.
+- Add static trust tests for claims users are asked to rely on, especially no source-history mutation and no network behavior.
 - Avoid commits that mix unrelated docs/spec/code changes.
 - Open questions must be classified as locked decisions, explicit v2/post-v1 items, or true blockers.
 - Treat “remaining issues” as release-blocking unless explicitly marked as v2/post-v1/non-goal.

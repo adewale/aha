@@ -55,4 +55,9 @@ func TestReadmeDocumentsRegisteredCommandsAndPrivacy(t *testing.T) {
 	if !strings.Contains(text, "does **not** redact secrets") {
 		t.Fatalf("README privacy warning missing")
 	}
+	for _, doc := range []string{"docs/trust.md", "docs/comparisons/claude-history-explorer.md", "docs/lessons-learned.md"} {
+		if !strings.Contains(text, doc) {
+			t.Fatalf("README missing link to %s", doc)
+		}
+	}
 }
