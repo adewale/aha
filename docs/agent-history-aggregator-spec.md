@@ -2,7 +2,7 @@
 title: Agent History Aggregator Spec
 kind: spec
 created: 2026-05-18
-updated: 2026-05-18
+updated: 2026-05-19
 tags:
   - agents
   - session-history
@@ -15,7 +15,7 @@ tags:
   - cli
   - specification
 source_type: design
-source_count: 4
+source_count: 8
 status: draft-spec
 aliases:
   - Agent History Aggregator
@@ -55,17 +55,20 @@ Short version:
 | Tool name | Agent History Aggregator (`aha`) |
 | Product form | Open-source CLI |
 | Language | Go |
-| Source adapters in v1 | Pi and Claude Code only |
+| Source adapters in v1 | Pi and Claude Code built in; adapter system must be pluggable for more agents later |
 | Compression/archive format | `tar.zst` |
 | Paths | Preserve raw paths by default |
-| SQLite implementation | Pure Go portability preferred |
+| SQLite | Use SQLite as the corpus/query engine; use FTS5, indexes, constraints, transactions, JSON columns/functions where useful; do not reimplement what SQLite does well |
+| Config format | JSONC |
 | Secrets/redaction | Punt to v2; v1 warns but does not redact |
 | Subagents | Include in v1 |
-| Images | Include in v1 |
+| Images | Include in v1 and store enough information to recreate image-bearing prompts |
 | Live sync | No |
 | Live session mutation | Never |
 | Embeddings | Not v1 |
 | Tool output | Preserve in raw files; ignore for v1 search/indexing |
+| Determinism | Required for manifests, archive layout, tar metadata, and stable test fixtures |
+| Windows support | Punt to v2 |
 
 ## Non-goals
 
@@ -77,7 +80,8 @@ V1 does not try to:
 - publish or redact a public dataset;
 - solve secret handling;
 - inject old session history into every new agent run;
-- build a hosted service.
+- build a hosted service;
+- support Windows in v1.
 
 The tool is a local archive and search system. Users should treat bundles and corpora as private because v1 does not redact secrets.
 
@@ -102,16 +106,28 @@ Implementation target:
 
 ## Source adapters
 
-The CLI should keep source-specific parsing behind adapters.
+The CLI should keep source-specific discovery and parsing behind adapters. Pi and Claude Code are the only built-in v1 adapters, but the architecture must not bake either source into archive, ingest, search, or read semantics. Future agents should be addable by implementing the adapter contract and registering the adapter.
 
 ```go
 type SourceAdapter interface {
     Name() string
-    Discover(config SourceConfig) ([]SessionFile, error)
-    ParseSession(path string, r io.Reader) (*ParsedSession, error)
-    DiscoverArtifacts(session SessionFile) ([]ArtifactFile, error)
+    Version() string
+    DefaultRoots() []DefaultRoot
+    Capabilities() AdapterCapabilities
+    Discover(ctx context.Context, config SourceConfig) ([]SessionFile, error)
+    DiscoverArtifacts(ctx context.Context, session SessionFile) ([]ArtifactFile, error)
+    ParseSession(ctx context.Context, file SessionFile, r io.Reader) (*ParsedSession, error)
 }
 ```
+
+Adapter rules:
+
+- adapters emit source-native IDs when available and stable derived IDs when not;
+- adapters preserve raw files and raw entries even when normalization is partial;
+- adapters can attach source-specific metadata as JSON, but core tables must remain source-agnostic;
+- adapters describe capabilities such as `HasThreads`, `HasSubagents`, `HasImages`, `HasToolCalls`, `HasStableEntryIDs`, and `CanLinkSubagents`;
+- adapter name and adapter version are recorded in manifests and SQLite so parsed data can be regenerated after parser changes;
+- v1 adapters may be compiled in; external plugin loading can be v2, but the package boundary should make that migration straightforward.
 
 Adapters in v1:
 
@@ -157,17 +173,56 @@ session directory size: 159M
 
 V1 supports Claude Code, not Claude Desktop exports, Anthropic Workbench logs, or generic Anthropic API logs.
 
-The Claude Code adapter must answer these implementation questions during development:
+Reference implementation inspected:
 
-- default session directory on macOS, Linux, and Windows;
-- session file format and version fields;
-- how project paths are encoded;
-- how subagent work is represented;
-- how images and attachments are stored;
-- whether session files can be appended while Claude Code is running;
-- whether message IDs are stable enough for entry-level dedupe.
+- `adewale/claude-history-explorer`, a Python CLI for local Claude Code JSONL history;
+- `adewale/claude-history-explorer#8`, an open Windows compatibility PR.
 
-Until the adapter is verified against real Claude Code files, the parser should be conservative: preserve raw files, normalize only fields it can prove.
+Confirmed or strongly evidenced facts:
+
+- default session directory: `~/.claude/projects/`;
+- project directories encode source project paths;
+- Unix/macOS encoded path example: `/Users/foo/myproject` becomes `-Users-foo-myproject`;
+- Windows encoded path example from PR #8: `C:\Users\Moho\project` becomes `C--Users-Moho-project`;
+- session files are `*.jsonl` under each project directory;
+- files prefixed with `agent-` are Claude Code subagent conversations;
+- each JSONL line is a single JSON object;
+- common top-level fields include `type`, `timestamp`, and sometimes `slug`;
+- top-level `type` commonly includes `user` and `assistant`;
+- message payloads live under `message`;
+- `message.content` can be a string or a list of content blocks;
+- observed block types include `text`, `tool_use`, and `tool_result`;
+- assistant messages can include `message.usage` token accounting and `message.model`;
+- transcript content can contain Unicode such as emoji and em dashes, so CLI output and tests must be UTF-8-safe.
+
+Discovery rules for v1:
+
+- default source root is `~/.claude/projects/` unless overridden;
+- project candidates are non-hidden directories under the source root;
+- do not require project directory names to start with `-`; this is cheap and avoids a known future Windows portability trap, but it is not a v1 Windows support promise;
+- include a directory only if it contains one or more `*.jsonl` files;
+- preserve both raw project directory name and raw filesystem path in the manifest;
+- treat path decoding as best-effort metadata, not as identity, because Claude Code path encoding is lossy and platform-dependent.
+
+Parser rules for v1:
+
+- stream JSONL line-by-line;
+- skip malformed lines only after recording parse diagnostics; do not fail an entire bundle for one bad line;
+- preserve every raw JSONL line/object in the file blob even if normalization fails;
+- normalize only fields that are present and understood;
+- index `user` and `assistant` text blocks by default;
+- record `tool_use` names and inputs as metadata when cheap;
+- preserve `tool_result` in raw files, but do not index tool-result output for v1 search;
+- use source-native IDs if present; otherwise derive stable entry IDs from file path plus line number plus entry hash.
+
+Still to verify against real Claude Code data during implementation:
+
+- exact default directory on Linux under current Claude Code versions;
+- Windows default directory and drive-letter handling for v2;
+- whether stable message UUID fields are present in all entries;
+- how images and attachments are represented;
+- whether active files are append-only and safe to copy with retry;
+- whether subagent sessions can be linked to parent sessions beyond the `agent-` filename convention.
 
 ## Bundle format
 
@@ -204,12 +259,16 @@ checksums/
   sha256sums.txt
 ```
 
-The archive should be deterministic where practical:
+Archive determinism is a v1 requirement. Given the same input files, machine/config values, and pinned capture metadata, snapshot must produce byte-identical `manifest.json`, tar entry ordering, tar metadata, and compressed bundle bytes.
 
-- stable file ordering;
-- stable manifest ordering;
-- normalized tar metadata where safe;
-- bundle SHA-256 computed after archive creation.
+Determinism rules:
+
+- stable lexical ordering for discovered files and manifest arrays;
+- canonical JSON for `manifest.json` with stable field ordering and no incidental whitespace;
+- normalized tar metadata: owner/group IDs, owner/group names, modes, mtimes, type flags, and path separators;
+- deterministic zstd settings with no embedded wall-clock metadata;
+- bundle SHA-256 computed after archive creation and written to a receipt outside the bundle;
+- tests pin `captured_at`, `bundle_id`, and machine/config values to prove deterministic fixtures.
 
 ## Manifest
 
@@ -355,7 +414,14 @@ subagent-artifacts/*_output.md
 subagent-artifacts/*_meta.json
 ```
 
-Claude Code subagent artifact handling remains an adapter verification task.
+Claude Code examples inferred from `claude-history-explorer`:
+
+```txt
+~/.claude/projects/<encoded-project>/<session-id>.jsonl
+~/.claude/projects/<encoded-project>/agent-<id>.jsonl
+```
+
+For v1, treat `agent-*.jsonl` as subagent session files. Parent linkage is best-effort; if no explicit parent/session reference is found, preserve them as sessions with `is_subagent = true` and `parent_session_id = null`.
 
 ## Images
 
@@ -363,13 +429,15 @@ V1 includes images.
 
 Image handling rules:
 
-- preserve image files and image payloads;
+- preserve image files, embedded base64 image payloads, and source-native image references;
 - content-address image blobs by SHA-256;
-- index metadata such as filename, source, MIME type, size, dimensions when cheaply available, parent session, and entry ID;
+- store MIME type, extension, byte size, dimensions when cheaply available, source, raw path or source reference, parent session, parent entry ID, content block index, and prompt order;
+- keep enough linkage metadata to fully recreate the original image-bearing prompt as presented to the agent, including text/image ordering and the original raw entry JSON;
 - avoid dumping base64 image bodies into FTS snippets;
-- extract embedded base64 images into image blobs during ingest while preserving the raw entry JSON.
+- extract embedded base64 images into image blobs during ingest while preserving the raw entry JSON;
+- dedupe identical image bytes across bundles while preserving every prompt/reference occurrence.
 
-V1 does not require OCR or image captioning.
+V1 does not require OCR or image captioning. Image text search is metadata-only unless the original prompt contains text around the image.
 
 ## Ingest command
 
@@ -428,7 +496,7 @@ Core invariant:
 
 ## Corpus store
 
-Use SQLite plus filesystem blobs.
+Use SQLite plus filesystem blobs. SQLite is the corpus engine, not a cache. The design should lean on SQLite for joins, constraints, uniqueness, transactions, indexes, JSON metadata, FTS5 search, and conflict queries instead of reimplementing mini-databases or custom search/merge engines in Go. Filesystem blobs are for large immutable bytes; SQLite owns metadata, provenance, and queryability.
 
 Directory layout:
 
@@ -443,21 +511,22 @@ Directory layout:
   reports/
 ```
 
-SQLite should be pure-Go portable. Candidate drivers need FTS5 verification before implementation is locked.
+SQLite driver choice is still an implementation detail, but v1 assumes SQLite + FTS5. Prefer a pure-Go driver if it provides reliable FTS5 and JSON support in distributed binaries.
 
 Possible tables:
 
 ```sql
 bundles(bundle_id, bundle_sha256, machine_id, captured_at, ingested_at, manifest_json)
 machines(machine_id, first_seen_at, last_seen_at, labels_json)
-sources(source_id, source_name, adapter_version)
+sources(source_id, source_name, adapter_version, capabilities_json)
 files(file_sha256, kind, bytes, compressed_blob_path, first_seen_bundle_id)
-sessions(session_key, source_name, source_session_id, machine_id, raw_cwd, started_at)
+sessions(session_key, source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, source_metadata_json)
 session_versions(session_key, file_sha256, bundle_id, relative_path, raw_path, observed_at, copy_state)
-entries(session_key, entry_id, parent_id, entry_type, timestamp, role, entry_sha256, raw_json)
+entries(session_key, entry_id, parent_id, entry_type, timestamp, role, entry_sha256, raw_json, source_metadata_json)
 messages(session_key, entry_id, role, text, tool_name, command, files_json, model, provider, tokens, cost)
 artifacts(artifact_sha256, source_name, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview)
-images(image_sha256, source_name, parent_session_key, parent_entry_id, mime_type, bytes, width, height, raw_path)
+images(image_sha256, source_name, mime_type, bytes, width, height, ext, blob_path)
+entry_assets(session_key, entry_id, asset_sha256, asset_kind, content_index, prompt_order, raw_ref, mime_type, metadata_json)
 conflicts(conflict_id, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json)
 ```
 
@@ -467,7 +536,7 @@ Search table:
 fts_messages(session_key, entry_id, text)
 ```
 
-For v1, store raw source entries and normalized fields. Derived columns can be regenerated.
+For v1, store raw source entries and normalized fields. Derived columns can be regenerated. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts.
 
 ## Search command
 
@@ -507,12 +576,14 @@ score timestamp source machine project role snippet session_key entry_id
 
 V1 ranking:
 
-- SQLite FTS BM25;
-- support recency/date filtering;
+- SQLite FTS5 BM25;
+- ordinary SQLite indexes for source, machine, role, project, path, and date filters;
+- SQL joins for provenance and read-context lookups;
 - no semantic embeddings;
+- no custom search engine;
 - no tool-output ranking because tool output is not indexed in v1.
 
-Do not let embeddings hide bad ingestion. The v1 order is:
+Do not let embeddings or custom indexing hide bad ingestion. The v1 order is:
 
 ```txt
 parse correctly
@@ -522,7 +593,7 @@ parse correctly
 → consider embeddings later
 ```
 
-## Privacy and v2 redaction
+## Privacy and v2 candidates
 
 V1 punts secret handling.
 
@@ -532,14 +603,52 @@ The CLI and README must say plainly:
 V1 does not redact secrets. Bundles may contain credentials, private prompts, source code, tool output, images, filesystem paths, and API responses. Do not upload bundles or corpora publicly unless you have reviewed them yourself.
 ```
 
-V2 can add:
+V2 can add redaction, Windows support, and external plugin loading:
 
+- Windows support;
+- external adapter/plugin loading;
 - configured secret files;
 - deny patterns;
 - common token regexes;
 - TruffleHog-style scanning;
 - redacted derivative bundles;
 - public dataset export.
+
+## Config
+
+Use JSONC for configuration so users can keep comments and trailing commas while retaining JSON-compatible structure.
+
+Default config path should use platform-native config directories. On macOS/Linux v1, the likely paths are:
+
+```txt
+~/.config/aha/config.jsonc
+~/.aha/config.jsonc  # acceptable fallback if platform config discovery is too much for v1
+```
+
+Config should cover:
+
+```jsonc
+{
+  // Required unless supplied on the CLI.
+  "machine_id": "ade-mbp",
+  "machine_label": "Adewale MacBook Pro",
+
+  "sources": [
+    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true },
+    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true }
+  ],
+
+  "corpus_dir": "~/.aha",
+  "bundle_out_dir": "~/agent-session-bundles",
+  "path_mode": "raw",
+  "include_subagents": true,
+  "include_images": true,
+  "index_tool_output": false,
+  "redaction": "none-v1"
+}
+```
+
+CLI flags override config values. The first-run UX should create or print a starter JSONC config, but must not infer `machine_id` silently from raw hostname.
 
 ## CLI shape
 
@@ -560,9 +669,10 @@ Implementation preferences:
 | CLI framework | `cobra` or standard library; decide during implementation |
 | Compression | pure-Go Zstandard |
 | Archive | Go stdlib `archive/tar` |
-| SQLite | pure-Go driver with FTS5 support verified |
-| Config | platform-native config dir, likely TOML or JSON |
+| SQLite | SQLite + FTS5 as the query engine; prefer pure-Go driver if FTS5/JSON support is reliable |
+| Config | JSONC in platform-native config dir |
 | Output | human table by default, `--json` for scripts |
+| Testing | Go stdlib `testing`, table-driven tests, `testdata/` fixtures, property/fuzz tests for parsers, golden-file tests for manifests/search output |
 
 ## Thin slice
 
@@ -606,6 +716,76 @@ read output with surrounding entries
 - Conflicting same-entry IDs with different hashes are quarantined, not overwritten.
 - `status` reports machines, bundles, sources, sessions, entries, artifacts, images, index size, and conflicts.
 - README states that v1 does not redact secrets.
+- Test suite includes realistic Pi and Claude Code fixtures, including `agent-*.jsonl` and image-bearing prompts.
+- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and bundles, conflict quarantine, parser robustness, prompt image reconstruction, and search/read coherence.
+- CI runs `go test ./...`, `go test -race ./...`, and documentation-code sync checks.
+
+## Testing strategy
+
+The implementation should borrow directly from `adewale/testing-best-practices`: test quality is measured by bugs caught, not test count or line coverage. Prefer real filesystem/database objects over mocks, write regression tests before fixes, and keep fixtures realistic.
+
+### Test layout
+
+Recommended Go layout:
+
+```txt
+cmd/aha/...
+internal/adapters/pi/...
+internal/adapters/claudecode/...
+internal/archive/...
+internal/corpus/...
+internal/search/...
+testdata/
+  pi/
+  claude-code/
+  bundles/
+  golden/
+```
+
+Use Go's standard testing stack first:
+
+- table-driven `*_test.go` tests with named cases;
+- `t.TempDir()` for filesystem snapshots, bundles, and corpora;
+- real SQLite databases in temporary directories, not mocked repositories;
+- `io.Reader`/`io.Writer` injection so CLI output can be tested without global stdout;
+- `go test ./...`, `go test -race ./...`, `go vet ./...` in CI;
+- build tags for optional slow or platform-specific tests.
+
+### Required test types
+
+| Test type | Required coverage for `aha` |
+|---|---|
+| Smoke | `aha --help`, `aha snapshot --help`, `aha ingest --help`, `aha search --help`, and a tiny snapshot→ingest→search flow all run. |
+| Unit | Path discovery, JSONL parsing, manifest validation, hash calculation, dedupe keys, FTS query construction. |
+| Golden files | Deterministic `manifest.json`, ingest reports, search output, `read` output, conflict reports. |
+| Property/fuzz | Parsers and normalizers never panic on arbitrary input; archive write/read roundtrips; ingest is idempotent; deterministic snapshot output is stable for stable inputs. |
+| Characterization | Realistic anonymized Pi and Claude Code JSONL fixtures capture current source behavior before parser refactors. |
+| Regression | Every bug gets a named test first; record the Windows Claude project discovery issue from `claude-history-explorer#8` as a v2 fixture, not a v1 support promise. |
+| Documentation sync | README command list, flags, config keys, and privacy warning stay in sync with the actual CLI registry/config structs. |
+| Race/concurrency | Active-file copy retry behavior and parallel ingest/search safety pass `go test -race`. |
+| Performance | Large-session parser benchmarks catch obvious O(n²) or whole-file-loading regressions. |
+
+### Core properties to test
+
+- **Read-only snapshot:** snapshot never modifies source session files; source mtimes and hashes remain unchanged in stable tests.
+- **Archive roundtrip:** decompressing a bundle yields the same manifest and file hashes that snapshot reported.
+- **Manifest honesty:** every manifest file entry exists in the archive and every archived session/artifact appears in the manifest.
+- **Determinism:** with pinned capture time, bundle ID, file mtimes, and input order, manifest bytes, tar entry ordering, tar metadata, and compressed bundle bytes are stable.
+- **Idempotent ingest:** ingesting the same bundle twice does not duplicate logical bundles, files, sessions, entries, messages, artifacts, or images.
+- **Append-only merge:** ingesting a later session version adds new entries and never deletes old entries.
+- **Conflict safety:** same session/entry ID with different entry hash creates a conflict row and never overwrites the existing entry.
+- **Parser robustness:** malformed JSONL lines, unknown roles, unknown block types, invalid timestamps, huge tool outputs, and Unicode text do not crash parsing.
+- **Claude discovery:** Unix-style `-Users-...` project directories are discovered if they contain JSONL files; hidden dirs are ignored. Windows-style `C--Users-...` stays in v2 fixtures.
+- **Prompt reconstruction:** image-bearing prompts can be recreated from raw entry JSON plus `entry_assets` and image blobs.
+- **Search/read coherence:** every search hit can be passed to `aha read` and returns bounded context containing the hit entry.
+
+### Test quality rules
+
+- Avoid mocks for filesystem, tar/zstd, and SQLite behavior; use real temp dirs, real archives, and real databases.
+- Do not accept tests that only assert “not empty” for manifests, search results, or reports; assert specific fields and negative cases.
+- No unconditional skipped tests without a tracking issue or build tag rationale.
+- No `t.Log`/`t.Logf` in assertion position; use `t.Error`, `t.Errorf`, or `t.Fatal`.
+- Golden-file updates require human review because they define compatibility.
 
 ## Validation plan
 
@@ -641,23 +821,35 @@ read output with surrounding entries
 4. **Unlinked subagent artifact**
    - Expected: preserve and index as artifact with `parent_session_id = null`.
 
+5. **Image-bearing prompt recreation**
+   - Input: session entries containing text plus embedded or referenced images.
+   - Expected: raw entry preserved, image bytes stored by hash, prompt order recorded, and reconstructed prompt matches source-native text/image order.
+
+6. **Malformed and unknown Claude JSONL entries**
+   - Input: valid messages mixed with malformed JSON, unknown `type`, unknown content block types, invalid timestamps, and Unicode text.
+   - Expected: raw file preserved, diagnostics recorded, known text indexed, parser does not crash.
+
+7. **Deterministic bundle fixture**
+   - Input: stable testdata tree with pinned capture metadata.
+   - Expected: stable manifest JSON, tar entry order, tar metadata, and compressed bundle bytes.
+
 ## Remaining issues to resolve
 
 ### Claude Code adapter verification
 
-- Confirm default session directories on macOS, Linux, and Windows.
-- Confirm session file format and stable IDs.
-- Confirm how project paths are represented.
-- Confirm subagent transcript/artifact representation.
+- Confirm exact default session directory on Linux for current Claude Code versions.
+- Confirm whether stable message UUID fields are present in all entries.
+- Confirm whether project path decoding can be made reliable enough for display, while preserving raw encoded names as identity metadata.
+- Confirm whether `agent-*.jsonl` files contain parent-session linkage or only filename-level subagent identity.
 - Confirm image/attachment representation.
 - Confirm whether active files are append-only and safe to copy with retry.
 
-### Pure-Go SQLite and FTS5
+### SQLite driver and schema tuning
 
-- Choose a pure-Go SQLite driver.
-- Verify FTS5 support in distributed binaries.
-- Confirm acceptable performance for large corpora.
-- Decide whether to use SQLite FTS5 or a separate pure-Go search index if FTS5 portability is poor.
+- Choose a SQLite driver; prefer pure-Go if FTS5 and JSON support are reliable in distributed binaries.
+- Verify FTS5 and JSON support in release builds.
+- Confirm acceptable performance for large corpora with realistic indexes and transactions.
+- Tune schema, indexes, pragmas, and transaction boundaries before considering any non-SQLite component.
 
 ### Project identity
 
@@ -683,27 +875,29 @@ read output with surrounding entries
 - Conflicts should be quarantined and never overwritten.
 - Open question: should conflicting entries be excluded from default search or shown with a conflict marker?
 
-### Image depth
+### Image prompt reconstruction details
 
 - V1 preserves and metadata-indexes images.
+- V1 must store enough ordering/reference metadata to recreate image-bearing prompts.
 - OCR and captioning are out of v1.
-- Open question: should image dimensions be extracted in v1, or should v1 only store MIME/bytes/hash/path?
+- Need exact source-specific reconstruction rules for Pi and Claude Code content blocks.
 
-### Config format
+### Config initialization
 
-- Need to choose TOML, JSON, or YAML.
-- Need platform-native config path.
+- JSONC is chosen.
+- Need exact platform-native config path fallback behavior.
 - Need first-run config initialization behavior.
 
-### Archive determinism
+### Archive determinism details
 
-- Need exact tar metadata normalization rules.
-- Need to decide whether deterministic bundles are a hard requirement or best-effort.
+- Deterministic output is required.
+- Need exact tar metadata normalization rules and canonical JSON encoder behavior documented in implementation tests.
 
-### Windows support
+### Windows support in v2
 
-- Go can support Windows, but v1 acceptance target is macOS/Linux unless otherwise decided.
-- Need path handling tests before promising Windows support.
+- Windows support is punted to v2.
+- Keep known Windows Claude Code path facts as v2 fixtures, especially `C--...` drive-letter project directories.
+- Before claiming Windows support, add path handling, UTF-8 terminal output, and filesystem permission tests.
 
 ## Relationship to adjacent tools
 
@@ -715,6 +909,8 @@ read output with surrounding entries
 | `MohammadErfan-Jabbari/pi-session-inspect` | Read-only local session inspection | Local inspection rather than cross-machine bundle ingest. |
 | `Dwsy/pi-session-manager` | Session manager UI, SQLite search, external sessions | Heavier workbench; not a Go CLI archive format. |
 | `badlogic/pi-share-hf` | Incremental collection, redaction, review, upload | Public dataset pipeline; v1 here is private local corpus and does not redact. |
+| `adewale/claude-history-explorer` | Concrete Claude Code JSONL discovery/parsing, `agent-*.jsonl`, rich read-only UX | Single-machine Python explorer rather than multi-machine immutable bundle corpus. |
+| `adewale/testing-best-practices` | Table-driven Go tests, real fixtures, golden files, property/fuzz tests, doc-sync tests, test-quality antipatterns | Testing guidance rather than an agent-history product. |
 
 Remembered line:
 
