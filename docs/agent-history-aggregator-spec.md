@@ -972,7 +972,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | 5 | Fourth/fifth-pass fixes | Review found artifact search/read incoherence and `--` terminator regression. | No | Full artifact read body and literal flag-query semantics. |
 | 6 | Sixth-pass migration fix | Review found existing-corpus schema migration gap. | No | Migration path/test added; reviewers reported clean enough for v1. |
 | 7 | Audit/spec-hygiene rollback and redo | Fresh review found a P1: Pi ingest could reopen mutable `raw_path` for header identity instead of using the immutable bundled reader. | Yes: `d857a47` before redo; redo committed as `b5eeff5` but rejected by review | Lesson recorded; must roll back and redo with immutable bundle-derived identity. |
-| 8 | Immutable-ingest provenance redo | Ensure adapters derive parse-time identity from bundled bytes, not live source paths. | Required by this loop | Current cycle; stop only if fresh review finds no P0/P1. |
+| 8 | Immutable-ingest provenance redo | Fresh review found no P0/P1 after Pi identity-from-bundle fix and regression test. | Yes: `5768b51` before redo | Current v1 implementation `9a46ca6`; clean enough for v1/no rollback-worthy regrets. |
 
 ### Eighth-cycle implementation lessons
 
@@ -987,6 +987,13 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Immutable ingest | During bundle ingest, source adapters must not read live source paths for parsed identity; they must use bundled content and manifest metadata. |
 | Pi parse identity | Pi `ParseSession` derives the header `id` from the first parsed raw session entry; file-path header reads are allowed only during live discovery/snapshot. |
 | Provenance regression | Tests must prove ingest identity comes from bundled Pi content even if `raw_path` points to a different mutable file. |
+
+### Current cycle counts
+
+- Implementation attempts built: 5 (`dc227ff`, `39b3205`/`0d78c2a`, final-loop redo ending `6d13867`, seventh-cycle rejected redo `b5eeff5`, eighth-cycle current redo `9a46ca6`).
+- Full implementation rollbacks committed: 4 (`ffbc899`, `c43f6d2`, `d857a47`, `5768b51`).
+- Lesson/spec-update cycles recorded: 8.
+- Current stop reason: two fresh reviewers reported no P0/P1/no rollback-worthy regrets after the eighth-cycle redo.
 
 ## Validation plan
 
