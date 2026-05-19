@@ -879,6 +879,27 @@ A loop is not complete until spec and implementation agree. If implementation ma
 | Blob writes | Write content-addressed file/image blobs with temp-file + atomic rename; skip existing blobs. |
 | Bundle promotion | Store bundle blobs only after validation succeeds. |
 
+### Third-pass implementation lessons
+
+A further loop clarified process and remaining quality gates:
+
+- The required loop is not ceremonial. The correct sequence is spec update, implementation, adversarial review, spec update with lessons, then repeat until no P0/P1 issues remain and remaining regrets are explicitly resolved or accepted.
+- “V1 done” should not be claimed from passing tests alone. It requires a clean adversarial review focused on spec compliance, data loss, determinism, and search/read coherence.
+- Raw preservation, queryable provenance, and safe blob lifecycle are distinct requirements. Satisfying one does not imply the others.
+- Streaming and atomic writes are core v1 design requirements, not performance polish.
+- Every result class returned by search must be readable, including unlinked artifacts.
+- Review-discovered issues should become durable spec text and regression tests before continuing.
+
+### Final v1 success condition
+
+V1 is complete only when all of these are true:
+
+- every locked v1 decision and definition-of-done item in this spec has implementation coverage;
+- implementation has been rolled through the spec→implement→review→spec loop until adversarial reviewers report no P0/P1 issues;
+- `go test ./...`, `go vet ./...`, `go test -race ./...`, parser fuzz tests, and `go build ./cmd/aha` all pass;
+- no known data-loss, determinism, provenance, or search/read-coherence regret remains unaddressed;
+- any residual limitation is explicitly documented as v2 or non-goal rather than hidden in the implementation.
+
 
 ## Validation plan
 
