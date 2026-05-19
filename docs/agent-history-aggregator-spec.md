@@ -972,7 +972,9 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | 5 | Fourth/fifth-pass fixes | Review found artifact search/read incoherence and `--` terminator regression. | No | Full artifact read body and literal flag-query semantics. |
 | 6 | Sixth-pass migration fix | Review found existing-corpus schema migration gap. | No | Migration path/test added; reviewers reported clean enough for v1. |
 | 7 | Audit/spec-hygiene rollback and redo | Fresh review found a P1: Pi ingest could reopen mutable `raw_path` for header identity instead of using the immutable bundled reader. | Yes: `d857a47` before redo; redo committed as `b5eeff5` but rejected by review | Lesson recorded; must roll back and redo with immutable bundle-derived identity. |
-| 8 | Immutable-ingest provenance redo | Fresh review found no P0/P1 after Pi identity-from-bundle fix and regression test. | Yes: `5768b51` before redo | Current v1 implementation `9a46ca6`; clean enough for v1/no rollback-worthy regrets. |
+| 8 | Immutable-ingest provenance redo | Fresh review found no P0/P1 after Pi identity-from-bundle fix and regression test. | Yes: `5768b51` before redo | Implementation `9a46ca6`; clean enough until next requested cycles. |
+| 9 | Release-readiness redo | Fresh review found a P1: spec cycle counts/ledger were stale after the ninth rollback and redo. | Yes: `ca09ee9` before redo; redo committed as `f2dac7c` but rejected by review | Lesson recorded; cycle accounting needs a regression test. |
+| 10 | Ledger-synchronized release redo | Adds a test to keep spec and lessons cycle accounting synchronized. | Required by this loop | Current cycle; stop after fresh review reports no P0/P1. |
 
 ### Eighth-cycle implementation lessons
 
@@ -988,12 +990,25 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Pi parse identity | Pi `ParseSession` derives the header `id` from the first parsed raw session entry; file-path header reads are allowed only during live discovery/snapshot. |
 | Provenance regression | Tests must prove ingest identity comes from bundled Pi content even if `raw_path` points to a different mutable file. |
 
+### Tenth-cycle process-accounting lessons
+
+- Cycle accounting is itself a release invariant once the spec says it is required.
+- A reviewer found stale counts immediately after the ninth redo, proving that manual ledger maintenance is easy to miss.
+- Add a doc-sync regression test for cycle counts so the next cycle cannot silently leave spec and lessons out of sync.
+
+### Additional locked decisions from tenth cycle
+
+| Area | Decision |
+|---|---|
+| Ledger sync test | A test must assert that the spec and lessons document name the current cycle count and current implementation/rollback counts. |
+| Cycle count updates | Updating the implementation cycle ledger is part of the spec-update step before each rollback/reimplementation cycle. |
+
 ### Current cycle counts
 
-- Implementation attempts built: 5 (`dc227ff`, `39b3205`/`0d78c2a`, final-loop redo ending `6d13867`, seventh-cycle rejected redo `b5eeff5`, eighth-cycle current redo `9a46ca6`).
-- Full implementation rollbacks committed: 4 (`ffbc899`, `c43f6d2`, `d857a47`, `5768b51`).
-- Lesson/spec-update cycles recorded: 8.
-- Current stop reason: two fresh reviewers reported no P0/P1/no rollback-worthy regrets after the eighth-cycle redo.
+- Implementation attempts built: 7 (`dc227ff`, `39b3205`/`0d78c2a`, final-loop redo ending `6d13867`, seventh-cycle rejected redo `b5eeff5`, eighth-cycle redo `9a46ca6`, ninth-cycle rejected redo `f2dac7c`, tenth-cycle current redo).
+- Full implementation rollbacks committed: 6 (`ffbc899`, `c43f6d2`, `d857a47`, `5768b51`, `ca09ee9`, tenth-cycle rollback of `f2dac7c`).
+- Lesson/spec-update cycles recorded: 10.
+- Current stop condition: fresh reviewers report no P0/P1/no rollback-worthy regrets after the tenth-cycle redo.
 
 ### Ninth-cycle release-readiness lessons
 

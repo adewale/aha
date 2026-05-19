@@ -14,7 +14,8 @@ This document captures the implementation lessons from the Agent History Aggrega
 | 6 | Schema evolution needs migrations from the first release. | Added idempotent migration and old-schema test. |
 | 7 | Spec hygiene is part of correctness. | Cleaned stale remaining issues and added cycle accounting. |
 | 8 | Ingest must be bundle-pure. | Pi identity now comes from bundled bytes, not mutable live paths. |
-| 9 | Release readiness needs first-class lessons, classified open questions, and CI/release hardening. | Added this document and tightened spec classification. |
+| 9 | Release readiness needs first-class lessons, classified open questions, and CI/release hardening. | Added this document and tightened spec classification; review caught stale spec cycle counts. |
+| 10 | Process accounting needs regression tests too. | Added doc-sync coverage for current cycle/attempt/rollback counts. |
 
 ## Product lessons
 
@@ -62,6 +63,7 @@ Additional testing lessons:
 - The loop must be literal: update spec → implement → review → update spec with lessons → repeat.
 - Do not claim v1 completion from passing tests alone; require fresh adversarial review.
 - Keep cycle accounting from day one: implementation attempts, rollbacks, lesson commits, and stop reasons.
+- Add doc-sync tests for process/accounting invariants once the spec depends on them.
 - Avoid commits that mix unrelated docs/spec/code changes.
 - Open questions must be classified as locked decisions, explicit v2/post-v1 items, or true blockers.
 - Treat “remaining issues” as release-blocking unless explicitly marked as v2/post-v1/non-goal.
@@ -85,6 +87,7 @@ Additional testing lessons:
 - Missing existing-corpus migration for `artifacts.text_body`.
 - Mutable live-path reads during bundle ingest.
 - Stale open questions in the spec.
+- Stale implementation-cycle counts after the ninth redo.
 
 ## Regrets intentionally accepted or deferred
 
