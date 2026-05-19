@@ -1,0 +1,5 @@
+/aha
+*.test
+*.out
+.DS_Store
+coverage.out

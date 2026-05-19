@@ -1,0 +1,319 @@
+package corpus
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/adewale/aha/internal/adapters"
+	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/hash"
+	"github.com/adewale/aha/internal/model"
+	"github.com/klauspost/compress/zstd"
+)
+
+type IngestReport struct {
+	Sessions, Entries, Messages, Images, Artifacts int
+	Duplicate                                      bool
+}
+
+func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) (duplicate bool, skip bool, err error) {
+	var shaForID string
+	err = tx.QueryRow(`select bundle_sha256 from bundles where bundle_id=?`, manifest.BundleID).Scan(&shaForID)
+	if err == nil {
+		if shaForID != bundleSHA {
+			return false, false, fmt.Errorf("bundle_id %s already exists with different sha", manifest.BundleID)
+		}
+		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return false, false, err
+		}
+		return true, true, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, false, err
+	}
+	var idForSHA string
+	err = tx.QueryRow(`select bundle_id from bundles where bundle_sha256=?`, bundleSHA).Scan(&idForSHA)
+	if err == nil {
+		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return false, false, err
+		}
+		return true, true, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, false, err
+	}
+	if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,0)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return false, false, err
+	}
+	return false, false, nil
+}
+
+func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path string) (IngestReport, error) {
+	manifest, entries, bundleBytes, bundleSHA, err := archive.ReadBundle(path)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	tx, err := store.DB.Begin()
+	if err != nil {
+		return IngestReport{}, err
+	}
+	defer tx.Rollback()
+	dup, skip, err := recordBundleAttempt(tx, manifest, bundleSHA)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	if skip {
+		if err := tx.Commit(); err != nil {
+			return IngestReport{}, err
+		}
+		return IngestReport{Duplicate: dup}, nil
+	}
+	manifestJSON, _ := json.Marshal(manifest)
+	if _, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, manifest.BundleID, bundleSHA, manifest.MachineID, manifest.CapturedAt, time.Now().UTC().Format(time.RFC3339), string(manifestJSON)); err != nil {
+		return IngestReport{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(store.Root, "blobs", "bundles"), 0o755); err != nil {
+		return IngestReport{}, err
+	}
+	if err := os.WriteFile(filepath.Join(store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), bundleBytes, 0o644); err != nil {
+		return IngestReport{}, err
+	}
+	_, _ = tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel}))
+	for _, ad := range manifest.Adapters {
+		_, _ = tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities))
+	}
+	rep := IngestReport{Duplicate: dup}
+	for _, mf := range manifest.Files {
+		data, ok := entries[mf.RelativePath]
+		if !ok {
+			return IngestReport{}, fmt.Errorf("manifest file missing from archive: %s", mf.RelativePath)
+		}
+		if hash.SHA256Bytes(data) != mf.SHA256 {
+			return IngestReport{}, fmt.Errorf("sha mismatch for %s", mf.RelativePath)
+		}
+		if err := storeFileBlob(store.Root, mf.SHA256, data); err != nil {
+			return IngestReport{}, err
+		}
+		if _, err := tx.Exec(`insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`, mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
+			return IngestReport{}, err
+		}
+		if mf.Kind != "session" {
+			added, err := ingestArtifact(tx, manifest, mf, data)
+			if err != nil {
+				return IngestReport{}, err
+			}
+			if added {
+				rep.Artifacts++
+			}
+			continue
+		}
+		ad := registry[mf.Source]
+		if ad == nil {
+			continue
+		}
+		ps, err := ad.ParseSession(context.Background(), model.SessionFile{Source: mf.Source, Path: mf.RawPath, RelativePath: strings.TrimPrefix(mf.RelativePath, "sources/"+mf.Source+"/sessions/"), SessionID: mf.SessionID, CWD: mf.CWD, StartedAt: mf.StartedAt, IsSubagent: mf.IsSubagent}, bytes.NewReader(data))
+		if err != nil {
+			return IngestReport{}, err
+		}
+		if len(ps.Diagnostics) > 0 {
+			ps.Metadata["diagnostics"] = ps.Diagnostics
+		}
+		sessionID := firstNonEmpty(ps.SourceSessionID, mf.SessionID, strings.TrimSuffix(filepath.Base(mf.RelativePath), filepath.Ext(mf.RelativePath)))
+		sessionKey := mf.Source + ":" + manifest.MachineID + ":" + sessionID
+		if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
+			return IngestReport{}, err
+		}
+		if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+			return IngestReport{}, err
+		}
+		rep.Sessions++
+		for _, pe := range ps.Entries {
+			r, err := ingestEntry(tx, store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
+			if err != nil {
+				return IngestReport{}, err
+			}
+			rep.Entries += r.Entries
+			rep.Messages += r.Messages
+			rep.Images += r.Images
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return IngestReport{}, err
+	}
+	return rep, nil
+}
+
+type entryReport struct{ Entries, Messages, Images int }
+
+func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourceSessionID, sessionKey string, pe model.ParsedEntry) (entryReport, error) {
+	eh := hash.SHA256Bytes([]byte(pe.RawJSON))
+	var oldHash string
+	err := tx.QueryRow(`select entry_sha256 from entries where session_key=? and entry_id=?`, sessionKey, pe.EntryID).Scan(&oldHash)
+	if err == nil && oldHash != eh {
+		_, _ = tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": manifest.BundleID}))
+		return entryReport{}, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return entryReport{}, err
+	}
+	conflicted, err := detectCrossMachineConflict(tx, manifest, source, sourceSessionID, sessionKey, pe.EntryID, eh)
+	if err != nil {
+		return entryReport{}, err
+	}
+	if conflicted {
+		return entryReport{}, nil
+	}
+	res, err := tx.Exec(`insert or ignore into entries(session_key,entry_id,parent_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json,source_metadata_json) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, pe.EntryID, pe.ParentID, pe.LineNo, pe.EntryType, pe.Timestamp, pe.Role, eh, pe.RawJSON, mustJSON(pe.Metadata))
+	if err != nil {
+		return entryReport{}, err
+	}
+	rep := entryReport{}
+	if n, _ := res.RowsAffected(); n > 0 {
+		rep.Entries++
+	}
+	if shouldIndexText(pe, manifest.Policy.IndexToolOutput) {
+		res, err := tx.Exec(`insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cost) values(?,?,?,?,?,?,?,?,?,?,?)`, sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.Cost)
+		if err != nil {
+			return entryReport{}, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			if _, err := tx.Exec(`insert into fts_messages(session_key,entry_id,text) values(?,?,?)`, sessionKey, pe.EntryID, pe.Text); err != nil {
+				return entryReport{}, err
+			}
+			rep.Messages++
+		}
+	}
+	if !manifest.Policy.IncludeImages {
+		return rep, nil
+	}
+	for _, asset := range pe.Assets {
+		added, err := ingestAsset(tx, root, source, sessionKey, pe.EntryID, asset)
+		if err != nil {
+			return entryReport{}, err
+		}
+		if added {
+			rep.Images++
+		}
+	}
+	return rep, nil
+}
+
+func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
+	if strings.TrimSpace(pe.Text) == "" {
+		return false
+	}
+	switch pe.Role {
+	case "user", "assistant", "branchSummary", "compactionSummary":
+		return true
+	case "toolResult", "bashExecution":
+		return indexToolOutput
+	default:
+		return false
+	}
+}
+
+func detectCrossMachineConflict(tx *sql.Tx, manifest model.Manifest, source, sourceSessionID, sessionKey, entryID, entryHash string) (bool, error) {
+	rows, err := tx.Query(`select e.session_key,e.entry_sha256 from entries e join sessions s on s.session_key=e.session_key where s.source_name=? and s.source_session_id=? and s.machine_id<>? and e.entry_id=?`, source, sourceSessionID, manifest.MachineID, entryID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var otherSession, otherHash string
+		if err := rows.Scan(&otherSession, &otherHash); err != nil {
+			return false, err
+		}
+		if otherHash != entryHash {
+			_, err := tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, entryID, otherHash, entryHash, mustJSON(map[string]any{"bundle_id": manifest.BundleID, "other_session_key": otherSession, "kind": "cross-machine"}))
+			return true, err
+		}
+	}
+	return false, rows.Err()
+}
+
+func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset model.ParsedAsset) (bool, error) {
+	assetSHA := ""
+	added := false
+	if len(asset.Data) > 0 {
+		assetSHA = hash.SHA256Bytes(asset.Data)
+		ext := extFromMime(asset.MimeType)
+		blobPath := filepath.ToSlash(filepath.Join("blobs", "images", assetSHA+ext))
+		if err := os.MkdirAll(filepath.Join(root, "blobs", "images"), 0o755); err != nil {
+			return false, err
+		}
+		if err := os.WriteFile(filepath.Join(root, blobPath), asset.Data, 0o644); err != nil {
+			return false, err
+		}
+		res, err := tx.Exec(`insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`, assetSHA, source, asset.MimeType, len(asset.Data), asset.Width, asset.Height, ext, blobPath)
+		if err != nil {
+			return false, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			added = true
+		}
+	} else {
+		assetSHA = hash.SHA256Bytes([]byte(asset.RawRef))
+	}
+	_, err := tx.Exec(`insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`, sessionKey, entryID, assetSHA, asset.AssetKind, asset.ContentIndex, asset.PromptOrder, asset.RawRef, asset.MimeType, mustJSON(asset.Metadata))
+	return added, err
+}
+
+func ingestArtifact(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, data []byte) (bool, error) {
+	preview := ""
+	if utf8.Valid(data) {
+		preview = string(data)
+		if len(preview) > 4000 {
+			preview = preview[:4000]
+		}
+	}
+	var parent any
+	if mf.ParentHint != "" {
+		parent = mf.Source + ":" + manifest.MachineID + ":" + mf.ParentHint
+	}
+	res, err := tx.Exec(`insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview) values(?,?,?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview)
+	if err != nil {
+		return false, err
+	}
+	added := false
+	if n, _ := res.RowsAffected(); n > 0 {
+		added = true
+		if preview != "" {
+			var artifactID int64
+			if err := tx.QueryRow(`select artifact_id from artifacts where artifact_sha256=? and bundle_id=? and relative_path=? and coalesce(parent_session_key,'')=coalesce(?, '')`, mf.SHA256, manifest.BundleID, mf.RelativePath, parent).Scan(&artifactID); err != nil {
+				return false, err
+			}
+			if _, err := tx.Exec(`insert into fts_artifacts(artifact_id,text) values(?,?)`, artifactID, preview); err != nil {
+				return false, err
+			}
+		}
+	}
+	return added, nil
+}
+
+func storeFileBlob(root, sha string, data []byte) error {
+	dir := filepath.Join(root, "blobs", "files")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	enc, err := zstd.NewWriter(&buf)
+	if err != nil {
+		return err
+	}
+	if _, err := enc.Write(data); err != nil {
+		return err
+	}
+	if err := enc.Close(); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, sha+".zst"), buf.Bytes(), 0o644)
+}
