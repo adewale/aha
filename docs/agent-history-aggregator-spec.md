@@ -900,6 +900,24 @@ V1 is complete only when all of these are true:
 - no known data-loss, determinism, provenance, or search/read-coherence regret remains unaddressed;
 - any residual limitation is explicitly documented as v2 or non-goal rather than hidden in the implementation.
 
+### Fourth-pass implementation lessons
+
+- CLI examples must be executable as written. If docs show flags after positional query text, the CLI must support that form or the docs must change.
+- Text artifacts are documents, not previews. Previews are for display only; FTS must index the full text artifact body when it is valid text.
+- Summary indexing must recognize source-native summary types beyond Pi-specific `branchSummary`/`compactionSummary` when a `summary` or text field is present.
+- V1 image handling includes both embedded image payloads and image files discovered as artifacts. Non-embedded image references without bytes can be recorded as references, but image files available on disk must be content-addressed as image blobs.
+- Claude Code subagent behavior requires at least one `agent-*.jsonl` fixture and assertion that it is discovered/ingested as a subagent.
+
+### Additional locked decisions from fourth pass
+
+| Area | Decision |
+|---|---|
+| CLI flags | Commands with positional query/session arguments must accept flags before or after the positional argument when documented examples show that style. |
+| Artifact FTS | Index full valid UTF-8 artifact text; keep previews separately for status/display. |
+| Summary FTS | Index entries with `branchSummary`, `compactionSummary`, or generic `summary` type when summary/text content is present. |
+| Image files | Recognized image files included as artifacts are also stored in `images` as content-addressed blobs with dimensions when possible. |
+| Claude subagent fixture | V1 tests include `agent-*.jsonl` and assert subagent ingestion. |
+
 
 ## Validation plan
 
