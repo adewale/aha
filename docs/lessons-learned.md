@@ -22,6 +22,16 @@ Current counts after cycle 10:
 - Implementation attempts built: 7.
 - Full implementation rollbacks committed: 6.
 - Lesson/spec-update cycles recorded: 10.
+- Final reviewed implementation: `083cf5d` plus ledger/doc fix `aded92f`.
+- Final review result: clean enough for v1; no rollback-worthy P0/P1 regrets.
+
+## Final v1 status after ten cycles
+
+- V1 locked decisions and definition-of-done items are implemented and covered by tests/review evidence.
+- V1-blocking open questions: 0.
+- Post-v1 release-hardening tasks: large-corpus performance validation, more anonymized real Claude fixtures, and release notes.
+- V2/later items: redaction/public dataset prep, Windows support, configurable project grouping, opt-in tool-output indexing, source-native branch/thread reads, conflict UX refinements, and OCR/captioning.
+- Accepted residual regrets are documented below; none are P0/P1 for v1.
 
 ## Product lessons
 
