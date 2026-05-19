@@ -524,7 +524,7 @@ sessions(session_key, source_name, source_session_id, machine_id, raw_cwd, proje
 session_versions(session_key, file_sha256, bundle_id, relative_path, raw_path, observed_at, copy_state)
 entries(session_key, entry_id, parent_id, entry_type, timestamp, role, entry_sha256, raw_json, source_metadata_json)
 messages(session_key, entry_id, role, text, tool_name, command, files_json, model, provider, tokens, cost)
-artifacts(artifact_sha256, source_name, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview)
+artifacts(artifact_id, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview)
 images(image_sha256, source_name, mime_type, bytes, width, height, ext, blob_path)
 entry_assets(session_key, entry_id, asset_sha256, asset_kind, content_index, prompt_order, raw_ref, mime_type, metadata_json)
 conflicts(conflict_id, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json)
@@ -534,6 +534,7 @@ Search table:
 
 ```sql
 fts_messages(session_key, entry_id, text)
+fts_artifacts(artifact_id, text)
 ```
 
 For v1, store raw source entries and normalized fields. Derived columns can be regenerated. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts.
@@ -836,6 +837,43 @@ V1 implementation should satisfy these engineering constraints:
 - Do not merge heterogeneous search result sets without a deterministic global order.
 - Do not leave artifact parent linkage completely opaque when source metadata can provide hints.
 - Do not rely on docs and tests manually listing commands in separate places.
+
+### Required implementation loop
+
+Implementation should proceed in explicit learning loops:
+
+```txt
+update spec with intended behavior and lessons
+→ implement only what the spec now says
+→ run tests and adversarial review
+→ update spec with newly learned decisions, regrets, and fixes
+→ repeat until reviewers find no P0/P1 issues and remaining regrets are explicitly accepted or resolved
+```
+
+A loop is not complete until spec and implementation agree. If implementation makes an unplanned product or architecture decision, pause and record it in the spec before continuing.
+
+### Second-pass implementation lessons
+
+- Pi session identity must come from the Pi session header `id` when present, not from the filename. Filename-derived IDs are only a fallback.
+- Pi artifacts must be preserved even when parent linkage is uncertain. Link only when inferable; otherwise store as unlinked and keep it searchable.
+- Unlinked text artifacts need a read path. V1 uses synthetic read keys of the form `artifact:<sha256>` for unlinked artifact search results.
+- Tool output indexing must be enforced at ingest, not just stated as policy. Only user/assistant/summaries are indexed by default; `toolResult` and `bashExecution` text require explicit opt-in.
+- Bundle duplicate semantics must distinguish exact duplicates from same `bundle_id` with different content. Same ID with different SHA is an error/quarantine condition, not a silent duplicate.
+- Search/read coherence applies to artifact hits too. Every search result must include enough identity to be readable.
+- Archive writing should stream to disk instead of buffering the whole compressed bundle. Ingest should likewise avoid whole-bundle memory loading for large histories.
+- Parser robustness should use line reading that records diagnostics instead of failing an entire session on malformed lines or scanner size limits.
+
+### Additional locked decisions from second pass
+
+| Area | Decision |
+|---|---|
+| Pi session identity | Use header `id` as `source_session_id` when present. |
+| Artifact identity | Store artifact occurrences/provenance separately enough that identical bytes from different paths/bundles are not lost. |
+| Unlinked artifact read | Search returns `artifact:<sha256>` session keys for unlinked artifact hits; `read` accepts them. |
+| Artifact parent linkage | Link only with evidence; preserve and index unlinked artifacts. |
+| Tool output indexing | Enforce in ingest based on role and `index_tool_output`. |
+| Bundle duplicate conflict | Same `bundle_id` with different SHA is an error/conflict, not a no-op. |
+| Archive memory use | Avoid all-in-memory archive write/read paths for normal snapshot and ingest. |
 
 
 ## Validation plan
