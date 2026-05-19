@@ -511,7 +511,7 @@ Directory layout:
   reports/
 ```
 
-SQLite driver choice is still an implementation detail, but v1 assumes SQLite + FTS5. Prefer a pure-Go driver if it provides reliable FTS5 and JSON support in distributed binaries.
+V1 uses `modernc.org/sqlite` with SQLite FTS5. SQLite schema, FTS, constraints, indexes, transactions, and migrations are part of the product contract; filesystem blobs store immutable large bytes.
 
 Possible tables:
 
@@ -520,11 +520,11 @@ bundles(bundle_id, bundle_sha256, machine_id, captured_at, ingested_at, manifest
 machines(machine_id, first_seen_at, last_seen_at, labels_json)
 sources(source_id, source_name, adapter_version, capabilities_json)
 files(file_sha256, kind, bytes, compressed_blob_path, first_seen_bundle_id)
-sessions(session_key, source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, source_metadata_json)
+sessions(session_key, source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, source_metadata_json, is_subagent, parent_session_key)
 session_versions(session_key, file_sha256, bundle_id, relative_path, raw_path, observed_at, copy_state)
 entries(session_key, entry_id, parent_id, entry_type, timestamp, role, entry_sha256, raw_json, source_metadata_json)
 messages(session_key, entry_id, role, text, tool_name, command, files_json, model, provider, tokens, cost)
-artifacts(artifact_id, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview)
+artifacts(artifact_id, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body)
 images(image_sha256, source_name, mime_type, bytes, width, height, ext, blob_path)
 entry_assets(session_key, entry_id, asset_sha256, asset_kind, content_index, prompt_order, raw_ref, mime_type, metadata_json)
 conflicts(conflict_id, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json)
@@ -995,6 +995,22 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 - Lesson/spec-update cycles recorded: 8.
 - Current stop reason: two fresh reviewers reported no P0/P1/no rollback-worthy regrets after the eighth-cycle redo.
 
+### Ninth-cycle release-readiness lessons
+
+- Lessons learned should be a first-class document, not only scattered through commit messages and the spec.
+- Schema examples in the spec are compatibility contracts. If implementation adds columns such as `text_body` or subagent markers, the spec must be updated in the same docs-only step before reimplementation.
+- Release hardening needs automation. The canonical validation command set should be represented in CI even if large real-corpus validation remains manual.
+- README/release docs should state v1 limitations explicitly so accepted regrets are visible to users.
+
+### Additional locked decisions from ninth cycle
+
+| Area | Decision |
+|---|---|
+| Lessons artifact | Maintain `docs/lessons-learned.md` as the durable cycle-learning document. |
+| Schema documentation | Keep the spec schema sketch synchronized with implemented v1 columns that affect compatibility or behavior. |
+| CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
+| Limitation docs | README must describe accepted v1 limitations, not only features. |
+
 ## Validation plan
 
 ### Canonical examples
@@ -1045,46 +1061,36 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
    - Input: bundle containing a Pi session header `id=A` whose manifest `raw_path` points to a live file now containing header `id=B`.
    - Expected: ingest records session identity `A` from the bundled bytes and never consults the mutable live file during parse.
 
-## Remaining issues to resolve
+## Open question and limitation ledger
 
-This section contains only genuine open or deferred items. Answered implementation questions belong in locked decisions and tests above.
+This section contains no hidden v1 blockers. Each item is classified as a locked v1 behavior, post-v1 release-hardening task, or v2/non-goal.
 
-### Claude Code adapter verification against more real data
+### Locked v1 behaviors, not open blockers
 
-- Confirm exact default session directory on Linux for current Claude Code versions; v1 currently implements the documented/common `~/.claude/projects/` path.
-- Confirm whether all current Claude Code entries expose stable message UUIDs; v1 preserves raw entries and falls back to stable derived IDs when needed.
-- Confirm whether `agent-*.jsonl` files contain source-native parent-session linkage in real histories; v1 records them as subagent sessions and links only with evidence.
-- Add more anonymized real-world Claude Code fixtures, especially image/attachment representations and active append-only files.
-
-### Project identity beyond v1 heuristic
-
-- V1 preserves raw paths and derives a simple `project_key` for grouping.
-- Future question: should users configure path rewrite/grouping rules for monorepos, renamed folders, and cross-machine path aliases?
-
-### Optional future indexing/read behavior
-
+- Claude Code default root is `~/.claude/projects/` unless configured.
+- Claude Code entry IDs use source-native IDs when present and stable derived IDs otherwise.
+- Claude `agent-*.jsonl` files are ingested as subagent sessions; parent linkage is recorded only with evidence.
+- V1 preserves raw paths and derives a simple `project_key`; advanced path grouping is not required for v1.
 - V1 preserves tool output in raw files but does not index it by default.
-- Future question: should a later version add opt-in tool-output indexing for users who want command logs and tool results searchable?
-- V1 `read` shows surrounding file-order context. Future question: should `read` reconstruct source-native branches/threads for Pi and Claude Code?
-- Conflicts are quarantined and never overwrite existing entries. Future question: should conflicting entries be hidden from default search or shown with a conflict marker?
-
-### Image prompt reconstruction depth
-
+- V1 `read` shows surrounding file-order context rather than source-native branch/thread reconstruction.
+- Conflicts are quarantined and never overwrite existing entries.
 - V1 preserves raw entry JSON, image blobs, prompt order, content indexes, references, and dimensions when available.
-- More real fixtures are still needed to prove exact source-specific reconstruction rules for every Pi and Claude Code image/attachment shape.
-- OCR and captioning remain out of v1.
 
-### Scale and release hardening
+### Post-v1 release hardening, not implementation blockers
 
-- Validate performance against large real corpora, not only synthetic fixtures.
-- Consider a CI workflow that runs the canonical validation command set.
-- Document v1 limitations and privacy warning prominently in release notes.
+- Validate performance against large real corpora.
+- Add more anonymized real-world Claude Code fixtures, especially image/attachment representations and active append-only files.
+- Prepare release notes that repeat the v1 privacy warning and limitations.
 
-### Windows support in v2
+### V2 or later
 
-- Windows support is punted to v2.
-- Keep known Windows Claude Code path facts as v2 fixtures, especially `C--...` drive-letter project directories.
-- Before claiming Windows support, add path handling, UTF-8 terminal output, and filesystem permission tests.
+- Secret redaction and public dataset preparation.
+- Windows support, including `C--...` drive-letter project directories, path handling, UTF-8 terminal output, and filesystem permission tests.
+- Configurable project path rewrite/grouping rules for monorepos, renamed folders, and cross-machine aliases.
+- Opt-in tool-output indexing.
+- Source-native branch/thread reconstruction in `read`.
+- Conflict display/search policy refinements.
+- OCR/captioning for image content.
 
 ## Relationship to adjacent tools
 
