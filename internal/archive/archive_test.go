@@ -58,7 +58,7 @@ func TestCaptureWriteDeterministicAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.BundleID != "fixed" || manifest.Counts.SessionFiles != 2 || manifest.Counts.ImageFiles != 1 {
+	if manifest.BundleID != "fixed" || manifest.Counts.SessionFiles != 3 || manifest.Counts.ImageFiles != 1 {
 		t.Fatalf("bad manifest: %+v", manifest)
 	}
 }

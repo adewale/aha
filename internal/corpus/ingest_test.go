@@ -33,6 +33,49 @@ func makeBundle(t *testing.T, root string) (string, string) {
 	return path, filepath.Join(root, "corpus")
 }
 
+func TestSchemaMigratesOldArtifactTable(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`create table artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,bundle_id text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var found int
+	rows, err := store.DB.Query(`pragma table_info(artifacts)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "text_body" {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("text_body migration not applied")
+	}
+}
+
 func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	root := t.TempDir()
 	bundle, corpusDir := makeBundle(t, root)
@@ -45,7 +88,7 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Sessions != 2 || rep.Messages != 4 || rep.Images != 1 || rep.Artifacts != 2 {
+	if rep.Sessions != 3 || rep.Messages != 6 || rep.Images != 1 || rep.Artifacts != 3 {
 		t.Fatalf("bad first ingest: %+v", rep)
 	}
 	rep, err = corpus.IngestBundle(store, adapters.Builtins(), bundle)
@@ -56,10 +99,17 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 		t.Fatalf("second ingest should be duplicate: %+v", rep)
 	}
 	assertCount(t, store.DB, "bundles", 1)
-	assertCount(t, store.DB, "sessions", 2)
-	assertCount(t, store.DB, "messages", 4)
-	assertCount(t, store.DB, "images", 1)
+	assertCount(t, store.DB, "sessions", 3)
+	assertCount(t, store.DB, "messages", 6)
+	assertCount(t, store.DB, "images", 2)
 	assertCount(t, store.DB, "entry_assets", 1)
+	var subagents int
+	if err := store.DB.QueryRow(`select count(*) from sessions where is_subagent=1 and source_name='claude-code'`).Scan(&subagents); err != nil {
+		t.Fatal(err)
+	}
+	if subagents != 1 {
+		t.Fatalf("claude subagent sessions=%d", subagents)
+	}
 	var parent string
 	if err := store.DB.QueryRow(`select parent_session_key from artifacts where parent_session_key is not null`).Scan(&parent); err != nil {
 		t.Fatal(err)
@@ -71,7 +121,7 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err := store.DB.QueryRow(`select count(*) from artifacts where parent_session_key is null`).Scan(&unlinked); err != nil {
 		t.Fatal(err)
 	}
-	if unlinked != 1 {
+	if unlinked != 2 {
 		t.Fatalf("unlinked artifact count=%d", unlinked)
 	}
 	var width, height int
@@ -151,7 +201,7 @@ func TestLaterBundleAppendOnlyMerge(t *testing.T) {
 	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err != nil {
 		t.Fatal(err)
 	}
-	assertCount(t, store.DB, "sessions", 2)
+	assertCount(t, store.DB, "sessions", 3)
 	var versions int
 	if err := store.DB.QueryRow(`select count(*) from session_versions where session_key='pi:test-machine:pi-session'`).Scan(&versions); err != nil {
 		t.Fatal(err)
@@ -200,6 +250,57 @@ func TestConflictQuarantineFromBundle(t *testing.T) {
 	}
 	if text != "hello needle" {
 		t.Fatalf("original message overwritten: %q", text)
+	}
+}
+
+func TestFullArtifactTailAndSummaryAreIndexed(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	artifactPath := filepath.Join(fx.PiRoot, "--Users-me-proj--", "subagent-artifacts", "long_unlinked.md")
+	if err := os.WriteFile(artifactPath, []byte(strings.Repeat("x", 5000)+" tailneedle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	piFile := filepath.Join(fx.PiRoot, "--Users-me-proj--", "2026_pi.jsonl")
+	f, err := os.OpenFile(piFile, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"type":"summary","summary":"summaryneedle"}` + "\n")
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := writeBundleFromRoots(t, root, fx, "test-machine", "fulltext")
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	artifactResults, err := search.Query(store.DB, "tailneedle", search.Filters{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifactResults) == 0 {
+		t.Fatalf("tail artifact text was not indexed")
+	}
+	artifactCtx, err := corpus.ReadContext(store.DB, artifactResults[0].SessionKey, artifactResults[0].EntryID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifactCtx) != 1 || !strings.Contains(artifactCtx[0].Text, "tailneedle") {
+		t.Fatalf("tail artifact read was not coherent: %+v", artifactCtx)
+	}
+	summaryResults, err := search.Query(store.DB, "summaryneedle", search.Filters{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaryResults) == 0 {
+		t.Fatalf("summary was not indexed")
 	}
 }
 

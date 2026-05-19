@@ -432,7 +432,6 @@ func ReadManifest(path string) (model.Manifest, error) {
 	return manifest, nil
 }
 
-
 func StreamReaders(path string, fn func(name string, size int64, r io.Reader) error) error {
 	f, err := os.Open(path)
 	if err != nil {

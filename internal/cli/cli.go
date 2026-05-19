@@ -215,6 +215,7 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 }
 
 func cmdSearch(args []string, stdout, stderr io.Writer) error {
+	args = reorderSearchArgs(args)
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
@@ -385,6 +386,44 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "adapter: %s version=%s capabilities=%s\n", name, ad.Version(), mustJSON(ad.Capabilities()))
 	}
 	return nil
+}
+
+func reorderSearchArgs(args []string) []string {
+	valueFlags := map[string]bool{"--corpus": true, "--config": true, "--source": true, "--machine": true, "--role": true, "--after": true, "--before": true, "--path": true, "--limit": true}
+	boolFlags := map[string]bool{"--json": true}
+	literal := []string(nil)
+	for i, a := range args {
+		if a == "--" {
+			literal = args[i+1:]
+			args = args[:i]
+			break
+		}
+	}
+	var flags []string
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name := a
+		if eq := strings.IndexByte(a, '='); eq >= 0 {
+			name = a[:eq]
+		}
+		if boolFlags[name] || strings.Contains(a, "=") && valueFlags[name] {
+			flags = append(flags, a)
+			continue
+		}
+		if valueFlags[name] && i+1 < len(args) {
+			flags = append(flags, a, args[i+1])
+			i++
+			continue
+		}
+		pos = append(pos, a)
+	}
+	out := append(flags, pos...)
+	if literal != nil {
+		out = append(out, "--")
+		out = append(out, literal...)
+	}
+	return out
 }
 
 func writeJSON(w io.Writer, v any) error {

@@ -8,7 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,7 +132,7 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 			return err
 		}
 		if mf.Kind != "session" {
-			added, err := ingestArtifact(tx, manifest, mf, tmpPath)
+			added, err := ingestArtifact(tx, store.Root, manifest, mf, tmpPath)
 			if err != nil {
 				return err
 			}
@@ -253,7 +258,7 @@ func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
 		return false
 	}
 	switch pe.Role {
-	case "user", "assistant", "branchSummary", "compactionSummary":
+	case "user", "assistant", "branchSummary", "compactionSummary", "summary":
 		return true
 	case "toolResult", "bashExecution":
 		return indexToolOutput
@@ -339,38 +344,75 @@ func writeImageBlobAtomic(root, relPath string, data []byte) error {
 	return nil
 }
 
-func ingestArtifact(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, path string) (bool, error) {
+func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) (bool, error) {
 	preview := ""
-	if f, err := os.Open(path); err == nil {
-		buf := make([]byte, 4000)
-		n, _ := f.Read(buf)
-		_ = f.Close()
-		if utf8.Valid(buf[:n]) {
-			preview = string(buf[:n])
+	fullText := ""
+	if b, err := os.ReadFile(path); err == nil && utf8.Valid(b) {
+		fullText = string(b)
+		preview = fullText
+		if len(preview) > 4000 {
+			preview = preview[:4000]
 		}
 	}
 	var parent any
 	if mf.ParentHint != "" {
 		parent = mf.Source + ":" + manifest.MachineID + ":" + mf.ParentHint
 	}
-	res, err := tx.Exec(`insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview) values(?,?,?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview)
+	res, err := tx.Exec(`insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview, fullText)
 	if err != nil {
 		return false, err
 	}
 	added := false
 	if n, _ := res.RowsAffected(); n > 0 {
 		added = true
-		if preview != "" {
-			var artifactID int64
-			if err := tx.QueryRow(`select artifact_id from artifacts where artifact_sha256=? and bundle_id=? and relative_path=? and coalesce(parent_session_key,'')=coalesce(?, '')`, mf.SHA256, manifest.BundleID, mf.RelativePath, parent).Scan(&artifactID); err != nil {
-				return false, err
-			}
-			if _, err := tx.Exec(`insert into fts_artifacts(artifact_id,text) values(?,?)`, artifactID, preview); err != nil {
+		var artifactID int64
+		if err := tx.QueryRow(`select artifact_id from artifacts where artifact_sha256=? and bundle_id=? and relative_path=? and coalesce(parent_session_key,'')=coalesce(?, '')`, mf.SHA256, manifest.BundleID, mf.RelativePath, parent).Scan(&artifactID); err != nil {
+			return false, err
+		}
+		if fullText != "" {
+			if _, err := tx.Exec(`insert into fts_artifacts(artifact_id,text) values(?,?)`, artifactID, fullText); err != nil {
 				return false, err
 			}
 		}
+		if err := maybeStoreImageArtifact(tx, root, manifest, mf, path); err != nil {
+			return false, err
+		}
 	}
 	return added, nil
+}
+
+func maybeStoreImageArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) error {
+	mt := mime.TypeByExtension(strings.ToLower(filepath.Ext(mf.RawPath)))
+	if !strings.HasPrefix(mt, "image/") {
+		mt = mime.TypeByExtension(strings.ToLower(filepath.Ext(mf.RelativePath)))
+	}
+	if !strings.HasPrefix(mt, "image/") {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	cfg, _, decodeErr := image.DecodeConfig(f)
+	_ = f.Close()
+	width, height := 0, 0
+	if decodeErr == nil {
+		width, height = cfg.Width, cfg.Height
+	}
+	ext := filepath.Ext(mf.RawPath)
+	if ext == "" {
+		ext = extFromMime(mt)
+	}
+	blobPath := filepath.ToSlash(filepath.Join("blobs", "images", mf.SHA256+ext))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := writeImageBlobAtomic(root, blobPath, data); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, mt, mf.Bytes, width, height, ext, blobPath)
+	return err
 }
 
 func spoolEntry(root string, r io.Reader) (string, string, int64, error) {

@@ -33,7 +33,17 @@ func WriteAgentFixtures(t *testing.T, root string) FixtureRoots {
 	if err := os.WriteFile(filepath.Join(piRoot, "--Users-me-proj--", "subagent-artifacts", "unlinked_output.md"), []byte("unlinked artifact preserved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	imgBytes, _ := base64.StdEncoding.DecodeString("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+	if err := os.WriteFile(filepath.Join(piRoot, "--Users-me-proj--", "subagent-artifacts", "prompt.gif"), imgBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(claudeRoot, "-Users-me-proj", "abc.jsonl"), []byte(claude), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := `{"type":"user","timestamp":"2026-01-02T00:01:00Z","message":{"content":"agent subtask"}}
+{"type":"assistant","timestamp":"2026-01-02T00:01:01Z","message":{"content":[{"type":"text","text":"agent done"}]}}
+`
+	if err := os.WriteFile(filepath.Join(claudeRoot, "-Users-me-proj", "agent-worker.jsonl"), []byte(agent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return FixtureRoots{PiRoot: piRoot, ClaudeRoot: claudeRoot}

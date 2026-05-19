@@ -2,9 +2,7 @@ package corpus
 
 import "database/sql"
 
-func Init(e interface {
-	Exec(string, ...any) (sql.Result, error)
-}) error {
+func Init(db *sql.DB) error {
 	stmts := []string{
 		`pragma foreign_keys=on`,
 		`create table if not exists schema_migrations(version integer primary key, applied_at text default current_timestamp)`,
@@ -18,7 +16,7 @@ func Init(e interface {
 		`create table if not exists session_versions(session_key text,file_sha256 text,bundle_id text,relative_path text,raw_path text,observed_at text,copy_state text,unique(session_key,file_sha256,bundle_id))`,
 		`create table if not exists entries(session_key text,entry_id text,parent_id text,line_no integer,entry_type text,timestamp text,role text,entry_sha256 text,raw_json text,source_metadata_json text,primary key(session_key,entry_id))`,
 		`create table if not exists messages(session_key text,entry_id text,role text,text text,tool_name text,command text,files_json text,model text,provider text,tokens integer,cost real,primary key(session_key,entry_id))`,
-		`create table if not exists artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,bundle_id text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`,
+		`create table if not exists artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,bundle_id text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,text_body text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`,
 		`create table if not exists images(image_sha256 text primary key,source_name text,mime_type text,bytes integer,width integer,height integer,ext text,blob_path text)`,
 		`create table if not exists entry_assets(session_key text,entry_id text,asset_sha256 text,asset_kind text,content_index integer,prompt_order integer,raw_ref text,mime_type text,metadata_json text,primary key(session_key,entry_id,asset_sha256,content_index,prompt_order))`,
 		`create table if not exists conflicts(conflict_id integer primary key,session_key text,entry_id text,first_entry_sha256 text,second_entry_sha256 text,details_json text,created_at text default current_timestamp)`,
@@ -29,9 +27,44 @@ func Init(e interface {
 		`create index if not exists idx_entries_time_role on entries(timestamp,role)`,
 	}
 	for _, st := range stmts {
-		if _, err := e.Exec(st); err != nil {
+		if _, err := db.Exec(st); err != nil {
+			return err
+		}
+	}
+	return migrate(db)
+}
+
+func migrate(db *sql.DB) error {
+	hasTextBody, err := columnExists(db, "artifacts", "text_body")
+	if err != nil {
+		return err
+	}
+	if !hasTextBody {
+		if _, err := db.Exec(`alter table artifacts add column text_body text`); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`pragma table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }

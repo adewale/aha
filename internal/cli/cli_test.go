@@ -26,15 +26,22 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, bundle}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "sessions=2") {
+	if !strings.Contains(out.String(), "sessions=3") {
 		t.Fatalf("bad ingest output: %s", out.String())
 	}
 	out.Reset()
-	if err := cli.Run([]string{"search", "--corpus", corpusDir, "needle"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"search", "needle", "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "claude-code") || !strings.Contains(out.String(), "artifact") {
+	if !strings.Contains(out.String(), "[") || !strings.Contains(out.String(), "claude-code") || !strings.Contains(out.String(), "artifact") {
 		t.Fatalf("bad search output: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"search", "--corpus", corpusDir, "--", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "[") {
+		t.Fatalf("literal flag-looking query should not enable --json flag: %s", out.String())
 	}
 	out.Reset()
 	if err := cli.Run([]string{"read", "--corpus", corpusDir, "--session", "abc", "--before", "0", "--after", "1"}, &out, io.Discard); err != nil {

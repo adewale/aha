@@ -131,9 +131,9 @@ func readArtifactHit(db *sql.DB, sessionKey, artifactSHA string) (ReadEntry, err
 	var rawPath string
 	var err error
 	if sessionKey == "" {
-		err = db.QueryRow(`select text_preview,raw_path from artifacts where artifact_sha256=? order by artifact_id limit 1`, artifactSHA).Scan(&text, &rawPath)
+		err = db.QueryRow(`select coalesce(nullif(text_body,''), text_preview),raw_path from artifacts where artifact_sha256=? order by artifact_id limit 1`, artifactSHA).Scan(&text, &rawPath)
 	} else {
-		err = db.QueryRow(`select text_preview,raw_path from artifacts where parent_session_key=? and artifact_sha256=? order by artifact_id limit 1`, sessionKey, artifactSHA).Scan(&text, &rawPath)
+		err = db.QueryRow(`select coalesce(nullif(text_body,''), text_preview),raw_path from artifacts where parent_session_key=? and artifact_sha256=? order by artifact_id limit 1`, sessionKey, artifactSHA).Scan(&text, &rawPath)
 	}
 	if err != nil {
 		return ReadEntry{}, err
