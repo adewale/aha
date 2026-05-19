@@ -717,8 +717,8 @@ read output with surrounding entries
 - `status` reports machines, bundles, sources, sessions, entries, artifacts, images, index size, and conflicts.
 - README states that v1 does not redact secrets.
 - Test suite includes realistic Pi and Claude Code fixtures, including `agent-*.jsonl` and image-bearing prompts.
-- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and bundles, conflict quarantine, parser robustness, prompt image reconstruction, and search/read coherence.
-- CI runs `go test ./...`, `go test -race ./...`, and documentation-code sync checks.
+- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, and search/read coherence.
+- CI runs `go test ./...`, `go test -race ./...`, `go vet ./...`, parser fuzz/property tests, deterministic archive tests, and documentation-code sync checks.
 
 ## Testing strategy
 
@@ -786,6 +786,57 @@ Use Go's standard testing stack first:
 - No unconditional skipped tests without a tracking issue or build tag rationale.
 - No `t.Log`/`t.Logf` in assertion position; use `t.Error`, `t.Errorf`, or `t.Fatal`.
 - Golden-file updates require human review because they define compatibility.
+
+## Implementation lessons incorporated
+
+A first thin implementation validated the core direction but exposed gaps. V1 should be implemented as a maintainable product slice, not as one large prototype file.
+
+### Lessons learned
+
+- SQLite is more than sufficient for v1 search, dedupe, conflict tracking, status, and joins. Prefer schema/index/transaction tuning over custom Go data structures.
+- Determinism is feasible only when implemented deliberately: pinned test metadata, stable discovery order, canonical manifest encoding, normalized tar metadata, and deterministic compression.
+- Prompt reconstruction for images needs occurrence metadata (`entry_assets`-style records), not only image blob metadata. Prompt order and source references matter.
+- Adapters must remain source-agnostic at their boundary. Pi and Claude Code already differ enough that archive, ingest, search, and read cannot depend on either format directly.
+- A functional thin slice is not the same as a production-quality v1. Realistic fixtures, package boundaries, migrations, and fuzz/property tests are part of v1 quality.
+
+### Decisions now locked by implementation learning
+
+| Area | Decision |
+|---|---|
+| Package layout | Use packages, not a monolithic `main.go`: `cmd/aha`, `internal/config`, `internal/adapters`, `internal/archive`, `internal/corpus`, `internal/search`, `internal/cli`, `internal/testutil`. |
+| CLI framework | Standard library `flag` is acceptable for v1 unless command UX becomes painful; command handlers must be testable via injected `io.Reader`/`io.Writer`. |
+| SQLite driver | Use `modernc.org/sqlite` for CGO-free SQLite with FTS5; verify FTS5 in tests. |
+| Config parser | Use JSONC via `github.com/tailscale/hujson` or equivalent. |
+| Manifest encoding | Use a canonical/stable manifest encoder; do not rely on incidental map iteration order. Struct encoding is acceptable only if all manifest shapes avoid maps or sort map keys explicitly. |
+| Schema evolution | Include schema initialization in code and leave room for migrations/versioning from the first implementation. |
+| Image dimensions | Extract dimensions for common image types when bytes are available, using cheap standard-library paths where possible. Keep zero/unknown only when extraction fails. |
+| README sync | Test documented commands and privacy warning against the actual command registry, not a hand-maintained list in tests. |
+
+### Implementation quality bar
+
+V1 implementation should satisfy these engineering constraints:
+
+- no single-file implementation beyond small `main.go` command bootstrap;
+- no package import cycles;
+- command registry is the source of truth for help and doc-sync tests;
+- archive creation can be tested without touching user home directories;
+- ingest can be tested against a real temporary SQLite database;
+- all parser packages have fuzz tests or property-style tests proving they do not panic on arbitrary JSONL;
+- deterministic bundle tests compare compressed bundle bytes, not just manifest fields;
+- golden fixtures include realistic anonymized Pi and Claude Code sessions, including subagent sessions and image-bearing prompts;
+- every bug discovered during implementation receives a regression test before the fix;
+- hidden test-only flags, if any, are clearly marked and kept out of normal help unless intentionally supported.
+
+### Known prototype mistakes to avoid
+
+- Do not put all code in one large `main.go`.
+- Do not call synthetic-fixture-only validation “done” without a clear limitation.
+- Do not claim image dimension support unless dimensions are actually extracted.
+- Do not add JSON metadata columns without tests that prove they round-trip and remain queryable when needed.
+- Do not merge heterogeneous search result sets without a deterministic global order.
+- Do not leave artifact parent linkage completely opaque when source metadata can provide hints.
+- Do not rely on docs and tests manually listing commands in separate places.
+
 
 ## Validation plan
 
