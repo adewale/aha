@@ -17,6 +17,12 @@ This document captures the implementation lessons from the Agent History Aggrega
 | 9 | Release readiness needs first-class lessons, classified open questions, and CI/release hardening. | Added this document and tightened spec classification; review caught stale spec cycle counts. |
 | 10 | Process accounting needs regression tests too. | Added doc-sync coverage for current cycle/attempt/rollback counts. |
 
+Current counts after cycle 10:
+
+- Implementation attempts built: 7.
+- Full implementation rollbacks committed: 6.
+- Lesson/spec-update cycles recorded: 10.
+
 ## Product lessons
 
 - The bundle is the receipt; the corpus is the index. Ingest must trust bundled bytes over mutable live paths.

@@ -29,8 +29,15 @@ func TestSpecAndLessonsCycleLedgerStayInSync(t *testing.T) {
 			t.Fatalf("spec cycle ledger missing %q", want)
 		}
 	}
-	if !strings.Contains(lessons, "| 10 | Process accounting needs regression tests too.") {
-		t.Fatalf("lessons document missing cycle 10")
+	for _, want := range []string{
+		"| 10 | Process accounting needs regression tests too.",
+		"Implementation attempts built: 7",
+		"Full implementation rollbacks committed: 6",
+		"Lesson/spec-update cycles recorded: 10",
+	} {
+		if !strings.Contains(lessons, want) {
+			t.Fatalf("lessons cycle ledger missing %q", want)
+		}
 	}
 }
 
