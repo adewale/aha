@@ -942,6 +942,36 @@ V1 is complete only when all of these are true:
 | Schema migration | Keep a migration path for v1 schema changes; use idempotent `ALTER TABLE`/metadata checks where needed. |
 | Migration tests | Tests must cover upgrading at least one older corpus shape when schema changes. |
 
+### Seventh-cycle audit lessons
+
+A Git-history plus Pi-session audit clarified progress and process accounting:
+
+- Before the seventh cycle, three implementation attempts had been built, two had been rolled back, and one was current.
+- Pi session history showed the loop was real but not initially disciplined: the user had to correct the ordering to `update spec → implement → review → update spec with lessons → repeat`.
+- The spec grew materially from the initial draft, but some `Remaining issues` text became stale after implementation decisions were locked. Stale open questions are a spec bug because they make it unclear whether v1 is complete.
+- A final no-regrets loop must include spec hygiene: move answered questions into locked decisions and leave only true open/v2 questions.
+- Progress should be judged by shrinking P0/P1 regret classes, stronger regression tests, and clearer locked decisions, not merely by commit count or passing tests.
+
+### Additional locked decisions from seventh cycle
+
+| Area | Decision |
+|---|---|
+| Cycle accounting | Track implementation attempts, rollbacks, and lesson loops in the spec. |
+| Spec hygiene | Do not leave answered implementation questions in `Remaining issues`; move them to locked decisions or implemented-state notes. |
+| Completion evidence | A clean v1 claim requires Git history, Pi session history, validation commands, and fresh adversarial review to agree that no P0/P1 regrets remain. |
+| Progress metric | Progress means fewer unresolved data-loss, determinism, provenance, migration, and search/read-coherence risks after each cycle. |
+
+### Implementation cycle ledger
+
+| Cycle | Implementation attempt | Learning/review result | Rollback? | Resulting state |
+|---:|---|---|---|---|
+| 1 | `dc227ff` monolithic `aha v1` CLI | Proved core shape, exposed maintainability/spec gaps. | Yes: `ffbc899` | Spec gained implementation lessons; monolith rejected. |
+| 2 | `39b3205` maintainable package-based v1 | Better package boundaries; review found hardening gaps. | No immediate rollback | Established current architecture. |
+| 3 | `0d78c2a` archive/ingest/blob hardening | Streaming validation and atomic blob lifecycle addressed P1 risks. | No immediate rollback | Hardened implementation baseline. |
+| 4 | Final-loop reimplementation after `c43f6d2` rollback | Review found executable-doc, artifact FTS, summary, image-file, and Claude subagent fixture gaps. | Yes: `c43f6d2` before redo | Spec fourth-pass lessons and regression fixes. |
+| 5 | Fourth/fifth-pass fixes | Review found artifact search/read incoherence and `--` terminator regression. | No | Full artifact read body and literal flag-query semantics. |
+| 6 | Sixth-pass migration fix | Review found existing-corpus schema migration gap. | No | Migration path/test added; reviewers reported clean enough for v1. |
+| 7 | Audit/spec-hygiene rollback and redo | Uses Git + Pi history to clean stale spec issues and rerun no-regrets validation. | Required by this loop | Current cycle; stop only if fresh review finds no P0/P1. |
 
 ## Validation plan
 
@@ -991,63 +1021,38 @@ V1 is complete only when all of these are true:
 
 ## Remaining issues to resolve
 
-### Claude Code adapter verification
+This section contains only genuine open or deferred items. Answered implementation questions belong in locked decisions and tests above.
 
-- Confirm exact default session directory on Linux for current Claude Code versions.
-- Confirm whether stable message UUID fields are present in all entries.
-- Confirm whether project path decoding can be made reliable enough for display, while preserving raw encoded names as identity metadata.
-- Confirm whether `agent-*.jsonl` files contain parent-session linkage or only filename-level subagent identity.
-- Confirm image/attachment representation.
-- Confirm whether active files are append-only and safe to copy with retry.
+### Claude Code adapter verification against more real data
 
-### SQLite driver and schema tuning
+- Confirm exact default session directory on Linux for current Claude Code versions; v1 currently implements the documented/common `~/.claude/projects/` path.
+- Confirm whether all current Claude Code entries expose stable message UUIDs; v1 preserves raw entries and falls back to stable derived IDs when needed.
+- Confirm whether `agent-*.jsonl` files contain source-native parent-session linkage in real histories; v1 records them as subagent sessions and links only with evidence.
+- Add more anonymized real-world Claude Code fixtures, especially image/attachment representations and active append-only files.
 
-- Choose a SQLite driver; prefer pure-Go if FTS5 and JSON support are reliable in distributed binaries.
-- Verify FTS5 and JSON support in release builds.
-- Confirm acceptable performance for large corpora with realistic indexes and transactions.
-- Tune schema, indexes, pragmas, and transaction boundaries before considering any non-SQLite component.
+### Project identity beyond v1 heuristic
 
-### Project identity
+- V1 preserves raw paths and derives a simple `project_key` for grouping.
+- Future question: should users configure path rewrite/grouping rules for monorepos, renamed folders, and cross-machine path aliases?
 
-- Raw paths are preserved by default.
-- Need a derived `project_key` for grouping the same repo across machines.
-- Candidate v1 heuristic: basename of `cwd` plus source adapter.
-- Open question: should users configure path rewrite/grouping rules in v1?
+### Optional future indexing/read behavior
 
-### Tool-output policy
-
-- V1 ignores tool output for indexing and ranking.
-- Raw source files are still preserved, so tool output remains recoverable through session reads or direct bundle inspection.
+- V1 preserves tool output in raw files but does not index it by default.
 - Future question: should a later version add opt-in tool-output indexing for users who want command logs and tool results searchable?
+- V1 `read` shows surrounding file-order context. Future question: should `read` reconstruct source-native branches/threads for Pi and Claude Code?
+- Conflicts are quarantined and never overwrite existing entries. Future question: should conflicting entries be hidden from default search or shown with a conflict marker?
 
-### Read semantics
+### Image prompt reconstruction depth
 
-- V1 can show surrounding file-order context.
-- Pi entries have tree structure via `parentId`; Claude Code may have different threading semantics.
-- Open question: should `read` reconstruct source-native branches in v1 or defer to v1.1?
+- V1 preserves raw entry JSON, image blobs, prompt order, content indexes, references, and dimensions when available.
+- More real fixtures are still needed to prove exact source-specific reconstruction rules for every Pi and Claude Code image/attachment shape.
+- OCR and captioning remain out of v1.
 
-### Conflict visibility
+### Scale and release hardening
 
-- Conflicts should be quarantined and never overwritten.
-- Open question: should conflicting entries be excluded from default search or shown with a conflict marker?
-
-### Image prompt reconstruction details
-
-- V1 preserves and metadata-indexes images.
-- V1 must store enough ordering/reference metadata to recreate image-bearing prompts.
-- OCR and captioning are out of v1.
-- Need exact source-specific reconstruction rules for Pi and Claude Code content blocks.
-
-### Config initialization
-
-- JSONC is chosen.
-- Need exact platform-native config path fallback behavior.
-- Need first-run config initialization behavior.
-
-### Archive determinism details
-
-- Deterministic output is required.
-- Need exact tar metadata normalization rules and canonical JSON encoder behavior documented in implementation tests.
+- Validate performance against large real corpora, not only synthetic fixtures.
+- Consider a CI workflow that runs the canonical validation command set.
+- Document v1 limitations and privacy warning prominently in release notes.
 
 ### Windows support in v2
 
