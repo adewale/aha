@@ -918,6 +918,18 @@ V1 is complete only when all of these are true:
 | Image files | Recognized image files included as artifacts are also stored in `images` as content-addressed blobs with dimensions when possible. |
 | Claude subagent fixture | V1 tests include `agent-*.jsonl` and assert subagent ingestion. |
 
+### Fifth-pass implementation lessons
+
+- Full-text artifact indexing implies artifact reads must retrieve full artifact text or a matched context, not only a display preview.
+- Supporting flags after query text must not break standard `--` terminator semantics. Users need to search for flag-looking strings such as `--json` and `--path` from historical command transcripts.
+
+### Additional locked decisions from fifth pass
+
+| Area | Decision |
+|---|---|
+| Artifact read body | `read` for artifact hits returns full text when the artifact is valid UTF-8, with preview remaining only a display/status field. |
+| Search query terminator | `aha search -- --literal-flag` treats terms after `--` as query text, not CLI flags. |
+
 
 ## Validation plan
 
