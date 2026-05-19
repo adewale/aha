@@ -52,13 +52,16 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 		if entryID == "" {
 			entryID = fmt.Sprintf("line-%06d-%s", lineNo, hash.SHA256Bytes([]byte(raw))[:12])
 		}
-		role := stringField(m, "role")
+		role := firstNonEmpty(stringField(m, "role"), nestedString(m, "message", "role"))
 		typ := stringField(m, "type")
 		if role == "" {
 			role = typ
 		}
 		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), Metadata: map[string]any{}}
 		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(m)
+		if pe.ToolName == "" {
+			pe.ToolName = firstNonEmpty(stringField(m, "toolName"), nestedString(m, "message", "toolName"))
+		}
 		if pe.Model == "" {
 			pe.Model = stringField(m, "model")
 		}

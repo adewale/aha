@@ -71,6 +71,7 @@ Additional testing lessons:
 - Use real temp files, tar/zstd archives, and SQLite databases; avoid mocks for core storage behavior.
 - Every review-discovered bug should get a regression test before the fix is considered done.
 - Synthetic fixtures are useful but insufficient. Add anonymized real-world-shaped Pi and Claude Code fixtures early.
+- Real-history smoke tests are necessary before release: they caught that real Pi entries use top-level `type:"message"` plus nested `message.role`, while early fixtures had top-level roles.
 - Tests should assert specific fields and negative cases, not just non-empty output.
 - Documentation examples are tests: if README shows `aha search query --json`, the CLI must support that form.
 
@@ -104,6 +105,7 @@ Additional testing lessons:
 - Mutable live-path reads during bundle ingest.
 - Stale open questions in the spec.
 - Stale implementation-cycle counts after the ninth redo.
+- Synthetic Pi fixtures initially masked real Pi `message.role` parsing, causing real Pi histories to ingest entries without indexing user/assistant messages.
 
 ## Regrets intentionally accepted or deferred
 
