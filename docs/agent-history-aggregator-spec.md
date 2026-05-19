@@ -862,6 +862,8 @@ A loop is not complete until spec and implementation agree. If implementation ma
 - Search/read coherence applies to artifact hits too. Every search result must include enough identity to be readable.
 - Archive writing should stream to disk instead of buffering the whole compressed bundle. Ingest should likewise avoid whole-bundle memory loading for large histories.
 - Parser robustness should use line reading that records diagnostics instead of failing an entire session on malformed lines or scanner size limits.
+- Content-addressed blobs must never be overwritten in place. File and image blobs are written to temporary files and atomically renamed only if the final blob path does not already exist.
+- Rejected or corrupt bundles should not be promoted into the corpus bundle store. Stage the incoming bundle, validate manifest-listed file hashes/sizes and archive honesty, then move the staged bundle into `blobs/bundles/`.
 
 ### Additional locked decisions from second pass
 
@@ -874,6 +876,8 @@ A loop is not complete until spec and implementation agree. If implementation ma
 | Tool output indexing | Enforce in ingest based on role and `index_tool_output`. |
 | Bundle duplicate conflict | Same `bundle_id` with different SHA is an error/conflict, not a no-op. |
 | Archive memory use | Avoid all-in-memory archive write/read paths for normal snapshot and ingest. |
+| Blob writes | Write content-addressed file/image blobs with temp-file + atomic rename; skip existing blobs. |
+| Bundle promotion | Store bundle blobs only after validation succeeds. |
 
 
 ## Validation plan

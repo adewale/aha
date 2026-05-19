@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +32,7 @@ type Options struct {
 type Bundle struct {
 	Manifest model.Manifest
 	Files    []model.CapturedFile
+	TempDir  string
 }
 
 func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters.SourceAdapter, opts Options) (Bundle, error) {
@@ -84,47 +87,56 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Path < sessions[j].Path })
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	tmpDir, err := os.MkdirTemp("", "aha-capture-*")
+	if err != nil {
+		return Bundle{}, err
+	}
 	var files []model.CapturedFile
 	var total int64
 	imageCount := 0
 	for _, sf := range sessions {
-		data, state, err := StableRead(sf.Path)
+		copyPath, sha, size, state, err := StableCopy(sf.Path, tmpDir)
 		if err != nil {
 			return Bundle{}, err
 		}
 		rel := filepath.ToSlash(filepath.Join("sources", sf.Source, "sessions", sf.RelativePath))
-		mf := model.ManifestFile{Source: sf.Source, Kind: "session", RelativePath: rel, RawPath: sf.Path, SHA256: hash.SHA256Bytes(data), Bytes: int64(len(data)), SessionID: sf.SessionID, CWD: sf.CWD, StartedAt: sf.StartedAt, CopyState: state, IsSubagent: sf.IsSubagent}
+		mf := model.ManifestFile{Source: sf.Source, Kind: "session", RelativePath: rel, RawPath: sf.Path, SHA256: sha, Bytes: size, SessionID: sf.SessionID, CWD: sf.CWD, StartedAt: sf.StartedAt, CopyState: state, IsSubagent: sf.IsSubagent}
 		if ad := registry[sf.Source]; ad != nil {
-			if ps, err := ad.ParseSession(ctx, sf, bytes.NewReader(data)); err == nil {
-				mf.Entries = len(ps.Entries)
-				if ps.SourceSessionID != "" {
-					mf.SessionID = ps.SourceSessionID
-				}
-				if mf.StartedAt == "" {
-					mf.StartedAt = ps.StartedAt
-				}
-				if mf.CWD == "" {
-					mf.CWD = ps.CWD
-				}
-				if cfg.IncludeImages {
-					for _, e := range ps.Entries {
-						imageCount += len(e.Assets)
+			fh, err := os.Open(copyPath)
+			if err == nil {
+				ps, parseErr := ad.ParseSession(ctx, sf, fh)
+				_ = fh.Close()
+				if parseErr == nil {
+					mf.Entries = len(ps.Entries)
+					if ps.SourceSessionID != "" {
+						mf.SessionID = ps.SourceSessionID
+					}
+					if mf.StartedAt == "" {
+						mf.StartedAt = ps.StartedAt
+					}
+					if mf.CWD == "" {
+						mf.CWD = ps.CWD
+					}
+					if cfg.IncludeImages {
+						for _, e := range ps.Entries {
+							imageCount += len(e.Assets)
+						}
 					}
 				}
 			}
 		}
-		files = append(files, model.CapturedFile{Manifest: mf, Data: data})
-		total += int64(len(data))
+		files = append(files, model.CapturedFile{Manifest: mf, Path: copyPath})
+		total += size
 	}
 	for _, af := range artifacts {
-		data, state, err := StableRead(af.Path)
+		copyPath, sha, size, state, err := StableCopy(af.Path, tmpDir)
 		if err != nil {
 			return Bundle{}, err
 		}
 		rel := filepath.ToSlash(filepath.Join("sources", af.Source, "artifacts", af.RelativePath))
-		mf := model.ManifestFile{Source: af.Source, Kind: af.Kind, RelativePath: rel, RawPath: af.Path, SHA256: hash.SHA256Bytes(data), Bytes: int64(len(data)), CopyState: state, ParentHint: af.ParentHint}
-		files = append(files, model.CapturedFile{Manifest: mf, Data: data})
-		total += int64(len(data))
+		mf := model.ManifestFile{Source: af.Source, Kind: af.Kind, RelativePath: rel, RawPath: af.Path, SHA256: sha, Bytes: size, CopyState: state, ParentHint: af.ParentHint}
+		files = append(files, model.CapturedFile{Manifest: mf, Path: copyPath})
+		total += size
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Manifest.RelativePath < files[j].Manifest.RelativePath })
 	manifestFiles := make([]model.ManifestFile, len(files))
@@ -142,7 +154,67 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 		mad = append(mad, model.ManifestAdapt{Name: ad.Name(), Version: ad.Version(), Capabilities: ad.Capabilities()})
 	}
 	m := model.Manifest{Schema: model.BundleSchema, BundleID: opts.BundleID, MachineID: cfg.MachineID, MachineLabel: cfg.MachineLabel, CapturedAt: opts.CapturedAt, CreatedBy: "aha " + model.Version, Implementation: model.Implementation{Language: "go", Archive: "tar.zst"}, Source: model.ManifestSource{HostOS: runtime.GOOS}, Policy: model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction}, Counts: model.ManifestCounts{SessionFiles: len(sessions), ArtifactFiles: len(artifacts), ImageFiles: imageCount, BytesUncompressed: total}, Adapters: mad, Files: manifestFiles}
-	return Bundle{Manifest: m, Files: files}, nil
+	return Bundle{Manifest: m, Files: files, TempDir: tmpDir}, nil
+}
+
+func StableCopy(path, dir string) (string, string, int64, string, error) {
+	for i := 0; i < 2; i++ {
+		st1, err := os.Stat(path)
+		if err != nil {
+			return "", "", 0, "", err
+		}
+		out, err := os.CreateTemp(dir, "file-*")
+		if err != nil {
+			return "", "", 0, "", err
+		}
+		outPath := out.Name()
+		in, err := os.Open(path)
+		if err != nil {
+			_ = out.Close()
+			return "", "", 0, "", err
+		}
+		h := sha256.New()
+		n, copyErr := io.Copy(io.MultiWriter(out, h), in)
+		closeInErr := in.Close()
+		closeOutErr := out.Close()
+		if copyErr != nil {
+			return "", "", 0, "", copyErr
+		}
+		if closeInErr != nil {
+			return "", "", 0, "", closeInErr
+		}
+		if closeOutErr != nil {
+			return "", "", 0, "", closeOutErr
+		}
+		st2, err := os.Stat(path)
+		if err != nil {
+			return "", "", 0, "", err
+		}
+		if st1.Size() == st2.Size() && st1.ModTime().Equal(st2.ModTime()) {
+			return outPath, hex.EncodeToString(h.Sum(nil)), n, "stable", nil
+		}
+	}
+	out, err := os.CreateTemp(dir, "file-*")
+	if err != nil {
+		return "", "", 0, "", err
+	}
+	outPath := out.Name()
+	in, err := os.Open(path)
+	if err != nil {
+		_ = out.Close()
+		return "", "", 0, "", err
+	}
+	h := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(out, h), in)
+	_ = in.Close()
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", "", 0, "", copyErr
+	}
+	if closeErr != nil {
+		return "", "", 0, "", closeErr
+	}
+	return outPath, hex.EncodeToString(h.Sum(nil)), n, "unstable", nil
 }
 
 func StableRead(path string) ([]byte, string, error) {
@@ -168,6 +240,9 @@ func StableRead(path string) ([]byte, string, error) {
 }
 
 func Write(path string, b Bundle) (string, error) {
+	if b.TempDir != "" {
+		defer os.RemoveAll(b.TempDir)
+	}
 	seenNames := map[string]bool{"manifest.json": true, "checksums/sha256sums.txt": true}
 	for _, f := range b.Files {
 		if seenNames[f.Manifest.RelativePath] {
@@ -198,7 +273,7 @@ func Write(path string, b Bundle) (string, error) {
 	}
 	var sums []string
 	for _, f := range b.Files {
-		if err := addTar(tw, f.Manifest.RelativePath, f.Data, 0o644); err != nil {
+		if err := addTarCaptured(tw, f); err != nil {
 			_ = out.Close()
 			return "", err
 		}
@@ -220,14 +295,14 @@ func Write(path string, b Bundle) (string, error) {
 	if err := out.Close(); err != nil {
 		return "", err
 	}
-	compressed, err := os.ReadFile(tmp)
+	sha, err := FileSHA256(tmp)
 	if err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return "", err
 	}
-	return hash.SHA256Bytes(compressed), nil
+	return sha, nil
 }
 
 func CanonicalManifest(m model.Manifest) ([]byte, error) {
@@ -239,6 +314,23 @@ func CanonicalManifest(m model.Manifest) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
+func addTarCaptured(tw *tar.Writer, f model.CapturedFile) error {
+	if f.Data != nil {
+		return addTar(tw, f.Manifest.RelativePath, f.Data, 0o644)
+	}
+	h := &tar.Header{Name: filepath.ToSlash(f.Manifest.RelativePath), Mode: 0o644, Size: f.Manifest.Bytes, ModTime: time.Unix(0, 0).UTC(), AccessTime: time.Unix(0, 0).UTC(), ChangeTime: time.Unix(0, 0).UTC(), Uid: 0, Gid: 0, Uname: "", Gname: "", Typeflag: tar.TypeReg, Format: tar.FormatPAX}
+	if err := tw.WriteHeader(h); err != nil {
+		return err
+	}
+	in, err := os.Open(f.Path)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	_, err = io.Copy(tw, in)
+	return err
+}
+
 func addTar(tw *tar.Writer, name string, data []byte, mode int64) error {
 	h := &tar.Header{Name: filepath.ToSlash(name), Mode: mode, Size: int64(len(data)), ModTime: time.Unix(0, 0).UTC(), AccessTime: time.Unix(0, 0).UTC(), ChangeTime: time.Unix(0, 0).UTC(), Uid: 0, Gid: 0, Uname: "", Gname: "", Typeflag: tar.TypeReg, Format: tar.FormatPAX}
 	if err := tw.WriteHeader(h); err != nil {
@@ -246,6 +338,173 @@ func addTar(tw *tar.Writer, name string, data []byte, mode int64) error {
 	}
 	_, err := tw.Write(data)
 	return err
+}
+
+func FileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func CopyFileHashed(src, dst string) (string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(out, h), in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func ReadManifest(path string) (model.Manifest, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return model.Manifest{}, err
+	}
+	defer f.Close()
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		return model.Manifest{}, err
+	}
+	defer zr.Close()
+	tr := tar.NewReader(zr)
+	h, err := tr.Next()
+	if err != nil {
+		return model.Manifest{}, err
+	}
+	if h.Name != "manifest.json" {
+		return model.Manifest{}, fmt.Errorf("first tar entry is %s, want manifest.json", h.Name)
+	}
+	b, err := io.ReadAll(tr)
+	if err != nil {
+		return model.Manifest{}, err
+	}
+	var manifest model.Manifest
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		return model.Manifest{}, err
+	}
+	if manifest.Schema != model.BundleSchema {
+		return model.Manifest{}, fmt.Errorf("unsupported schema %q", manifest.Schema)
+	}
+	return manifest, nil
+}
+
+
+func StreamReaders(path string, fn func(name string, size int64, r io.Reader) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	tr := tar.NewReader(zr)
+	seen := map[string]bool{}
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		if seen[h.Name] {
+			return fmt.Errorf("duplicate tar entry %s", h.Name)
+		}
+		seen[h.Name] = true
+		if err := fn(h.Name, h.Size, tr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StreamFiles(path string, fn func(name string, data []byte) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	tr := tar.NewReader(zr)
+	seen := map[string]bool{}
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		if seen[h.Name] {
+			return fmt.Errorf("duplicate tar entry %s", h.Name)
+		}
+		seen[h.Name] = true
+		b, err := io.ReadAll(tr)
+		if err != nil {
+			return err
+		}
+		if err := fn(h.Name, b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ReadBundle(path string) (model.Manifest, map[string][]byte, []byte, string, error) {

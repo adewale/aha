@@ -162,4 +162,5 @@ type ManifestFile struct {
 type CapturedFile struct {
 	Manifest ManifestFile
 	Data     []byte
+	Path     string
 }
