@@ -930,6 +930,18 @@ V1 is complete only when all of these are true:
 | Artifact read body | `read` for artifact hits returns full text when the artifact is valid UTF-8, with preview remaining only a display/status field. |
 | Search query terminator | `aha search -- --literal-flag` treats terms after `--` as query text, not CLI flags. |
 
+### Sixth-pass implementation lessons
+
+- Schema evolution needs real migrations, not only `CREATE TABLE IF NOT EXISTS`. Any added column must be applied idempotently to existing v1 corpora.
+- Migration tests should create an older schema shape and verify current startup upgrades it before ingest/read paths use new columns.
+
+### Additional locked decisions from sixth pass
+
+| Area | Decision |
+|---|---|
+| Schema migration | Keep a migration path for v1 schema changes; use idempotent `ALTER TABLE`/metadata checks where needed. |
+| Migration tests | Tests must cover upgrading at least one older corpus shape when schema changes. |
+
 
 ## Validation plan
 
