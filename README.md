@@ -1,21 +1,28 @@
 # aha — Agent History Aggregator
 
-`aha` is a local Go CLI that snapshots, ingests, merges, and searches coding-agent session histories.
+`aha` snapshots your local Pi and Claude Code histories into immutable `tar.zst` bundles, ingests those bundles into a local SQLite corpus, and lets you search/read the combined history.
 
-V1 supports Pi and Claude Code sessions, deterministic `tar.zst` bundles, SQLite + FTS5 search, subagent/artifact preservation, and image blob extraction for embedded image-bearing prompts.
+Use it when you want one private, searchable archive of agent sessions across tools and machines.
 
-## Privacy warning
+## What it does
 
-V1 does **not** redact secrets. Bundles may contain credentials, private prompts, source code, tool output, images, filesystem paths, and API responses. Do not upload bundles or corpora publicly unless you have reviewed them yourself.
+- Reads Pi sessions from `~/.pi/agent/sessions`.
+- Reads Claude Code sessions from `~/.claude/projects`.
+- Writes deterministic snapshot bundles to `~/agent-session-bundles`.
+- Ingests bundles into a local SQLite + FTS5 corpus at `~/.aha`.
+- Preserves raw session files, artifacts, subagent sessions, and image prompt metadata.
 
-See `docs/trust.md` for the v1 trust model and verification commands.
+## Privacy first
+
+V1 does **not** redact secrets. Bundles may contain prompts, source code, tool output, credentials accidentally pasted into chat, images, paths, and API responses. Keep bundles and corpora private unless you have reviewed them.
+
+See `docs/trust.md` for the trust model and verification commands.
 
 ## Build
 
 ```bash
 go build -o aha ./cmd/aha
 go test ./...
-go test -race ./...
 ```
 
 ## Quick start
@@ -25,34 +32,76 @@ aha init --accept-secrets
 aha snapshot
 aha ingest
 aha search "dynamic workflows"
-aha read --session <session-id-or-key> --entry <entry-id> --before 3 --after 5
-aha status
-aha conflicts
-aha doctor
 ```
 
-For explicit/automation-friendly forms, see `docs/user-journeys.md`.
+Read around a result:
+
+```bash
+aha read --session <session-key> --entry <entry-id> --before 3 --after 5
+```
+
+## Common journeys
+
+### First local archive
+
+```bash
+aha init --accept-secrets
+aha snapshot
+aha ingest
+```
+
+Rationale: the first run should be safe and short. `init` writes visible defaults, records the privacy acknowledgement, and leaves the bundle/corpus locations explicit in JSONC.
+
+### Routine refresh
+
+```bash
+aha snapshot
+aha ingest
+```
+
+Rationale: after setup, refreshing should not require remembering paths. `snapshot` writes a new bundle to the configured bundle directory; `ingest` with no arguments ingests bundles from that directory and skips duplicates.
+
+### Import another machine
+
+```bash
+aha ingest ~/Downloads/aha-sessions-work-mac.tar.zst
+aha search "migration" --machine work-mac
+```
+
+Rationale: copied bundles should merge into the same local corpus. Machine identity comes from the manifest, not the filename.
+
+More journeys and default rationale: `docs/user-journeys.md`.
 
 ## Commands
 
 ```txt
-aha snapshot
-aha ingest
-aha search
-aha read
-aha status
-aha conflicts
+aha init [--accept-secrets]
+aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]
+aha ingest [bundle.tar.zst ...]
+aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--json]
+aha read --session ID [--entry ID] [--before N] [--after N] [--json]
+aha status [--json]
+aha conflicts [--json]
 aha doctor
-aha init
 ```
 
-## Config
+## Defaults
 
-Config is JSONC at `~/.config/aha/config.jsonc` by default.
+| Setting | Default |
+|---|---|
+| Config | `~/.config/aha/config.jsonc` |
+| Corpus | `~/.aha` |
+| Bundle output | `~/agent-session-bundles` |
+| Pi source | `~/.pi/agent/sessions` |
+| Claude Code source | `~/.claude/projects` |
+| Machine ID | sanitized local hostname, written into config by `aha init` |
+| Tool output indexing | off |
+| Redaction | none in v1 |
+
+Config is JSONC. Flags override config.
 
 ```jsonc
 {
-  // Required unless supplied with --machine.
   "machine_id": "ade-mbp",
   "machine_label": "Adewale MacBook Pro",
   "sources": [
@@ -70,18 +119,19 @@ Config is JSONC at `~/.config/aha/config.jsonc` by default.
 }
 ```
 
-CLI flags override config values.
+## Accepted v1 limits
 
-## V1 notes and accepted limitations
+- No secret redaction.
+- No Windows support until v2.
+- Project grouping uses a simple derived key.
+- `read` shows file-order context, not source-native branch/thread reconstruction.
+- Tool output is preserved in raw files but not indexed by default.
+- Conflict rows are quarantined; conflict search/display UX can improve later.
 
-- Windows support is intentionally punted to v2.
-- V1 preserves raw data and does not redact secrets; bundles and corpora are private artifacts.
-- Project grouping uses a simple derived key; configurable cross-machine path rewrite rules are v2+.
-- Tool output is preserved in raw session files but is not indexed by default.
-- `read` returns bounded file-order context; source-native branch/thread reconstruction is v2+.
-- Conflict rows are quarantined and never overwrite existing entries; conflict search/display UX can improve later.
-- SQLite is the corpus/query engine; `aha` uses FTS5 and SQL indexes rather than a custom search engine.
-- Deterministic bundles require identical input files plus pinned/generated capture metadata. Tests pin `captured_at` and `bundle_id`.
-- Image prompt reconstruction metadata is stored for embedded/base64 image content, including prompt order, source reference, MIME type, hash, and dimensions when available.
-- See `docs/lessons-learned.md` for the rollback/reimplementation lessons that shaped v1.
-- See `docs/comparisons/claude-history-explorer.md` for what `aha` adopted from Claude History Explorer and where it intentionally differs.
+## More docs
+
+- `docs/user-journeys.md` — journeys and defaults.
+- `docs/trust.md` — privacy/trust model and verification.
+- `docs/agent-history-aggregator-spec.md` — full v1 spec.
+- `docs/lessons-learned.md` — rollback/reimplementation lessons.
+- `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.

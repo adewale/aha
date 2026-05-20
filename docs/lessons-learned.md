@@ -82,6 +82,14 @@ Additional testing lessons:
 - Tests should assert specific fields and negative cases, not just non-empty output.
 - Documentation examples are tests: if README shows `aha search query --json`, the CLI must support that form.
 
+## Documentation lessons
+
+- The README is the front door: answer what it is, why it matters, and how to use it within the first screen.
+- Show the shortest real path first; move flags and edge cases to journey docs.
+- Keep prose specific. Avoid generic AI-doc filler such as “powerful,” “seamless,” “robust,” and “unlock.”
+- Put rationale near defaults so users can predict behavior instead of memorizing flags.
+- Link to deep docs; do not duplicate the full spec in the README.
+
 ## Process lessons
 
 - The loop must be literal: update spec → implement → review → update spec with lessons → repeat.
