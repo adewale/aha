@@ -31,6 +31,7 @@ type Command struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
+		"refresh":   {"refresh", "aha refresh [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR] [--corpus DIR]", cmdRefresh},
 		"snapshot":  {"snapshot", "aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]", cmdSnapshot},
 		"ingest":    {"ingest", "aha ingest [bundle.tar.zst ...]", cmdIngest},
 		"search":    {"search", "aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--after DATE] [--before DATE] [--path TEXT] [--json]", cmdSearch},
@@ -112,8 +113,67 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
+type snapshotRequest struct {
+	Config     model.Config
+	CapturedAt string
+	BundleID   string
+}
+
 func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("snapshot", flag.ContinueOnError)
+	req, err := parseSnapshotRequest("snapshot", args, stderr)
+	if err != nil {
+		return err
+	}
+	path, sha, err := writeSnapshot(req)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s\nsha256:%s\n", path, sha)
+	return nil
+}
+
+func cmdRefresh(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	machine := fs.String("machine", "", "machine id")
+	outDir := fs.String("out", "", "output directory")
+	corpusDir := fs.String("corpus", "", "corpus dir")
+	configPath := fs.String("config", "", "JSONC config path")
+	acceptSecrets := fs.Bool("accept-secrets", false, "acknowledge v1 does not redact secrets")
+	capturedAt := fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
+	bundleID := fs.String("bundle-id", "", "bundle id (advanced deterministic testing)")
+	var sourceFlags multiFlag
+	fs.Var(&sourceFlags, "source", "source spec type=path (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	req, err := buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, stderr)
+	if err != nil {
+		return err
+	}
+	if *corpusDir != "" {
+		req.Config.CorpusDir = *corpusDir
+	}
+	path, sha, err := writeSnapshot(req)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s\nsha256:%s\n", path, sha)
+	store, err := corpus.Open(req.Config.CorpusDir)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	rep, err := corpus.IngestBundle(store, adapters.Builtins(), path)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%s: sessions=%d entries=%d messages=%d images=%d artifacts=%d duplicate=%v\n", path, rep.Sessions, rep.Entries, rep.Messages, rep.Images, rep.Artifacts, rep.Duplicate)
+	return nil
+}
+
+func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapshotRequest, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	machine := fs.String("machine", "", "machine id")
 	outDir := fs.String("out", "", "output directory")
@@ -124,66 +184,73 @@ func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
 	var sourceFlags multiFlag
 	fs.Var(&sourceFlags, "source", "source spec type=path (repeatable)")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return snapshotRequest{}, err
 	}
-	cfg, err := config.Load(*configPath)
+	return buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, stderr)
+}
+
+func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags multiFlag, stderr io.Writer) (snapshotRequest, error) {
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		return err
+		return snapshotRequest{}, err
 	}
-	if *machine != "" {
-		cfg.MachineID = *machine
+	if machine != "" {
+		cfg.MachineID = machine
 	}
-	if *outDir != "" {
-		cfg.BundleOutDir = *outDir
+	if outDir != "" {
+		cfg.BundleOutDir = outDir
 	}
 	if len(sourceFlags) > 0 {
 		cfg.Sources = nil
 		for _, sf := range sourceFlags {
 			parts := strings.SplitN(sf, "=", 2)
 			if len(parts) != 2 {
-				return fmt.Errorf("invalid --source %q, want type=path", sf)
+				return snapshotRequest{}, fmt.Errorf("invalid --source %q, want type=path", sf)
 			}
 			cfg.Sources = append(cfg.Sources, model.SourceConfig{Type: parts[0], Root: parts[1], Enabled: true})
 		}
 	}
 	if cfg.MachineID == "" {
-		return errors.New("machine_id required: set config machine_id or pass --machine")
+		return snapshotRequest{}, errors.New("machine_id required: set config machine_id or pass --machine")
 	}
 	if os.Getenv("AHA_ACCEPT_SECRETS") == "1" {
 		cfg.AcceptSecretsWarning = true
 	}
-	if !*acceptSecrets && !cfg.AcceptSecretsWarning {
+	if !acceptSecrets && !cfg.AcceptSecretsWarning {
 		fmt.Fprintln(stderr, "V1 does not redact secrets. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private. Pass --accept-secrets to continue.")
-		return errors.New("secrets warning not acknowledged")
+		return snapshotRequest{}, errors.New("secrets warning not acknowledged")
 	}
-	out, err := paths.Expand(cfg.BundleOutDir)
+	return snapshotRequest{Config: cfg, CapturedAt: capturedAt, BundleID: bundleID}, nil
+}
+
+func writeSnapshot(req snapshotRequest) (string, string, error) {
+	out, err := paths.Expand(req.Config.BundleOutDir)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
-		return err
+		return "", "", err
 	}
-	opts := archive.Options{CapturedAt: *capturedAt, BundleID: *bundleID}
+	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID}
 	if opts.CapturedAt == "" {
 		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	if opts.BundleID == "" {
 		opts.BundleID = hash.RandomID()
 	}
-	bundle, err := archive.Capture(context.Background(), cfg, adapters.Builtins(), opts)
+	bundle, err := archive.Capture(context.Background(), req.Config, adapters.Builtins(), opts)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	path := filepath.Join(out, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(cfg.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
+	path := filepath.Join(out, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
 	sha, err := archive.Write(path, bundle)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	receipt := map[string]any{"bundle": path, "sha256": sha, "bundle_id": opts.BundleID, "captured_at": opts.CapturedAt}
 	rb, _ := json.MarshalIndent(receipt, "", "  ")
 	_ = os.WriteFile(path+".receipt.json", append(rb, '\n'), 0o644)
-	fmt.Fprintf(stdout, "%s\nsha256:%s\n", path, sha)
-	return nil
+	return path, sha, nil
 }
 
 func cmdIngest(args []string, stdout, stderr io.Writer) error {

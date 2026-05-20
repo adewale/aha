@@ -655,6 +655,7 @@ CLI flags override config values. The first-run UX creates a starter JSONC confi
 ## CLI shape
 
 ```txt
+aha refresh
 aha snapshot
 aha ingest
 aha search
@@ -1027,6 +1028,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
 | Limitation docs | README must describe accepted v1 limitations, not only features. |
 | User journeys | `docs/user-journeys.md` defines the no-flag defaults optimized for local first use, routine refresh, search/read, and imported bundles. |
+| Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources, then ingest the just-created bundle into the configured corpus. |
 
 ## Validation plan
 

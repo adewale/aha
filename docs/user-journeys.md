@@ -16,8 +16,7 @@ User goal: “I want all of this machine's Pi and Claude Code history searchable
 
 ```bash
 aha init --accept-secrets
-aha snapshot
-aha ingest
+aha refresh
 aha search "query"
 ```
 
@@ -25,8 +24,8 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `snapshot` should not require paths for the standard Pi/Claude locations.
-- `ingest` should know where snapshots were written.
+- `refresh` creates a snapshot bundle and ingests that bundle into the local corpus.
+- The user should not need to remember Pi/Claude paths for the standard layout.
 
 Defaults used:
 
@@ -42,15 +41,14 @@ Defaults used:
 User goal: “Add the sessions created since my last snapshot.”
 
 ```bash
-aha snapshot
-aha ingest
+aha refresh
 ```
 
 Rationale:
 
 - Refresh should be muscle memory.
-- `snapshot` creates a new dated bundle.
-- `ingest` with no arguments reads configured bundles and skips duplicates.
+- `refresh` is `snapshot` plus ingest of the just-created bundle.
+- The lower-level commands remain available when users want capture and ingest separated.
 
 ## Journey 3: search and read
 
@@ -87,13 +85,12 @@ Rationale:
 User goal: “Run this in a script with temporary paths.”
 
 ```bash
-AHA_ACCEPT_SECRETS=1 aha snapshot \
+AHA_ACCEPT_SECRETS=1 aha refresh \
   --machine ci-mac \
   --source pi="$HOME/.pi/agent/sessions" \
   --source claude-code="$HOME/.claude/projects" \
-  --out "$RUNNER_TEMP/aha-bundles"
-
-aha ingest --corpus "$RUNNER_TEMP/aha-corpus" "$RUNNER_TEMP/aha-bundles"/*.tar.zst
+  --out "$RUNNER_TEMP/aha-bundles" \
+  --corpus "$RUNNER_TEMP/aha-corpus"
 ```
 
 Rationale:
@@ -108,11 +105,26 @@ Rationale:
 |---|---|
 | `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default corpus/bundle dirs, and privacy acknowledgement set to false. |
 | `aha init --accept-secrets` | Same as `init`, but records one-time privacy acknowledgement. |
+| `aha refresh` | Snapshot configured sources into configured bundle output, then ingest the new bundle into configured corpus. |
 | `aha snapshot` | Use config/default machine ID, sources, and bundle output. Require prior acknowledgement via config, `--accept-secrets`, or `AHA_ACCEPT_SECRETS=1`. |
-| `aha ingest` | Ingest all `*.tar.zst` from configured bundle output into configured corpus. |
+| `aha ingest` | Ingest explicit bundle paths, or all `*.tar.zst` from configured bundle output when no paths are given. |
 | `aha search <query>` | Search configured corpus, limit 20. |
 | `aha read ...` | Read from configured corpus. |
 | `aha status` / `aha conflicts` | Inspect configured corpus. |
+
+## Why each command exists
+
+| Command | Reason |
+|---|---|
+| `refresh` | Common local operation: make the aggregation corpus current in one step. |
+| `snapshot` | Capture immutable evidence without changing the corpus; useful for backup, copy, and deterministic testing. |
+| `ingest` | Merge copied/existing bundles; useful for multi-machine history and parser/schema reruns. |
+| `search` | Primary retrieval action. |
+| `read` | Context expansion around compact search results. |
+| `status` | Explain corpus health and counts. |
+| `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
+| `doctor` | Debug source discovery, config, and adapter availability. |
+| `init` | Optional: materialize editable defaults and one-time privacy acknowledgement. |
 
 ## When to use flags
 

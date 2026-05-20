@@ -27,10 +27,16 @@ go test ./...
 
 ## Quick start
 
+Create the aggregation corpus for this machine:
+
 ```bash
 aha init --accept-secrets
-aha snapshot
-aha ingest
+aha refresh
+```
+
+Search it:
+
+```bash
 aha search "dynamic workflows"
 ```
 
@@ -46,20 +52,18 @@ aha read --session <session-key> --entry <entry-id> --before 3 --after 5
 
 ```bash
 aha init --accept-secrets
-aha snapshot
-aha ingest
+aha refresh
 ```
 
-Rationale: the first run should be safe and short. `init` writes visible defaults, records the privacy acknowledgement, and leaves the bundle/corpus locations explicit in JSONC.
+Rationale: first use should be safe and short. `init` writes visible defaults and records the privacy acknowledgement. `refresh` snapshots the configured sources and ingests the new bundle into the configured corpus.
 
 ### Routine refresh
 
 ```bash
-aha snapshot
-aha ingest
+aha refresh
 ```
 
-Rationale: after setup, refreshing should not require remembering paths. `snapshot` writes a new bundle to the configured bundle directory; `ingest` with no arguments ingests bundles from that directory and skips duplicates.
+Rationale: after setup, refreshing should be one command. `refresh` is `snapshot` plus ingest of the bundle it just created.
 
 ### Import another machine
 
@@ -76,6 +80,7 @@ More journeys and default rationale: `docs/user-journeys.md`.
 
 ```txt
 aha init [--accept-secrets]
+aha refresh [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR] [--corpus DIR]
 aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]
 aha ingest [bundle.tar.zst ...]
 aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--json]
@@ -84,6 +89,18 @@ aha status [--json]
 aha conflicts [--json]
 aha doctor
 ```
+
+## Why separate commands exist
+
+- `refresh`: one-command local update; creates the aggregation corpus on first run.
+- `snapshot`: capture an immutable bundle without touching the corpus.
+- `ingest`: merge copied or existing bundles into a corpus.
+- `search`: find matches in the corpus.
+- `read`: show context around a search hit.
+- `status`: inspect corpus counts and health.
+- `conflicts`: inspect quarantined merge conflicts.
+- `doctor`: show environment, config, and adapter information.
+- `init`: optional config materialization; useful for changing defaults and acknowledging the privacy warning once.
 
 ## Defaults
 
