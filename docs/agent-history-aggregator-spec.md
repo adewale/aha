@@ -334,7 +334,7 @@ linux-box
 cloud-devbox-01
 ```
 
-Do not silently use raw hostname as `machine_id`. The first run should require either a config value or a CLI flag:
+Default `machine_id` is a sanitized local hostname, written visibly by `aha init`. Users can override it in config or with a flag when they need stable naming across host renames:
 
 ```bash
 aha snapshot --machine ade-mbp
@@ -645,11 +645,12 @@ Config should cover:
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
-  "redaction": "none-v1"
+  "redaction": "none-v1",
+  "accept_secrets_warning": false
 }
 ```
 
-CLI flags override config values. The first-run UX should create or print a starter JSONC config, but must not infer `machine_id` silently from raw hostname.
+CLI flags override config values. The first-run UX creates a starter JSONC config with a visible hostname-derived `machine_id`; users can edit it before snapshotting. Recommended journeys and no-flag defaults are documented in `docs/user-journeys.md`.
 
 ## CLI shape
 
@@ -1025,6 +1026,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Schema documentation | Keep the spec schema sketch synchronized with implemented v1 columns that affect compatibility or behavior. |
 | CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
 | Limitation docs | README must describe accepted v1 limitations, not only features. |
+| User journeys | `docs/user-journeys.md` defines the no-flag defaults optimized for local first use, routine refresh, search/read, and imported bundles. |
 
 ## Validation plan
 

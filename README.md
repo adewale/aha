@@ -21,22 +21,17 @@ go test -race ./...
 ## Quick start
 
 ```bash
-aha init
-
-aha snapshot \
-  --machine ade-mbp \
-  --source pi=$HOME/.pi/agent/sessions \
-  --source claude-code=$HOME/.claude/projects \
-  --out ~/agent-session-bundles \
-  --accept-secrets
-
-aha ingest ~/agent-session-bundles/aha-sessions-*.tar.zst
+aha init --accept-secrets
+aha snapshot
+aha ingest
 aha search "dynamic workflows"
 aha read --session <session-id-or-key> --entry <entry-id> --before 3 --after 5
 aha status
 aha conflicts
 aha doctor
 ```
+
+For explicit/automation-friendly forms, see `docs/user-journeys.md`.
 
 ## Commands
 
@@ -70,7 +65,8 @@ Config is JSONC at `~/.config/aha/config.jsonc` by default.
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
-  "redaction": "none-v1"
+  "redaction": "none-v1",
+  "accept_secrets_warning": true
 }
 ```
 

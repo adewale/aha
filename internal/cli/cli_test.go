@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,50 @@ import (
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/testutil"
 )
+
+func TestCLIDefaultSnapshotAndIngestJourney(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	corpusDir := filepath.Join(root, "corpus")
+	configPath := filepath.Join(root, "config.jsonc")
+	cfg := `{
+		"machine_id":"journey-machine",
+		"sources":[
+			{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true},
+			{"type":"claude-code","root":"` + filepath.ToSlash(fx.ClaudeRoot) + `","enabled":true}
+		],
+		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"bundle_out_dir":"` + filepath.ToSlash(outDir) + `",
+		"path_mode":"raw",
+		"include_subagents":true,
+		"include_images":true,
+		"index_tool_output":false,
+		"redaction":"none-v1",
+		"accept_secrets_warning":true
+	}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"snapshot", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "journey"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"ingest", "--config", configPath}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sessions=3") {
+		t.Fatalf("bad default ingest output: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"search", "--config", configPath, "needle"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "claude-code") {
+		t.Fatalf("bad default search output: %s", out.String())
+	}
+}
 
 func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	root := t.TempDir()

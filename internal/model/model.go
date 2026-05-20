@@ -4,16 +4,17 @@ const Version = "0.1.0"
 const BundleSchema = "agent-session-snapshot-bundle/v1"
 
 type Config struct {
-	MachineID        string         `json:"machine_id"`
-	MachineLabel     string         `json:"machine_label,omitempty"`
-	Sources          []SourceConfig `json:"sources"`
-	CorpusDir        string         `json:"corpus_dir"`
-	BundleOutDir     string         `json:"bundle_out_dir"`
-	PathMode         string         `json:"path_mode"`
-	IncludeSubagents bool           `json:"include_subagents"`
-	IncludeImages    bool           `json:"include_images"`
-	IndexToolOutput  bool           `json:"index_tool_output"`
-	Redaction        string         `json:"redaction"`
+	MachineID            string         `json:"machine_id"`
+	MachineLabel         string         `json:"machine_label,omitempty"`
+	Sources              []SourceConfig `json:"sources"`
+	CorpusDir            string         `json:"corpus_dir"`
+	BundleOutDir         string         `json:"bundle_out_dir"`
+	PathMode             string         `json:"path_mode"`
+	IncludeSubagents     bool           `json:"include_subagents"`
+	IncludeImages        bool           `json:"include_images"`
+	IndexToolOutput      bool           `json:"index_tool_output"`
+	Redaction            string         `json:"redaction"`
+	AcceptSecretsWarning bool           `json:"accept_secrets_warning"`
 }
 
 type SourceConfig struct {

@@ -31,8 +31,8 @@ type Command struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"snapshot":  {"snapshot", "aha snapshot --machine <id> [--source pi=PATH] [--source claude-code=PATH] [--out DIR]", cmdSnapshot},
-		"ingest":    {"ingest", "aha ingest <bundle.tar.zst> [...]", cmdIngest},
+		"snapshot":  {"snapshot", "aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]", cmdSnapshot},
+		"ingest":    {"ingest", "aha ingest [bundle.tar.zst ...]", cmdIngest},
 		"search":    {"search", "aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--after DATE] [--before DATE] [--path TEXT] [--json]", cmdSearch},
 		"read":      {"read", "aha read --session ID [--entry ID] [--before N] [--after N] [--json]", cmdRead},
 		"status":    {"status", "aha status [--json]", cmdStatus},
@@ -79,6 +79,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", config.DefaultPath(), "config path")
+	acceptSecrets := fs.Bool("accept-secrets", false, "write config with privacy warning acknowledged")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -92,7 +93,14 @@ func cmdInit(args []string, stdout, stderr io.Writer) error {
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("config already exists: %s", path)
 	}
-	if err := os.WriteFile(path, config.StarterJSONC(), 0o644); err != nil {
+	content := config.StarterJSONC()
+	if *acceptSecrets {
+		cfg := config.Default()
+		cfg.AcceptSecretsWarning = true
+		b, _ := json.MarshalIndent(cfg, "", "  ")
+		content = append([]byte("// aha config (JSONC)\n// Privacy warning acknowledged by `aha init --accept-secrets`. Bundles/corpora remain private.\n"), append(b, '\n')...)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintln(stdout, path)
@@ -141,7 +149,10 @@ func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
 	if cfg.MachineID == "" {
 		return errors.New("machine_id required: set config machine_id or pass --machine")
 	}
-	if !*acceptSecrets {
+	if os.Getenv("AHA_ACCEPT_SECRETS") == "1" {
+		cfg.AcceptSecretsWarning = true
+	}
+	if !*acceptSecrets && !cfg.AcceptSecretsWarning {
 		fmt.Fprintln(stderr, "V1 does not redact secrets. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private. Pass --accept-secrets to continue.")
 		return errors.New("secrets warning not acknowledged")
 	}
@@ -190,17 +201,25 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 	if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
-	if fs.NArg() == 0 {
-		return errors.New("ingest requires at least one bundle")
+	bundles := fs.Args()
+	if len(bundles) == 0 {
+		out, err := paths.Expand(cfg.BundleOutDir)
+		if err != nil {
+			return err
+		}
+		bundles = []string{filepath.Join(out, "*.tar.zst")}
 	}
 	store, err := corpus.Open(cfg.CorpusDir)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	for _, pattern := range fs.Args() {
+	for _, pattern := range bundles {
 		matches, _ := filepath.Glob(pattern)
 		if len(matches) == 0 {
+			if len(fs.Args()) == 0 {
+				return fmt.Errorf("no bundles found for %s", pattern)
+			}
 			matches = []string{pattern}
 		}
 		for _, path := range matches {

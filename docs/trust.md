@@ -86,9 +86,9 @@ go test ./internal/adapters -run ReadOnly
 
 # End-to-end private smoke test; use temp dirs and delete them after inspection
 go build -o /tmp/aha ./cmd/aha
-/tmp/aha snapshot --machine local-test \
+AHA_ACCEPT_SECRETS=1 /tmp/aha snapshot \
+  --machine local-test \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --out /tmp/aha-bundles \
-  --accept-secrets
+  --out /tmp/aha-bundles
 ```
