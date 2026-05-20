@@ -80,21 +80,21 @@ More journeys and default rationale: `docs/user-journeys.md`.
 
 ```txt
 aha init [--accept-secrets]
-aha refresh [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR] [--corpus DIR]
-aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]
-aha ingest [bundle.tar.zst ...]
-aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--json]
-aha read --session ID [--entry ID] [--before N] [--after N] [--json]
-aha status [--json]
-aha conflicts [--json]
+aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR]
+aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR]
+aha ingest [--repo DIR] [bundle.tar.zst ...]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json]
+aha read --session ID [--entry ID] [--repo DIR] [--before N] [--after N] [--json]
+aha status [--repo DIR] [--json]
+aha conflicts [--repo DIR] [--json]
 aha doctor
 ```
 
 ## Why separate commands exist
 
-- `refresh`: one-command local update; creates the aggregation corpus on first run.
-- `snapshot`: capture an immutable bundle without touching the corpus.
-- `ingest`: merge copied or existing bundles into a corpus.
+- `refresh`: one-command local update; creates the aggregation corpus on first run. Use `--session` or `--max-sessions` for 1-to-all local-session scope.
+- `snapshot`: capture an immutable bundle without touching the corpus. Use `--session` or `--max-sessions` for scoped snapshots.
+- `ingest`: merge copied or existing bundles into a corpus/repo.
 - `search`: find matches in the corpus.
 - `read`: show context around a search hit.
 - `status`: inspect corpus counts and health.

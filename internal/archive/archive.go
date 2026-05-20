@@ -25,8 +25,10 @@ import (
 )
 
 type Options struct {
-	CapturedAt string
-	BundleID   string
+	CapturedAt     string
+	BundleID       string
+	SessionFilters []string
+	MaxSessions    int
 }
 
 type Bundle struct {
@@ -67,22 +69,30 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 				continue
 			}
 			sessions = append(sessions, sf)
-			if cfg.IncludeSubagents {
-				as, err := ad.DiscoverArtifacts(ctx, sf)
-				if err != nil {
-					return Bundle{}, err
+		}
+	}
+	sessions = filterSessions(sessions, opts)
+	for _, sf := range sessions {
+		if !cfg.IncludeSubagents {
+			continue
+		}
+		ad := registry[sf.Source]
+		if ad == nil {
+			continue
+		}
+		as, err := ad.DiscoverArtifacts(ctx, sf)
+		if err != nil {
+			return Bundle{}, err
+		}
+		for _, artifact := range as {
+			if idx, ok := artifactByPath[artifact.Path]; ok {
+				if artifacts[idx].ParentHint == "" && artifact.ParentHint != "" {
+					artifacts[idx].ParentHint = artifact.ParentHint
 				}
-				for _, artifact := range as {
-					if idx, ok := artifactByPath[artifact.Path]; ok {
-						if artifacts[idx].ParentHint == "" && artifact.ParentHint != "" {
-							artifacts[idx].ParentHint = artifact.ParentHint
-						}
-						continue
-					}
-					artifactByPath[artifact.Path] = len(artifacts)
-					artifacts = append(artifacts, artifact)
-				}
+				continue
 			}
+			artifactByPath[artifact.Path] = len(artifacts)
+			artifacts = append(artifacts, artifact)
 		}
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Path < sessions[j].Path })
@@ -155,6 +165,47 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 	}
 	m := model.Manifest{Schema: model.BundleSchema, BundleID: opts.BundleID, MachineID: cfg.MachineID, MachineLabel: cfg.MachineLabel, CapturedAt: opts.CapturedAt, CreatedBy: "aha " + model.Version, Implementation: model.Implementation{Language: "go", Archive: "tar.zst"}, Source: model.ManifestSource{HostOS: runtime.GOOS}, Policy: model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction}, Counts: model.ManifestCounts{SessionFiles: len(sessions), ArtifactFiles: len(artifacts), ImageFiles: imageCount, BytesUncompressed: total}, Adapters: mad, Files: manifestFiles}
 	return Bundle{Manifest: m, Files: files, TempDir: tmpDir}, nil
+}
+
+func filterSessions(sessions []model.SessionFile, opts Options) []model.SessionFile {
+	if len(opts.SessionFilters) > 0 {
+		var filtered []model.SessionFile
+		for _, s := range sessions {
+			for _, f := range opts.SessionFilters {
+				if sessionMatches(s, f) {
+					filtered = append(filtered, s)
+					break
+				}
+			}
+		}
+		sessions = filtered
+	}
+	if opts.MaxSessions > 0 && len(sessions) > opts.MaxSessions {
+		sort.SliceStable(sessions, func(i, j int) bool {
+			mi, ei := os.Stat(sessions[i].Path)
+			mj, ej := os.Stat(sessions[j].Path)
+			if ei == nil && ej == nil && !mi.ModTime().Equal(mj.ModTime()) {
+				return mi.ModTime().After(mj.ModTime())
+			}
+			return sessions[i].Path < sessions[j].Path
+		})
+		sessions = sessions[:opts.MaxSessions]
+	}
+	return sessions
+}
+
+func sessionMatches(s model.SessionFile, filter string) bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return false
+	}
+	candidates := []string{s.SessionID, s.RelativePath, s.Path, filepath.Base(s.Path), strings.TrimSuffix(filepath.Base(s.Path), filepath.Ext(s.Path))}
+	for _, c := range candidates {
+		if c == filter || strings.Contains(c, filter) {
+			return true
+		}
+	}
+	return false
 }
 
 func StableCopy(path, dir string) (string, string, int64, string, error) {

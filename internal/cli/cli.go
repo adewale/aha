@@ -31,15 +31,15 @@ type Command struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"refresh":   {"refresh", "aha refresh [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR] [--corpus DIR]", cmdRefresh},
-		"snapshot":  {"snapshot", "aha snapshot [--machine ID] [--source pi=PATH] [--source claude-code=PATH] [--out DIR]", cmdSnapshot},
-		"ingest":    {"ingest", "aha ingest [bundle.tar.zst ...]", cmdIngest},
-		"search":    {"search", "aha search <query> [--source NAME] [--machine ID] [--role ROLE] [--after DATE] [--before DATE] [--path TEXT] [--json]", cmdSearch},
-		"read":      {"read", "aha read --session ID [--entry ID] [--before N] [--after N] [--json]", cmdRead},
-		"status":    {"status", "aha status [--json]", cmdStatus},
-		"conflicts": {"conflicts", "aha conflicts [--json]", cmdConflicts},
+		"refresh":   {"refresh", "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR]", cmdRefresh},
+		"snapshot":  {"snapshot", "aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR]", cmdSnapshot},
+		"ingest":    {"ingest", "aha ingest [--repo DIR] [bundle.tar.zst ...]", cmdIngest},
+		"search":    {"search", "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json]", cmdSearch},
+		"read":      {"read", "aha read --session ID [--entry ID] [--repo DIR] [--before N] [--after N] [--json]", cmdRead},
+		"status":    {"status", "aha status [--repo DIR] [--json]", cmdStatus},
+		"conflicts": {"conflicts", "aha conflicts [--repo DIR] [--json]", cmdConflicts},
 		"doctor":    {"doctor", "aha doctor", cmdDoctor},
-		"init":      {"init", "aha init [--config PATH]", cmdInit},
+		"init":      {"init", "aha init [--config PATH] [--accept-secrets]", cmdInit},
 	}
 }
 
@@ -114,9 +114,11 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 type snapshotRequest struct {
-	Config     model.Config
-	CapturedAt string
-	BundleID   string
+	Config         model.Config
+	CapturedAt     string
+	BundleID       string
+	SessionFilters []string
+	MaxSessions    int
 }
 
 func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
@@ -138,20 +140,26 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	machine := fs.String("machine", "", "machine id")
 	outDir := fs.String("out", "", "output directory")
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "JSONC config path")
 	acceptSecrets := fs.Bool("accept-secrets", false, "acknowledge v1 does not redact secrets")
 	capturedAt := fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
 	bundleID := fs.String("bundle-id", "", "bundle id (advanced deterministic testing)")
+	maxSessions := fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
 	var sourceFlags multiFlag
+	var sessionFlags multiFlag
 	fs.Var(&sourceFlags, "source", "source spec type=path (repeatable)")
+	fs.Var(&sessionFlags, "session", "session id/path match to snapshot (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	req, err := buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, stderr)
+	req, err := buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		req.Config.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		req.Config.CorpusDir = *corpusDir
 	}
 	path, sha, err := writeSnapshot(req)
@@ -181,15 +189,18 @@ func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapsho
 	acceptSecrets := fs.Bool("accept-secrets", false, "acknowledge v1 does not redact secrets")
 	capturedAt := fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
 	bundleID := fs.String("bundle-id", "", "bundle id (advanced deterministic testing)")
+	maxSessions := fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
 	var sourceFlags multiFlag
+	var sessionFlags multiFlag
 	fs.Var(&sourceFlags, "source", "source spec type=path (repeatable)")
+	fs.Var(&sessionFlags, "session", "session id/path match to snapshot (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return snapshotRequest{}, err
 	}
-	return buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, stderr)
+	return buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
 }
 
-func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags multiFlag, stderr io.Writer) (snapshotRequest, error) {
+func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return snapshotRequest{}, err
@@ -220,7 +231,10 @@ func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool
 		fmt.Fprintln(stderr, "V1 does not redact secrets. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private. Pass --accept-secrets to continue.")
 		return snapshotRequest{}, errors.New("secrets warning not acknowledged")
 	}
-	return snapshotRequest{Config: cfg, CapturedAt: capturedAt, BundleID: bundleID}, nil
+	if maxSessions < 0 {
+		return snapshotRequest{}, errors.New("--max-sessions must be >= 0")
+	}
+	return snapshotRequest{Config: cfg, CapturedAt: capturedAt, BundleID: bundleID, SessionFilters: []string(sessionFlags), MaxSessions: maxSessions}, nil
 }
 
 func writeSnapshot(req snapshotRequest) (string, string, error) {
@@ -231,7 +245,7 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return "", "", err
 	}
-	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID}
+	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID, SessionFilters: req.SessionFilters, MaxSessions: req.MaxSessions}
 	if opts.CapturedAt == "" {
 		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -257,6 +271,7 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "config path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -265,7 +280,9 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		cfg.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
 	bundles := fs.Args()
@@ -305,6 +322,7 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "config path")
 	source := fs.String("source", "", "source filter")
 	machine := fs.String("machine", "", "machine filter")
@@ -324,7 +342,9 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		cfg.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
 	store, err := corpus.Open(cfg.CorpusDir)
@@ -349,6 +369,7 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("read", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "config path")
 	session := fs.String("session", "", "session key/id")
 	entry := fs.String("entry", "", "entry id")
@@ -365,7 +386,9 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		cfg.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
 	store, err := corpus.Open(cfg.CorpusDir)
@@ -394,6 +417,7 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "config path")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	if err := fs.Parse(args); err != nil {
@@ -403,7 +427,9 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		cfg.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
 	store, err := corpus.Open(cfg.CorpusDir)
@@ -430,6 +456,7 @@ func cmdConflicts(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("conflicts", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpusDir := fs.String("corpus", "", "corpus dir")
+	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "config path")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	if err := fs.Parse(args); err != nil {
@@ -439,7 +466,9 @@ func cmdConflicts(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *corpusDir != "" {
+	if *repoDir != "" {
+		cfg.CorpusDir = *repoDir
+	} else if *corpusDir != "" {
 		cfg.CorpusDir = *corpusDir
 	}
 	store, err := corpus.Open(cfg.CorpusDir)
@@ -475,7 +504,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 }
 
 func reorderSearchArgs(args []string) []string {
-	valueFlags := map[string]bool{"--corpus": true, "--config": true, "--source": true, "--machine": true, "--role": true, "--after": true, "--before": true, "--path": true, "--limit": true}
+	valueFlags := map[string]bool{"--corpus": true, "--repo": true, "--config": true, "--source": true, "--machine": true, "--role": true, "--after": true, "--before": true, "--path": true, "--limit": true}
 	boolFlags := map[string]bool{"--json": true}
 	literal := []string(nil)
 	for i, a := range args {

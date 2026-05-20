@@ -52,6 +52,46 @@ func TestCLIRefreshCreatesAggregationCorpus(t *testing.T) {
 	}
 }
 
+func TestCLIRepoAliasAndSessionScopedJourneys(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	repoDir := filepath.Join(root, "repo")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"snapshot", "--machine", "scoped", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--out", outDir, "--accept-secrets", "--session", "pi-session", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "pi-only"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(outDir, "aha-sessions-scoped-2026-01-03T00-00-00Z-pi-only.tar.zst")
+	out.Reset()
+	if err := cli.Run([]string{"ingest", "--repo", repoDir, bundle}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sessions=1") {
+		t.Fatalf("expected one scoped session: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"search", "--repo", repoDir, "needle"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "pi") || strings.Contains(out.String(), "claude-code") {
+		t.Fatalf("repo/session scoped search mismatch: %s", out.String())
+	}
+}
+
+func TestCLIRefreshCanLimitLocalSessions(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	repoDir := filepath.Join(root, "repo")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"refresh", "--machine", "limited", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--out", outDir, "--repo", repoDir, "--accept-secrets", "--max-sessions", "1", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "one"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sessions=1") {
+		t.Fatalf("expected refresh to ingest one session: %s", out.String())
+	}
+}
+
 func TestCLIDefaultSnapshotAndIngestJourney(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)

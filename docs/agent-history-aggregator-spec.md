@@ -1028,25 +1028,30 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
 | Limitation docs | README must describe accepted v1 limitations, not only features. |
 | User journeys | `docs/user-journeys.md` defines the no-flag defaults optimized for local first use, routine refresh, search/read, and imported bundles. |
-| Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources, then ingest the just-created bundle into the configured corpus. |
+| Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources, then ingest the just-created bundle into the configured corpus. It supports `--session` and `--max-sessions` for one-to-all local-session scope. |
+| Repo alias | Corpus path flags also accept `--repo` where users are thinking in terms of an aggregation repo. |
 
 ## Validation plan
 
 ### Canonical examples
 
-1. **Single-machine first snapshot**
+1. **Single-machine first refresh**
    - Input: local Pi and Claude Code directories.
    - Expected: one bundle, one machine, two sources, searchable corpus.
 
-2. **Same bundle ingested twice**
+2. **Scoped local refresh/snapshot**
+   - Input: local Pi and Claude Code directories plus `--session MATCH` or `--max-sessions 1`.
+   - Expected: bundle/corpus contains only selected local sessions and their linked artifacts.
+
+3. **Same bundle ingested twice**
    - Input: identical archive.
    - Expected: second ingest is a no-op except ingest-attempt receipt.
 
-3. **Later bundle from same machine**
+4. **Later bundle from same machine**
    - Input: prior archive plus a changed/grown session file.
    - Expected: new file version recorded, new entries added, old entries unchanged.
 
-4. **Second machine**
+5. **Second machine**
    - Input: bundle from another `machine_id`.
    - Expected: same corpus searches across both machines and can filter by machine.
 
