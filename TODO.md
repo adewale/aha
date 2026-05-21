@@ -18,6 +18,6 @@
 
 ## Future adapters
 
-- Research and prototype adapters for local stores from Aider, Cline/Roo Code, Continue, Gemini CLI, Cursor, Windsurf/Codeium, Zed, Goose, and OpenCode.
-- OpenCode looks viable with caveats; see `docs/research/opencode.md`. Prefer a SQLite snapshot adapter for current `anomalyco/opencode` after collecting real fixtures.
+- Research and prototype adapters for local stores from Aider, Cline/Roo Code, Continue, Gemini CLI, Cursor, Windsurf/Codeium, Zed, and Goose.
+- Punt OpenCode support unless/until users provide current fixtures or specifically request it. Research is parked in `docs/research/opencode.md`.
 - Prefer raw-preserving, read-only adapters first; treat Electron/VS Code state DB adapters as experimental until backed by fixtures from real current versions.
