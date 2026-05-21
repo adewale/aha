@@ -30,11 +30,15 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	if *session == "" {
 		return errors.New("--session required")
 	}
+	var ref model.HitRef
+	useRef := false
 	if strings.Contains(*session, "#") && *entry == "" {
-		ref, err := model.ParseHitRef(*session)
+		parsed, err := model.ParseHitRef(*session)
 		if err != nil {
 			return err
 		}
+		ref = parsed
+		useRef = true
 		*session, *entry = ref.SessionKey, ref.EntryID
 	}
 	cfg, err := cf.loadConfig()
@@ -46,7 +50,12 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	entries, err := corpus.ReadContext(store.DB, *session, *entry, *before, *after)
+	var entries []corpus.ReadEntry
+	if useRef {
+		entries, err = corpus.ReadRef(store.DB, ref, *before, *after)
+	} else {
+		entries, err = corpus.ReadContext(store.DB, *session, *entry, *before, *after)
+	}
 	if err != nil {
 		return err
 	}

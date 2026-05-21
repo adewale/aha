@@ -21,7 +21,15 @@ Inputs:
 - Fixed `refresh --json` to use stable lower-case report keys via JSON tags.
 - Fixed `search --json` to preserve structured `ref` and add copy-pastable `ref_text`.
 - Fixed artifact discovery so disabling subagent sessions does not suppress normal-session artifacts.
-- Added a static test-quality guard against `t.Log` as assertion substitute.
+- Added static test-quality guards against `t.Log` as assertion substitute and focused/sleep-based tests.
+- Added ingest failure-injection hooks/tests for rollback after file blobs and cleanup after bundle promotion.
+- Split ingest setup into `ingestPlan`, metadata insertion, and bundle promotion helpers.
+- Added multi-store concurrent duplicate ingest coverage and busy retry for SQLite writer contention.
+- Added real-ish committed parser fixtures for Pi, Claude Code, and Codex.
+- Added CLI flag metadata/FlagSet sync coverage.
+- Added resolver tests for exact-vs-prefix precedence and literal `%`/`_` handling.
+- Added search path-filter wildcard escaping coverage.
+- Routed `aha read <ref>` through typed `corpus.ReadRef` and added artifact search-ref round-trip coverage.
 
 ## TDD misses found
 
@@ -31,7 +39,7 @@ Inputs:
 
 2. **Search JSON ref round-trip**
    - Miss: `--refs` emitted copyable refs, but `--json` exposed only structured internal refs.
-   - Fix: failing CLI round-trip test first; `search.Result` now emits `ref` string and `hit_ref` object.
+   - Fix: failing CLI round-trip test first; `search.Result` preserves structured `ref` and adds copy-pastable `ref_text`.
 
 3. **Archive path policy**
    - Miss: archive validation checked sizes/SHA/duplicates but not unsafe path names.
@@ -49,14 +57,22 @@ Inputs:
    - Miss: artifact capture was accidentally tied to subagent-session inclusion.
    - Fix: failing flag-matrix test first; artifact discovery now runs for retained normal sessions regardless of `IncludeSubagents`.
 
-## Remaining audit findings
+## Second audit results
 
-- `internal/corpus/ingest.go` still mixes bundle staging, validation, blob writes, DB inserts, indexing, conflict handling, and report construction. Consider extracting an ingest plan / blob publisher / report DTO boundary before adding failure-injection tests.
-- Ingest has non-transactional filesystem side effects. Add failure-injection tests for DB errors after blob writes and after promoted bundle rename; decide whether orphan blobs are acceptable/repairable.
-- Parser tests need real-ish `testdata/` fixtures for Pi, Claude Code, and Codex transcript variants; current fixtures are still simplified.
-- CLI command metadata still duplicates flag definitions. Long term, define `FlagSpec` once and generate `flag.FlagSet`, help, docs, and schema metadata from it.
-- Add direct resolver tests for session/entry prefix ambiguity and LIKE wildcard escaping.
-- Add concurrency tests beyond `go test -race`: concurrent duplicate ingest, search/read during ingest, and simultaneous blob writes.
+A fresh reviewer pass after the fixes found no P0/P1 blockers after these follow-ups:
+
+- Bundle staging now uses `os.CreateTemp` rather than timestamp-only names, removing concurrent staging collisions.
+- Search path filters now escape SQL LIKE wildcards for message cwd and artifact raw paths.
+- Concurrent duplicate ingest is covered with two independently opened stores and `-race -count=5` validation.
+- Ingest failure tests assert full rollback across bundle/session/message/artifact/FTS tables plus staging cleanup.
+
+## Remaining deferrable findings
+
+- `internal/corpus/ingest.go` is improved but still owns parsing, blob writes, DB writes, conflict detection, FTS indexing, and report construction. A deeper split into planner / blob publisher / DB writer can wait until the next substantial ingest feature.
+- Add a held-writer/barrier test for search/read visibility during an open ingest transaction. Current tests cover duplicate ingest contention and rollback, but not reader consistency under a deliberately paused writer.
+- Parser fixtures are real-ish and committed, but still synthetic. Expand them with captured anonymized examples when available.
+- CLI flag sync now catches name drift, but defaults/help text/reorder maps are still separately maintained.
+- Add more adapter-level fixture tests that call `PiCLI`, `ClaudeCode`, and `CodexCLI` wrappers, not only `parseGenericJSONL`.
 
 ## Best-practice checks to keep
 

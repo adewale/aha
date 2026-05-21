@@ -68,9 +68,22 @@ func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) 
 	return false, false, nil
 }
 
+type ingestHooks struct {
+	afterManifestFiles             func() error
+	afterBundlePromoteBeforeCommit func() error
+}
+
 type Ingestor struct {
 	Store    *Store
 	Registry map[string]adapters.SourceAdapter
+	hooks    ingestHooks
+}
+
+type ingestPlan struct {
+	stagingPath string
+	bundleSHA   string
+	bundleBlob  string
+	manifest    model.Manifest
 }
 
 func NewIngestor(store *Store, registry map[string]adapters.SourceAdapter) Ingestor {
@@ -82,26 +95,29 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 }
 
 func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
+	const maxBusyRetries = 20
+	for attempt := 0; ; attempt++ {
+		rep, err := ing.ingestBundleOnce(path)
+		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
+			return rep, err
+		}
+		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+	}
+}
+
+func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 	store := ing.Store
-	stagingPath := filepath.Join(store.Root, "blobs", "bundles", fmt.Sprintf(".ingest-%d.tar.zst", time.Now().UnixNano()))
-	bundleSHA, err := archive.CopyFileHashed(path, stagingPath)
+	plan, err := prepareIngestPlan(store, path)
 	if err != nil {
 		return IngestReport{}, err
 	}
-	defer os.Remove(stagingPath)
-	manifest, err := archive.ReadManifest(stagingPath)
-	if err != nil {
-		return IngestReport{}, err
-	}
-	if err := archive.ValidateManifestBudgets(manifest); err != nil {
-		return IngestReport{}, err
-	}
+	defer os.Remove(plan.stagingPath)
 	tx, err := store.DB.Begin()
 	if err != nil {
 		return IngestReport{}, err
 	}
 	defer tx.Rollback()
-	dup, skip, err := recordBundleAttempt(tx, manifest, bundleSHA)
+	dup, skip, err := recordBundleAttempt(tx, plan.manifest, plan.bundleSHA)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -111,14 +127,10 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 		}
 		return IngestReport{Duplicate: dup}, nil
 	}
-	manifestJSON, _ := json.Marshal(manifest)
-	if _, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, manifest.BundleID, bundleSHA, manifest.MachineID, manifest.CapturedAt, time.Now().UTC().Format(time.RFC3339), string(manifestJSON)); err != nil {
+	if err := insertBundleMetadata(tx, plan); err != nil {
 		return IngestReport{}, err
 	}
-	bundleBlob := filepath.Join(store.Root, "blobs", "bundles", bundleSHA+".tar.zst")
-	if err := os.MkdirAll(filepath.Dir(bundleBlob), 0o755); err != nil {
-		return IngestReport{}, err
-	}
+	manifest := plan.manifest
 	if _, err := tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
 		return IngestReport{}, err
 	}
@@ -128,7 +140,7 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 		}
 	}
 	rep := IngestReport{Duplicate: dup}
-	err = archive.StreamManifestFiles(stagingPath, func(mf model.ManifestFile, r io.Reader) error {
+	err = archive.StreamManifestFiles(plan.stagingPath, func(mf model.ManifestFile, r io.Reader) error {
 		fileRep, err := ing.ingestManifestFile(tx, manifest, mf, r)
 		if err != nil {
 			return err
@@ -143,17 +155,91 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 	if err != nil {
 		return IngestReport{}, err
 	}
-	if _, err := os.Stat(bundleBlob); os.IsNotExist(err) {
-		if err := os.Rename(stagingPath, bundleBlob); err != nil {
+	if ing.hooks.afterManifestFiles != nil {
+		if err := ing.hooks.afterManifestFiles(); err != nil {
 			return IngestReport{}, err
 		}
-	} else if err != nil {
+	}
+	promoted, err := promoteBundleBlob(plan)
+	if err != nil {
 		return IngestReport{}, err
+	}
+	committed := false
+	defer func() {
+		if promoted && !committed {
+			_ = os.Remove(plan.bundleBlob)
+		}
+	}()
+	if ing.hooks.afterBundlePromoteBeforeCommit != nil {
+		if err := ing.hooks.afterBundlePromoteBeforeCommit(); err != nil {
+			return IngestReport{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return IngestReport{}, err
 	}
+	committed = true
 	return rep, nil
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+}
+
+func prepareIngestPlan(store *Store, sourcePath string) (ingestPlan, error) {
+	stagingDir := filepath.Join(store.Root, "blobs", "bundles")
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		return ingestPlan{}, err
+	}
+	staging, err := os.CreateTemp(stagingDir, ".ingest-*.tar.zst")
+	if err != nil {
+		return ingestPlan{}, err
+	}
+	stagingPath := staging.Name()
+	if err := staging.Close(); err != nil {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, err
+	}
+	bundleSHA, err := archive.CopyFileHashed(sourcePath, stagingPath)
+	if err != nil {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, err
+	}
+	manifest, err := archive.ReadManifest(stagingPath)
+	if err != nil {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, err
+	}
+	if err := archive.ValidateManifestBudgets(manifest); err != nil {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, err
+	}
+	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest}, nil
+}
+
+func insertBundleMetadata(tx *sql.Tx, plan ingestPlan) error {
+	manifestJSON, _ := json.Marshal(plan.manifest)
+	_, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, plan.manifest.BundleID, plan.bundleSHA, plan.manifest.MachineID, plan.manifest.CapturedAt, time.Now().UTC().Format(time.RFC3339), string(manifestJSON))
+	return err
+}
+
+func promoteBundleBlob(plan ingestPlan) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(plan.bundleBlob), 0o755); err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(plan.bundleBlob); os.IsNotExist(err) {
+		if err := os.Rename(plan.stagingPath, plan.bundleBlob); err != nil {
+			return false, err
+		}
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (ing Ingestor) ingestManifestFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, r io.Reader) (IngestReport, error) {

@@ -36,6 +36,24 @@ func TestQueryFiltersMessagesAndArtifacts(t *testing.T) {
 	}
 }
 
+func TestQueryPathFilterEscapesLikeWildcards(t *testing.T) {
+	store := buildSearchCorpus(t)
+	results, err := search.Query(store.DB, "needle", search.Filters{Path: "%", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("path wildcard filter matched as SQL wildcard: %+v", results)
+	}
+	results, err = search.Query(store.DB, "needle", search.Filters{Path: "Users_me", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("underscore path filter matched as SQL wildcard: %+v", results)
+	}
+}
+
 func TestQueryQuotesArbitraryTermsForFTS(t *testing.T) {
 	store := buildSearchCorpus(t)
 	for _, query := range []string{`needle "quoted"`, `--json`, `needle:`, `path/to/file`, `one OR two`} {

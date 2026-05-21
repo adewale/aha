@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -17,6 +18,49 @@ func FuzzParseGenericJSONL(f *testing.F) {
 			t.Fatalf("parser returned scanner error: %v", err)
 		}
 	})
+}
+
+func TestParseCommittedRealishFixtures(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		file       string
+		wantID     string
+		wantNeedle string
+		wantAssets int
+	}{
+		{name: "pi", source: "pi", file: "testdata/pi_realish.jsonl", wantID: "pi-realish", wantNeedle: "search needle from pi fixture"},
+		{name: "claude", source: "claude-code", file: "testdata/claude_realish.jsonl", wantID: "path-fallback", wantNeedle: "claude fixture needle", wantAssets: 1},
+		{name: "codex", source: "codex", file: "testdata/codex_realish.jsonl", wantID: "codex-realish", wantNeedle: "codex fixture needle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := os.Open(tt.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			ps, err := parseGenericJSONL(tt.source, model.SessionFile{Source: tt.source, SessionID: "path-fallback"}, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ps.Source != tt.source || ps.SourceSessionID != tt.wantID {
+				t.Fatalf("bad parsed identity: %+v", ps)
+			}
+			var found *model.ParsedEntry
+			for i := range ps.Entries {
+				if ps.Entries[i].Text == tt.wantNeedle {
+					found = &ps.Entries[i]
+				}
+			}
+			if found == nil {
+				t.Fatalf("fixture text not parsed: %+v", ps.Entries)
+			}
+			if len(found.Assets) != tt.wantAssets {
+				t.Fatalf("fixture assets=%d want %d: %+v", len(found.Assets), tt.wantAssets, found.Assets)
+			}
+		})
+	}
 }
 
 func TestParsePiNestedMessageRole(t *testing.T) {

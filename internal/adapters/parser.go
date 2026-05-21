@@ -48,12 +48,15 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 		if ps.StartedAt == "" {
 			ps.StartedAt = stringField(m, "timestamp")
 		}
+		typ := stringField(m, "type")
 		entryID := firstNonEmpty(stringField(m, "id"), stringField(m, "uuid"), nestedString(m, "message", "id"), nestedString(m, "message", "uuid"))
+		if typ == "session" && entryID != "" {
+			ps.SourceSessionID = entryID
+		}
 		if entryID == "" {
 			entryID = fmt.Sprintf("line-%06d-%s", lineNo, hash.SHA256Bytes([]byte(raw))[:12])
 		}
 		role := firstNonEmpty(stringField(m, "role"), nestedString(m, "message", "role"))
-		typ := stringField(m, "type")
 		if role == "" {
 			role = typ
 		}

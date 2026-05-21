@@ -288,6 +288,27 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 		t.Fatalf("read search JSON ref failed: %s", out.String())
 	}
 	out.Reset()
+	if err := cli.Run([]string{"search", "artifact needle", "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var artifactSearchJSON []struct {
+		Role    string `json:"role"`
+		RefText string `json:"ref_text"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &artifactSearchJSON); err != nil {
+		t.Fatalf("artifact search JSON did not decode: %v\n%s", err, out.String())
+	}
+	if len(artifactSearchJSON) == 0 || artifactSearchJSON[0].Role != "artifact" || artifactSearchJSON[0].RefText == "" {
+		t.Fatalf("artifact search JSON missing ref_text: %+v", artifactSearchJSON)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"read", artifactSearchJSON[0].RefText, "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "artifact needle text") {
+		t.Fatalf("read artifact search ref failed: %s", out.String())
+	}
+	out.Reset()
 	if err := cli.Run([]string{"search", "needle", "--corpus", corpusDir, "--refs"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}

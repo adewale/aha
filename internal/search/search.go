@@ -56,8 +56,8 @@ func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
 		vals = append(vals, f.Before)
 	}
 	if f.Path != "" {
-		where = append(where, "s.raw_cwd like ?")
-		vals = append(vals, "%"+f.Path+"%")
+		where = append(where, "s.raw_cwd like ? escape '\\'")
+		vals = append(vals, likeContains(f.Path))
 	}
 	vals = append(vals, f.Limit)
 	rows, err := db.Query(`select bm25(fts_messages) score,e.timestamp,s.source_name,s.machine_id,coalesce(s.raw_cwd,''),m.role,snippet(fts_messages,2,'[',']','…',12),m.session_key,m.entry_id from fts_messages join messages m on m.session_key=fts_messages.session_key and m.entry_id=fts_messages.entry_id join sessions s on s.session_key=m.session_key join entries e on e.session_key=m.session_key and e.entry_id=m.entry_id where `+strings.Join(where, " and ")+` order by score,e.timestamp,m.session_key,m.entry_id limit ?`, vals...)
@@ -124,8 +124,8 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 		vals = append(vals, f.Machine)
 	}
 	if f.Path != "" {
-		where = append(where, "a.raw_path like ?")
-		vals = append(vals, "%"+f.Path+"%")
+		where = append(where, "a.raw_path like ? escape '\\'")
+		vals = append(vals, likeContains(f.Path))
 	}
 	if f.After != "" {
 		where = append(where, "b.captured_at>=?")
@@ -159,6 +159,20 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func likeContains(q string) string {
+	out := make([]byte, 0, len(q)+2)
+	out = append(out, '%')
+	for i := 0; i < len(q); i++ {
+		switch q[i] {
+		case '\\', '%', '_':
+			out = append(out, '\\')
+		}
+		out = append(out, q[i])
+	}
+	out = append(out, '%')
+	return string(out)
 }
 
 func ftsQuery(q string) string {

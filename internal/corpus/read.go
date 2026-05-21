@@ -89,8 +89,8 @@ func resolveSession(db *sql.DB, q string) (string, error) {
 	if len(matches) > 1 {
 		return "", fmt.Errorf("ambiguous session %q", q)
 	}
-	prefix := q + "%"
-	rows, err = db.Query(`select session_key from sessions where session_key like ? or source_session_id like ?`, prefix, prefix)
+	prefix := likePrefix(q)
+	rows, err = db.Query(`select session_key from sessions where session_key like ? escape '\' or source_session_id like ? escape '\'`, prefix, prefix)
 	if err != nil {
 		return "", err
 	}
@@ -112,8 +112,8 @@ func resolveEntryLine(db *sql.DB, sessionKey, q string) (int, error) {
 		arg := q
 		sqlq := `select line_no from entries where session_key=? and entry_id=?`
 		if like {
-			arg = q + "%"
-			sqlq = `select line_no from entries where session_key=? and entry_id like ?`
+			arg = likePrefix(q)
+			sqlq = `select line_no from entries where session_key=? and entry_id like ? escape '\'`
 		}
 		rows, err := db.Query(sqlq, sessionKey, arg)
 		if err != nil {
@@ -141,6 +141,19 @@ func resolveEntryLine(db *sql.DB, sessionKey, q string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("entry not found: %s", q)
+}
+
+func likePrefix(q string) string {
+	out := make([]byte, 0, len(q)+1)
+	for i := 0; i < len(q); i++ {
+		switch q[i] {
+		case '\\', '%', '_':
+			out = append(out, '\\')
+		}
+		out = append(out, q[i])
+	}
+	out = append(out, '%')
+	return string(out)
 }
 
 func readArtifactHit(db *sql.DB, sessionKey, artifactSHA string) (ReadEntry, error) {
