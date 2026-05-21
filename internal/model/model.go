@@ -3,6 +3,30 @@ package model
 const Version = "0.1.0"
 const BundleSchema = "agent-session-snapshot-bundle/v1"
 
+type HitKind string
+
+const (
+	HitKindMessage  HitKind = "message"
+	HitKindArtifact HitKind = "artifact"
+)
+
+type HitRef struct {
+	Kind        HitKind `json:"kind"`
+	SessionKey  string  `json:"session_key,omitempty"`
+	EntryID     string  `json:"entry_id,omitempty"`
+	ArtifactSHA string  `json:"artifact_sha256,omitempty"`
+}
+
+func ArtifactSessionKey(sha string) string { return "artifact:" + sha }
+
+func ParseArtifactSessionKey(session string) (string, bool) {
+	const prefix = "artifact:"
+	if len(session) <= len(prefix) || session[:len(prefix)] != prefix {
+		return "", false
+	}
+	return session[len(prefix):], true
+}
+
 type Config struct {
 	MachineID            string         `json:"machine_id"`
 	MachineLabel         string         `json:"machine_label,omitempty"`

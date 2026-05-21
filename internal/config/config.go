@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
+	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 	"github.com/tailscale/hujson"
@@ -14,11 +16,8 @@ import (
 
 func Default() model.Config {
 	return model.Config{
-		MachineID: defaultMachineID(),
-		Sources: []model.SourceConfig{
-			{Type: "pi", Root: "~/.pi/agent/sessions", Enabled: true},
-			{Type: "claude-code", Root: "~/.claude/projects", Enabled: true},
-		},
+		MachineID:            defaultMachineID(),
+		Sources:              defaultSources(),
 		CorpusDir:            "~/.aha",
 		BundleOutDir:         "~/agent-session-bundles",
 		PathMode:             "raw",
@@ -28,6 +27,24 @@ func Default() model.Config {
 		Redaction:            "none-v1",
 		AcceptSecretsWarning: false,
 	}
+}
+
+func defaultSources() []model.SourceConfig {
+	builtins := adapters.Builtins()
+	names := make([]string, 0, len(builtins))
+	for name := range builtins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]model.SourceConfig, 0, len(names))
+	for _, name := range names {
+		roots := builtins[name].DefaultRoots()
+		if len(roots) == 0 {
+			continue
+		}
+		out = append(out, model.SourceConfig{Type: name, Root: roots[0].Path, Enabled: true})
+	}
+	return out
 }
 
 func DefaultPath() string {

@@ -104,6 +104,83 @@ func TestSchemaMigratesOldArtifactTable(t *testing.T) {
 	}
 }
 
+func TestIngestHonorsIncludeImagesFalseForImageArtifacts(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	gifPath := filepath.Join(fx.PiRoot, "--Users-me-proj--", "subagent-artifacts", "prompt.gif")
+	gifBytes, err := os.ReadFile(gifPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fx.PiRoot, "--Users-me-proj--", "subagent-artifacts", "prompt_no_ext"), gifBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.MachineID = "test-machine"
+	cfg.IncludeImages = true
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fx.PiRoot, Enabled: true}, {Type: "claude-code", Root: fx.ClaudeRoot, Enabled: true}}
+	b, err := archive.Capture(t.Context(), cfg, adapters.Builtins(), archive.Options{CapturedAt: "2026-01-03T00:00:00Z", BundleID: "no-images"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Manifest.Policy.IncludeImages = false
+	bundle := filepath.Join(root, "no-images.tar.zst")
+	if _, err := archive.Write(bundle, b); err != nil {
+		t.Fatal(err)
+	}
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, store.DB, "images", 0)
+	var imageArtifacts int
+	if err := store.DB.QueryRow(`select count(*) from artifacts where raw_path like '%prompt%'`).Scan(&imageArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if imageArtifacts != 0 {
+		t.Fatalf("image artifact rows=%d want 0", imageArtifacts)
+	}
+}
+
+func TestIngestCapsLargeArtifactTextBody(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	large := strings.Repeat("x", int(corpus.MaxArtifactTextIndexBytes)+1024)
+	if err := os.WriteFile(filepath.Join(fx.PiRoot, "--Users-me-proj--", "subagent-artifacts", "large.txt"), []byte(large), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.MachineID = "test-machine"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fx.PiRoot, Enabled: true}}
+	b, err := archive.Capture(t.Context(), cfg, adapters.Builtins(), archive.Options{CapturedAt: "2026-01-03T00:00:00Z", BundleID: "large-artifact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(root, "large.tar.zst")
+	if _, err := archive.Write(bundle, b); err != nil {
+		t.Fatal(err)
+	}
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	if err := store.DB.QueryRow(`select length(text_body) from artifacts where raw_path like '%large.txt%'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != corpus.MaxArtifactTextIndexBytes {
+		t.Fatalf("text_body length=%d want cap %d", n, corpus.MaxArtifactTextIndexBytes)
+	}
+}
+
 func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	root := t.TempDir()
 	bundle, corpusDir := makeBundle(t, root)
@@ -370,6 +447,27 @@ func TestMalformedDiagnosticsPersistAndToolOutputNotIndexed(t *testing.T) {
 	if len(results) != 0 {
 		t.Fatalf("tool output should not be indexed: %+v", results)
 	}
+}
+
+func TestOpenExistingDoesNotCreateCorpus(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "missing")
+	if _, err := corpus.OpenExisting(missing); err == nil {
+		t.Fatalf("OpenExisting succeeded for missing corpus")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("OpenExisting created missing dir: %v", err)
+	}
+	store, err := corpus.Open(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	store, err = corpus.OpenExisting(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
 }
 
 func TestDuplicateBundleIDDifferentSHAErrors(t *testing.T) {

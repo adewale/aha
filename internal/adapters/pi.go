@@ -39,8 +39,11 @@ func (Pi) DiscoverArtifacts(ctx context.Context, session model.SessionFile) ([]m
 	roots := []string{filepath.Join(filepath.Dir(session.Path), "subagent-artifacts")}
 	seen := map[string]bool{}
 	for _, root := range roots {
-		_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || seen[p] {
+		err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || seen[p] || d.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
 			seen[p] = true
@@ -52,6 +55,9 @@ func (Pi) DiscoverArtifacts(ctx context.Context, session model.SessionFile) ([]m
 			out = append(out, model.ArtifactFile{Source: "pi", Root: root, Path: p, RelativePath: filepath.ToSlash(rel), Kind: "artifact", ParentHint: parentHint})
 			return nil
 		})
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 	}
 	return out, nil
 }

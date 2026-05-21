@@ -1,52 +1,72 @@
 # aha — Agent History Aggregator
 
-`aha` snapshots your local Pi and Claude Code histories into immutable `tar.zst` bundles, ingests those bundles into a local SQLite corpus, and lets you search/read the combined history.
+`aha` turns local coding-agent histories into a private, searchable corpus. It snapshots Pi, Claude Code, and Codex sessions into deterministic `tar.zst` bundles, ingests those bundles into SQLite + FTS5, and lets humans or agents search then read the original context.
 
-Use it when you want one private, searchable archive of agent sessions across tools and machines.
+Use it when agent conversations are becoming project memory and you want one local archive across tools and machines.
 
-## What it does
+## Why use it?
 
-- Reads Pi sessions from `~/.pi/agent/sessions`.
-- Reads Claude Code sessions from `~/.claude/projects`.
-- Writes deterministic snapshot bundles to `~/agent-session-bundles`.
-- Ingests bundles into a local SQLite + FTS5 corpus at `~/.aha`.
-- Preserves raw session files, artifacts, subagent sessions, and image prompt metadata.
+- **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
+- **Private by default**: everything stays on your machine unless you move the bundle/corpus.
+- **Portable history**: copy a bundle from another machine and `aha ingest` it.
+- **Agent-friendly retrieval**: search emits JSON/refs; read retrieves full context so agents do not answer from snippets alone.
+- **Auditable trust claims**: read-only source access and no-network behavior are tested.
 
-## Privacy first
+## Privacy warning
 
-V1 does **not** redact secrets. Bundles may contain prompts, source code, tool output, credentials accidentally pasted into chat, images, paths, and API responses. Keep bundles and corpora private unless you have reviewed them.
+V1 does **not** redact secrets. Bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
 See `docs/trust.md` for the trust model and verification commands.
 
-## Build
+## Install / build
+
+Requires Go from `go.mod` on macOS or Linux. Windows support is planned for v2.
 
 ```bash
+git clone https://github.com/adewale/aha.git
+cd aha
 go build -o aha ./cmd/aha
+./aha --version
+```
+
+Run tests:
+
+```bash
 go test ./...
 ```
 
 ## Quick start
 
-Create the aggregation corpus for this machine:
+Create a config, acknowledge the privacy model, snapshot local histories, and ingest them:
 
 ```bash
 aha init --accept-secrets
 aha refresh
 ```
 
-Search it:
+Search:
 
 ```bash
 aha search "dynamic workflows"
 ```
 
-Read around a result:
+Read full context around a hit:
 
 ```bash
 aha read --session <session-key> --entry <entry-id> --before 3 --after 5
 ```
 
-## Common journeys
+Agent-oriented flow:
+
+```bash
+aha search "migration bug" --json --limit 10
+aha search "migration bug" --refs
+aha read '<session-key>#<entry-id>' --json
+```
+
+Expected result: `search` returns matching messages/artifacts; `read` returns surrounding transcript entries or artifact text.
+
+## Core journeys
 
 ### First local archive
 
@@ -55,15 +75,20 @@ aha init --accept-secrets
 aha refresh
 ```
 
-Rationale: first use should be safe and short. `init` writes visible defaults and records the privacy acknowledgement. `refresh` snapshots the configured sources and ingests the new bundle into the configured corpus.
+`refresh` is the short path: snapshot configured sources and ingest the new bundle into the configured corpus.
 
-### Routine refresh
+### Routine update
 
 ```bash
 aha refresh
 ```
 
-Rationale: after setup, refreshing should be one command. `refresh` is `snapshot` plus ingest of the bundle it just created.
+### Inspect one recent/local session
+
+```bash
+aha refresh --max-sessions 1
+aha search "needle" --refs
+```
 
 ### Import another machine
 
@@ -72,35 +97,43 @@ aha ingest ~/Downloads/aha-sessions-work-mac.tar.zst
 aha search "migration" --machine work-mac
 ```
 
-Rationale: copied bundles should merge into the same local corpus. Machine identity comes from the manifest, not the filename.
-
-More journeys and default rationale: `docs/user-journeys.md`.
+More journey rationale: `docs/user-journeys.md`.
 
 ## Commands
 
 ```txt
-aha init [--accept-secrets]
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR]
-aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR]
-aha ingest [--repo DIR] [bundle.tar.zst ...]
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json]
-aha read --session ID [--entry ID] [--repo DIR] [--before N] [--after N] [--json]
+aha init [--config PATH] [--accept-secrets] [--json]
+aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]
+aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]
+aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
+aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
 aha status [--repo DIR] [--json]
 aha conflicts [--repo DIR] [--json]
-aha doctor
+aha doctor [--json]
 ```
 
-## Why separate commands exist
+Command roles:
 
-- `refresh`: one-command local update; creates the aggregation corpus on first run. Use `--session` or `--max-sessions` for 1-to-all local-session scope.
-- `snapshot`: capture an immutable bundle without touching the corpus. Use `--session` or `--max-sessions` for scoped snapshots.
-- `ingest`: merge copied or existing bundles into a corpus/repo.
-- `search`: find matches in the corpus.
-- `read`: show context around a search hit.
-- `status`: inspect corpus counts and health.
-- `conflicts`: inspect quarantined merge conflicts.
-- `doctor`: show environment, config, and adapter information.
-- `init`: optional config materialization; useful for changing defaults and acknowledging the privacy warning once.
+- `init`: write starter JSONC config and optionally persist privacy acknowledgement.
+- `refresh`: common local update: `snapshot` then ingest the just-created bundle.
+- `snapshot`: create an immutable bundle without touching a corpus.
+- `ingest`: merge bundles into a corpus/repo.
+- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts.
+- `read`: retrieve full context from `--session/--entry` or a `<session>#<entry>` ref.
+- `status`: corpus counts and health.
+- `conflicts`: quarantined merge conflicts.
+- `doctor`: environment, config, adapter, and next-action diagnostics.
+
+## Supported sources
+
+| Source | Default root | Format |
+|---|---|---|
+| Pi | `~/.pi/agent/sessions` | JSONL session files |
+| Claude Code | `~/.claude/projects` | JSONL project/session files, including `agent-*` subagents |
+| Codex | `~/.codex/sessions` | JSONL rollout/session files |
+
+A source is read-only during snapshot. Raw files are copied into the bundle and preserved for provenance.
 
 ## Defaults
 
@@ -109,25 +142,22 @@ aha doctor
 | Config | `~/.config/aha/config.jsonc` |
 | Corpus | `~/.aha` |
 | Bundle output | `~/agent-session-bundles` |
-| Pi source | `~/.pi/agent/sessions` |
-| Claude Code source | `~/.claude/projects` |
-| Machine ID | sanitized local hostname, written into config by `aha init` |
+| Machine ID | sanitized local hostname |
 | Tool output indexing | off |
 | Redaction | none in v1 |
 
-Config is JSONC. Flags override config.
+Config is JSONC; flags override config.
 
 ```jsonc
 {
   "machine_id": "ade-mbp",
-  "machine_label": "Adewale MacBook Pro",
   "sources": [
-    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true },
-    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true }
+    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true },
+    { "type": "codex", "root": "~/.codex/sessions", "enabled": true },
+    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
   "corpus_dir": "~/.aha",
   "bundle_out_dir": "~/agent-session-bundles",
-  "path_mode": "raw",
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
@@ -136,19 +166,35 @@ Config is JSONC. Flags override config.
 }
 ```
 
+## Agent guidance
+
+For coding agents using `aha`:
+
+1. Use `aha search ... --json` or `--refs` to find leads.
+2. Use `aha read <ref> --json` to retrieve full source context.
+3. Answer from retrieved context, not from snippets alone.
+4. Prefer read-only commands (`search`, `read`, `status`, `conflicts`, `doctor`) unless the user explicitly asks to snapshot/ingest.
+5. Remember v1 does not redact secrets.
+
 ## Accepted v1 limits
 
 - No secret redaction.
 - No Windows support until v2.
-- Project grouping uses a simple derived key.
+- `include_images=false` suppresses normalized image assets/blobs, but raw bundles/session JSON may still contain embedded image bytes.
 - `read` shows file-order context, not source-native branch/thread reconstruction.
 - Tool output is preserved in raw files but not indexed by default.
-- Conflict rows are quarantined; conflict search/display UX can improve later.
+- Conflict UX can improve.
 
-## More docs
+## Project docs
 
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
+- `docs/eval-rubric.md` — rubric for future evals.
+- `docs/eval-results.md` — latest basic eval results.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
+
+## License
+
+No license file is currently included. Add one before broad external adoption.

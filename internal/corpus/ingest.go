@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -8,12 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
-	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,10 +18,14 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
+	"github.com/adewale/aha/internal/media"
 	"github.com/adewale/aha/internal/model"
 	"github.com/klauspost/compress/zstd"
 )
+
+const MaxArtifactTextIndexBytes int64 = 4 << 20
 
 type IngestReport struct {
 	Sessions, Entries, Messages, Images, Artifacts int
@@ -64,7 +64,21 @@ func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) 
 	return false, false, nil
 }
 
+type Ingestor struct {
+	Store    *Store
+	Registry map[string]adapters.SourceAdapter
+}
+
+func NewIngestor(store *Store, registry map[string]adapters.SourceAdapter) Ingestor {
+	return Ingestor{Store: store, Registry: registry}
+}
+
 func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path string) (IngestReport, error) {
+	return NewIngestor(store, registry).IngestBundle(path)
+}
+
+func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
+	store := ing.Store
 	stagingPath := filepath.Join(store.Root, "blobs", "bundles", fmt.Sprintf(".ingest-%d.tar.zst", time.Now().UnixNano()))
 	bundleSHA, err := archive.CopyFileHashed(path, stagingPath)
 	if err != nil {
@@ -73,6 +87,9 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 	defer os.Remove(stagingPath)
 	manifest, err := archive.ReadManifest(stagingPath)
 	if err != nil {
+		return IngestReport{}, err
+	}
+	if err := archive.ValidateManifestBudgets(manifest); err != nil {
 		return IngestReport{}, err
 	}
 	tx, err := store.DB.Begin()
@@ -98,92 +115,29 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 	if err := os.MkdirAll(filepath.Dir(bundleBlob), 0o755); err != nil {
 		return IngestReport{}, err
 	}
-	_, _ = tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel}))
-	for _, ad := range manifest.Adapters {
-		_, _ = tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities))
+	if _, err := tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
+		return IngestReport{}, err
 	}
-	byPath := map[string]model.ManifestFile{}
-	for _, mf := range manifest.Files {
-		byPath[mf.RelativePath] = mf
+	for _, ad := range manifest.Adapters {
+		if _, err := tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities)); err != nil {
+			return IngestReport{}, err
+		}
 	}
 	rep := IngestReport{Duplicate: dup}
-	err = archive.StreamReaders(stagingPath, func(name string, size int64, r io.Reader) error {
-		if name == "manifest.json" || name == "checksums/sha256sums.txt" {
-			_, err := io.Copy(io.Discard, r)
-			return err
-		}
-		mf, ok := byPath[name]
-		if !ok {
-			return fmt.Errorf("archive file missing from manifest: %s", name)
-		}
-		delete(byPath, name)
-		tmpPath, sha, n, err := spoolEntry(store.Root, r)
+	err = archive.StreamManifestFiles(stagingPath, func(mf model.ManifestFile, r io.Reader) error {
+		fileRep, err := ing.ingestManifestFile(tx, manifest, mf, r)
 		if err != nil {
 			return err
 		}
-		defer os.Remove(tmpPath)
-		if sha != mf.SHA256 || n != mf.Bytes {
-			return fmt.Errorf("sha/size mismatch for %s", mf.RelativePath)
-		}
-		if err := storeFileBlobFromPath(store.Root, mf.SHA256, tmpPath); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`, mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
-			return err
-		}
-		if mf.Kind != "session" {
-			added, err := ingestArtifact(tx, store.Root, manifest, mf, tmpPath)
-			if err != nil {
-				return err
-			}
-			if added {
-				rep.Artifacts++
-			}
-			return nil
-		}
-		ad := registry[mf.Source]
-		if ad == nil {
-			return nil
-		}
-		fh, err := os.Open(tmpPath)
-		if err != nil {
-			return err
-		}
-		ps, err := ad.ParseSession(context.Background(), model.SessionFile{Source: mf.Source, Path: mf.RawPath, RelativePath: strings.TrimPrefix(mf.RelativePath, "sources/"+mf.Source+"/sessions/"), SessionID: mf.SessionID, CWD: mf.CWD, StartedAt: mf.StartedAt, IsSubagent: mf.IsSubagent}, fh)
-		_ = fh.Close()
-		if err != nil {
-			return err
-		}
-		if len(ps.Diagnostics) > 0 {
-			ps.Metadata["diagnostics"] = ps.Diagnostics
-		}
-		sessionID := firstNonEmpty(ps.SourceSessionID, mf.SessionID, strings.TrimSuffix(filepath.Base(mf.RelativePath), filepath.Ext(mf.RelativePath)))
-		sessionKey := mf.Source + ":" + manifest.MachineID + ":" + sessionID
-		if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
-			return err
-		}
-		rep.Sessions++
-		for _, pe := range ps.Entries {
-			r, err := ingestEntry(tx, store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
-			if err != nil {
-				return err
-			}
-			rep.Entries += r.Entries
-			rep.Messages += r.Messages
-			rep.Images += r.Images
-		}
+		rep.Sessions += fileRep.Sessions
+		rep.Entries += fileRep.Entries
+		rep.Messages += fileRep.Messages
+		rep.Images += fileRep.Images
+		rep.Artifacts += fileRep.Artifacts
 		return nil
 	})
 	if err != nil {
 		return IngestReport{}, err
-	}
-	if len(byPath) > 0 {
-		for missing := range byPath {
-			return IngestReport{}, fmt.Errorf("manifest file missing from archive: %s", missing)
-		}
 	}
 	if _, err := os.Stat(bundleBlob); os.IsNotExist(err) {
 		if err := os.Rename(stagingPath, bundleBlob); err != nil {
@@ -198,6 +152,101 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 	return rep, nil
 }
 
+func (ing Ingestor) ingestManifestFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, r io.Reader) (IngestReport, error) {
+	store := ing.Store
+	entryReader := io.Reader(r)
+	if !manifest.Policy.IncludeImages && mf.Kind != "session" {
+		if isImageManifestFile(mf) {
+			sha, n, err := hashAndDiscard(r)
+			if err != nil {
+				return IngestReport{}, err
+			}
+			if sha != mf.SHA256 || n != mf.Bytes {
+				return IngestReport{}, fmt.Errorf("sha/size mismatch for %s", mf.RelativePath)
+			}
+			return IngestReport{}, nil
+		}
+		br := bufio.NewReader(r)
+		if media.ReaderLooksImage(br) {
+			sha, n, err := hashAndDiscard(br)
+			if err != nil {
+				return IngestReport{}, err
+			}
+			if sha != mf.SHA256 || n != mf.Bytes {
+				return IngestReport{}, fmt.Errorf("sha/size mismatch for %s", mf.RelativePath)
+			}
+			return IngestReport{}, nil
+		}
+		entryReader = br
+	}
+	tmpPath, sha, n, err := spoolEntry(store.Root, entryReader)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	defer os.Remove(tmpPath)
+	if sha != mf.SHA256 || n != mf.Bytes {
+		return IngestReport{}, fmt.Errorf("sha/size mismatch for %s", mf.RelativePath)
+	}
+	if err := storeFileBlobFromPath(store.Root, mf.SHA256, tmpPath); err != nil {
+		return IngestReport{}, err
+	}
+	if _, err := tx.Exec(`insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`, mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
+		return IngestReport{}, err
+	}
+	if mf.Kind != "session" {
+		added, err := ingestArtifact(tx, store.Root, manifest, mf, tmpPath)
+		if err != nil {
+			return IngestReport{}, err
+		}
+		if added {
+			return IngestReport{Artifacts: 1}, nil
+		}
+		return IngestReport{}, nil
+	}
+	return ing.ingestSessionFile(tx, manifest, mf, tmpPath)
+}
+
+func (ing Ingestor) ingestSessionFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, tmpPath string) (IngestReport, error) {
+	ad := ing.Registry[mf.Source]
+	if ad == nil {
+		return IngestReport{}, nil
+	}
+	fh, err := os.Open(tmpPath)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	ps, err := ad.ParseSession(context.Background(), model.SessionFile{Source: mf.Source, Path: mf.RawPath, RelativePath: strings.TrimPrefix(mf.RelativePath, "sources/"+mf.Source+"/sessions/"), SessionID: mf.SessionID, CWD: mf.CWD, StartedAt: mf.StartedAt, IsSubagent: mf.IsSubagent}, fh)
+	_ = fh.Close()
+	if err != nil {
+		return IngestReport{}, err
+	}
+	if len(ps.Diagnostics) > 0 {
+		if ps.Metadata == nil {
+			ps.Metadata = map[string]any{}
+		}
+		ps.Metadata["diagnostics"] = ps.Diagnostics
+	}
+	sessionID := firstNonEmpty(ps.SourceSessionID, mf.SessionID, strings.TrimSuffix(filepath.Base(mf.RelativePath), filepath.Ext(mf.RelativePath)))
+	sessionKey := mf.Source + ":" + manifest.MachineID + ":" + sessionID
+	if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
+		return IngestReport{}, err
+	}
+	if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+		return IngestReport{}, err
+	}
+	rep := IngestReport{Sessions: 1}
+	for _, pe := range ps.Entries {
+		r, err := ingestEntry(tx, ing.Store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
+		if err != nil {
+			return IngestReport{}, err
+		}
+		rep.Entries += r.Entries
+		rep.Messages += r.Messages
+		rep.Images += r.Images
+	}
+	return rep, nil
+}
+
 type entryReport struct{ Entries, Messages, Images int }
 
 func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourceSessionID, sessionKey string, pe model.ParsedEntry) (entryReport, error) {
@@ -205,8 +254,8 @@ func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourc
 	var oldHash string
 	err := tx.QueryRow(`select entry_sha256 from entries where session_key=? and entry_id=?`, sessionKey, pe.EntryID).Scan(&oldHash)
 	if err == nil && oldHash != eh {
-		_, _ = tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": manifest.BundleID}))
-		return entryReport{}, nil
+		_, err := tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": manifest.BundleID}))
+		return entryReport{}, err
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return entryReport{}, err
@@ -291,7 +340,10 @@ func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset mod
 	added := false
 	if len(asset.Data) > 0 {
 		assetSHA = hash.SHA256Bytes(asset.Data)
-		ext := extFromMime(asset.MimeType)
+		ext := media.ExtFromMIME(asset.MimeType)
+		if ext == "" {
+			ext = ".bin"
+		}
 		blobPath := filepath.ToSlash(filepath.Join("blobs", "images", assetSHA+ext))
 		if err := writeImageBlobAtomic(root, blobPath, asset.Data); err != nil {
 			return false, err
@@ -308,6 +360,46 @@ func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset mod
 	}
 	_, err := tx.Exec(`insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`, sessionKey, entryID, assetSHA, asset.AssetKind, asset.ContentIndex, asset.PromptOrder, asset.RawRef, asset.MimeType, mustJSON(asset.Metadata))
 	return added, err
+}
+
+func writeImageBlobFromPathAtomic(root, relPath, srcPath string) error {
+	finalPath := filepath.Join(root, relPath)
+	if _, err := os.Stat(finalPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(finalPath), "image-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	_, copyErr := io.Copy(tmp, in)
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmpPath)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return closeErr
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		if _, statErr := os.Stat(finalPath); statErr == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func writeImageBlobAtomic(root, relPath string, data []byte) error {
@@ -344,15 +436,37 @@ func writeImageBlobAtomic(root, relPath string, data []byte) error {
 	return nil
 }
 
-func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) (bool, error) {
-	preview := ""
-	fullText := ""
-	if b, err := os.ReadFile(path); err == nil && utf8.Valid(b) {
-		fullText = string(b)
-		preview = fullText
-		if len(preview) > 4000 {
-			preview = preview[:4000]
+func readArtifactText(path string) (string, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, MaxArtifactTextIndexBytes+1))
+	if err != nil {
+		return "", "", err
+	}
+	if int64(len(b)) > MaxArtifactTextIndexBytes {
+		b = b[:MaxArtifactTextIndexBytes]
+		for len(b) > 0 && !utf8.Valid(b) {
+			b = b[:len(b)-1]
 		}
+	}
+	if !utf8.Valid(b) {
+		return "", "", nil
+	}
+	fullText := string(b)
+	preview := fullText
+	if len(preview) > 4000 {
+		preview = preview[:4000]
+	}
+	return preview, fullText, nil
+}
+
+func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) (bool, error) {
+	preview, fullText, err := readArtifactText(path)
+	if err != nil {
+		return false, err
 	}
 	var parent any
 	if mf.ParentHint != "" {
@@ -374,45 +488,69 @@ func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.M
 				return false, err
 			}
 		}
-		if err := maybeStoreImageArtifact(tx, root, manifest, mf, path); err != nil {
-			return false, err
+		if manifest.Policy.IncludeImages {
+			if err := maybeStoreImageArtifact(tx, root, manifest, mf, path); err != nil {
+				return false, err
+			}
 		}
 	}
 	return added, nil
 }
 
-func maybeStoreImageArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) error {
-	mt := mime.TypeByExtension(strings.ToLower(filepath.Ext(mf.RawPath)))
-	if !strings.HasPrefix(mt, "image/") {
-		mt = mime.TypeByExtension(strings.ToLower(filepath.Ext(mf.RelativePath)))
+func isImageManifestFile(mf model.ManifestFile) bool {
+	_, ok := media.ImageMIMEFromPath(firstNonEmpty(mf.RawPath, mf.RelativePath))
+	if ok {
+		return true
 	}
-	if !strings.HasPrefix(mt, "image/") {
-		return nil
+	_, ok = media.ImageMIMEFromPath(mf.RelativePath)
+	return ok
+}
+
+func maybeStoreImageArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) error {
+	mt, ok := media.ImageMIMEFromPath(firstNonEmpty(mf.RawPath, mf.RelativePath))
+	if !ok {
+		mt, ok = media.ImageMIMEFromPath(mf.RelativePath)
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	cfg, _, decodeErr := image.DecodeConfig(f)
-	_ = f.Close()
-	width, height := 0, 0
-	if decodeErr == nil {
-		width, height = cfg.Width, cfg.Height
+	var head [16]byte
+	n, _ := io.ReadFull(f, head[:])
+	if !ok {
+		mt, ok = media.ImageMIMEFromBytes(head[:n])
 	}
-	ext := filepath.Ext(mf.RawPath)
-	if ext == "" {
-		ext = extFromMime(mt)
-	}
-	blobPath := filepath.ToSlash(filepath.Join("blobs", "images", mf.SHA256+ext))
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = f.Close()
 		return err
 	}
-	if err := writeImageBlobAtomic(root, blobPath, data); err != nil {
+	if !ok {
+		_ = f.Close()
+		return nil
+	}
+	width, height := media.Dimensions(f)
+	_ = f.Close()
+	ext := filepath.Ext(mf.RawPath)
+	if ext == "" {
+		ext = media.ExtFromMIME(mt)
+	}
+	if ext == "" {
+		ext = ".bin"
+	}
+	blobPath := filepath.ToSlash(filepath.Join("blobs", "images", mf.SHA256+ext))
+	if err := writeImageBlobFromPathAtomic(root, blobPath, path); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, mt, mf.Bytes, width, height, ext, blobPath)
 	return err
+}
+
+func hashAndDiscard(r io.Reader) (string, int64, error) {
+	res, err := fileutil.HashDiscard(r)
+	if err != nil {
+		return "", 0, err
+	}
+	return res.SHA256, res.Bytes, nil
 }
 
 func spoolEntry(root string, r io.Reader) (string, string, int64, error) {
@@ -429,9 +567,11 @@ func spoolEntry(root string, r io.Reader) (string, string, int64, error) {
 	n, copyErr := io.Copy(io.MultiWriter(out, h), r)
 	closeErr := out.Close()
 	if copyErr != nil {
+		_ = os.Remove(path)
 		return "", "", 0, copyErr
 	}
 	if closeErr != nil {
+		_ = os.Remove(path)
 		return "", "", 0, closeErr
 	}
 	return path, hex.EncodeToString(h.Sum(nil)), n, nil

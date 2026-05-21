@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/adewale/aha/internal/model"
 )
 
 type Filters struct {
@@ -12,15 +14,16 @@ type Filters struct {
 	Limit                                      int
 }
 type Result struct {
-	Score      float64 `json:"score"`
-	Timestamp  string  `json:"timestamp"`
-	Source     string  `json:"source"`
-	Machine    string  `json:"machine"`
-	Project    string  `json:"project"`
-	Role       string  `json:"role"`
-	Snippet    string  `json:"snippet"`
-	SessionKey string  `json:"session_key"`
-	EntryID    string  `json:"entry_id"`
+	Score      float64      `json:"score"`
+	Timestamp  string       `json:"timestamp"`
+	Source     string       `json:"source"`
+	Machine    string       `json:"machine"`
+	Project    string       `json:"project"`
+	Role       string       `json:"role"`
+	Snippet    string       `json:"snippet"`
+	SessionKey string       `json:"session_key"`
+	EntryID    string       `json:"entry_id"`
+	Ref        model.HitRef `json:"ref"`
 }
 
 func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
@@ -66,6 +69,7 @@ func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
 		if err := rows.Scan(&r.Score, &r.Timestamp, &r.Source, &r.Machine, &r.Project, &r.Role, &r.Snippet, &r.SessionKey, &r.EntryID); err != nil {
 			return nil, err
 		}
+		r.Ref = model.HitRef{Kind: model.HitKindMessage, SessionKey: r.SessionKey, EntryID: r.EntryID}
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -130,7 +134,7 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 		vals = append(vals, f.Before)
 	}
 	vals = append(vals, f.Limit)
-	rows, err := db.Query(`select bm25(fts_artifacts) score,a.source_name,a.machine_id,a.raw_path,snippet(fts_artifacts,1,'[',']','…',12),case when a.parent_session_key is null or a.parent_session_key='' then 'artifact:' || a.artifact_sha256 else a.parent_session_key end,a.artifact_sha256 from fts_artifacts join artifacts a on a.artifact_id=fts_artifacts.artifact_id left join bundles b on b.bundle_id=a.bundle_id where `+strings.Join(where, " and ")+` order by score,a.raw_path,a.artifact_sha256 limit ?`, vals...)
+	rows, err := db.Query(`select bm25(fts_artifacts) score,coalesce(b.captured_at,''),a.source_name,a.machine_id,a.raw_path,snippet(fts_artifacts,1,'[',']','…',12),coalesce(a.parent_session_key,''),a.artifact_sha256 from fts_artifacts join artifacts a on a.artifact_id=fts_artifacts.artifact_id left join bundles b on b.bundle_id=a.bundle_id where `+strings.Join(where, " and ")+` order by score,coalesce(b.captured_at,''),a.raw_path,a.artifact_sha256 limit ?`, vals...)
 	if err != nil {
 		return nil, err
 	}
@@ -138,9 +142,16 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 	var out []Result
 	for rows.Next() {
 		var r Result
-		if err := rows.Scan(&r.Score, &r.Source, &r.Machine, &r.Project, &r.Snippet, &r.SessionKey, &r.EntryID); err != nil {
+		var parentSession, artifactSHA string
+		if err := rows.Scan(&r.Score, &r.Timestamp, &r.Source, &r.Machine, &r.Project, &r.Snippet, &parentSession, &artifactSHA); err != nil {
 			return nil, err
 		}
+		ref := model.HitRef{Kind: model.HitKindArtifact, SessionKey: parentSession, ArtifactSHA: artifactSHA, EntryID: artifactSHA}
+		if ref.SessionKey == "" {
+			ref.SessionKey = model.ArtifactSessionKey(ref.ArtifactSHA)
+		}
+		r.Ref = ref
+		r.SessionKey, r.EntryID = ref.SessionKey, ref.EntryID
 		r.Role = "artifact"
 		out = append(out, r)
 	}

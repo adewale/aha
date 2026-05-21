@@ -15,6 +15,9 @@ func discoverJSONL(root, source string, recursive bool) ([]model.SessionFile, er
 		if err != nil {
 			return err
 		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir

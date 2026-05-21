@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAdaptersStayReadOnly(t *testing.T) {
+func TestSourceAdaptersStayReadOnly(t *testing.T) {
 	forbidden := []string{
 		"os.WriteFile",
 		"os.Create(",

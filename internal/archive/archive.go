@@ -2,7 +2,6 @@ package archive
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,12 +14,16 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/adewale/aha/internal/adapters"
+	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
+	"github.com/adewale/aha/internal/media"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
+	"github.com/adewale/aha/internal/safety"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -30,6 +33,15 @@ type Options struct {
 	SessionFilters []string
 	MaxSessions    int
 }
+
+const (
+	MaxManifestBytes           int64 = 16 << 20
+	MaxArchiveEntryBytes       int64 = 4 << 30
+	MaxBundleBytes             int64 = 2 << 30
+	MaxBundleUncompressedBytes int64 = 8 << 30
+	MaxChecksumBytes           int64 = 1 << 20
+	MaxManifestFiles                 = 200000
+)
 
 type Bundle struct {
 	Manifest model.Manifest
@@ -102,9 +114,18 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 		return Bundle{}, err
 	}
 	var files []model.CapturedFile
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
 	var total int64
 	imageCount := 0
 	for _, sf := range sessions {
+		if err := safety.EnsureUnderRoot(sf.Root, sf.Path); err != nil {
+			return Bundle{}, err
+		}
 		copyPath, sha, size, state, err := StableCopy(sf.Path, tmpDir)
 		if err != nil {
 			return Bundle{}, err
@@ -139,6 +160,12 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 		total += size
 	}
 	for _, af := range artifacts {
+		if err := safety.EnsureUnderRoot(af.Root, af.Path); err != nil {
+			return Bundle{}, err
+		}
+		if !cfg.IncludeImages && media.FileLooksImage(af.Path) {
+			continue
+		}
 		copyPath, sha, size, state, err := StableCopy(af.Path, tmpDir)
 		if err != nil {
 			return Bundle{}, err
@@ -150,8 +177,12 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Manifest.RelativePath < files[j].Manifest.RelativePath })
 	manifestFiles := make([]model.ManifestFile, len(files))
+	artifactFileCount := 0
 	for i := range files {
 		manifestFiles[i] = files[i].Manifest
+		if files[i].Manifest.Kind != "session" {
+			artifactFileCount++
+		}
 	}
 	var mad []model.ManifestAdapt
 	names := make([]string, 0, len(registry))
@@ -163,7 +194,8 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 		ad := registry[name]
 		mad = append(mad, model.ManifestAdapt{Name: ad.Name(), Version: ad.Version(), Capabilities: ad.Capabilities()})
 	}
-	m := model.Manifest{Schema: model.BundleSchema, BundleID: opts.BundleID, MachineID: cfg.MachineID, MachineLabel: cfg.MachineLabel, CapturedAt: opts.CapturedAt, CreatedBy: "aha " + model.Version, Implementation: model.Implementation{Language: "go", Archive: "tar.zst"}, Source: model.ManifestSource{HostOS: runtime.GOOS}, Policy: model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction}, Counts: model.ManifestCounts{SessionFiles: len(sessions), ArtifactFiles: len(artifacts), ImageFiles: imageCount, BytesUncompressed: total}, Adapters: mad, Files: manifestFiles}
+	m := model.Manifest{Schema: model.BundleSchema, BundleID: opts.BundleID, MachineID: cfg.MachineID, MachineLabel: cfg.MachineLabel, CapturedAt: opts.CapturedAt, CreatedBy: "aha " + model.Version, Implementation: model.Implementation{Language: "go", Archive: "tar.zst"}, Source: model.ManifestSource{HostOS: runtime.GOOS}, Policy: model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction}, Counts: model.ManifestCounts{SessionFiles: len(sessions), ArtifactFiles: artifactFileCount, ImageFiles: imageCount, BytesUncompressed: total}, Adapters: mad, Files: manifestFiles}
+	success = true
 	return Bundle{Manifest: m, Files: files, TempDir: tmpDir}, nil
 }
 
@@ -208,64 +240,102 @@ func sessionMatches(s model.SessionFile, filter string) bool {
 	return false
 }
 
+func openRegularNoFollow(path string) (*os.File, os.FileInfo, error) {
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !st.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("refusing to copy non-regular file: %s", path)
+	}
+	return f, st, nil
+}
+
 func StableCopy(path, dir string) (string, string, int64, string, error) {
-	for i := 0; i < 2; i++ {
-		st1, err := os.Stat(path)
+	check := func() (os.FileInfo, error) {
+		st, err := os.Lstat(path)
 		if err != nil {
-			return "", "", 0, "", err
+			return nil, err
 		}
+		if st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() {
+			return nil, fmt.Errorf("refusing to copy non-regular file: %s", path)
+		}
+		return st, nil
+	}
+	copyOnce := func(expected os.FileInfo) (string, string, int64, os.FileInfo, error) {
 		out, err := os.CreateTemp(dir, "file-*")
 		if err != nil {
-			return "", "", 0, "", err
+			return "", "", 0, nil, err
 		}
 		outPath := out.Name()
-		in, err := os.Open(path)
+		in, openedInfo, err := openRegularNoFollow(path)
 		if err != nil {
 			_ = out.Close()
-			return "", "", 0, "", err
+			_ = os.Remove(outPath)
+			return "", "", 0, nil, err
+		}
+		if expected != nil && !os.SameFile(expected, openedInfo) {
+			_ = in.Close()
+			_ = out.Close()
+			_ = os.Remove(outPath)
+			return "", "", 0, nil, fmt.Errorf("source file changed before open: %s", path)
 		}
 		h := sha256.New()
 		n, copyErr := io.Copy(io.MultiWriter(out, h), in)
 		closeInErr := in.Close()
 		closeOutErr := out.Close()
 		if copyErr != nil {
-			return "", "", 0, "", copyErr
+			_ = os.Remove(outPath)
+			return "", "", 0, nil, copyErr
 		}
 		if closeInErr != nil {
-			return "", "", 0, "", closeInErr
+			_ = os.Remove(outPath)
+			return "", "", 0, nil, closeInErr
 		}
 		if closeOutErr != nil {
-			return "", "", 0, "", closeOutErr
+			_ = os.Remove(outPath)
+			return "", "", 0, nil, closeOutErr
 		}
-		st2, err := os.Stat(path)
+		return outPath, hex.EncodeToString(h.Sum(nil)), n, openedInfo, nil
+	}
+	for i := 0; i < 2; i++ {
+		st1, err := check()
 		if err != nil {
 			return "", "", 0, "", err
 		}
-		if st1.Size() == st2.Size() && st1.ModTime().Equal(st2.ModTime()) {
-			return outPath, hex.EncodeToString(h.Sum(nil)), n, "stable", nil
+		outPath, sha, n, openedInfo, err := copyOnce(st1)
+		if err != nil {
+			return "", "", 0, "", err
 		}
+		st2, err := check()
+		if err != nil {
+			_ = os.Remove(outPath)
+			return "", "", 0, "", err
+		}
+		if !os.SameFile(openedInfo, st2) {
+			_ = os.Remove(outPath)
+			return "", "", 0, "", fmt.Errorf("source file changed during copy: %s", path)
+		}
+		if st1.Size() == st2.Size() && st1.ModTime().Equal(st2.ModTime()) {
+			return outPath, sha, n, "stable", nil
+		}
+		_ = os.Remove(outPath)
 	}
-	out, err := os.CreateTemp(dir, "file-*")
+	if _, err := check(); err != nil {
+		return "", "", 0, "", err
+	}
+	outPath, sha, n, _, err := copyOnce(nil)
 	if err != nil {
 		return "", "", 0, "", err
 	}
-	outPath := out.Name()
-	in, err := os.Open(path)
-	if err != nil {
-		_ = out.Close()
-		return "", "", 0, "", err
-	}
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(out, h), in)
-	_ = in.Close()
-	closeErr := out.Close()
-	if copyErr != nil {
-		return "", "", 0, "", copyErr
-	}
-	if closeErr != nil {
-		return "", "", 0, "", closeErr
-	}
-	return outPath, hex.EncodeToString(h.Sum(nil)), n, "unstable", nil
+	return outPath, sha, n, "unstable", nil
 }
 
 func StableRead(path string) ([]byte, string, error) {
@@ -291,6 +361,9 @@ func StableRead(path string) ([]byte, string, error) {
 }
 
 func Write(path string, b Bundle) (string, error) {
+	if err := ValidateManifestBudgets(b.Manifest); err != nil {
+		return "", err
+	}
 	if b.TempDir != "" {
 		defer os.RemoveAll(b.TempDir)
 	}
@@ -301,11 +374,14 @@ func Write(path string, b Bundle) (string, error) {
 		}
 		seenNames[f.Manifest.RelativePath] = true
 	}
-	tmp := path + ".tmp"
-	out, err := os.Create(tmp)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	out, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return "", err
 	}
+	tmp := out.Name()
 	defer os.Remove(tmp)
 	enc, err := zstd.NewWriter(out, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
@@ -378,8 +454,18 @@ func addTarCaptured(tw *tar.Writer, f model.CapturedFile) error {
 		return err
 	}
 	defer in.Close()
-	_, err = io.Copy(tw, in)
-	return err
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tw, hash), in)
+	if err != nil {
+		return err
+	}
+	if n != f.Manifest.Bytes {
+		return fmt.Errorf("size mismatch while writing %s", f.Manifest.RelativePath)
+	}
+	if got := hex.EncodeToString(hash.Sum(nil)); got != f.Manifest.SHA256 {
+		return fmt.Errorf("sha mismatch while writing %s", f.Manifest.RelativePath)
+	}
+	return nil
 }
 
 func addTar(tw *tar.Writer, name string, data []byte, mode int64) error {
@@ -405,28 +491,20 @@ func FileSHA256(path string) (string, error) {
 }
 
 func CopyFileHashed(src, dst string) (string, error) {
+	return CopyFileHashedLimit(src, dst, MaxBundleBytes)
+}
+
+func CopyFileHashedLimit(src, dst string, maxBytes int64) (string, error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return "", err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
-	}
-	out, err := os.Create(dst)
+	res, err := fileutil.CopyHash(dst, in, maxBytes)
 	if err != nil {
 		return "", err
 	}
-	h := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(out, h), in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return "", copyErr
-	}
-	if closeErr != nil {
-		return "", closeErr
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return res.SHA256, nil
 }
 
 func CopyFile(src, dst string) error {
@@ -445,12 +523,114 @@ func CopyFile(src, dst string) error {
 	_, copyErr := io.Copy(out, in)
 	closeErr := out.Close()
 	if copyErr != nil {
+		_ = os.Remove(dst)
 		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(dst)
 	}
 	return closeErr
 }
 
 func ReadManifest(path string) (model.Manifest, error) {
+	manifest, err := readManifestOnly(path)
+	if err != nil {
+		return model.Manifest{}, err
+	}
+	return manifest, ValidateManifestBudgets(manifest)
+}
+
+func StreamReaders(path string, fn func(name string, size int64, r io.Reader) error) error {
+	return WalkBundle(path, func(name string, size int64, r io.Reader) error {
+		return fn(name, size, r)
+	})
+}
+
+func StreamManifestFiles(path string, fn func(mf model.ManifestFile, r io.Reader) error) error {
+	manifest, err := readManifestOnly(path)
+	if err != nil {
+		return err
+	}
+	if err := ValidateManifestBudgets(manifest); err != nil {
+		return err
+	}
+	return walkTarZstd(path, manifest, func(mf model.ManifestFile, r io.Reader) error {
+		return fn(mf, r)
+	})
+}
+
+func StreamFiles(path string, fn func(name string, data []byte) error) error {
+	return WalkBundle(path, func(name string, size int64, r io.Reader) error {
+		b, err := io.ReadAll(io.LimitReader(r, size+1))
+		if err != nil {
+			return err
+		}
+		if int64(len(b)) != size {
+			return fmt.Errorf("short archive entry %s", name)
+		}
+		return fn(name, b)
+	})
+}
+
+func ReadBundle(path string) (model.Manifest, map[string][]byte, []byte, string, error) {
+	if st, err := os.Stat(path); err != nil {
+		return model.Manifest{}, nil, nil, "", err
+	} else if st.Size() > MaxBundleBytes {
+		return model.Manifest{}, nil, nil, "", fmt.Errorf("bundle too large: exceeds %d bytes", MaxBundleBytes)
+	}
+	bundleBytes, err := os.ReadFile(path)
+	if err != nil {
+		return model.Manifest{}, nil, nil, "", err
+	}
+	bundleSHA := hash.SHA256Bytes(bundleBytes)
+	manifest, err := ReadManifest(path)
+	if err != nil {
+		return model.Manifest{}, nil, nil, "", err
+	}
+	entries := map[string][]byte{}
+	if err := StreamFiles(path, func(name string, data []byte) error {
+		entries[name] = data
+		return nil
+	}); err != nil {
+		return model.Manifest{}, nil, nil, "", err
+	}
+	return manifest, entries, bundleBytes, bundleSHA, nil
+}
+
+func WalkBundle(path string, fn func(name string, size int64, r io.Reader) error) error {
+	manifest, err := readManifestOnly(path)
+	if err != nil {
+		return err
+	}
+	if err := ValidateManifestBudgets(manifest); err != nil {
+		return err
+	}
+	return walkTarZstd(path, manifest, func(mf model.ManifestFile, r io.Reader) error {
+		return fn(mf.RelativePath, mf.Bytes, r)
+	})
+}
+
+func ValidateManifestBudgets(manifest model.Manifest) error {
+	if len(manifest.Files) > MaxManifestFiles {
+		return fmt.Errorf("manifest has too many files: %d", len(manifest.Files))
+	}
+	var total int64
+	for _, mf := range manifest.Files {
+		if mf.Bytes < 0 {
+			return fmt.Errorf("manifest file has negative size: %s", mf.RelativePath)
+		}
+		if mf.Bytes > MaxArchiveEntryBytes {
+			return fmt.Errorf("manifest file too large: %s", mf.RelativePath)
+		}
+		if total > MaxBundleUncompressedBytes-mf.Bytes {
+			return fmt.Errorf("bundle uncompressed size exceeds %d bytes", MaxBundleUncompressedBytes)
+		}
+		total += mf.Bytes
+	}
+	return nil
+}
+
+func readManifestOnly(path string) (model.Manifest, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return model.Manifest{}, err
@@ -469,9 +649,18 @@ func ReadManifest(path string) (model.Manifest, error) {
 	if h.Name != "manifest.json" {
 		return model.Manifest{}, fmt.Errorf("first tar entry is %s, want manifest.json", h.Name)
 	}
-	b, err := io.ReadAll(tr)
+	if h.Typeflag != tar.TypeReg {
+		return model.Manifest{}, fmt.Errorf("manifest is not a regular tar entry")
+	}
+	if h.Size > MaxManifestBytes {
+		return model.Manifest{}, fmt.Errorf("manifest too large: %d bytes", h.Size)
+	}
+	b, err := io.ReadAll(io.LimitReader(tr, MaxManifestBytes+1))
 	if err != nil {
 		return model.Manifest{}, err
+	}
+	if int64(len(b)) > MaxManifestBytes {
+		return model.Manifest{}, fmt.Errorf("manifest too large")
 	}
 	var manifest model.Manifest
 	if err := json.Unmarshal(b, &manifest); err != nil {
@@ -483,7 +672,81 @@ func ReadManifest(path string) (model.Manifest, error) {
 	return manifest, nil
 }
 
-func StreamReaders(path string, fn func(name string, size int64, r io.Reader) error) error {
+func walkTarZstd(path string, manifest model.Manifest, fn func(mf model.ManifestFile, r io.Reader) error) error {
+	manifestFiles := map[string]model.ManifestFile{}
+	for _, mf := range manifest.Files {
+		if _, exists := manifestFiles[mf.RelativePath]; exists {
+			return fmt.Errorf("duplicate manifest file path: %s", mf.RelativePath)
+		}
+		manifestFiles[mf.RelativePath] = mf
+	}
+	seen := map[string]bool{}
+	var total int64
+	err := walkRawTarZstd(path, func(h *tar.Header, r io.Reader) error {
+		if h.Typeflag != tar.TypeReg {
+			return fmt.Errorf("unsupported tar entry type for %s", h.Name)
+		}
+		if h.Size < 0 || h.Size > MaxArchiveEntryBytes {
+			return fmt.Errorf("tar entry too large: %s", h.Name)
+		}
+		if total > MaxBundleUncompressedBytes-h.Size {
+			return fmt.Errorf("archive uncompressed size exceeds %d bytes", MaxBundleUncompressedBytes)
+		}
+		total += h.Size
+		if seen[h.Name] {
+			return fmt.Errorf("duplicate tar entry %s", h.Name)
+		}
+		seen[h.Name] = true
+		if h.Name == "manifest.json" {
+			if h.Size > MaxManifestBytes {
+				return fmt.Errorf("manifest too large: %d bytes", h.Size)
+			}
+			_, err := io.Copy(io.Discard, r)
+			return err
+		}
+		if h.Name == "checksums/sha256sums.txt" {
+			if h.Size > MaxChecksumBytes {
+				return fmt.Errorf("checksum entry too large: %d bytes", h.Size)
+			}
+			_, err := io.Copy(io.Discard, r)
+			return err
+		}
+		mf, ok := manifestFiles[h.Name]
+		if !ok {
+			return fmt.Errorf("archive file missing from manifest: %s", h.Name)
+		}
+		if h.Size != mf.Bytes {
+			return fmt.Errorf("size mismatch for %s: tar=%d manifest=%d", mf.RelativePath, h.Size, mf.Bytes)
+		}
+		delete(manifestFiles, h.Name)
+		hash := sha256.New()
+		tee := io.TeeReader(r, hash)
+		if err := fn(mf, tee); err != nil {
+			return err
+		}
+		if _, err := io.Copy(io.Discard, tee); err != nil {
+			return err
+		}
+		if got := hex.EncodeToString(hash.Sum(nil)); got != mf.SHA256 {
+			return fmt.Errorf("sha mismatch for %s", mf.RelativePath)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(manifestFiles) > 0 {
+		missing := make([]string, 0, len(manifestFiles))
+		for name := range manifestFiles {
+			missing = append(missing, name)
+		}
+		sort.Strings(missing)
+		return fmt.Errorf("manifest file missing from archive: %s", missing[0])
+	}
+	return nil
+}
+
+func walkRawTarZstd(path string, fn func(h *tar.Header, r io.Reader) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -495,7 +758,6 @@ func StreamReaders(path string, fn func(name string, size int64, r io.Reader) er
 	}
 	defer zr.Close()
 	tr := tar.NewReader(zr)
-	seen := map[string]bool{}
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -504,98 +766,9 @@ func StreamReaders(path string, fn func(name string, size int64, r io.Reader) er
 		if err != nil {
 			return err
 		}
-		if h.Typeflag != tar.TypeReg {
-			continue
-		}
-		if seen[h.Name] {
-			return fmt.Errorf("duplicate tar entry %s", h.Name)
-		}
-		seen[h.Name] = true
-		if err := fn(h.Name, h.Size, tr); err != nil {
+		if err := fn(h, tr); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func StreamFiles(path string, fn func(name string, data []byte) error) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	zr, err := zstd.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	tr := tar.NewReader(zr)
-	seen := map[string]bool{}
-	for {
-		h, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if h.Typeflag != tar.TypeReg {
-			continue
-		}
-		if seen[h.Name] {
-			return fmt.Errorf("duplicate tar entry %s", h.Name)
-		}
-		seen[h.Name] = true
-		b, err := io.ReadAll(tr)
-		if err != nil {
-			return err
-		}
-		if err := fn(h.Name, b); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadBundle(path string) (model.Manifest, map[string][]byte, []byte, string, error) {
-	bundleBytes, err := os.ReadFile(path)
-	if err != nil {
-		return model.Manifest{}, nil, nil, "", err
-	}
-	bundleSHA := hash.SHA256Bytes(bundleBytes)
-	zr, err := zstd.NewReader(bytes.NewReader(bundleBytes))
-	if err != nil {
-		return model.Manifest{}, nil, nil, "", err
-	}
-	defer zr.Close()
-	tr := tar.NewReader(zr)
-	entries := map[string][]byte{}
-	for {
-		h, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return model.Manifest{}, nil, nil, "", err
-		}
-		if h.Typeflag != tar.TypeReg {
-			continue
-		}
-		b, err := io.ReadAll(tr)
-		if err != nil {
-			return model.Manifest{}, nil, nil, "", err
-		}
-		if _, exists := entries[h.Name]; exists {
-			return model.Manifest{}, nil, nil, "", fmt.Errorf("duplicate tar entry %s", h.Name)
-		}
-		entries[h.Name] = b
-	}
-	var manifest model.Manifest
-	if err := json.Unmarshal(entries["manifest.json"], &manifest); err != nil {
-		return model.Manifest{}, nil, nil, "", err
-	}
-	if manifest.Schema != model.BundleSchema {
-		return model.Manifest{}, nil, nil, "", fmt.Errorf("unsupported schema %q", manifest.Schema)
-	}
-	return manifest, entries, bundleBytes, bundleSHA, nil
 }

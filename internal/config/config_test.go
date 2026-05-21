@@ -8,6 +8,17 @@ import (
 	"github.com/adewale/aha/internal/config"
 )
 
+func TestDefaultSourcesComeFromRegisteredAdapters(t *testing.T) {
+	cfg := config.Default()
+	seen := map[string]string{}
+	for _, s := range cfg.Sources {
+		seen[s.Type] = s.Root
+	}
+	if seen["pi"] != "~/.pi/agent/sessions" || seen["claude-code"] != "~/.claude/projects" || seen["codex"] != "~/.codex/sessions" {
+		t.Fatalf("unexpected default sources: %+v", cfg.Sources)
+	}
+}
+
 func TestLoadJSONC(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonc")
 	content := `// comment

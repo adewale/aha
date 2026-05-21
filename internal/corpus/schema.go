@@ -5,6 +5,8 @@ import "database/sql"
 func Init(db *sql.DB) error {
 	stmts := []string{
 		`pragma foreign_keys=on`,
+		`pragma busy_timeout=5000`,
+		`pragma journal_mode=wal`,
 		`create table if not exists schema_migrations(version integer primary key, applied_at text default current_timestamp)`,
 		`insert or ignore into schema_migrations(version) values(1)`,
 		`create table if not exists bundles(bundle_id text primary key,bundle_sha256 text unique,machine_id text,captured_at text,ingested_at text,manifest_json text)`,
@@ -23,6 +25,7 @@ func Init(db *sql.DB) error {
 		`create virtual table if not exists fts_messages using fts5(session_key unindexed,entry_id unindexed,text)`,
 		`create virtual table if not exists fts_artifacts using fts5(artifact_id unindexed,text)`,
 		`create index if not exists idx_sessions_source_machine on sessions(source_name,machine_id)`,
+		`create index if not exists idx_sessions_source_session on sessions(source_name,source_session_id,machine_id)`,
 		`create index if not exists idx_entries_session_line on entries(session_key,line_no)`,
 		`create index if not exists idx_entries_time_role on entries(timestamp,role)`,
 	}
@@ -34,17 +37,51 @@ func Init(db *sql.DB) error {
 	return migrate(db)
 }
 
+type migration struct {
+	version int
+	apply   func(*sql.DB) error
+}
+
+var migrations = []migration{
+	{version: 2, apply: func(db *sql.DB) error {
+		hasTextBody, err := columnExists(db, "artifacts", "text_body")
+		if err != nil {
+			return err
+		}
+		if !hasTextBody {
+			if _, err := db.Exec(`alter table artifacts add column text_body text`); err != nil {
+				return err
+			}
+		}
+		return nil
+	}},
+}
+
 func migrate(db *sql.DB) error {
-	hasTextBody, err := columnExists(db, "artifacts", "text_body")
-	if err != nil {
-		return err
-	}
-	if !hasTextBody {
-		if _, err := db.Exec(`alter table artifacts add column text_body text`); err != nil {
+	for _, m := range migrations {
+		applied, err := migrationApplied(db, m.version)
+		if err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		if err := m.apply(db); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`insert or ignore into schema_migrations(version) values(?)`, m.version); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func migrationApplied(db *sql.DB, version int) (bool, error) {
+	var n int
+	if err := db.QueryRow(`select count(*) from schema_migrations where version=?`, version).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func columnExists(db *sql.DB, table, column string) (bool, error) {

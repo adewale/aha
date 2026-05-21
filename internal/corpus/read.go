@@ -3,7 +3,8 @@ package corpus
 import (
 	"database/sql"
 	"fmt"
-	"strings"
+
+	"github.com/adewale/aha/internal/model"
 )
 
 type ReadEntry struct {
@@ -15,9 +16,25 @@ type ReadEntry struct {
 	RawJSON   string `json:"raw_json"`
 }
 
+func ReadRef(db *sql.DB, ref model.HitRef, before, after int) ([]ReadEntry, error) {
+	if ref.Kind == model.HitKindArtifact {
+		sha := firstNonEmpty(ref.ArtifactSHA, ref.EntryID)
+		sessionKey := ref.SessionKey
+		if _, ok := model.ParseArtifactSessionKey(sessionKey); ok {
+			sessionKey = ""
+		}
+		artifact, err := readArtifactHit(db, sessionKey, sha)
+		if err != nil {
+			return nil, err
+		}
+		return []ReadEntry{artifact}, nil
+	}
+	return ReadContext(db, ref.SessionKey, ref.EntryID, before, after)
+}
+
 func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEntry, error) {
-	if strings.HasPrefix(session, "artifact:") {
-		sha := strings.TrimPrefix(session, "artifact:")
+	if parsedSHA, ok := model.ParseArtifactSessionKey(session); ok {
+		sha := parsedSHA
 		if entry != "" {
 			sha = entry
 		}

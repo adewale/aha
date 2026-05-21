@@ -22,8 +22,9 @@ Current counts after cycle 10:
 - Implementation attempts built: 7.
 - Full implementation rollbacks committed: 6.
 - Lesson/spec-update cycles recorded: 10.
-- Final reviewed implementation: `083cf5d` plus ledger/doc fix `aded92f`.
-- Final review result: clean enough for v1; no rollback-worthy P0/P1 regrets.
+- Final reviewed implementation: current `main` after the latest audit/fix pass.
+- Final review result: requires rerunning the audit checklist after any later feature change; do not rely on old clean-review commit IDs.
+- Post-audit hardening result: subcommand help, image exclusion, symlink/path hygiene, bounded ingest, conflict/error handling, and trust-doc verification were fixed with regression coverage before revalidating.
 
 ## Final v1 status after ten cycles
 
@@ -59,6 +60,15 @@ Current counts after cycle 10:
 - Content-addressed blobs must be written with temp-file plus atomic rename and never overwritten in place.
 - Rejected or corrupt bundles must not be promoted into the corpus store.
 - Schema changes require idempotent migrations and tests that simulate old corpus shapes.
+
+## Post-audit hardening lessons
+
+- `--help` is behavior, not incidental flag-parser output; every subcommand help path should exit successfully.
+- Privacy flags must affect all image preservation paths, including file artifacts and legacy bundles, not only embedded prompt images or the `images` table.
+- Skipped data still needs integrity validation. If an image artifact is ignored because `include_images=false`, ingest must still hash/read the tar entry before accepting the bundle.
+- Symlink safety needs defense in depth: discovery skips symlinks, snapshot copy rejects non-regular files, and output/repo paths are checked both lexically and through existing symlink resolution.
+- Archive validation must bound compressed size, manifest size, file count, per-entry size, and total declared uncompressed bytes before spooling untrusted bundle content.
+- Trust-doc commands are contracts; test names and docs must stay synchronized.
 
 ## Testing lessons
 

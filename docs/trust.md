@@ -33,7 +33,7 @@ How this is enforced:
 Verify locally:
 
 ```bash
-go test ./internal/corpus -run Immutable
+go test ./internal/corpus -run IngestPiIdentity
 ```
 
 ## Guarantee 3: local-only v1, no network behavior
@@ -48,7 +48,7 @@ How this is enforced:
 Verify locally:
 
 ```bash
-go test ./internal/cli -run NoNetwork
+go test ./internal/cli -run NoNetworkImports
 ```
 
 ## Guarantee 4: no v1 redaction
@@ -81,8 +81,8 @@ go vet ./...
 go test -race ./...
 
 # Static trust checks
-go test ./internal/cli -run 'NoNetwork|Readme'
-go test ./internal/adapters -run ReadOnly
+go test ./internal/cli -run 'NoNetworkImports|Readme'
+go test ./internal/adapters -run SourceAdaptersStayReadOnly
 
 # End-to-end private smoke test; use temp dirs and delete them after inspection
 go build -o /tmp/aha ./cmd/aha

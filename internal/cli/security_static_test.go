@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestApplicationPackagesDoNotImportNetworkAPIs(t *testing.T) {
+func TestNoNetworkImportsInApplicationPackages(t *testing.T) {
 	roots := []string{"../../cmd", "../../internal"}
 	forbidden := []string{
 		`"net"`,

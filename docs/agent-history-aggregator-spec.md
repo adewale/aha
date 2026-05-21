@@ -992,6 +992,16 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Pi parse identity | Pi `ParseSession` derives the header `id` from the first parsed raw session entry; file-path header reads are allowed only during live discovery/snapshot. |
 | Provenance regression | Tests must prove ingest identity comes from bundled Pi content even if `raw_path` points to a different mutable file. |
 
+### Post-audit hardening decisions
+
+| Area | Decision |
+|---|---|
+| Help behavior | `aha <command> --help` exits successfully for all subcommands. |
+| Image exclusion | `include_images=false` suppresses normalized embedded-image assets and image artifact rows/blobs; raw session files and promoted bundle bytes remain preserved in v1 and may still contain embedded image bytes. Skipped image tar entries are still hash/size validated before bundle acceptance. |
+| Symlink safety | Source discovery skips symlinks; snapshot copy rejects symlinks/non-regular files; output and repo paths must not resolve inside configured source roots. |
+| Ingest budgets | Bundle ingest uses bounded compressed staging plus manifest, file-count, per-entry, and total-uncompressed limits before spooling/promoting content. |
+| Trust verification | Docs must name executable tests that actually verify read-only/no-network/privacy claims. |
+
 ### Tenth-cycle process-accounting lessons
 
 - Cycle accounting is itself a release invariant once the spec says it is required.

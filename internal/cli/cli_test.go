@@ -12,6 +12,112 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
+func TestSubcommandHelpIsSuccessful(t *testing.T) {
+	for _, cmd := range cli.CommandNames() {
+		var out bytes.Buffer
+		if err := cli.Run([]string{cmd, "--help"}, &out, &out); err != nil {
+			t.Fatalf("%s --help returned error: %v output=%s", cmd, err, out.String())
+		}
+		if !strings.Contains(out.String(), "Usage of") {
+			t.Fatalf("%s --help missing usage: %s", cmd, out.String())
+		}
+	}
+}
+
+func TestSnapshotJSONIncludesGeneratedMetadata(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"snapshot", "--json", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), `"bundle_id": ""`) || strings.Contains(out.String(), `"captured_at": ""`) {
+		t.Fatalf("snapshot JSON omitted generated metadata: %s", out.String())
+	}
+	if !strings.Contains(out.String(), `"bundle_id"`) || !strings.Contains(out.String(), `"captured_at"`) {
+		t.Fatalf("snapshot JSON missing metadata fields: %s", out.String())
+	}
+}
+
+func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	var out, stderr bytes.Buffer
+	err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir}, &out, &stderr)
+	if err == nil {
+		t.Fatalf("snapshot succeeded without privacy acknowledgement")
+	}
+	if !strings.Contains(stderr.String(), "does not redact secrets") {
+		t.Fatalf("missing privacy warning: %s", stderr.String())
+	}
+	matches, _ := filepath.Glob(filepath.Join(outDir, "*.tar.zst"))
+	if len(matches) != 0 {
+		t.Fatalf("snapshot wrote bundles despite rejected privacy acknowledgement: %v", matches)
+	}
+}
+
+func TestCLIRejectsWritesInsideSourceRoots(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	insideSource := filepath.Join(fx.PiRoot, "aha-output")
+	var out, stderr bytes.Buffer
+	err := cli.Run([]string{"snapshot", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", insideSource}, &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
+		t.Fatalf("snapshot did not reject output inside source root: err=%v stderr=%s", err, stderr.String())
+	}
+	outDir := filepath.Join(root, "bundles")
+	err = cli.Run([]string{"refresh", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir, "--repo", insideSource}, &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
+		t.Fatalf("refresh did not reject repo inside source root before snapshot: err=%v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(outDir, "*.tar.zst"))
+	if len(matches) != 0 {
+		t.Fatalf("refresh wrote snapshot before repo validation: %v", matches)
+	}
+	cfgPath := filepath.Join(root, "config.jsonc")
+	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"bundle_out_dir":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`","corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = cli.Run([]string{"ingest", "--config", cfgPath, "--repo", insideSource, filepath.Join(root, "bundle.tar.zst")}, &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
+		t.Fatalf("ingest did not reject repo inside source root: err=%v", err)
+	}
+	linkToSource := filepath.Join(root, "repo-link")
+	if err := os.Symlink(fx.PiRoot, linkToSource); err == nil {
+		err = cli.Run([]string{"ingest", "--config", cfgPath, "--repo", filepath.Join(linkToSource, "corpus"), filepath.Join(root, "bundle.tar.zst")}, &out, &stderr)
+		if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
+			t.Fatalf("ingest did not reject symlinked repo into source root: err=%v", err)
+		}
+	}
+}
+
+func TestCLIReadCommandsDoNotCreateMissingCorpus(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	missingRepo := filepath.Join(root, "missing-corpus")
+	cfgPath := filepath.Join(root, "config.jsonc")
+	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"bundle_out_dir":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`","corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]string{
+		{"search", "needle", "--config", cfgPath, "--repo", missingRepo},
+		{"read", "--session", "x", "--config", cfgPath, "--repo", missingRepo},
+		{"status", "--config", cfgPath, "--repo", missingRepo},
+		{"conflicts", "--config", cfgPath, "--repo", missingRepo},
+	}
+	for _, args := range commands {
+		var out bytes.Buffer
+		if err := cli.Run(args, &out, &out); err == nil {
+			t.Fatalf("%v unexpectedly created/opened missing corpus", args)
+		}
+		if _, err := os.Stat(missingRepo); !os.IsNotExist(err) {
+			t.Fatalf("%v created repo dir: %v", args, err)
+		}
+	}
+}
+
 func TestCLIRefreshCreatesAggregationCorpus(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)
@@ -158,8 +264,21 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	if err := cli.Run([]string{"search", "needle", "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "[") || !strings.Contains(out.String(), "claude-code") || !strings.Contains(out.String(), "artifact") {
+	if !strings.Contains(out.String(), "[") || !strings.Contains(out.String(), "claude-code") || !strings.Contains(out.String(), "artifact") || !strings.Contains(out.String(), "\"ref\"") {
 		t.Fatalf("bad search output: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"search", "needle", "--corpus", corpusDir, "--refs"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	refLine := strings.Split(strings.TrimSpace(out.String()), "\n")[0]
+	ref := strings.Split(refLine, "\t")[0]
+	out.Reset()
+	if err := cli.Run([]string{"read", ref, "--corpus", corpusDir, "--before", "0", "--after", "0", "--md"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "needle") {
+		t.Fatalf("read ref failed: ref=%s output=%s", ref, out.String())
 	}
 	out.Reset()
 	if err := cli.Run([]string{"search", "--corpus", corpusDir, "--", "--json"}, &out, io.Discard); err != nil {

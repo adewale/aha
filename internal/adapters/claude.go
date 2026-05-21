@@ -38,6 +38,9 @@ func (ClaudeCode) Discover(ctx context.Context, config model.SourceConfig) ([]mo
 		matches, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 		sort.Strings(matches)
 		for _, p := range matches {
+			if info, err := os.Lstat(p); err != nil || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
 			sid := SessionIDFromPath(p)
 			out = append(out, model.SessionFile{Source: "claude-code", Root: config.Root, Path: p, RelativePath: filepath.ToSlash(filepath.Join(it.Name(), filepath.Base(p))), SessionID: sid, CWD: DecodeClaudeProjectPath(it.Name()), IsSubagent: strings.HasPrefix(filepath.Base(p), "agent-")})
 		}

@@ -41,6 +41,18 @@ func TestSpecAndLessonsCycleLedgerStayInSync(t *testing.T) {
 	}
 }
 
+func TestRegisteredCommandsHaveAgentMetadata(t *testing.T) {
+	for _, name := range cli.CommandNames() {
+		cmd := cli.Registry()[name]
+		if cmd.Usage == "" || cmd.Docs == "" || cmd.JSONSchema == "" || len(cmd.Examples) == 0 {
+			t.Fatalf("command %s missing metadata: %+v", name, cmd)
+		}
+		if len(cmd.Flags) == 0 && name != "doctor" {
+			t.Fatalf("command %s missing flag metadata", name)
+		}
+	}
+}
+
 func TestReadmeDocumentsRegisteredCommandsAndPrivacy(t *testing.T) {
 	b, err := os.ReadFile("../../README.md")
 	if err != nil {
