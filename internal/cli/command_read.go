@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/model"
 )
 
 func cmdRead(args []string, stdout, stderr io.Writer) error {
@@ -30,8 +31,11 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 		return errors.New("--session required")
 	}
 	if strings.Contains(*session, "#") && *entry == "" {
-		parts := strings.SplitN(*session, "#", 2)
-		*session, *entry = parts[0], parts[1]
+		ref, err := model.ParseHitRef(*session)
+		if err != nil {
+			return err
+		}
+		*session, *entry = ref.SessionKey, ref.EntryID
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {

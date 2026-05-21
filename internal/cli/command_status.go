@@ -25,8 +25,22 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 	}
 	defer store.Close()
 	stats := corpus.Status(store.DB, store.Root)
+	stats["next"] = statusNext(stats)
 	if *jsonOut {
 		return writeJSON(stdout, stats)
 	}
 	return renderMap(stdout, stats)
+}
+
+func statusNext(stats map[string]any) []string {
+	sessions, _ := stats["sessions"].(int)
+	if sessions == 0 {
+		return []string{"aha refresh", "aha ingest <bundle.tar.zst>", "aha doctor"}
+	}
+	conflicts, _ := stats["conflicts"].(int)
+	next := []string{"aha search <query>", "aha read <ref>"}
+	if conflicts > 0 {
+		next = append(next, "aha conflicts")
+	}
+	return next
 }

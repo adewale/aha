@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/search"
 )
 
@@ -55,8 +56,8 @@ func renderSearchResults(w io.Writer, results []search.Result, mode renderMode) 
 }
 
 func resultRef(r search.Result) string {
-	if r.Ref.Kind != "" && r.Ref.ArtifactSHA != "" {
-		return fmt.Sprintf("%s#%s", r.Ref.SessionKey, r.Ref.ArtifactSHA)
+	if r.Ref.Kind != "" {
+		return model.FormatHitRef(r.Ref)
 	}
 	if r.EntryID == "" {
 		return r.SessionKey

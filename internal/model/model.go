@@ -1,5 +1,10 @@
 package model
 
+import (
+	"fmt"
+	"strings"
+)
+
 const Version = "0.1.0"
 const BundleSchema = "agent-session-snapshot-bundle/v1"
 
@@ -25,6 +30,56 @@ func ParseArtifactSessionKey(session string) (string, bool) {
 		return "", false
 	}
 	return session[len(prefix):], true
+}
+
+func FormatHitRef(ref HitRef) string {
+	session := ref.SessionKey
+	entry := ref.EntryID
+	if ref.Kind == HitKindArtifact {
+		sha := firstNonEmpty(ref.ArtifactSHA, ref.EntryID)
+		if session == "" {
+			session = ArtifactSessionKey(sha)
+		}
+		entry = sha
+	}
+	if entry == "" {
+		return session
+	}
+	return session + "#" + entry
+}
+
+func ParseHitRef(s string) (HitRef, error) {
+	if s == "" {
+		return HitRef{}, fmt.Errorf("empty ref")
+	}
+	parts := strings.SplitN(s, "#", 2)
+	session := parts[0]
+	if session == "" {
+		return HitRef{}, fmt.Errorf("empty session in ref")
+	}
+	entry := ""
+	if len(parts) == 2 {
+		entry = parts[1]
+		if entry == "" {
+			return HitRef{}, fmt.Errorf("empty entry in ref")
+		}
+	}
+	if sha, ok := ParseArtifactSessionKey(session); ok {
+		if entry != "" {
+			sha = entry
+		}
+		return HitRef{Kind: HitKindArtifact, SessionKey: session, EntryID: sha, ArtifactSHA: sha}, nil
+	}
+	return HitRef{Kind: HitKindMessage, SessionKey: session, EntryID: entry}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type Config struct {

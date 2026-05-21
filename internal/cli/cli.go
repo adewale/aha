@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,27 @@ type Command struct {
 	Run        func([]string, io.Writer, io.Writer) error
 }
 
+type CommandError struct {
+	Code    string
+	Command string
+	Err     error
+	Next    []string
+}
+
+func (e *CommandError) Error() string { return e.Err.Error() }
+func (e *CommandError) Unwrap() error { return e.Err }
+
+type errorEnvelope struct {
+	Error errorPayload `json:"error"`
+}
+
+type errorPayload struct {
+	Code    string   `json:"code"`
+	Message string   `json:"message"`
+	Command string   `json:"command,omitempty"`
+	Next    []string `json:"next,omitempty"`
+}
+
 func Registry() map[string]Command {
 	return map[string]Command{
 		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--machine", "--max-sessions", "--out", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources and ingest the new bundle", Run: cmdRefresh},
@@ -41,7 +63,7 @@ func Registry() map[string]Command {
 		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
 		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--files", "--json", "--limit", "--machine", "--md", "--path", "--refs", "--repo", "--role", "--source"}, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
 		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--entry", "--json", "--md", "--repo", "--session"}, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
-		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha status --json"}, JSONSchema: "object{sessions,entries,messages,artifacts,images,bundles,conflicts,bytes}", Docs: "summarize corpus health", Run: cmdStatus},
+		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha status --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,next}", Docs: "summarize corpus health", Run: cmdStatus},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--json]", Flags: []string{"--json"}, Examples: []string{"aha doctor"}, JSONSchema: "object{version,config,adapters,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
@@ -59,7 +81,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 	cmd, ok := Registry()[args[0]]
 	if !ok {
-		return fmt.Errorf("unknown command %q", args[0])
+		return &CommandError{Code: "unknown_command", Command: args[0], Err: fmt.Errorf("unknown command %q", args[0]), Next: []string{"aha help", "aha doctor"}}
 	}
 	if err := cmd.Run(args[1:], stdout, stderr); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -70,12 +92,82 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func RunMain(args []string, stdout, stderr io.Writer) int {
+	if wantsJSON(args) {
+		var commandStderr bytes.Buffer
+		if err := Run(args, stdout, &commandStderr); err != nil {
+			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, args)})
+			return 1
+		}
+		_, _ = stderr.Write(commandStderr.Bytes())
+		return 0
+	}
+	if err := Run(args, stdout, stderr); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	return 0
+}
+
+func wantsJSON(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "--json" || strings.HasPrefix(arg, "--json=") {
+			return true
+		}
+	}
+	return false
+}
+
+func machineError(err error, args []string) errorPayload {
+	payload := errorPayload{Code: "command_failed", Message: err.Error(), Next: []string{"aha doctor", "aha help"}}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		payload.Command = args[0]
+	}
+	var ce *CommandError
+	if errors.As(err, &ce) {
+		payload.Code = ce.Code
+		payload.Command = ce.Command
+		if len(ce.Next) > 0 {
+			payload.Next = ce.Next
+		}
+	}
+	return payload
+}
+
 func Usage(w io.Writer) {
 	fmt.Fprintf(w, "aha %s\n\nUsage:\n", model.Version)
 	names := CommandNames()
 	for _, name := range names {
 		fmt.Fprintf(w, "  %s\n", Registry()[name].Usage)
 	}
+}
+
+func GenerateCommandsMarkdown() string {
+	var b strings.Builder
+	b.WriteString("# aha commands\n\n")
+	b.WriteString("This file is generated from CLI command metadata. Update command metadata, then regenerate this file.\n\n")
+	b.WriteString("## JSON errors\n\n")
+	b.WriteString("When a command is invoked with `--json`, failures are written to stderr as:\n\n")
+	b.WriteString("```json\n{\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor\"]\n  }\n}\n```\n\n")
+	for _, name := range CommandNames() {
+		cmd := Registry()[name]
+		fmt.Fprintf(&b, "## aha %s\n\n", name)
+		fmt.Fprintf(&b, "%s\n\n", cmd.Docs)
+		fmt.Fprintf(&b, "```txt\n%s\n```\n\n", cmd.Usage)
+		b.WriteString("**Flags:**\n\n")
+		for _, flag := range cmd.Flags {
+			fmt.Fprintf(&b, "- `%s`\n", flag)
+		}
+		b.WriteString("\n**Examples:**\n\n")
+		for _, example := range cmd.Examples {
+			fmt.Fprintf(&b, "- `%s`\n", example)
+		}
+		fmt.Fprintf(&b, "\n**JSON contract:** `%s`\n\n", cmd.JSONSchema)
+	}
+	return b.String()
 }
 
 func CommandNames() []string {
