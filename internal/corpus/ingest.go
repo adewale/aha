@@ -112,6 +112,9 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 		return IngestReport{}, err
 	}
 	defer os.Remove(plan.stagingPath)
+	if err := validateIngestAdapters(plan.manifest, ing.Registry); err != nil {
+		return IngestReport{}, err
+	}
 	tx, err := store.DB.Begin()
 	if err != nil {
 		return IngestReport{}, err
@@ -180,6 +183,20 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 	}
 	committed = true
 	return rep, nil
+}
+
+func validateIngestAdapters(manifest model.Manifest, registry map[string]adapters.SourceAdapter) error {
+	seen := map[string]bool{}
+	for _, mf := range manifest.Files {
+		if seen[mf.Source] {
+			continue
+		}
+		seen[mf.Source] = true
+		if registry[mf.Source] == nil {
+			return fmt.Errorf("unknown source adapter %q", mf.Source)
+		}
+	}
+	return nil
 }
 
 func isSQLiteBusy(err error) bool {
@@ -299,7 +316,7 @@ func (ing Ingestor) ingestManifestFile(tx *sql.Tx, manifest model.Manifest, mf m
 func (ing Ingestor) ingestSessionFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, tmpPath string) (IngestReport, error) {
 	ad := ing.Registry[mf.Source]
 	if ad == nil {
-		return IngestReport{}, nil
+		return IngestReport{}, fmt.Errorf("unknown source adapter %q", mf.Source)
 	}
 	fh, err := os.Open(tmpPath)
 	if err != nil {

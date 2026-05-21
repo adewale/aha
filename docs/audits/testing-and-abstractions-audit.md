@@ -66,6 +66,18 @@ A fresh reviewer pass after the fixes found no P0/P1 blockers after these follow
 - Concurrent duplicate ingest is covered with two independently opened stores and `-race -count=5` validation.
 - Ingest failure tests assert full rollback across bundle/session/message/artifact/FTS tables plus staging cleanup.
 
+## Third audit results
+
+A later TDD pass addressed additional reviewer findings:
+
+- Unsupported source adapters during ingest now fail explicitly instead of silently reporting success with zero parsed sessions.
+- Archive writing is deterministic independent of caller file ordering; `Write` sorts a copy of manifest and captured files.
+- Archive read/write/stream/walk now validate semantic manifest fields: schema, bundle ID, machine ID, capture timestamp, file source, supported kind, and source/kind path consistency.
+- `search` and `read` now reject mutually exclusive output mode combinations instead of silently picking one.
+- Artifact `ref_text` now formats as `artifact:<sha>` so parsing preserves artifact kind.
+
+A fresh reviewer pass found no P0/P1 regressions after these changes.
+
 ## Remaining deferrable findings
 
 - `internal/corpus/ingest.go` is improved but still owns parsing, blob writes, DB writes, conflict detection, FTS indexing, and report construction. A deeper split into planner / blob publisher / DB writer can wait until the next substantial ingest feature.

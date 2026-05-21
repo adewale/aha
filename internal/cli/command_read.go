@@ -30,6 +30,9 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	if *session == "" {
 		return errors.New("--session required")
 	}
+	if err := requireAtMostOneOutputMode(*jsonOut, *mdOut); err != nil {
+		return err
+	}
 	var ref model.HitRef
 	useRef := false
 	if strings.Contains(*session, "#") && *entry == "" {

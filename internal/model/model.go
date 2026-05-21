@@ -37,10 +37,8 @@ func FormatHitRef(ref HitRef) string {
 	entry := ref.EntryID
 	if ref.Kind == HitKindArtifact {
 		sha := firstNonEmpty(ref.ArtifactSHA, ref.EntryID)
-		if session == "" {
-			session = ArtifactSessionKey(sha)
-		}
-		entry = sha
+		session = ArtifactSessionKey(sha)
+		entry = ""
 	}
 	if entry == "" {
 		return session
@@ -62,6 +60,9 @@ func ParseHitRef(s string) (HitRef, error) {
 		entry = parts[1]
 		if entry == "" {
 			return HitRef{}, fmt.Errorf("empty entry in ref")
+		}
+		if strings.Contains(entry, "#") {
+			return HitRef{}, fmt.Errorf("invalid entry in ref")
 		}
 	}
 	if sha, ok := ParseArtifactSessionKey(session); ok {

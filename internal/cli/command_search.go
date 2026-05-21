@@ -31,6 +31,9 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 	if fs.NArg() == 0 {
 		return errors.New("search requires query")
 	}
+	if err := requireAtMostOneOutputMode(*jsonOut, *refsOut, *filesOut, *mdOut); err != nil {
+		return err
+	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
 		return err

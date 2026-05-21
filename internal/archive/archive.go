@@ -359,6 +359,10 @@ func StableRead(path string) ([]byte, string, error) {
 }
 
 func Write(path string, b Bundle) (string, error) {
+	b = normalizeBundleForWrite(b)
+	if err := ValidateManifestSemantics(b.Manifest); err != nil {
+		return "", err
+	}
 	if err := ValidateManifestBudgets(b.Manifest); err != nil {
 		return "", err
 	}
@@ -448,6 +452,52 @@ func Write(path string, b Bundle) (string, error) {
 		return "", err
 	}
 	return sha, nil
+}
+
+func normalizeBundleForWrite(b Bundle) Bundle {
+	b.Manifest.Files = append([]model.ManifestFile(nil), b.Manifest.Files...)
+	sort.Slice(b.Manifest.Files, func(i, j int) bool { return b.Manifest.Files[i].RelativePath < b.Manifest.Files[j].RelativePath })
+	b.Files = append([]model.CapturedFile(nil), b.Files...)
+	sort.Slice(b.Files, func(i, j int) bool { return b.Files[i].Manifest.RelativePath < b.Files[j].Manifest.RelativePath })
+	return b
+}
+
+func ValidateManifestSemantics(m model.Manifest) error {
+	if m.Schema != model.BundleSchema {
+		return fmt.Errorf("invalid manifest: schema must be %q", model.BundleSchema)
+	}
+	if strings.TrimSpace(m.BundleID) == "" {
+		return fmt.Errorf("invalid manifest: bundle_id required")
+	}
+	if strings.TrimSpace(m.MachineID) == "" {
+		return fmt.Errorf("invalid manifest: machine_id required")
+	}
+	if strings.TrimSpace(m.CapturedAt) == "" {
+		return fmt.Errorf("invalid manifest: captured_at required")
+	}
+	for _, mf := range m.Files {
+		if err := validateArchiveDataPath(mf.RelativePath); err != nil {
+			return err
+		}
+		if strings.TrimSpace(mf.Source) == "" {
+			return fmt.Errorf("invalid manifest: file source required for %s", mf.RelativePath)
+		}
+		switch mf.Kind {
+		case "session":
+			want := "sources/" + mf.Source + "/sessions/"
+			if !strings.HasPrefix(mf.RelativePath, want) {
+				return fmt.Errorf("invalid manifest: session path %s must be under %s", mf.RelativePath, want)
+			}
+		case "artifact":
+			want := "sources/" + mf.Source + "/artifacts/"
+			if !strings.HasPrefix(mf.RelativePath, want) {
+				return fmt.Errorf("invalid manifest: artifact path %s must be under %s", mf.RelativePath, want)
+			}
+		default:
+			return fmt.Errorf("invalid manifest: unsupported file kind %q", mf.Kind)
+		}
+	}
+	return nil
 }
 
 func validateArchiveDataPath(name string) error {
@@ -565,6 +615,9 @@ func ReadManifest(path string) (model.Manifest, error) {
 	if err != nil {
 		return model.Manifest{}, err
 	}
+	if err := ValidateManifestSemantics(manifest); err != nil {
+		return model.Manifest{}, err
+	}
 	return manifest, ValidateManifestBudgets(manifest)
 }
 
@@ -577,6 +630,9 @@ func StreamReaders(path string, fn func(name string, size int64, r io.Reader) er
 func StreamManifestFiles(path string, fn func(mf model.ManifestFile, r io.Reader) error) error {
 	manifest, err := readManifestOnly(path)
 	if err != nil {
+		return err
+	}
+	if err := ValidateManifestSemantics(manifest); err != nil {
 		return err
 	}
 	if err := ValidateManifestBudgets(manifest); err != nil {
@@ -628,6 +684,9 @@ func ReadBundle(path string) (model.Manifest, map[string][]byte, []byte, string,
 func WalkBundle(path string, fn func(name string, size int64, r io.Reader) error) error {
 	manifest, err := readManifestOnly(path)
 	if err != nil {
+		return err
+	}
+	if err := ValidateManifestSemantics(manifest); err != nil {
 		return err
 	}
 	if err := ValidateManifestBudgets(manifest); err != nil {

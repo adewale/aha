@@ -25,6 +25,21 @@ func TestSubcommandHelpIsSuccessful(t *testing.T) {
 	}
 }
 
+func TestOutputModesAreMutuallyExclusive(t *testing.T) {
+	var out bytes.Buffer
+	for _, args := range [][]string{
+		{"search", "needle", "--json", "--refs"},
+		{"search", "needle", "--files", "--md"},
+		{"read", "pi:m:s#e", "--json", "--md"},
+	} {
+		err := cli.Run(args, &out, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive output modes") {
+			t.Fatalf("Run(%v) err=%v, want mutually exclusive output modes", args, err)
+		}
+		out.Reset()
+	}
+}
+
 func TestSnapshotJSONIncludesGeneratedMetadata(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)
