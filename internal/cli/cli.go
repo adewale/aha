@@ -60,8 +60,8 @@ func Registry() map[string]Command {
 	return map[string]Command{
 		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--machine", "--max-sessions", "--out", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources and ingest the new bundle", Run: cmdRefresh},
 		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--machine", "--max-sessions", "--out", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --out ./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle", Run: cmdSnapshot},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
-		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--files", "--json", "--limit", "--machine", "--md", "--path", "--refs", "--repo", "--role", "--source"}, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
+		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
+		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--files", "--json", "--limit", "--machine", "--md", "--path", "--refs", "--repo", "--role", "--source"}, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
 		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--entry", "--json", "--md", "--repo", "--session"}, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
 		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha status --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,next}", Docs: "summarize corpus health", Run: cmdStatus},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
@@ -122,7 +122,7 @@ func wantsJSON(args []string) bool {
 }
 
 func machineError(err error, args []string) errorPayload {
-	payload := errorPayload{Code: "command_failed", Message: err.Error(), Next: []string{"aha doctor", "aha help"}}
+	payload := errorPayload{Code: classifyError(err), Message: err.Error(), Next: []string{"aha doctor", "aha help"}}
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		payload.Command = args[0]
 	}
@@ -135,6 +135,17 @@ func machineError(err error, args []string) errorPayload {
 		}
 	}
 	return payload
+}
+
+func classifyError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "flag provided but not defined") || strings.Contains(msg, "invalid value") || strings.Contains(msg, "flag needs an argument") {
+		return "flag_parse_error"
+	}
+	if strings.Contains(msg, "required") || strings.Contains(msg, "not found") || strings.Contains(msg, "ambiguous") {
+		return "validation_error"
+	}
+	return "command_failed"
 }
 
 func Usage(w io.Writer) {

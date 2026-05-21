@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -85,9 +86,6 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 	}
 	sessions = filterSessions(sessions, opts)
 	for _, sf := range sessions {
-		if !cfg.IncludeSubagents {
-			continue
-		}
 		ad := registry[sf.Source]
 		if ad == nil {
 			continue
@@ -368,11 +366,31 @@ func Write(path string, b Bundle) (string, error) {
 		defer os.RemoveAll(b.TempDir)
 	}
 	seenNames := map[string]bool{"manifest.json": true, "checksums/sha256sums.txt": true}
+	captured := map[string]model.ManifestFile{}
 	for _, f := range b.Files {
+		if err := validateArchiveDataPath(f.Manifest.RelativePath); err != nil {
+			return "", err
+		}
 		if seenNames[f.Manifest.RelativePath] {
 			return "", fmt.Errorf("duplicate archive path %s", f.Manifest.RelativePath)
 		}
 		seenNames[f.Manifest.RelativePath] = true
+		captured[f.Manifest.RelativePath] = f.Manifest
+	}
+	for _, mf := range b.Manifest.Files {
+		if err := validateArchiveDataPath(mf.RelativePath); err != nil {
+			return "", err
+		}
+		got, ok := captured[mf.RelativePath]
+		if !ok {
+			return "", fmt.Errorf("manifest file has no captured data: %s", mf.RelativePath)
+		}
+		if got.SHA256 != mf.SHA256 || got.Bytes != mf.Bytes || got.Kind != mf.Kind || got.Source != mf.Source {
+			return "", fmt.Errorf("captured metadata mismatch for %s", mf.RelativePath)
+		}
+	}
+	if len(captured) != len(b.Manifest.Files) {
+		return "", fmt.Errorf("captured file missing from manifest")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
@@ -430,6 +448,16 @@ func Write(path string, b Bundle) (string, error) {
 		return "", err
 	}
 	return sha, nil
+}
+
+func validateArchiveDataPath(name string) error {
+	if name == "" || name == "." || name == ".." || path.IsAbs(name) || path.Clean(name) != name || strings.Contains(name, "\\") || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || strings.HasPrefix(name, "./") || strings.Contains(name, "/./") {
+		return fmt.Errorf("unsafe archive path: %s", name)
+	}
+	if name == "manifest.json" || name == "checksums/sha256sums.txt" || strings.HasPrefix(name, "checksums/") {
+		return fmt.Errorf("unsafe archive path: %s", name)
+	}
+	return nil
 }
 
 func CanonicalManifest(m model.Manifest) ([]byte, error) {
@@ -675,6 +703,9 @@ func readManifestOnly(path string) (model.Manifest, error) {
 func walkTarZstd(path string, manifest model.Manifest, fn func(mf model.ManifestFile, r io.Reader) error) error {
 	manifestFiles := map[string]model.ManifestFile{}
 	for _, mf := range manifest.Files {
+		if err := validateArchiveDataPath(mf.RelativePath); err != nil {
+			return err
+		}
 		if _, exists := manifestFiles[mf.RelativePath]; exists {
 			return fmt.Errorf("duplicate manifest file path: %s", mf.RelativePath)
 		}
@@ -685,6 +716,11 @@ func walkTarZstd(path string, manifest model.Manifest, fn func(mf model.Manifest
 	err := walkRawTarZstd(path, func(h *tar.Header, r io.Reader) error {
 		if h.Typeflag != tar.TypeReg {
 			return fmt.Errorf("unsupported tar entry type for %s", h.Name)
+		}
+		if h.Name != "manifest.json" && h.Name != "checksums/sha256sums.txt" {
+			if err := validateArchiveDataPath(h.Name); err != nil {
+				return err
+			}
 		}
 		if h.Size < 0 || h.Size > MaxArchiveEntryBytes {
 			return fmt.Errorf("tar entry too large: %s", h.Name)

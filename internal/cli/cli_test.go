@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -266,6 +267,25 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "[") || !strings.Contains(out.String(), "claude-code") || !strings.Contains(out.String(), "artifact") || !strings.Contains(out.String(), "\"ref\"") {
 		t.Fatalf("bad search output: %s", out.String())
+	}
+	var searchJSON []struct {
+		Ref struct {
+			Kind string `json:"kind"`
+		} `json:"ref"`
+		RefText string `json:"ref_text"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &searchJSON); err != nil {
+		t.Fatalf("search JSON did not decode: %v\n%s", err, out.String())
+	}
+	if len(searchJSON) == 0 || !strings.Contains(searchJSON[0].RefText, "#") || searchJSON[0].Ref.Kind == "" {
+		t.Fatalf("search JSON missing round-trippable refs: %+v", searchJSON)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"read", searchJSON[0].RefText, "--corpus", corpusDir, "--before", "0", "--after", "0", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "needle") {
+		t.Fatalf("read search JSON ref failed: %s", out.String())
 	}
 	out.Reset()
 	if err := cli.Run([]string{"search", "needle", "--corpus", corpusDir, "--refs"}, &out, io.Discard); err != nil {

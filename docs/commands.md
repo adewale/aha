@@ -61,7 +61,7 @@ aha doctor [--json]
 merge one or more bundles into a corpus
 
 ```txt
-aha ingest [--repo DIR] [bundle.tar.zst ...]
+aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]
 ```
 
 **Flags:**
@@ -185,7 +185,7 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `aha search needle --json`
 - `aha search needle --refs`
 
-**JSON contract:** `array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref}>`
+**JSON contract:** `array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>`
 
 ## aha snapshot
 

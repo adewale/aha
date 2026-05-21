@@ -56,6 +56,9 @@ func renderSearchResults(w io.Writer, results []search.Result, mode renderMode) 
 }
 
 func resultRef(r search.Result) string {
+	if r.RefText != "" {
+		return r.RefText
+	}
 	if r.Ref.Kind != "" {
 		return model.FormatHitRef(r.Ref)
 	}

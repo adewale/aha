@@ -24,6 +24,7 @@ type Result struct {
 	SessionKey string       `json:"session_key"`
 	EntryID    string       `json:"entry_id"`
 	Ref        model.HitRef `json:"ref"`
+	RefText    string       `json:"ref_text"`
 }
 
 func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
@@ -70,6 +71,7 @@ func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
 			return nil, err
 		}
 		r.Ref = model.HitRef{Kind: model.HitKindMessage, SessionKey: r.SessionKey, EntryID: r.EntryID}
+		r.RefText = model.FormatHitRef(r.Ref)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -151,6 +153,7 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 			ref.SessionKey = model.ArtifactSessionKey(ref.ArtifactSHA)
 		}
 		r.Ref = ref
+		r.RefText = model.FormatHitRef(ref)
 		r.SessionKey, r.EntryID = ref.SessionKey, ref.EntryID
 		r.Role = "artifact"
 		out = append(out, r)
@@ -163,8 +166,15 @@ func ftsQuery(q string) string {
 	if len(fields) == 0 {
 		return q
 	}
-	for i, f := range fields {
-		fields[i] = fmt.Sprintf("%q", strings.ReplaceAll(f, `"`, `""`))
+	out := fields[:0]
+	for _, f := range fields {
+		f = strings.ReplaceAll(f, `\\`, " ")
+		f = strings.ReplaceAll(f, `"`, `""`)
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("\"%s\"", f))
 	}
-	return strings.Join(fields, " ")
+	return strings.Join(out, " ")
 }

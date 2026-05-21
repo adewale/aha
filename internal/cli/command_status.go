@@ -24,7 +24,10 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	stats := corpus.Status(store.DB, store.Root)
+	stats, err := corpus.Status(store.DB, store.Root)
+	if err != nil {
+		return err
+	}
 	stats["next"] = statusNext(stats)
 	if *jsonOut {
 		return writeJSON(stdout, stats)

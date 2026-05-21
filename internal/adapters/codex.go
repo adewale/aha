@@ -44,8 +44,7 @@ func (CodexCLI) Discover(ctx context.Context, config model.SourceConfig) ([]mode
 		}
 		base := filepath.Base(p)
 		if !strings.HasPrefix(base, "rollout-") && base != "history.jsonl" {
-			// Preserve compatibility with future Codex JSONL layouts under sessions,
-			// but avoid config/auth/log files outside the configured sessions root.
+			return nil
 		}
 		rel, err := filepath.Rel(config.Root, p)
 		if err != nil {

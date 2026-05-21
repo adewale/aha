@@ -10,6 +10,7 @@ import (
 
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/testutil"
 )
 
 func TestRunMainJSONErrorContract(t *testing.T) {
@@ -63,8 +64,47 @@ func TestRunMainJSONFlagParseErrorIsOnlyJSON(t *testing.T) {
 	if err := json.Unmarshal(stderr.Bytes(), &payload); err != nil {
 		t.Fatalf("stderr is not JSON: %v\n%s", err, text)
 	}
-	if payload.Error.Code != "command_failed" || payload.Error.Command != "status" || payload.Error.Message == "" {
+	if payload.Error.Code != "flag_parse_error" || payload.Error.Command != "status" || payload.Error.Message == "" {
 		t.Fatalf("bad JSON flag error payload: %+v", payload.Error)
+	}
+}
+
+func TestRefreshJSONUsesStableLowercaseReportKeys(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "bundles")
+	repoDir := filepath.Join(root, "repo")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"refresh", "--json", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir, "--repo", repoDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "json-contract"}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Bundle string `json:"bundle"`
+		SHA256 string `json:"sha256"`
+		Report struct {
+			Sessions  int  `json:"sessions"`
+			Entries   int  `json:"entries"`
+			Messages  int  `json:"messages"`
+			Images    int  `json:"images"`
+			Artifacts int  `json:"artifacts"`
+			Duplicate bool `json:"duplicate"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("refresh JSON did not decode: %v\n%s", err, out.String())
+	}
+	if payload.Bundle == "" || payload.SHA256 == "" || payload.Report.Sessions != 1 || payload.Report.Entries == 0 || payload.Report.Messages == 0 {
+		t.Fatalf("bad refresh JSON payload: %+v", payload)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(out.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	report := raw["report"].(map[string]any)
+	for _, bad := range []string{"Sessions", "Entries", "Messages", "Images", "Artifacts", "Duplicate"} {
+		if _, ok := report[bad]; ok {
+			t.Fatalf("refresh JSON leaked PascalCase key %q: %s", bad, out.String())
+		}
 	}
 }
 

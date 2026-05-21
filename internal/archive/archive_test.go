@@ -91,13 +91,33 @@ func writeTestTarZst(path string, manifest model.Manifest, files map[string][]by
 
 func TestStreamFilesValidatesManifestFilesArePresent(t *testing.T) {
 	root := t.TempDir()
-	bundle := archive.Bundle{Manifest: model.Manifest{Schema: model.BundleSchema, BundleID: "missing", MachineID: "m1", CapturedAt: "2026-01-01T00:00:00Z", Policy: model.ManifestPolicy{IncludeImages: true}, Files: []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/missing.jsonl", SHA256: "abc", Bytes: 3}}}}
-	path := filepath.Join(root, "bundle.tar.zst")
-	if _, err := archive.Write(path, bundle); err != nil {
+	path := filepath.Join(root, "missing.tar.zst")
+	mf := model.ManifestFile{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/missing.jsonl", SHA256: hash.SHA256Bytes([]byte("abc")), Bytes: 3, CopyState: "stable"}
+	manifest := model.Manifest{Schema: model.BundleSchema, BundleID: "missing", MachineID: "m1", CapturedAt: "2026-01-01T00:00:00Z", Policy: model.ManifestPolicy{IncludeImages: true}, Files: []model.ManifestFile{mf}}
+	if err := writeTestTarZst(path, manifest, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := archive.StreamFiles(path, func(name string, data []byte) error { return nil }); err == nil {
 		t.Fatalf("StreamFiles accepted bundle missing manifest file")
+	}
+}
+
+func TestCaptureIncludesArtifactsWhenSubagentsDisabled(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	cfg := config.Default()
+	cfg.MachineID = "m1"
+	cfg.IncludeSubagents = false
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fx.PiRoot, Enabled: true}}
+	b, err := archive.Capture(t.Context(), cfg, adapters.Builtins(), archive.Options{CapturedAt: "2026-01-03T00:00:00Z", BundleID: "no-subagents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Manifest.Counts.SessionFiles != 1 {
+		t.Fatalf("sessions=%d, want normal session only", b.Manifest.Counts.SessionFiles)
+	}
+	if b.Manifest.Counts.ArtifactFiles == 0 {
+		t.Fatalf("artifacts not captured when subagents disabled")
 	}
 }
 

@@ -23,6 +23,7 @@ func TestRenderSearchGolden(t *testing.T) {
 			Snippet:    "fixed [needle] in parser",
 			SessionKey: "claude-code:work-mac:abc123",
 			EntryID:    "entry-7",
+			RefText:    "claude-code:work-mac:abc123#entry-7",
 			Ref:        model.HitRef{Kind: model.HitKindMessage, SessionKey: "claude-code:work-mac:abc123", EntryID: "entry-7"},
 		},
 		{
@@ -35,6 +36,7 @@ func TestRenderSearchGolden(t *testing.T) {
 			Snippet:    "artifact [needle] tail",
 			SessionKey: "artifact:abcdef012345",
 			EntryID:    "abcdef012345",
+			RefText:    "artifact:abcdef012345#abcdef012345",
 			Ref:        model.HitRef{Kind: model.HitKindArtifact, SessionKey: "artifact:abcdef012345", EntryID: "abcdef012345", ArtifactSHA: "abcdef012345"},
 		},
 	}

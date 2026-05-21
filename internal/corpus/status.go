@@ -1,19 +1,28 @@
 package corpus
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
-func Status(db *sql.DB, root string) map[string]any {
+func Status(db *sql.DB, root string) (map[string]any, error) {
 	stats := map[string]any{"corpus_dir": root}
 	for _, table := range []string{"machines", "bundles", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "conflicts", "fts_messages", "fts_artifacts"} {
 		var n int
-		_ = db.QueryRow("select count(*) from " + table).Scan(&n)
+		if err := db.QueryRow("select count(*) from " + table).Scan(&n); err != nil {
+			return nil, fmt.Errorf("status count %s: %w", table, err)
+		}
 		stats[table] = n
 	}
 	var pageCount, pageSize int64
-	_ = db.QueryRow(`pragma page_count`).Scan(&pageCount)
-	_ = db.QueryRow(`pragma page_size`).Scan(&pageSize)
+	if err := db.QueryRow(`pragma page_count`).Scan(&pageCount); err != nil {
+		return nil, fmt.Errorf("status pragma page_count: %w", err)
+	}
+	if err := db.QueryRow(`pragma page_size`).Scan(&pageSize); err != nil {
+		return nil, fmt.Errorf("status pragma page_size: %w", err)
+	}
 	stats["index_size_bytes"] = pageCount * pageSize
-	return stats
+	return stats, nil
 }
 
 type Conflict struct {

@@ -13,7 +13,8 @@
       "kind": "message",
       "session_key": "claude-code:work-mac:abc123",
       "entry_id": "entry-7"
-    }
+    },
+    "ref_text": "claude-code:work-mac:abc123#entry-7"
   },
   {
     "score": 0.25,
@@ -30,6 +31,7 @@
       "session_key": "artifact:abcdef012345",
       "entry_id": "abcdef012345",
       "artifact_sha256": "abcdef012345"
-    }
+    },
+    "ref_text": "artifact:abcdef012345#abcdef012345"
   }
 ]

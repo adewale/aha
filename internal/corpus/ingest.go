@@ -28,8 +28,12 @@ import (
 const MaxArtifactTextIndexBytes int64 = 4 << 20
 
 type IngestReport struct {
-	Sessions, Entries, Messages, Images, Artifacts int
-	Duplicate                                      bool
+	Sessions  int  `json:"sessions"`
+	Entries   int  `json:"entries"`
+	Messages  int  `json:"messages"`
+	Images    int  `json:"images"`
+	Artifacts int  `json:"artifacts"`
+	Duplicate bool `json:"duplicate"`
 }
 
 func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) (duplicate bool, skip bool, err error) {

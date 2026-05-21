@@ -38,6 +38,24 @@ func TestCodexDiscoverAndParseRollout(t *testing.T) {
 	}
 }
 
+func TestCodexDiscoverIgnoresNonSessionJSONL(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	if err := os.WriteFile(filepath.Join(fx.CodexRoot, "auth.jsonl"), []byte(`{"token":"secret"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fx.CodexRoot, "2026", "05", "20", "debug.jsonl"), []byte(`{"level":"debug"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := (adapters.CodexCLI{}).Discover(t.Context(), model.SourceConfig{Type: "codex", Root: fx.CodexRoot, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || filepath.Base(files[0].Path) != "rollout-2026-05-20T00-00-00-codex-session.jsonl" {
+		t.Fatalf("codex discovered non-session files: %+v", files)
+	}
+}
+
 func TestCodexDiscoverSkipsSymlink(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)

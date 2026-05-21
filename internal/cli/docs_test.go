@@ -50,6 +50,11 @@ func TestRegisteredCommandsHaveAgentMetadata(t *testing.T) {
 		if len(cmd.Flags) == 0 && name != "doctor" {
 			t.Fatalf("command %s missing flag metadata", name)
 		}
+		for _, flag := range cmd.Flags {
+			if flag == "--json" && !strings.Contains(cmd.Usage, "--json") {
+				t.Fatalf("command %s supports --json but usage omits it: %s", name, cmd.Usage)
+			}
+		}
 	}
 }
 

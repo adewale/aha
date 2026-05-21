@@ -193,6 +193,7 @@ For coding agents using `aha`:
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
+- `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 
