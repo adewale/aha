@@ -1,0 +1,35 @@
+[
+  {
+    "score": 0.125,
+    "timestamp": "2026-01-03T00:00:00Z",
+    "source": "claude-code",
+    "machine": "work-mac",
+    "project": "/Users/ade/projects/aha",
+    "role": "assistant",
+    "snippet": "fixed [needle] in parser",
+    "session_key": "claude-code:work-mac:abc123",
+    "entry_id": "entry-7",
+    "ref": {
+      "kind": "message",
+      "session_key": "claude-code:work-mac:abc123",
+      "entry_id": "entry-7"
+    }
+  },
+  {
+    "score": 0.25,
+    "timestamp": "2026-01-04T00:00:00Z",
+    "source": "pi",
+    "machine": "work-mac",
+    "project": "notes.txt",
+    "role": "artifact",
+    "snippet": "artifact [needle] tail",
+    "session_key": "artifact:abcdef012345",
+    "entry_id": "abcdef012345",
+    "ref": {
+      "kind": "artifact",
+      "session_key": "artifact:abcdef012345",
+      "entry_id": "abcdef012345",
+      "artifact_sha256": "abcdef012345"
+    }
+  }
+]

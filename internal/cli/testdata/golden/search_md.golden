@@ -1,0 +1,2 @@
+- `claude-code:work-mac:abc123#entry-7` **assistant** `claude-code` score=0.1250 — fixed [needle] in parser
+- `artifact:abcdef012345#abcdef012345` **artifact** `pi` score=0.2500 — artifact [needle] tail

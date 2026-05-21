@@ -1,0 +1,18 @@
+[
+  {
+    "line_no": 7,
+    "entry_id": "entry-7",
+    "timestamp": "2026-01-03T00:00:00Z",
+    "role": "assistant",
+    "text": "fixed needle in parser",
+    "raw_json": "{\"role\":\"assistant\"}"
+  },
+  {
+    "line_no": 8,
+    "entry_id": "entry-8",
+    "timestamp": "2026-01-03T00:00:01Z",
+    "role": "tool",
+    "text": "",
+    "raw_json": "{\"tool\":\"go test\"}"
+  }
+]
