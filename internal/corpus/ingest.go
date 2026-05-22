@@ -86,6 +86,19 @@ type ingestPlan struct {
 	manifest    model.Manifest
 }
 
+type bundlePlanner struct {
+	Store *Store
+}
+
+type blobPublisher struct{}
+
+type corpusWriter struct {
+	Store    *Store
+	Registry map[string]adapters.SourceAdapter
+	tx       *sql.Tx
+	manifest model.Manifest
+}
+
 func NewIngestor(store *Store, registry map[string]adapters.SourceAdapter) Ingestor {
 	return Ingestor{Store: store, Registry: registry}
 }
@@ -107,7 +120,7 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 
 func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 	store := ing.Store
-	plan, err := prepareIngestPlan(store, path)
+	plan, err := (bundlePlanner{Store: store}).Prepare(path)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -134,17 +147,13 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 		return IngestReport{}, err
 	}
 	manifest := plan.manifest
-	if _, err := tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
+	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest}
+	if err := writer.InsertMachineAndSources(); err != nil {
 		return IngestReport{}, err
-	}
-	for _, ad := range manifest.Adapters {
-		if _, err := tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities)); err != nil {
-			return IngestReport{}, err
-		}
 	}
 	rep := IngestReport{Duplicate: dup}
 	err = archive.StreamManifestFiles(plan.stagingPath, func(mf model.ManifestFile, r io.Reader) error {
-		fileRep, err := ing.ingestManifestFile(tx, manifest, mf, r)
+		fileRep, err := writer.IngestManifestFile(mf, r)
 		if err != nil {
 			return err
 		}
@@ -163,7 +172,7 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 			return IngestReport{}, err
 		}
 	}
-	promoted, err := promoteBundleBlob(plan)
+	promoted, err := (blobPublisher{}).PromoteBundle(plan)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -207,8 +216,8 @@ func isSQLiteBusy(err error) bool {
 	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
 }
 
-func prepareIngestPlan(store *Store, sourcePath string) (ingestPlan, error) {
-	stagingDir := filepath.Join(store.Root, "blobs", "bundles")
+func (p bundlePlanner) Prepare(sourcePath string) (ingestPlan, error) {
+	stagingDir := filepath.Join(p.Store.Root, "blobs", "bundles")
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
 		return ingestPlan{}, err
 	}
@@ -235,7 +244,7 @@ func prepareIngestPlan(store *Store, sourcePath string) (ingestPlan, error) {
 		_ = os.Remove(stagingPath)
 		return ingestPlan{}, err
 	}
-	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest}, nil
+	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(p.Store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest}, nil
 }
 
 func insertBundleMetadata(tx *sql.Tx, plan ingestPlan) error {
@@ -244,7 +253,7 @@ func insertBundleMetadata(tx *sql.Tx, plan ingestPlan) error {
 	return err
 }
 
-func promoteBundleBlob(plan ingestPlan) (bool, error) {
+func (blobPublisher) PromoteBundle(plan ingestPlan) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(plan.bundleBlob), 0o755); err != nil {
 		return false, err
 	}
@@ -259,8 +268,23 @@ func promoteBundleBlob(plan ingestPlan) (bool, error) {
 	return false, nil
 }
 
-func (ing Ingestor) ingestManifestFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, r io.Reader) (IngestReport, error) {
-	store := ing.Store
+func (w corpusWriter) InsertMachineAndSources() error {
+	manifest := w.manifest
+	if _, err := w.tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
+		return err
+	}
+	for _, ad := range manifest.Adapters {
+		if _, err := w.tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (IngestReport, error) {
+	store := w.Store
+	manifest := w.manifest
+	tx := w.tx
 	entryReader := io.Reader(r)
 	if !manifest.Policy.IncludeImages && mf.Kind != "session" {
 		if isImageManifestFile(mf) {
@@ -310,11 +334,13 @@ func (ing Ingestor) ingestManifestFile(tx *sql.Tx, manifest model.Manifest, mf m
 		}
 		return IngestReport{}, nil
 	}
-	return ing.ingestSessionFile(tx, manifest, mf, tmpPath)
+	return w.IngestSessionFile(mf, tmpPath)
 }
 
-func (ing Ingestor) ingestSessionFile(tx *sql.Tx, manifest model.Manifest, mf model.ManifestFile, tmpPath string) (IngestReport, error) {
-	ad := ing.Registry[mf.Source]
+func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (IngestReport, error) {
+	manifest := w.manifest
+	tx := w.tx
+	ad := w.Registry[mf.Source]
 	if ad == nil {
 		return IngestReport{}, fmt.Errorf("unknown source adapter %q", mf.Source)
 	}
@@ -343,7 +369,7 @@ func (ing Ingestor) ingestSessionFile(tx *sql.Tx, manifest model.Manifest, mf mo
 	}
 	rep := IngestReport{Sessions: 1}
 	for _, pe := range ps.Entries {
-		r, err := ingestEntry(tx, ing.Store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
+		r, err := ingestEntry(tx, w.Store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
 		if err != nil {
 			return IngestReport{}, err
 		}

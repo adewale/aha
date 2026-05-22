@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"io"
 	"strings"
 
@@ -11,27 +10,15 @@ import (
 
 func cmdSearch(args []string, stdout, stderr io.Writer) error {
 	args = reorderSearchArgs(args)
-	fs := flag.NewFlagSet("search", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	cf := registerCorpusFlags(fs)
-	source := fs.String("source", "", "source filter")
-	machine := fs.String("machine", "", "machine filter")
-	role := fs.String("role", "", "role filter")
-	after := fs.String("after", "", "after date")
-	before := fs.String("before", "", "before date")
-	pathFilter := fs.String("path", "", "path/cwd filter")
-	jsonOut := fs.Bool("json", false, "JSON output")
-	refsOut := fs.Bool("refs", false, "refs output")
-	filesOut := fs.Bool("files", false, "files output")
-	mdOut := fs.Bool("md", false, "Markdown output")
-	limit := fs.Int("limit", 20, "limit")
-	if err := fs.Parse(args); err != nil {
+	pf, err := parseFlagSpecs("search", args, stderr, searchFlagSpecs)
+	if err != nil {
 		return err
 	}
-	if fs.NArg() == 0 {
+	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
+	if pf.NArg() == 0 {
 		return errors.New("search requires query")
 	}
-	if err := requireAtMostOneOutputMode(*jsonOut, *refsOut, *filesOut, *mdOut); err != nil {
+	if err := requireAtMostOneOutputMode(pf.Bool("json"), pf.Bool("refs"), pf.Bool("files"), pf.Bool("md")); err != nil {
 		return err
 	}
 	cfg, err := cf.loadConfig()
@@ -43,18 +30,18 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	results, err := search.Query(store.DB, strings.Join(fs.Args(), " "), search.Filters{Source: *source, Machine: *machine, Role: *role, After: *after, Before: *before, Path: *pathFilter, Limit: *limit})
+	results, err := search.Query(store.DB, strings.Join(pf.Args(), " "), search.Filters{Source: pf.String("source"), Machine: pf.String("machine"), Role: pf.String("role"), After: pf.String("after"), Before: pf.String("before"), Path: pf.String("path"), Limit: pf.Int("limit")})
 	if err != nil {
 		return err
 	}
 	mode := renderHuman
-	if *jsonOut {
+	if pf.Bool("json") {
 		mode = renderJSON
-	} else if *refsOut {
+	} else if pf.Bool("refs") {
 		mode = renderRefs
-	} else if *filesOut {
+	} else if pf.Bool("files") {
 		mode = renderFiles
-	} else if *mdOut {
+	} else if pf.Bool("md") {
 		mode = renderMD
 	}
 	return renderSearchResults(stdout, results, mode)

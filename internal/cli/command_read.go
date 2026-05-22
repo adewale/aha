@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"flag"
 	"io"
 	"strings"
 
@@ -12,37 +11,32 @@ import (
 
 func cmdRead(args []string, stdout, stderr io.Writer) error {
 	args = reorderReadArgs(args)
-	fs := flag.NewFlagSet("read", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	cf := registerCorpusFlags(fs)
-	session := fs.String("session", "", "session key/id")
-	entry := fs.String("entry", "", "entry id")
-	before := fs.Int("before", 3, "entries before")
-	after := fs.Int("after", 5, "entries after")
-	jsonOut := fs.Bool("json", false, "JSON output")
-	mdOut := fs.Bool("md", false, "Markdown output")
-	if err := fs.Parse(args); err != nil {
+	pf, err := parseFlagSpecs("read", args, stderr, readFlagSpecs)
+	if err != nil {
 		return err
 	}
-	if *session == "" && fs.NArg() > 0 {
-		*session = fs.Arg(0)
+	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
+	session := pf.String("session")
+	entry := pf.String("entry")
+	if session == "" && pf.NArg() > 0 {
+		session = pf.Arg(0)
 	}
-	if *session == "" {
+	if session == "" {
 		return errors.New("--session required")
 	}
-	if err := requireAtMostOneOutputMode(*jsonOut, *mdOut); err != nil {
+	if err := requireAtMostOneOutputMode(pf.Bool("json"), pf.Bool("md")); err != nil {
 		return err
 	}
 	var ref model.HitRef
 	useRef := false
-	if strings.Contains(*session, "#") && *entry == "" {
-		parsed, err := model.ParseHitRef(*session)
+	if strings.Contains(session, "#") && entry == "" {
+		parsed, err := model.ParseHitRef(session)
 		if err != nil {
 			return err
 		}
 		ref = parsed
 		useRef = true
-		*session, *entry = ref.SessionKey, ref.EntryID
+		session, entry = ref.SessionKey, ref.EntryID
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
@@ -55,43 +49,22 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	defer store.Close()
 	var entries []corpus.ReadEntry
 	if useRef {
-		entries, err = corpus.ReadRef(store.DB, ref, *before, *after)
+		entries, err = corpus.ReadRef(store.DB, ref, pf.Int("before"), pf.Int("after"))
 	} else {
-		entries, err = corpus.ReadContext(store.DB, *session, *entry, *before, *after)
+		entries, err = corpus.ReadContext(store.DB, session, entry, pf.Int("before"), pf.Int("after"))
 	}
 	if err != nil {
 		return err
 	}
 	mode := renderHuman
-	if *jsonOut {
+	if pf.Bool("json") {
 		mode = renderJSON
-	} else if *mdOut {
+	} else if pf.Bool("md") {
 		mode = renderMD
 	}
 	return renderReadEntries(stdout, entries, mode)
 }
 
 func reorderReadArgs(args []string) []string {
-	valueFlags := map[string]bool{"--corpus": true, "--repo": true, "--config": true, "--session": true, "--entry": true, "--before": true, "--after": true}
-	boolFlags := map[string]bool{"--json": true, "--md": true}
-	var flags []string
-	var pos []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		name := a
-		if eq := strings.IndexByte(a, '='); eq >= 0 {
-			name = a[:eq]
-		}
-		if boolFlags[name] || strings.Contains(a, "=") && valueFlags[name] {
-			flags = append(flags, a)
-			continue
-		}
-		if valueFlags[name] && i+1 < len(args) {
-			flags = append(flags, a, args[i+1])
-			i++
-			continue
-		}
-		pos = append(pos, a)
-	}
-	return append(flags, pos...)
+	return reorderArgsBySpec(args, readFlagSpecs)
 }

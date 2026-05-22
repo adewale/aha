@@ -78,13 +78,16 @@ A later TDD pass addressed additional reviewer findings:
 
 A fresh reviewer pass found no P0/P1 regressions after these changes.
 
-## Remaining deferrable findings
+## Fourth audit results
 
-- `internal/corpus/ingest.go` is improved but still owns parsing, blob writes, DB writes, conflict detection, FTS indexing, and report construction. A deeper split into planner / blob publisher / DB writer can wait until the next substantial ingest feature.
-- Add a held-writer/barrier test for search/read visibility during an open ingest transaction. Current tests cover duplicate ingest contention and rollback, but not reader consistency under a deliberately paused writer.
-- Parser fixtures are real-ish and committed, but still synthetic. Expand them with captured anonymized examples when available.
-- CLI flag sync now catches name drift, but defaults/help text/reorder maps are still separately maintained.
-- Add more adapter-level fixture tests that call `PiCLI`, `ClaudeCode`, and `CodexCLI` wrappers, not only `parseGenericJSONL`.
+The remaining deferrable items were addressed with another red/green/refactor pass:
+
+- Ingest is split into internal planner / blob publisher / corpus writer seams while preserving the public `IngestBundle` API and one-transaction write path.
+- Held-writer visibility now covers both `search.Query` and `ReadContext`: a separate reader cannot see paused uncommitted ingest rows, then can see them after commit.
+- Adapter-level fixture tests now call `Pi`, `ClaudeCode`, and `CodexCLI` wrappers directly and assert source/session identity, roles, parent links, tool metadata, image assets, model/tokens, cwd, and timestamps.
+- `search` and `read` now use shared `FlagSpec` definitions for registry flags, parser defaults/help, and post-positional reordering; tests verify help/default text and every spec-backed post-positional flag.
+
+A fresh reviewer pass found no P0/P1 regressions. Remaining lower-priority opportunities are to expand fixtures with anonymized real captures and eventually migrate the rest of the commands to `FlagSpec` as they change.
 
 ## Best-practice checks to keep
 

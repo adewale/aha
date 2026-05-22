@@ -29,6 +29,7 @@ type Command struct {
 	Name       string
 	Usage      string
 	Flags      []string
+	FlagSpecs  []FlagSpec
 	Examples   []string
 	JSONSchema string
 	Docs       string
@@ -61,8 +62,8 @@ func Registry() map[string]Command {
 		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--machine", "--max-sessions", "--out", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources and ingest the new bundle", Run: cmdRefresh},
 		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--machine", "--max-sessions", "--out", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --out ./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle", Run: cmdSnapshot},
 		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
-		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--files", "--json", "--limit", "--machine", "--md", "--path", "--refs", "--repo", "--role", "--source"}, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
-		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: []string{"--after", "--before", "--config", "--corpus", "--entry", "--json", "--md", "--repo", "--session"}, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
+		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
+		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
 		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha status --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,next}", Docs: "summarize corpus health", Run: cmdStatus},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--json]", Flags: []string{"--json"}, Examples: []string{"aha doctor"}, JSONSchema: "object{version,config,adapters,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
@@ -258,41 +259,7 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 }
 
 func reorderSearchArgs(args []string) []string {
-	valueFlags := map[string]bool{"--corpus": true, "--repo": true, "--config": true, "--source": true, "--machine": true, "--role": true, "--after": true, "--before": true, "--path": true, "--limit": true}
-	boolFlags := map[string]bool{"--json": true, "--refs": true, "--files": true, "--md": true}
-	literal := []string(nil)
-	for i, a := range args {
-		if a == "--" {
-			literal = args[i+1:]
-			args = args[:i]
-			break
-		}
-	}
-	var flags []string
-	var pos []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		name := a
-		if eq := strings.IndexByte(a, '='); eq >= 0 {
-			name = a[:eq]
-		}
-		if boolFlags[name] || strings.Contains(a, "=") && valueFlags[name] {
-			flags = append(flags, a)
-			continue
-		}
-		if valueFlags[name] && i+1 < len(args) {
-			flags = append(flags, a, args[i+1])
-			i++
-			continue
-		}
-		pos = append(pos, a)
-	}
-	out := append(flags, pos...)
-	if literal != nil {
-		out = append(out, "--")
-		out = append(out, literal...)
-	}
-	return out
+	return reorderArgsBySpec(args, searchFlagSpecs)
 }
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -17,11 +18,18 @@ func TestCommandFlagMetadataMatchesFlagSets(t *testing.T) {
 	actual := parseCommandFlags(t)
 	registry := cli.Registry()
 	for name, cmd := range registry {
+		want := normalizeFlagNames(cmd.Flags)
+		if len(cmd.FlagSpecs) > 0 {
+			fromSpecs := normalizeFlagNames(flagNamesFromSpecsForTest(cmd.FlagSpecs))
+			if strings.Join(fromSpecs, ",") != strings.Join(want, ",") {
+				t.Fatalf("command %s flag metadata drift\nflag specs: %v\nregistry flags: %v", name, fromSpecs, want)
+			}
+			continue
+		}
 		flags, ok := actual[name]
 		if !ok {
 			t.Fatalf("registry command %s has no parsed flag contract", name)
 		}
-		want := normalizeFlagNames(cmd.Flags)
 		if strings.Join(flags, ",") != strings.Join(want, ",") {
 			t.Fatalf("command %s flag metadata drift\nactual flagset: %v\nregistry flags: %v", name, flags, want)
 		}
@@ -29,6 +37,28 @@ func TestCommandFlagMetadataMatchesFlagSets(t *testing.T) {
 	for name := range actual {
 		if _, ok := registry[name]; !ok {
 			t.Fatalf("parsed flags for unregistered command %s", name)
+		}
+	}
+}
+
+func TestFlagSpecsDriveHelpText(t *testing.T) {
+	for _, name := range []string{"search", "read"} {
+		cmd := cli.Registry()[name]
+		if len(cmd.FlagSpecs) == 0 {
+			t.Fatalf("%s has no flag specs", name)
+		}
+		var out bytes.Buffer
+		if err := cli.Run([]string{name, "--help"}, &out, &out); err != nil {
+			t.Fatalf("%s --help: %v", name, err)
+		}
+		help := out.String()
+		for _, spec := range cmd.FlagSpecs {
+			if !strings.Contains(help, "-"+spec.Name) || !strings.Contains(help, spec.Help) {
+				t.Fatalf("%s help missing --%s (%q):\n%s", name, spec.Name, spec.Help, help)
+			}
+			if spec.Default != "" && !strings.Contains(help, "default "+spec.Default) {
+				t.Fatalf("%s help missing default for --%s=%s:\n%s", name, spec.Name, spec.Default, help)
+			}
 		}
 	}
 }
@@ -140,6 +170,14 @@ func commandNameFromFunc(fn string) string {
 		out = append(out, r)
 	}
 	return strings.ToLower(string(out))
+}
+
+func flagNamesFromSpecsForTest(specs []cli.FlagSpec) []string {
+	out := make([]string, len(specs))
+	for i, spec := range specs {
+		out[i] = "--" + spec.Name
+	}
+	return out
 }
 
 func normalizeFlagNames(flags []string) []string {
