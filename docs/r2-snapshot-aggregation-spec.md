@@ -8,6 +8,7 @@ tags:
   - session-history
   - snapshots
   - aggregation
+  - depot
   - cloudflare-r2
   - object-storage
   - multi-machine
@@ -18,8 +19,8 @@ source_type: design
 status: proposed
 aliases:
   - R2 Snapshot Aggregation
-  - Remote bundle aggregation
-  - aha remote
+  - Depot
+  - aha depot
 ---
 
 # R2 Snapshot Aggregation Spec
@@ -27,390 +28,508 @@ aliases:
 ## Status and relationship to v1
 
 This is a **proposed** design, not a locked v1 decision. It extends the v1
-system described in `docs/agent-history-aggregator-spec.md` by adding an
-**optional, opt-in** remote aggregation tier backed by a **private Cloudflare R2
-bucket**. It deliberately crosses two v1 boundaries — "local-only, no network"
-(Guarantee 3 in `docs/trust.md`) and "do not upload bundles" (the README
-privacy warning) — so it is a v2-class capability and must remain off by
-default.
+system in `docs/agent-history-aggregator-spec.md` by adding an **optional,
+off-by-default** aggregation tier: a **depot** that can live on the local
+filesystem (as today) or in a **private Cloudflare R2 bucket**. It deliberately
+relaxes two v1 boundaries — "local-only, no network" (Guarantee 3 in
+`docs/trust.md`) and "do not upload bundles" (the README privacy warning) — so
+it is a v2-class capability that must stay off by default.
 
-The v1 design already contains the seam that makes this tractable:
+The v1 design already contains the seam that makes this clean:
 
 > The bundle is the receipt. The corpus is the index.
 
-Bundles are immutable, deterministic, and content-addressed by SHA-256. That is
-exactly the contract object storage wants. This spec routes those same bundle
-bytes through R2 instead of (or in addition to) the local
-`bundle_out_dir`, and keeps every analysis running against a local SQLite + FTS
-corpus that is hydrated from the aggregated bundle set.
+Bundles are immutable, deterministic, and content-addressed by SHA-256 — exactly
+the contract object storage wants. This spec routes those same bundle bytes
+through a **depot** (local dir or R2) and keeps every analysis running against a
+**local** SQLite + FTS corpus rebuilt from the aggregated bundles.
 
 ## Goal
 
-Let many machines publish their snapshot bundles into one **shared private R2
-bucket**, and let any authorized machine reconstruct or update a local corpus
-from the union of those bundles. R2 becomes the shared, durable,
-egress-free **distribution layer for bundles**; the local corpus stays the
-**query engine** for the analyses `aha` already supports (`search`, `read`,
-`status`, `conflicts`, `doctor`).
+Let many machines publish their snapshot bundles into one **shared depot**, and
+let any authorized machine rebuild or update a **local** corpus from the union of
+those bundles. The depot is the durable, shared, egress-free distribution point
+for bundles; the local corpus stays the query engine for the analyses `aha`
+already supports.
 
-```txt
-machine A ─ snapshot ─┐
-machine B ─ snapshot ─┼─► private R2 bucket (immutable tar.zst bundles + index)
-machine C ─ snapshot ─┘                 │
-                                        ▼
-                       any machine ─ pull/sync ─► local corpus.db + FTS ─► search/read/...
+## Domain model (the implicit model, made explicit)
+
+The tool's nouns and how they relate. The remote feature **adds nouns**
+(destination, depot, catalog) but **no new verbs** — it generalizes the existing
+pipeline so a bundle's home can be local or remote.
+
+```text
+                         ┌──────────┐  binds (default)   ┌──────────────────────┐
+                         │ Machine  │ ─────────────────► │ Depot                │
+                         │ id,label │                    │ = default Destination│
+                         └────┬─────┘                    │ holds many Bundles   │
+            owns │           │ produces                  │ has a Catalog        │
+                 ▼           ▼                           └──────────┬───────────┘
+        ┌──────────────┐   ┌───────────────────────┐               │ lives on
+        │ Corpus       │   │ Bundle  (the Receipt)  │               ▼
+        │ local index  │   │ immutable, sha256      │     ┌────────────────────────┐
+        │ per machine  │   │ produced_at, machine   │     │ Destination            │
+        └──────┬───────┘   │ described_by Manifest  │     │ (type, location)       │
+   indexes │   │ rebuilt   │ contains many Files    │     │ type ∈ {local, r2}     │
+           ▼   │  from     └───────────┬────────────┘     │ driver = transport     │
+   ┌───────────────────┐               │ normalize to     └────────────────────────┘
+   │ Session           │◄──────────────┘
+   │ source, machine   │   ┌───────────────┐
+   │ cwd, started_at   │   │ Source        │ adapter: pi | claude-code | codex
+   │ has many Entries  │◄──│ discovered on │
+   └─────────┬─────────┘   │   a Machine   │
+             │ has         └───────────────┘
+             ▼
+   ┌───────────────────┐   ┌───────────────┐   ┌───────────────────────────────┐
+   │ Entry             │──►│ Asset (image) │   │ Conflict                      │
+   │ role, ts, raw_json│   └───────────────┘   │ recorded in a Corpus when     │
+   │ entry_sha256      │                       │ ingest finds divergent entries│
+   └───────────────────┘                       │ for the same session/entry id │
+                                               └───────────────────────────────┘
+```
+
+| Entity | Identity | Lifetime | Scope |
+|---|---|---|---|
+| **Machine** | `machine_id` | stable | one per host |
+| **Source** | adapter name (`pi`/`claude-code`/`codex`) | stable | per machine |
+| **Session / Entry / Asset** | source-native or derived IDs | immutable once captured | per source |
+| **Bundle (Receipt)** | `bundle_sha256` (+ `bundle_id`) | **immutable** | shared via depot |
+| **Manifest** | embedded in bundle | immutable | per bundle |
+| **Destination** | `(type, location)` | config | addressable anywhere |
+| **Depot** | the default Destination | config | **one, shared** |
+| **Catalog** | per-machine shards | append-mostly | one per depot |
+| **Corpus** | the local DB | **derived, disposable, rebuildable** | **one per machine** |
+| **Conflict** | `(session_key, entry_id)` | recorded at ingest | per corpus |
+
+Two relationships carry the whole design:
+
+- A **Depot is the default Destination.** "Destination" is the addressing
+  primitive (`type` + `location`); "depot" is the role played by the one you
+  standardised on. This mirrors restic's default repo vs. `--repo`, and git's
+  `origin` vs. an explicit remote.
+- A **Corpus is derived from Bundles.** Bundles are the source of truth; the
+  corpus is a rebuildable local index. You can delete a corpus and rebuild it
+  from the depot, never the reverse.
+
+## Primitives and vocabulary
+
+| Term | Meaning | Replaces / why |
+|---|---|---|
+| **bundle** / **receipt** | the immutable, content-addressed `tar.zst` snapshot | project's own metaphor: a dated, hash-verified record you file and never edit |
+| **destination type** (driver) | transport implementation: `local`, `r2` | was the `Backend`/`BundleStore` interface; "driver" reads cleaner and matches restic backends |
+| **destination** | a `(type, location)` address users can name, e.g. `r2:aha-depot` or `~/agent-depot` | new primitive; collapses type+location into one token like restic's repo URI |
+| **depot** | the **default destination** — the standing aggregation point | renames the v1 "aggregation point"/`bundle_out_dir`; implies central storage without implying source control |
+| **catalog** | the bundle listing in a depot, sharded per machine | replaces "index" (which already means the corpus/FTS) |
+| **corpus** | the local SQLite + FTS index built from bundles | unchanged |
+| **`BundleRef`** | an in-code reference to a bundle | replaces `BundleObject` (dropped the S3 "object" leak; rhymes with the existing `HitRef`) |
+
+Retired from the earlier draft: **`remote`** (asymmetric — a local folder is a
+destination too), **`index/`** key prefix (collided with the corpus), and
+**`push`/`pull`/`sync`** verbs (`sync` collides head-on with the locked
+"Live sync: No" non-goal; the others carry git baggage).
+
+## Architecture and flows
+
+Per-machine pipeline — only `snapshot`/`ingest` cross the depot boundary;
+everything analytical stays on the local corpus:
+
+```text
+  LOCAL SOURCES                 DEPOT (local dir or r2:aha-depot)        LOCAL CORPUS
+  ~/.pi  ~/.claude  ~/.codex          [ shared bundle pool ]            [ per-machine index ]
+        │ discover+parse                                                       
+        ▼                                                                      
+   aha snapshot ── bundle(receipt) ──push──►  bundles/v1/<sha>.tar.zst          
+                                              catalog/v1/<machine>.json         
+                                                      │                         
+                                                      └──pull── aha ingest ──► corpus.db
+                                                                               + FTS + blobs
+                                                                                    │
+                                                              search · read · status · conflicts
+                                                                         (local, offline)
+```
+
+Three machines, one depot — the centerpiece. The depot is a single shared pool
+of immutable bundles; each machine keeps its **own** local corpus that converges
+as it ingests:
+
+```text
+        ┌──────── ade-mbp ────────┐     ┌──────── work-mac ───────┐     ┌──────── linux-box ──────┐
+        │ sources → snapshot → A  │     │ sources → snapshot → B  │     │ sources → snapshot → C  │
+        │ corpus(ade) ◄─ ingest   │     │ corpus(work) ◄─ ingest  │     │ corpus(lin) ◄─ ingest   │
+        └───────────┬──────┬──────┘     └──────┬───────────┬──────┘     └──────┬───────────┬──────┘
+              push A │      │ pull          push│ B         │ pull       push C │           │ pull
+                     ▼      ▲                   ▼           ▲                   ▼           ▲
+                  ┌────────────────────────────────────────────────────────────────────────┐
+                  │                  DEPOT   r2:aha-depot   [ SHARED ]                        │
+                  │      bundles/v1/A  bundles/v1/B  bundles/v1/C  bundles/v1/A2 ...          │
+                  │      catalog/v1/ade-mbp.json  …/work-mac.json  …/linux-box.json           │
+                  └────────────────────────────────────────────────────────────────────────┘
+
+  One bundle pool, three independent indexes. Convergence is pull-driven and eventual:
+  a machine only knows the bundles it has ingested. Nobody ever queries the depot to search.
+```
+
+## Opinionated defaults
+
+**R2 depot bucket: `aha-depot`.** No suffix, no machine name, no random token.
+Lowercase, 9 chars, a valid R2/S3 bucket name, one per account.
+
+This must be opinionated for **correctness, not tidiness**: a depot only
+aggregates if every machine lands in the **same** bucket. A per-machine or
+randomised default would silently create three private buckets that never merge —
+the opposite of the feature. So the default must be stable and identical
+everywhere; a second depot is an explicit override (`--depot r2:aha-archive`).
+
+Local depot default `~/.aha/depot`, giving:
+
+```text
+~/.aha/
+  depot/                          # the depot (bundle pool) — default destination
+    bundles/v1/<bundle_sha>.tar.zst
+    catalog/v1/<machine>.json     # per-machine shard: cheap listing, no write contention
+  corpus.db                       # the corpus (local index) — separate subsystem
+  blobs/                          # corpus's own content-addressed blobs
+```
+
+The `v1/` segment versions the key layout. Key scheme, catalog schema, manifest
+schema, and the bundle content hash are **explicit, versioned public contracts**
+(see Hyrum's Law), not incidental internals.
+
+## Depot vs. corpus
+
+Two subsystems with different jobs, lifetimes, and locations:
+
+| | **Depot** | **Corpus** |
+|---|---|---|
+| Holds | immutable, content-addressed bundles (receipts) | SQLite + FTS index built from bundles |
+| Scope | **one, shared** across machines | **one per machine**, local |
+| Role | durable **source of truth** | **derived**, disposable, rebuildable |
+| Written by | `snapshot` | `ingest` |
+| Read by | `ingest` | `search` / `read` / `status` / `conflicts` |
+| Needs network | yes (if R2) | no — always local |
+
+Mental model in brand-neutral terms: the depot is a **shared folder of immutable
+receipts**; the corpus is a **locally-built search index** over them — like macOS
+Spotlight, Windows Search, or `locate`'s database on Linux: derived from your
+files, rebuildable from scratch, and never the source of truth. Nobody "searches
+the shared folder" — you search your local index, which you keep fed from the
+folder. That is why there is **no shared remote corpus**: querying R2 per search
+would mean many round-trips, lose offline use, and force a single-writer SQLite
+file in a bucket — all rejected for conceptual integrity (see audit). **Depot =
+the bundle aggregation point, full stop. The corpus stays local.**
+
+## Commands in the depot model
+
+Organizing rule: **only `snapshot` (write), `ingest` (read), `refresh` (both),
+and the `depot`/`doctor` diagnostics touch the depot. Everything analytical reads
+the local corpus only and works offline.** The depot is implicit (you chose it
+once); any depot-touching command can override it for one invocation with
+`--depot <destination>`.
+
+| Command | Depot | Corpus | Network | Behavior |
+|---|---|---|---|---|
+| `aha init` | — | — | no | scaffolds config; records your depot choice |
+| `aha depot init <dest>` | create/bind | — | yes (r2) | creates or connects the depot, writes it to config |
+| `aha snapshot` | **write** | — | yes (r2) | builds a bundle, pushes it to the depot |
+| `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
+| `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |
+| `aha depot ls` | read catalog | — | yes (r2) | lists what is in the shared pool |
+| `aha depot verify` | read | — | yes (r2) | integrity: re-hash objects, catalog↔bucket agree |
+| `aha search` | — | read | **no** | queries your local corpus |
+| `aha read` | — | read | **no** | retrieves full context/blob from your local corpus |
+| `aha status` | optional | read | no by default | local corpus health; `--depot` adds a "behind by N bundles" line |
+| `aha conflicts` | — | read | **no** | lists quarantined merge conflicts in your corpus |
+| `aha doctor` | check | check | yes (r2) | diagnostics incl. depot reachability + credentials |
+
+Notable behaviors:
+
+- **`read` never needs the depot, even though the data came from it.** `ingest`
+  copies the bytes it needs into the corpus's own blob store, so `read` (incl.
+  image reconstruction) works offline forever.
+- **`conflicts` matters more with multiple machines.** Quarantined conflicts are
+  mostly a cross-machine phenomenon (same session id, divergent entries); the
+  command is unchanged, but the depot is where conflicting bundles arrive from.
+- **`status` stays local-and-fast by default;** `--depot` cheaply diffs your
+  corpus's known bundle set against the catalog and reports how far behind you
+  are.
+- **`depot ls` vs `status`** are the two halves: what is in the shared pool vs.
+  what is in your local index; the gap is what the next `refresh` pulls.
+- **`--depot` is inert for `search`/`read`/`conflicts`** (nothing remote to point
+  at); `status --depot` is the one analytical command that uses it.
+
+## Typical usage: three machines
+
+Machines `ade-mbp`, `work-mac`, `linux-box`, all sharing `r2:aha-depot`.
+
+One-time setup (per machine); the first creates the bucket, the others connect;
+credentials come from the environment, never config:
+
+```console
+ade-mbp$ export R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
+ade-mbp$ aha depot init r2                 # opinionated default bucket "aha-depot"
+created depot r2:aha-depot  (account ...e91)
+
+work-mac$  aha depot init r2:aha-depot     # bucket exists → connect
+linux-box$ aha depot init r2:aha-depot
+```
+
+Daily use is just `aha refresh` on each machine — it publishes your new snapshot
+and absorbs everyone else's:
+
+```console
+ade-mbp$ aha refresh
+snapshot → bundle A  (machine=ade-mbp, 41 sessions)
+push     → r2:aha-depot  (1 new, 0 skipped)
+ingest   ← r2:aha-depot  (1 new bundle)
+corpus: sessions=41 entries=5120 messages=3360 conflicts=0
+```
+
+State as the day unfolds — "Depot" is the single shared bucket; each "corpus" is
+a separate local database:
+
+| When | Command | Depot (R2), shared | That machine's corpus |
+|---|---|---|---|
+| T1 | `ade-mbp$ aha refresh` | `A` | ade-mbp: `A` |
+| T2 | `work-mac$ aha refresh` | `A, B` | work-mac: `A, B` |
+| T3 | `linux-box$ aha refresh` | `A, B, C` | linux-box: `A, B, C` |
+| T4 | `ade-mbp$ aha refresh` | `A, B, C, A2` | ade-mbp: `A, B, C, A2` |
+
+What this makes concrete:
+
+- **One bundle pool, many indexes.** After T4 the depot holds `{A, B, C, A2}` —
+  one deduped, content-addressed copy. Each `corpus.db` is a separate file that
+  converges in content as it ingests.
+- **Convergence is pull-driven and eventual.** Right after T4, `work-mac`'s
+  corpus is still `{A, B}` until its next `refresh`.
+- **Search is always local and offline.** `aha search` hits only the local
+  corpus.
+- **Idempotent and safe to over-run.** Re-ingesting `A` anywhere is a no-op;
+  back-to-back `refresh` changes nothing the second time.
+- **The corpus is disposable; the depot is durable truth.** A dead machine is
+  rebuilt from the depot:
+
+```console
+new-box$ aha depot init r2:aha-depot
+new-box$ aha ingest                 # pull everything; full history reconstructed
+```
+
+Overrides, when needed:
+
+```console
+ade-mbp$ aha search "needle"                       # local corpus, offline
+ade-mbp$ aha ingest --depot r2:aha-archive         # pull from a different depot
+ade-mbp$ aha snapshot --depot local:/Volumes/usb/depot
 ```
 
 ## Cloudflare R2 facts this design relies on
 
-From `https://developers.cloudflare.com/r2/how-r2-works/` and the R2 limits
-documentation, the properties that matter here:
+From `https://developers.cloudflare.com/r2/how-r2-works/` and the R2 limits docs:
 
-- **S3-compatible API**, SigV4 auth, region `auto`; also a Workers binding and a
-  REST API. The S3 API is the data plane we target.
-- **No egress fees.** Pulling the full bundle set to many machines is not
-  metered by bytes downloaded; operations (Class A writes/lists, Class B reads)
-  are metered.
-- **Strong consistency** (read-after-write, list-after-write), which makes
-  "push then another machine pulls" reliable without convergence hacks.
+- **S3-compatible API**, SigV4 auth, region `auto`; the S3 API is the data plane.
+- **No egress fees** — pulling the whole pool to many machines is not metered by
+  bytes; operations (Class A writes/lists, Class B reads) are metered.
+- **Strong consistency** (read-after-write, list-after-write) — "push then
+  another machine pulls" is reliable without convergence hacks.
 - **Encrypted at rest by default**; per-bucket and scoped API tokens.
-- Relevant limits: max object **5 TiB**; single-part PUT **5 GiB**; multipart up
-  to **10,000 parts / 4.995 TiB**; key length **1,024 bytes**; **unlimited**
-  objects/bytes per bucket; up to **1,000,000 buckets/account**; S3/Workers API
-  recommended over the REST API for high object counts; account-wide REST API
-  cap ~**1,200 req / 5 min**; same-object concurrent writes throttled to ~1/s
-  (HTTP 429).
+- Limits: object **5 TiB**; single-part PUT **5 GiB**; multipart up to **10,000
+  parts / 4.995 TiB**; key length **1,024 bytes**; **unlimited** objects/bytes per
+  bucket; up to **1,000,000 buckets/account**; S3/Workers API recommended over
+  the REST API for high object counts (REST cap ~**1,200 req / 5 min**);
+  same-object concurrent writes throttled ~1/s.
 
-Two consequences for `aha`:
-
-1. The current `MaxBundleBytes = 2 GiB` cap (see `internal/archive/archive.go`)
-   fits comfortably under the **5 GiB single-PUT** limit, so multipart is **not
-   required** for v1 of this feature. If the cap is ever raised past 5 GiB,
-   multipart upload becomes mandatory.
-2. Bundles already aggregate many tiny session files into **one** object. That
-   keeps object counts and per-object operation costs low — a much better fit
-   for R2 economics than uploading raw session files individually.
-
-## Proposed refactoring
-
-### The seam: a `BundleStore` abstraction
-
-Today the bundle location is hardcoded to the local filesystem. `snapshot`
-writes to `cfg.BundleOutDir` (`internal/cli/cli.go:writeSnapshot`), and `ingest`
-globs/reads local paths (`internal/cli/command_ingest.go`). Introduce one
-interface that both local and remote backends implement:
-
-```go
-// internal/remote/bundlestore.go  (network code lives ONLY in this package)
-type BundleStore interface {
-    // Put stores bundle bytes under an opaque, content-addressed key.
-    // Implementations must be idempotent: putting identical bytes twice is a no-op.
-    Put(ctx context.Context, obj BundleObject, r io.Reader) error
-    // Get returns the bundle bytes for a key.
-    Get(ctx context.Context, key string) (io.ReadCloser, error)
-    // List returns known bundle objects, optionally filtered by prefix.
-    List(ctx context.Context, prefix string) ([]BundleObject, error)
-    // Stat reports whether a key exists and its recorded metadata.
-    Stat(ctx context.Context, key string) (BundleObject, bool, error)
-}
-
-type BundleObject struct {
-    Key        string // e.g. "bundles/v1/<bundle_sha256>.tar.zst"
-    BundleSHA  string
-    BundleID   string
-    MachineID  string
-    CapturedAt string
-    Bytes      int64
-}
-```
-
-- `LocalFSStore` wraps the existing `bundle_out_dir` behavior. It is the default
-  and contains **no network code**.
-- `R2Store` wraps the S3-compatible API. It is the **only** package allowed to
-  import `net/http`.
-
-`snapshot`/`refresh` write through `BundleStore.Put`; `ingest`/`pull`/`sync`
-read through `Get`/`List`. The corpus, archive, adapters, search, and read code
-do not change at all — they keep operating on local `tar.zst` files and the
-local `corpus.db`. The remote backend only changes **how bundle bytes travel**.
-
-### Object key layout (a versioned, documented contract)
-
-Primary objects are **content-addressed** so identical bundles from different
-machines de-duplicate for free and re-uploads are no-ops:
-
-```txt
-bundles/v1/<bundle_sha256>.tar.zst        # the immutable bundle bytes
-index/v1/<machine_id>.json                # per-machine append-only index shard
-```
-
-- Content-addressed keys (not the human bundle filename) are the storage
-  identity. The pretty filename
-  `aha-sessions-{machine}-{ts}-{id}.tar.zst` is kept only as object metadata for
-  human browsing.
-- **Per-machine index shards** avoid expensive full-bucket `LIST` on every sync.
-  Each machine only ever writes its own shard (no write contention), and a
-  reader merges shards. The bucket-wide `LIST` remains the fallback / repair
-  path.
-- The `v1/` segment versions the layout. The key scheme and index schema are
-  **explicit public contracts** (see Hyrum's Law, below), not incidental
-  internals.
-
-### New commands / flags
-
-Add a thin remote surface; reuse all existing ingest/corpus machinery:
-
-| Command | Behavior |
-|---|---|
-| `aha push [bundle...]` | Upload local bundles to the configured R2 bucket; skip objects already present (by SHA); update this machine's index shard. |
-| `aha pull [--since ...]` | Download bundles present in R2 but not yet ingested locally, then ingest them (reusing idempotent `corpus.IngestBundle`). |
-| `aha sync` | `push` then `pull`: publish local snapshots and absorb everyone else's. |
-| `aha remote ls` / `aha remote verify` | List/inspect remote bundles; verify object SHAs and index/bucket agreement. |
-
-Plus a `--remote` flag on `refresh` so the existing one-command journey can
-optionally publish-and-aggregate. With remote disabled (default), every command
-behaves exactly as today.
-
-### Sync algorithm (incremental, idempotent)
-
-```txt
-local set  = { bundle_sha256 in corpus.bundles }            # already tracked in SQLite
-remote set = union(index shards) ∪ (fallback LIST bundles/v1/)
-to_pull    = remote set − local set
-for each missing bundle: Get → stage → validate manifest+file SHAs → IngestBundle
-```
-
-Correctness falls out of properties already in the codebase:
-
-- `corpus.IngestBundle` is **idempotent** (`recordBundleAttempt` dedupes by
-  `bundle_id` and `bundle_sha256`), so re-pulling a bundle is a no-op.
-- Ingest already **stages, validates, and only then promotes** bundle bytes
-  (`bundlePlanner.Prepare` → `walkTarZstd` SHA checks → `PromoteBundle`), so a
-  truncated or tampered download is rejected before it can corrupt the corpus.
-- Append-only merge and conflict quarantine already handle the same session
-  showing up from multiple machines.
-
-### Config additions
-
-Extend `model.Config` (new fields, all optional, default off):
-
-```jsonc
-{
-  // ...existing v1 config...
-  "remote": {
-    "enabled": false,
-    "provider": "r2",
-    "account_id": "<cf-account-id>",
-    "bucket": "aha-private-corpus",
-    "endpoint": "https://<account>.r2.cloudflarestorage.com",
-    "region": "auto",
-    "prefix": "bundles/v1/",
-    // Credentials are NEVER stored here. They come from env or an OS keychain.
-    "credentials_source": "env",        // "env" | "keychain" | "file:~/.config/aha/r2-credentials"
-    "encryption": "none"                // "none" | "age" | "aes-gcm" (client-side, see Security)
-  }
-}
-```
+Two consequences: the current `MaxBundleBytes = 2 GiB` cap fits under the **5 GiB
+single-PUT** limit (no multipart needed unless the cap is raised); and bundles
+already aggregate many tiny session files into one object, keeping object counts
+and per-op costs low.
 
 ## What must change, be added, or be removed
 
 ### Add
 
-- `internal/remote` package: `BundleStore` interface, `LocalFSStore`, `R2Store`,
-  and a minimal S3 SigV4 signer. **Recommendation:** a small hand-rolled SigV4
-  client over `net/http` + stdlib `crypto/sha256`/`crypto/hmac`, to preserve
-  `aha`'s pure-Go, minimal-dependency, CGO-free ethos. Alternative:
-  `minio-go` (pure Go, lighter than `aws-sdk-go-v2`). The trade-off is
-  hand-rolled-and-tested vs. dependency-weight; either way the signer needs
+- `internal/depot` package: a **destination driver** interface with `localFS`
+  and `r2` implementations, plus a minimal S3 **SigV4** signer.
+  **Recommendation:** a small hand-rolled SigV4 client over `net/http` + stdlib
+  `crypto/sha256`/`crypto/hmac` to preserve `aha`'s pure-Go, CGO-free,
+  minimal-dependency ethos; alternative `minio-go`. Either way the signer needs
   golden SigV4 vector tests.
-- `aha push` / `pull` / `sync` / `remote` commands wired into the registry
-  (`internal/cli/cli.go`), with `--json`, docs metadata, and doc-sync coverage.
-- `remote` config block in `model.Config` + `config.Default()` (off by default).
-- Credential loading from env / keychain / 0600 file — never from committed
-  config, never written into manifests or bundles.
-- Per-machine index shard reader/writer and a content-addressed key scheme.
-- Optional **client-side encryption** of bundle bytes before upload.
+- `depot` config block (type + location, off by default), `aha depot
+  init/ls/verify`, and `--depot` on the depot-touching commands.
+- Per-machine catalog shard reader/writer; content-addressed `bundles/v1/<sha>`
+  keys.
+- **Client-side encryption by default when a depot is remote** (restic/kopia
+  lesson — see Security).
+- Credential loading from env / OS keychain / `0600` file — never committed,
+  never written into manifests or bundles.
 
 ### Change
 
-- **The no-network guarantee must be re-scoped, not deleted.**
+- **Re-scope the no-network guarantee; don't delete it.**
   `internal/cli/security_static_test.go` currently fails the build if **any**
-  non-test file under `cmd/` or `internal/` imports `net`, `net/http`,
-  `net/url`, or `net/rpc`. The test comment already anticipates this:
-  *"update docs/trust.md if v1 network behavior changes."* The change is to
-  **exempt only `internal/remote`** and assert that **every other package stays
-  net-free**, so the local-only guarantee is still mechanically enforced for the
-  core. (Alternative: gate `internal/remote` behind a `//go:build r2` tag and
-  keep default builds 100% net-free.)
-- `docs/trust.md`: reframe Guarantee 3 from "no network, ever" to "**local-only
-  by default; remote is opt-in, private, scoped, integrity-checked**," and add a
-  new guarantee describing remote security posture.
-- README privacy warning: uploading **unredacted** bundles to R2 is a real
-  exposure even in a private bucket. Strengthen the warning and recommend
-  enabling v2 redaction and/or client-side encryption before turning remote on.
-- `writeSnapshot` / `cmdIngest` / `cmdRefresh` route bundle bytes through a
-  `BundleStore` selected by config.
+  non-test file under `cmd/`/`internal/` imports `net`, `net/http`, `net/url`,
+  `net/rpc`. Its comment already anticipates this: *"update docs/trust.md if v1
+  network behavior changes."* Change it to **exempt only `internal/depot`** and
+  assert every other package stays net-free (alternative: gate `internal/depot`
+  behind `//go:build r2`). The local-only guarantee stays mechanically enforced
+  for the core.
+- `docs/trust.md`: reframe Guarantee 3 to "local-only by default; depot is
+  opt-in, private, scoped, integrity-checked, encrypted client-side," and add a
+  depot-security guarantee.
+- README privacy warning: uploading **unredacted** bundles is real exposure even
+  to a private bucket; recommend v2 redaction and/or client-side encryption
+  before enabling a remote depot.
+- `writeSnapshot`/`cmdIngest`/`cmdRefresh` route bundle bytes through the
+  selected destination driver.
 
 ### Remove / explicitly avoid
 
-- Do **not** remove or weaken the local-first default. Remote stays opt-in.
-- Do **not** store the live `corpus.db` in R2 as a shared writable query engine.
-  SQLite is not safe for concurrent multi-writer access over object storage, and
-  it conflicts with "SQLite is the engine, not a cache." A read-only published
-  corpus snapshot is a possible **future** convenience (below), not the model.
-- Avoid querying bundles in place over the network for analyses — see rejected
-  alternatives.
+- Do **not** weaken the local-first default; the depot is opt-in.
+- Do **not** store `corpus.db` in R2 as a shared writable query engine (unsafe
+  multi-writer SQLite; contradicts "SQLite is the engine, not a cache").
+- Avoid querying bundles in place over the network for analyses.
+- Retire the words `remote`, `index` (as a key prefix), and the
+  `push`/`pull`/`sync` verbs.
 
 ## Trade-offs
 
-| Dimension | Local-only v1 (today) | With R2 aggregation (proposed) |
+| Dimension | Local-only v1 (today) | With a depot (proposed) |
 |---|---|---|
-| Trust model | "Everything stays on your machine." Mechanically proven no-network. | Histories leave the machine. No-network becomes "local-only by default." Biggest cost. |
-| Secrets exposure | Bundles never uploaded; v1 does not redact. | Unredacted prompts/code/credentials land in a third party's storage. Demands redaction or client-side encryption. |
-| Setup cost | Zero credentials, zero accounts. | Cloudflare account, bucket, scoped tokens, key management. |
-| Dependencies | Pure-Go, CGO-free, tiny dep set. | Adds an S3 client / SigV4 (dep weight or hand-rolled-and-tested). |
-| Multi-machine merge | Manual: copy a bundle, `aha ingest`. | One shared bucket; `aha sync` converges automatically. |
-| Durability | One laptop's disk. | Cloudflare-managed redundancy. |
-| Offline analysis | Always works. | Snapshot/search/read still local; only push/pull need network. |
-| Failure surface | Filesystem only. | + auth failures, throttling, partial uploads, network partitions. |
+| Trust model | "Everything stays on your machine." Mechanically proven no-network. | Histories leave the machine; no-network becomes "local-only by default." Biggest cost. |
+| Secrets | Bundles never uploaded; v1 does not redact. | Unredacted content lands in third-party storage → demands redaction or client-side encryption. |
+| Setup | Zero credentials. | Cloudflare account, bucket, scoped tokens, key management. |
+| Dependencies | Pure-Go, tiny dep set. | Adds an S3 client / SigV4 (dep weight or hand-rolled + tested). |
+| Multi-machine | Manual bundle copy + `ingest`. | One shared depot; `refresh` converges automatically. |
+| Durability | One disk. | Cloudflare-managed redundancy. |
+| Offline | Always. | Analyses still local/offline; only snapshot-push and ingest-pull need network. |
+| Failure surface | Filesystem only. | + auth, throttling, partial uploads, partitions. |
 
-Net: the design trades the strongest privacy property `aha` has for durable,
-low-friction, egress-free multi-machine aggregation. That trade is only
-acceptable as an explicit, off-by-default opt-in paired with redaction or
-encryption.
+Net: trades `aha`'s strongest privacy property for durable, low-friction,
+egress-free multi-machine aggregation — acceptable only as an explicit,
+off-by-default opt-in paired with redaction or encryption.
 
 ## Performance and scalability concerns
 
-- **Operation cost, not byte cost, dominates.** No egress fees, but each push is
-  a Class A `PUT`, each `LIST` is Class A, each pull is a Class B `GET`. The win
-  comes from bundles aggregating many session files into one object — keep that
-  property; never fan out to per-session objects.
-- **Avoid full-bucket `LIST` on every sync.** S3 `LIST` paginates at 1,000 keys;
-  a corpus of N bundles costs ⌈N/1000⌉ Class A ops and grows unbounded. The
-  per-machine index shards make sync cost proportional to **machines**, not
-  total bundles. Full `LIST` stays as a repair path only.
-- **Pull is N round trips.** Ingesting K new bundles is K serial `GET`s plus the
-  existing CPU-bound parse + FTS work. Parallelize downloads (bounded
-  concurrency) and stream into the existing staging path; the SQLite write is the
-  serialization point (`db.SetMaxOpenConns(1)`), so overlap network with parse.
-- **Bundle size vs. PUT limit.** 2 GiB cap < 5 GiB single PUT today. Raising the
-  cap past 5 GiB forces multipart (≤10,000 parts).
-- **Same-object write throttle (~1/s).** Irrelevant because content-addressed
-  keys are unique; re-PUT of an existing object is skipped via `Stat`.
-- **Query performance does not improve.** R2 aggregates *bundles*; analyses still
-  run on local SQLite. A very large aggregate corpus is an FTS/SQLite scaling
-  problem independent of R2 (indexes, `status` counts, conflict queries). R2
-  neither helps nor hurts query latency.
-- **Strong consistency simplifies sync** (read-after-write), so no
-  convergence/backoff dance is needed for "push then pull."
-- **Throttling.** Use the S3/Workers data-plane API (not the REST API's
-  ~1,200 req/5min cap), honor HTTP 429 with bounded exponential backoff, and cap
-  concurrent requests.
+- **Operation cost dominates, not byte cost.** No egress fees, but each push is a
+  Class A `PUT`, each catalog/`LIST` is Class A, each pull is a Class B `GET`.
+  Keep bundles aggregating many session files into one object; never fan out to
+  per-session objects.
+- **Avoid full-bucket `LIST` on every sync.** Per-machine catalog shards make
+  sync cost proportional to **machines**, not total bundles; full `LIST` is a
+  repair path only.
+- **Pull is N round trips.** Parallelize downloads with bounded concurrency and
+  stream into the existing staging path; the SQLite write
+  (`db.SetMaxOpenConns(1)`) is the serialization point, so overlap network with
+  parse.
+- **Bundle size vs. PUT limit.** 2 GiB cap < 5 GiB single PUT today; raising the
+  cap past 5 GiB forces multipart.
+- **Same-object write throttle (~1/s)** is irrelevant — content-addressed keys
+  are unique and existing objects are skipped via `Stat`.
+- **Query performance does not improve.** The depot aggregates *bundles*;
+  analyses still run on local SQLite. A very large aggregate corpus is an
+  FTS/SQLite scaling problem independent of R2.
+- **Strong consistency simplifies sync;** use the S3/Workers data plane (not the
+  REST cap), honor HTTP 429 with bounded backoff, and cap concurrency.
 
-## Security: how access to the bucket is secured
+## Security: how depot access is secured
 
-The bucket is **private and treated as holding unredacted secrets.** Layers:
+The bucket is **private and treated as holding unredacted secrets.**
 
-1. **Private bucket only.** No public bucket, no `r2.dev` dev URL, no public
-   custom domain. The bucket is never internet-readable.
-2. **Scoped, least-privilege API tokens — never account-scoped.**
-   - Per-machine **write+read** or **write-only** tokens for snapshot/push.
-   - **Read-only** tokens for pull-only consumers / analysis hosts.
-   - One token per machine so a lost laptop is revoked without rotating
-     everyone.
-3. **Credentials never live in the repo or in bundles.** Loaded from env
-   (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or R2 equivalents), an OS
-   keychain, or a `0600` credentials file outside the corpus/bundle trees.
-   `aha` must assert credentials never appear in `manifest.json`, bundle bytes,
-   `--json` output, receipts, or committed config.
-4. **TLS-only transport** to the S3 endpoint; SigV4 request signing.
-5. **Integrity verification on download.** Already enforced: ingest re-hashes
-   every file against the manifest and the bundle SHA against the key. A tampered
-   or truncated object is rejected before promotion. This defends against a
-   compromised or buggy storage layer.
-6. **Client-side encryption (recommended given no redaction).** Optionally
-   encrypt bundle bytes (e.g. `age` or AES-256-GCM with envelope keys) **before**
-   upload so Cloudflare only ever sees ciphertext. The encryption key is held by
-   the user, never in the bucket. Trade-off: the stored object's hash is the
-   ciphertext hash, so the plaintext `bundle_sha256` must travel in object
-   metadata / the index, and dedup is over ciphertext (deterministic encryption
-   or a content-derived key preserves dedup; random nonces break it — pick per
-   threat model).
-7. **Tamper resistance / retention.** Enable object versioning or bucket lock so
-   bundles cannot be silently overwritten or deleted; immutability + content
-   addressing already makes any mutation detectable.
-8. **Auditability.** Enable R2 event notifications / access logs so pushes and
-   reads are observable.
+1. **Private bucket only** — no public bucket, no `r2.dev` URL, no public custom
+   domain.
+2. **Scoped, least-privilege API tokens — never account-scoped.** Per-machine
+   write tokens for snapshot; read-only tokens for pull-only/analysis hosts; one
+   token per machine so a lost laptop is revoked without rotating everyone.
+3. **Credentials never in repo or bundles.** Loaded from env, OS keychain, or a
+   `0600` file outside the corpus/depot trees. `aha` must assert credentials
+   never appear in `manifest.json`, bundle bytes, `--json`, receipts, or config.
+4. **TLS-only transport**, SigV4 signing.
+5. **Integrity verification on download** — already enforced: ingest re-hashes
+   every file against the manifest and the bundle SHA against the key; tampered
+   or truncated objects are rejected before promotion.
+6. **Client-side encryption by default for remote depots (restic/kopia model).**
+   Encrypt bundle bytes before upload so Cloudflare sees only ciphertext; the key
+   is user-held, never in the bucket. This is a stronger answer to the
+   no-redaction problem than redaction alone. Note the dedup tension in the
+   audit.
+7. **Tamper resistance / retention** — object versioning or bucket lock so
+   bundles cannot be silently overwritten or deleted.
+8. **Auditability** — R2 event notifications / access logs.
+
+## Prior art
+
+We are reinventing a well-trodden shape: content-addressed immutable snapshots to
+an object-store backend with a separate, rebuildable index.
+
+| Tool | What we borrow | Difference / lesson |
+|---|---|---|
+| **restic** | `repository`/`snapshot`/`index`/`pack`/`backend` vocabulary; S3 backend; default-repo vs `--repo`; `check`/`prune` lifecycle | encrypts client-side **by default** (adopt); its "index" is blob-location, not full-text — our corpus is richer |
+| **kopia** | object-store-native, **multi-client-safe** shared repository; clean backend/index/manifest layering | closest operational analog to "many machines, one depot"; our content-addressed unique keys give the same write-safety |
+| **borg** | dedup + client-side encryption ideas | **not** object-store-native (needs FS/SSH, in-place mutation) — the example of what *not* to require |
+| **perkeep** | content-addressed blobs + **separate, rebuildable search index** + multi-backend sync | closest *architectural* analog to "bundle = receipt, corpus = index"; validates keeping search local and the depot a pure blob store |
+| **DVC / git-annex / OCI** | `push`/`pull` of content-addressed blobs to a `remote` | precedent for the verbs; we still prefer generalizing `snapshot`/`ingest` over minting them |
+| **rclone** | object-store transfer | its `sync` is a destructive mirror — a cautionary tale for the word "sync" |
+| `geekmuse/chronicle` | multi-machine session sync, path canonicalization | syncs **live files** (Git backend, CRDT); we replicate **immutable bundles** on demand |
+| `badlogic/pi-share-hf` | incremental collection, **redaction, review, upload** | the exact snapshot→redact→upload shape, plus the redaction we flag as a prerequisite |
+
+Key transferable lessons: **client-side encryption by default** (restic/kopia)
+beats relying on redaction; **the index is derived from blobs** (perkeep) — keep
+search local and the depot a pure receipt pool.
 
 ## Verification: how we verify the new functionality
 
-Per the installed `testing-best-practices` skill (real objects over mocks,
-table-driven, golden files, property tests, regression-test-first, contract
-tests for external APIs, both-directions for security, no live network in unit
-tests):
+Grounded in the installed `testing-best-practices` skill (real objects over
+mocks, table-driven, golden files, property tests, regression-test-first,
+contract tests for external APIs, both-directions for security, no live network
+in unit tests):
 
-- **One `BundleStore` contract suite, run against every implementation.** The
-  same table-driven behavior tests execute against `LocalFSStore`, an in-process
-  S3 fake (`gofakes3` / in-memory), and — gated behind a `//go:build
-  integration` tag with env credentials — a real R2 bucket. This is
-  differential testing: all backends must satisfy identical observable behavior.
-- **Use a real S3-compatible server in tests, not hand-written mocks.**
-  `gofakes3` in-process (or MinIO) gives real request/response and SigV4
-  behavior with **no live network**, satisfying "prefer real behavior" while
-  keeping CI hermetic. Avoid mocking the S3 client.
-- **SigV4 golden vectors.** Sign known requests and assert against AWS SigV4
-  published test vectors — a contract test that catches signer drift.
-- **Roundtrip property:** `Get(Put(x)) == x` and the returned bytes hash to the
-  expected SHA, over arbitrary bundle contents.
-- **Idempotency:** pushing the same bundle twice yields one object; pulling +
-  ingesting twice adds zero logical rows (reuse existing ingest-idempotence
-  tests through the remote path).
+- **One destination-driver contract suite, run against every driver.** The same
+  table-driven behavior tests run against `localFS`, an in-process S3 fake
+  (`gofakes3`/in-memory), and — behind a `//go:build integration` tag with env
+  creds — a real R2 bucket. Differential testing: all drivers satisfy identical
+  observable behavior.
+- **Use a real S3-compatible server, not hand mocks.** `gofakes3` in-process (or
+  MinIO) gives real request/response + SigV4 with **no live network**.
+- **SigV4 golden vectors** — sign known requests against AWS's published vectors
+  (contract test that catches signer drift).
+- **Roundtrip property:** `Get(Put(x)) == x` and the bytes hash to the expected
+  SHA.
+- **Idempotency:** pushing the same bundle twice → one object; pull+ingest twice
+  → zero new rows (reuse existing ingest-idempotence tests through the depot).
 - **Integrity regression (test-first):** mutate one byte of a stored object →
-  assert pull/ingest rejects it on SHA mismatch and never promotes it.
-- **Sync delta correctness:** given a known local ingested set and a known remote
-  index, assert the *exact* set of keys pulled equals `remote − local` (not just
-  "non-empty").
-- **Multi-machine end-to-end:** machine A and machine B push distinct bundles
-  through the fake store; machine C `pull`s and `search` returns hits from both
-  machines and can filter by `--machine`. This promotes the existing
-  "second machine" canonical example to run through R2.
-- **Encryption (if enabled):** `decrypt(encrypt(x)) == x`; ciphertext ≠
+  pull/ingest rejects it on SHA mismatch and never promotes it.
+- **Sync delta correctness:** assert the *exact* key set pulled equals
+  `catalog − corpus`, not just "non-empty."
+- **Multi-machine end-to-end:** machines A and B push distinct bundles through
+  the fake depot; C ingests and `search` returns hits from both with `--machine`
+  filtering.
+- **Encryption (default for remote):** `decrypt(encrypt(x)) == x`; ciphertext ≠
   plaintext; wrong key fails closed; both directions asserted.
-- **Security assertions (both directions):** credentials are usable for auth
-  **and** never appear in any emitted artifact (manifest, bundle, receipt,
-  `--json`, logs).
-- **Throttling/backoff:** fake store returns HTTP 429 → client retries with
-  bounded backoff and ultimately succeeds or returns a structured error
-  (deterministic, injected clock — no real sleeps).
-- **Doc-sync:** new commands/flags/config keys are validated against the registry
-  and config struct by the existing doc-sync test pattern
-  (`internal/cli/docs_test.go`, `flag_metadata_sync_test.go`).
+- **Security, both directions:** credentials authenticate **and** never appear in
+  any emitted artifact.
+- **Throttling/backoff:** fake depot returns HTTP 429 → bounded backoff with an
+  injected clock (no real sleeps).
+- **Doc-sync:** new commands/flags/config keys validated against the registry and
+  config struct (`internal/cli/docs_test.go`, `flag_metadata_sync_test.go`).
 - **No unconditional skips:** real-R2 tests live behind a build tag with a
-  documented rationale, not silent `t.Skip`.
+  documented rationale.
 
 ## Verification: how we confirm we did not break existing functionality
 
-- **Whole existing suite stays green:** `go test ./...`, `go test -race ./...`,
-  `go vet ./...`, parser fuzz, determinism tests, and **all golden files
-  unchanged** when remote is disabled. Bundle bytes and manifests are byte-for-
-  byte identical because R2 only changes transport.
-- **The no-network guarantee stays mechanically enforced for the core.** Rework
-  `TestNoNetworkImportsInApplicationPackages` so it still fails the build if any
-  package **other than `internal/remote`** imports a network package. This is the
-  key regression guard for the trust model; add it test-first before writing
-  `R2Store`.
-- **Remote-off path is provably inert:** with `remote.enabled=false`,
+- **Whole existing suite stays green:** `go test ./...`, `-race`, `go vet`, parser
+  fuzz, determinism tests, and **all golden files unchanged** with the depot
+  disabled. Bundle bytes and manifests are byte-identical — the depot only
+  changes transport.
+- **No-network guarantee stays mechanically enforced for the core.** The reworked
+  static test still fails the build if any package other than `internal/depot`
+  imports a network package; add it test-first before writing the `r2` driver.
+- **Depot-off path is provably inert:** with no depot configured,
   `snapshot`/`ingest`/`refresh`/`search`/`read`/`status`/`conflicts` take the
-  local code path and produce identical output (golden + characterization tests).
+  local path and produce identical output (golden + characterization).
 - **Trust Guarantees 1 and 2 untouched:** snapshot read-only behavior and
-  immutable-bundle ingest are unaffected (R2 changes neither source reads nor
-  parse-time identity). Their existing tests must still pass unchanged.
-- **Characterization on the bundle format:** existing v1 bundles round-trip
-  through `Put`/`Get` and ingest identically — the tar.zst/manifest schema is not
-  modified by this feature.
-- **Performance non-regression:** large-corpus ingest/parse benchmarks are
-  unchanged with remote off; remote on adds only network time around the
-  unchanged local pipeline.
+  immutable-bundle ingest are unaffected; their tests pass unchanged.
+- **Bundle-format characterization:** existing v1 bundles round-trip through the
+  drivers and ingest identically.
+- **Performance non-regression:** large-corpus ingest/parse benchmarks unchanged
+  with the depot off.
 
 ## Hyrum's Law implications
 
@@ -418,71 +537,123 @@ tests):
 > promise in the contract: all observable behaviors of your system will be
 > depended on by somebody.
 
-Putting bundles in a shared bucket vastly widens the set of *observable*
-behaviors, so things `aha` currently treats as internal become de facto
-contracts:
+A shared depot vastly widens *observable* behavior, so things `aha` treats as
+internal become de facto contracts:
 
-- **Object key layout.** Once anyone writes a lifecycle rule, dashboard, or
-  `aws s3 ls` script against `bundles/<machine>/<date>/...`, that layout is load-
-  bearing even though it is "internal." Mitigation: the explicit `bundles/v1/`
-  and `index/v1/` versioned prefixes, golden-tested key/index shapes, and a
-  documented migration path before any layout change.
-- **Bundle filename and manifest schema.** Because bundles are now directly
-  fetchable, external tools will parse `manifest.json` and the tar layout
-  themselves — fields marked `omitempty` or "internal" will be depended on.
-  Treat the bundle schema (`agent-session-snapshot-bundle/v1`) as a real public
-  contract with explicit versioning, not an implementation detail.
-- **The content hash is now a contract.** Determinism + content addressing means
-  consumers will pin and dedup on `bundle_sha256`. Any change to zstd level, tar
-  metadata normalization, or manifest field ordering changes the hash and breaks
-  dedup and external pins. The existing determinism tests must guard this even
-  harder once hashes are shared.
-- **Index schema.** `index/v1/<machine>.json` will be read by people, not just
-  `aha`. Version it and golden-test it.
-- **Strong consistency.** R2's read-after-write will be relied upon for "push
-  then immediately pull." Document this as the assumed model so a future caching
-  or multi-region change is evaluated against that dependency.
-- **JSON output and error/throttle behavior.** New `--json` remote fields, and
-  even observable retry timing / HTTP 429 surfacing, will be scripted against.
-  Once present they are effectively unremovable; add them deliberately and keep
-  them stable.
+- **Object key layout.** Once anyone scripts `aws s3 ls bundles/v1/…` or writes a
+  lifecycle rule, the layout is load-bearing. Mitigation: versioned `bundles/v1/`
+  and `catalog/v1/` prefixes, golden-tested key/catalog shapes, documented
+  migration before any change.
+- **Bundle filename, manifest schema, catalog schema.** Directly fetchable
+  bundles mean external tools parse them; `omitempty`/"internal" fields will be
+  depended on. Treat the bundle schema (`agent-session-snapshot-bundle/v1`) and
+  catalog schema as real versioned contracts.
+- **The content hash is a contract.** Determinism + content addressing means
+  consumers pin and dedup on `bundle_sha256`; any change to zstd level, tar
+  metadata, or manifest field order breaks dedup and external pins. The existing
+  determinism tests must guard this harder.
+- **Strong consistency.** "Push then immediately pull" will be relied upon;
+  document it as the assumed model.
+- **JSON output and throttle/retry behavior.** New `--json` depot fields and even
+  observable retry timing / HTTP 429 surfacing will be scripted; once present
+  they are effectively unremovable.
 
-General mitigations, consistent with `aha`'s existing discipline: prefer
-**explicit versioned contracts** over "this is internal" labels (labels do not
-stop dependence), pin and golden-test every externally observable surface (keys,
-index, manifest, hashes, JSON), and ship a deprecation/migration path rather than
-silent breaking changes.
+Mitigations, consistent with `aha`'s existing discipline: prefer **explicit
+versioned contracts** over "this is internal" labels, golden-test every
+observable surface (keys, catalog, manifest, hashes, JSON), and ship migration
+paths rather than silent breaks.
+
+## Conceptual integrity audit
+
+Judged against Brooks's standard — the system should reflect **one** set of
+design ideas, as if from a single mind, rather than good-but-uncoordinated
+additions.
+
+**Where it holds (strong):**
+
+- **One mental model, generalized — not a bolted-on mode.** The feature adds
+  nouns (destination, depot, catalog) but **no new verbs**: `snapshot` still
+  makes a receipt, `ingest` still builds the index, now location-agnostic via
+  `--depot`. The tool reads as "the same `aha`, with the depot able to live in
+  R2," which is the signature of conceptual integrity.
+- **Clean three-layer separation** — destination driver (transport) / depot
+  (logical store) / corpus (index) — mirrors restic (backend/repo) and perkeep
+  (blobs/index). Principled, not ad hoc.
+- **Vocabulary is coherent and each word means one thing.** Retiring `remote`
+  (asymmetric), `index` (collided with the corpus), and `BundleObject` (S3 leak)
+  removed the cracks the earlier draft had. `depot` vs `destination` is a
+  justified role-vs-primitive pair (like git `origin` vs a remote), not
+  redundancy.
+- **Defaults preserved.** Depot off by default; all v1 behavior, output, and
+  trust guarantees are unchanged — the relaxation is explicit and bounded.
+
+**Genuine tensions (must be decided, not hidden):**
+
+1. **Content-addressing vs. client-side encryption — the sharpest tension.**
+   Two core ideas partially conflict: dedup by *plaintext* SHA, and zero-knowledge
+   encryption. Random-nonce encryption breaks cross-machine dedup and decouples
+   the stored key from the plaintext hash; convergent encryption preserves dedup
+   but leaks plaintext equality (a real confidentiality weakening). **Verdict:**
+   default to per-depot authenticated encryption (not convergent), carry the
+   plaintext `bundle_sha256` in encrypted catalog/metadata, and accept that two
+   machines holding an identical bundle store two ciphertexts — rare, since
+   bundles are per-machine. This is the one place the model is not perfectly
+   clean; it must be a stated, threat-model-driven decision.
+2. **"Live sync: No" non-goal vs. `refresh` doing push+pull.** `refresh`
+   replicates **discrete immutable bundles on demand** — `git fetch`-like, not
+   Dropbox-like. It does not continuously sync or mutate live session files, so
+   it honors the non-goal's spirit. The spec must say this explicitly and keep
+   the word "sync" off the command surface (done).
+3. **"Everything stays on your machine" vs. the whole feature.** The biggest
+   shift, resolved by opt-in + off-by-default + encryption-by-default +
+   strengthened warnings. Integrity is preserved *because* the default is
+   unchanged and the relaxation is explicit and bounded — not an incoherent
+   reversal.
+
+**Minor warts (acceptable, noted not hidden):**
+
+- `--depot` is meaningful for depot-touching commands but inert for
+  `search`/`read`/`conflicts`; `status --depot` is a normally-local command that
+  optionally reaches the network. Acceptable with clear help text.
+- Two `init` verbs (`init`, `depot init`) — mirrors git `init` vs `remote add`.
+
+**Overall:** high conceptual integrity. The feature extends the existing pipeline
+rather than paralleling it; the one unavoidable tension (dedup vs. encryption) is
+explicit, and the two posture relaxations are deliberate and bounded.
 
 ## Rejected and deferred alternatives
 
-- **Store `corpus.db` in R2 as the shared query engine.** Rejected: SQLite is
-  unsafe for concurrent multi-writer access over object storage, and it
-  contradicts "SQLite is the engine, not a cache."
-- **Query bundles in place over the network for each analysis.** Rejected:
-  every `search`/`read` would become many network round trips and lose offline
-  use, FTS, and determinism.
-- **Publish a read-only prebuilt `corpus.db` snapshot to R2** for fast bootstrap
-  of new machines. Deferred as a future convenience: a single-writer host
-  publishes an immutable, versioned, read-only corpus snapshot that others
-  download to seed before incremental `pull`. Treated as a cache/replica, never
-  the multi-writer source of truth.
-- **Per-session objects instead of bundles.** Rejected: explodes object/op
-  counts and discards the deterministic, content-addressed bundle that makes
-  dedup and integrity trivial.
+- **`corpus.db` in R2 as a shared query engine** — rejected: unsafe multi-writer
+  SQLite; contradicts "SQLite is the engine, not a cache."
+- **Query bundles in place over the network per analysis** — rejected: many
+  round-trips, loses offline use, FTS, determinism.
+- **Publish a read-only prebuilt `corpus.db` snapshot to the depot** for fast
+  bootstrap — deferred: a single-writer host publishes an immutable, versioned,
+  read-only corpus snapshot others download to seed before incremental `ingest`.
+  A cache/replica, never the multi-writer source of truth.
+- **Per-session objects instead of bundles** — rejected: explodes object/op
+  counts and discards the deterministic, content-addressed receipt.
+- **`push`/`pull`/`sync` verbs** — rejected: `sync` collides with a non-goal; the
+  others carry git baggage. Generalizing `snapshot`/`ingest` via `--depot` keeps
+  the bundle→corpus seam visible.
 
 ## Definition of done for this feature
 
-- `remote.enabled=false` by default; all v1 behavior, output, golden files, and
-  trust guarantees are unchanged.
-- `internal/remote` is the only package importing a network package, enforced by
+- Depot off by default; all v1 behavior, output, golden files, and trust
+  guarantees unchanged.
+- `internal/depot` is the only package importing a network package, enforced by
   the reworked static test.
-- `push`/`pull`/`sync` work through a `BundleStore` with a contract suite passing
-  against local FS and an in-process S3 fake; real-R2 tests exist behind a build
-  tag.
+- `snapshot`/`ingest`/`refresh` + `aha depot init/ls/verify` work through the
+  destination-driver contract suite against local FS and an in-process S3 fake;
+  real-R2 tests exist behind a build tag.
 - Integrity verification rejects tampered/truncated objects (regression test).
+- Client-side encryption on by default for remote depots; roundtrip + wrong-key
+  tests pass.
 - Credentials never appear in any emitted artifact (security test, both
   directions).
-- `docs/trust.md` and the README state the new opt-in remote posture and the
-  unredacted-upload warning; doc-sync tests cover new commands/flags/config.
-- Key layout, index schema, manifest schema, and content-hash determinism are
+- `docs/trust.md` and README state the opt-in depot posture and the
+  unredacted-upload warning; doc-sync covers new commands/flags/config.
+- Key layout, catalog schema, manifest schema, and content-hash determinism are
   versioned and golden-tested as public contracts.
+- The conceptual-integrity tensions above are explicitly decided (esp. dedup vs.
+  encryption), not left implicit.
