@@ -1,15 +1,40 @@
 # aha — Agent History Aggregator
 
-`aha` turns local coding-agent histories into a private, searchable corpus. It snapshots Pi, Claude Code, and Codex sessions into deterministic `tar.zst` bundles, ingests those bundles into SQLite + FTS5, and lets humans or agents search then read the original context.
+`aha` is local search and retrieval for coding-agent history. It turns scattered Pi, Claude Code, and Codex transcripts into a private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and agent-friendly refs.
 
 Use it when agent conversations are becoming project memory and you want one local archive across tools and machines.
+
+## Who is this for?
+
+`aha` is for developers who use coding agents heavily and want past agent conversations to become searchable project memory.
+
+It is especially useful if you:
+
+- use multiple tools such as Pi, Claude Code, and Codex;
+- work across multiple machines;
+- need private local search over agent transcripts;
+- want agents/scripts to retrieve prior context with stable JSON and refs;
+- are currently using `rg`, ad hoc scripts, or tool-specific history search.
+
+## What does it replace?
+
+Many users start with:
+
+- `rg` over `~/.claude/projects`, `~/.pi/agent/sessions`, or `~/.codex/sessions`;
+- one-off JSONL parsing scripts;
+- Claude-only history explorers;
+- copy-pasted notes in `CLAUDE.md`, `AGENTS.md`, or project docs;
+- asking an agent to rediscover old context.
+
+`aha` turns those scattered histories into one local SQLite + FTS corpus with stable refs and full-context reads.
 
 ## Why use it?
 
 - **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
 - **Private by default**: everything stays on your machine unless you move the bundle/corpus.
 - **Portable history**: copy a bundle from another machine and `aha ingest` it.
-- **Agent-friendly retrieval**: search emits JSON/refs; read retrieves full context so agents do not answer from snippets alone.
+- **Better than snippets**: search finds leads; read retrieves full context so humans and agents do not answer from snippets alone.
+- **Agent-friendly retrieval**: JSON, refs, Markdown, and stable `search → read` workflows.
 - **Auditable trust claims**: read-only source access and no-network behavior are tested.
 
 ## Privacy warning
@@ -65,6 +90,31 @@ aha read '<session-key>#<entry-id>' --json
 ```
 
 Expected result: `search` returns matching messages/artifacts; `read` returns surrounding transcript entries or artifact text.
+
+## Search functionality
+
+`aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artifacts while preserving raw source files for later reads.
+
+Search supports:
+
+- full-text queries over messages and artifacts;
+- filters: `--source`, `--machine`, `--role`, `--after`, `--before`, `--path`, `--limit`;
+- output modes: human text, `--json`, `--refs`, `--files`, `--md`;
+- stable result identity: structured `ref` plus copy-pastable `ref_text`;
+- literal flag-looking queries with `--`, e.g. `aha search -- --json`;
+- coherent retrieval: every search hit should be readable with `aha read <ref>`.
+
+What it does **not** do yet: semantic/vector search, ranking beyond SQLite FTS scoring plus deterministic ordering, OCR/image caption search, branch/thread reconstruction, or advanced query UI.
+
+### Compared with Claude History Explorer and QMD
+
+| Tool | Search scope | Search engine | Retrieval style | Best fit |
+|---|---|---|---|---|
+| `aha` | Pi + Claude Code + Codex, across machines after ingest | SQLite FTS5 over a local corpus | Search returns refs; `read <ref>` expands to full context/artifact text | Private cross-agent archive and agent-friendly retrieval |
+| Claude History Explorer | Claude Code history only | On-demand parsing/regex-style local exploration | Browse/search Claude sessions directly | Lightweight Claude-only exploration |
+| QMD-style workflows | Usually document/session search with agent-oriented outputs | Depends on QMD setup | Treat snippets as leads, then retrieve cited context | Query/read discipline and citation-like workflows |
+
+`aha` borrows the QMD lesson that snippets are leads, not evidence: agents should search, read the returned refs, then answer from retrieved context. It differs from Claude History Explorer by snapshotting immutable multi-source bundles and merging them into a reusable local corpus instead of searching one live Claude tree on demand.
 
 ## Core journeys
 
