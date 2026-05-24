@@ -505,11 +505,13 @@ Directory layout:
   corpus.db
   blobs/
     bundles/{bundle_sha256}.tar.zst
-    files/{file_sha256}.zst
+    files/{file_sha256}.zst        # includes artifact file bytes
     images/{image_sha256}.{ext}
-    artifacts/{artifact_sha256}
-  reports/
 ```
+
+Artifact bytes are stored as ordinary file blobs under `blobs/files/`; artifact
+text and provenance live in the SQLite `artifacts` table. Ingest reports are
+returned to the caller and emitted to stdout/JSON, not persisted to disk.
 
 V1 uses `modernc.org/sqlite` with SQLite FTS5. SQLite schema, FTS, constraints, indexes, transactions, and migrations are part of the product contract; filesystem blobs store immutable large bytes.
 
