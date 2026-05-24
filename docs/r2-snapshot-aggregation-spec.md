@@ -279,7 +279,6 @@ subtrees under `~/.aha`:
   depot/        ← the depot (shared source of truth: bundles + catalog)
   corpus.db     ← the corpus (local database/index)
   blobs/        ← corpus's own content-addressed blobs (files/, images/, …)
-  reports/
 ```
 
 Honest cost: with a local depot the same bundle bytes can exist twice — once in
