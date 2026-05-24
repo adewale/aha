@@ -64,10 +64,12 @@ func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, js
 
 func pendingDepotRefs(refs []depot.BundleRef, ingested map[string]bool) []depot.BundleRef {
 	out := refs[:0]
+	seen := map[string]bool{}
 	for _, ref := range refs {
-		if ref.BundleSHA256 == "" || ingested[ref.BundleSHA256] {
+		if ref.BundleSHA256 == "" || ingested[ref.BundleSHA256] || seen[ref.BundleSHA256] {
 			continue
 		}
+		seen[ref.BundleSHA256] = true
 		out = append(out, ref)
 	}
 	return out
