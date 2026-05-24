@@ -202,20 +202,97 @@ randomised default would silently create separate buckets that never merge — t
 opposite of the feature. So the default must be stable and identical everywhere;
 a second depot is an explicit override (`--depot r2:aha-archive`).
 
-Local depot default `~/.aha/depot`, giving:
+Local depot default `~/.aha/depot`, overridable with `--depot local:/some/path`
+(a USB drive, NFS mount, or synced folder — which is how a *local* depot can
+still be shared across machines). A local depot is just a directory whose
+internal layout **mirrors the R2 key space**, so the `local` and `r2` drivers
+stay symmetric (one writes paths, the other object keys):
+
+```text
+<depot-root>/                       # default ~/.aha/depot ; or --depot local:PATH
+  depot.json                        # marker: schema, depot_id, layout version
+  bundles/
+    v1/
+      <bundle_sha256>.tar.zst       # the immutable bundle, named by content hash
+      ...
+  catalog/
+    v1/
+      <machine_id>.json             # one append-mostly shard per machine
+```
+
+The bundle file is named by its **content hash**, not the pretty
+`aha-sessions-…` name; the human-readable filename and per-bundle provenance live
+in the catalog shard (on R2 they may also sit in object metadata; a local FS has
+none, so the catalog is the canonical record).
+
+Populated, for the three-machine walkthrough:
+
+```text
+~/.aha/depot/
+  depot.json
+  bundles/v1/
+    3f9a…A.tar.zst          # from ade-mbp
+    7c21…B.tar.zst          # from work-mac
+    a8e0…C.tar.zst          # from linux-box
+    b4d5…A2.tar.zst         # ade-mbp, later/grown
+  catalog/v1/
+    ade-mbp.json            # lists 3f9a…A, b4d5…A2
+    work-mac.json           # lists 7c21…B
+    linux-box.json          # lists a8e0…C
+```
+
+A **catalog shard** (`catalog/v1/<machine>.json`) is append-mostly, one per
+machine so there is no write contention:
+
+```json
+{
+  "schema": "aha-depot-catalog/v1",
+  "machine_id": "ade-mbp",
+  "bundles": [
+    { "bundle_sha256": "3f9a…", "bundle_id": "01J…",
+      "captured_at": "2026-05-23T09:14:02Z", "bytes": 734512, "sessions": 41,
+      "filename": "aha-sessions-ade-mbp-2026-05-23T09-14-02Z-3f9a.tar.zst" }
+  ]
+}
+```
+
+The **`depot.json`** marker lets `depot init` create or recognize a depot and
+`depot verify` check the layout version (the restic repo-config / kopia
+format-blob analog):
+
+```json
+{ "schema": "aha-depot/v1", "depot_id": "…", "layout": "v1",
+  "created_at": "2026-05-23T09:00:00Z", "created_by": "aha 0.1.0" }
+```
+
+**Atomic writes.** `snapshot`/push writes to a temp file and renames into
+`bundles/v1/<sha>.tar.zst`, skipping if the hash already exists — the same
+temp-file + atomic-rename + skip-if-present discipline the corpus blob store
+already uses — so a transient `bundles/v1/.tmp-*` may appear briefly during a
+write.
+
+**The depot is not the corpus, even when both are local.** They are separate
+subtrees under `~/.aha`:
 
 ```text
 ~/.aha/
-  depot/                          # the depot (bundle pool), when its type is local
-    bundles/v1/<bundle_sha>.tar.zst
-    catalog/v1/<machine>.json     # per-machine shard: cheap listing, no write contention
-  corpus.db                       # the corpus (local database) — separate subsystem
-  blobs/                          # corpus's own content-addressed blobs
+  depot/        ← the depot (shared source of truth: bundles + catalog)
+  corpus.db     ← the corpus (local database/index)
+  blobs/        ← corpus's own content-addressed blobs (files/, images/, …)
+  reports/
 ```
 
-The `v1/` segment versions the key layout. Key scheme, catalog schema, manifest
-schema, and the bundle content hash are **explicit, versioned public contracts**
-(see Hyrum's Law), not incidental internals.
+Honest cost: with a local depot the same bundle bytes can exist twice — once in
+`depot/bundles/v1/<sha>.tar.zst` and again in the corpus blob store after
+`ingest`. That duplication is the price of a fully self-contained corpus so
+`read`/`search` work offline even when the depot is a remote R2 bucket. Possible
+later optimization: reflink/hardlink when depot and corpus share a filesystem, or
+let a local depot double as the corpus bundle store — deferred, not v1.
+
+The `v1/` segment versions the key layout. The key scheme, the `aha-depot/v1`
+marker, the `aha-depot-catalog/v1` shard schema, the manifest schema, and the
+bundle content hash are **explicit, versioned public contracts** (see Hyrum's
+Law), not incidental internals.
 
 ## Depot vs. corpus
 
