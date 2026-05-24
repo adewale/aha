@@ -10,10 +10,11 @@ tags:
   - state-machine-testing
   - fuzzing
   - types
+  - sqlite
   - go
   - specification
 source_type: design
-status: draft-spec
+status: implementation-prep
 aliases:
   - CbC refactor
   - aha correctness spec
@@ -23,438 +24,743 @@ aliases:
 
 ## Purpose
 
-`aha` is correct today by **test-and-convention**: its invariants (determinism,
-idempotency, append-only merge, conflict quarantine, read-only sources,
-search/read coherence) live in imperative code paths guarded by tests. The
-system even has the right instinct — "never delete an entry; add, link, or
-quarantine" — but enforces it by remembering not to write `DELETE`, not by
-making deletion impossible.
+`aha` already has unusually strong tests for a young local-history tool:
+archive hardening, parser fuzzing, SQLite integration tests, depot contracts,
+R2 fake-S3 tests, generated command docs, golden renderers, property-style
+checks, and race coverage. The remaining correctness risk is not lack of tests;
+it is that the most important invariants still live in **string conventions,
+imperative sequencing, and duplicated checks**.
 
-This spec defines a refactor that moves each invariant from *"a test will catch
-us if we break it"* to *"the broken code does not compile, the database rejects
-it, or the value cannot be constructed."* Where construction cannot reach (the
-untyped JSON boundary, cross-run determinism, merge algebra), the residual risk
-is pinned by **property-based testing (PBT)**, **state-machine / model-based
-testing**, **fuzzing**, **adversarial model-gap tests**, **exhaustive
-enumeration**, and **mutation testing** — not by example tests alone.
+This spec defines a refactor that moves those invariants toward construction:
 
-Verification techniques and the type-vs-test discipline here are drawn from
-`adewale/testing-best-practices` (notably its `correctness-by-construction`,
-`mutation-testing`, `exhaustive-testing`, and `deterministic-time` references).
+- the invalid value cannot be constructed;
+- the invalid row cannot be inserted;
+- the invalid operation is not exposed by the interface;
+- the invalid sequence is rejected by a model/state-machine test;
+- where Go/SQLite cannot make it impossible, the residual risk is explicitly
+  tested and documented.
 
-This is an engineering-quality refactor, not a feature change. User-visible
-behavior is preserved except where the identity format necessarily bumps to a
-new bundle/corpus version (Phase 4).
+This is not a rewrite. It is a staged hardening plan that preserves behavior
+until the identity-format migration phase.
 
 ## Non-goals
 
-- No new product features (no semantic search, redaction, new adapters).
-- No rewrite. Package boundaries (`cmd/aha`, `internal/*`) stay.
-- No move off SQLite, `modernc.org/sqlite`, `tar.zst`, or stdlib `flag`.
-- No attempt to type the *raw* input. External agent JSONL stays untyped and
-  lossless; only the normalized projection gets strong types.
-- No formal proofs or a dependently-typed rewrite. "Construction" here means
-  smart constructors, closed types, encapsulation, and database constraints —
-  the strongest guarantees Go and SQLite actually provide.
+- No new adapters, semantic search, redaction, MCP, OCR, or product features.
+- No move away from SQLite/FTS5, `modernc.org/sqlite`, `tar.zst`, JSONC config,
+  or stdlib `flag`.
+- No attempt to type or normalize every raw input field. Agent JSONL is
+  open-world and evolving; raw bytes stay lossless.
+- No claim of formal proof. In Go, “correct by construction” means opaque types,
+  smart constructors, closed internal variants, DB constraints, repository
+  encapsulation, static guards, and model/property/fuzz tests.
+
+## Current-state accuracy baseline
+
+The plan below is grounded in the current code shape:
+
+- `internal/model/model.go` has stringly `HitRef` fields and optional artifact
+  fallback behavior.
+- `internal/corpus/ingest.go` constructs session keys by string concatenation,
+  writes `fts_messages`/`fts_artifacts` manually, and reads wall-clock time in
+  ingest bookkeeping.
+- `internal/corpus/read.go` mixes canonical lookup and fuzzy human resolution,
+  so canonical refs can still encounter runtime “ambiguous” branches.
+- `internal/corpus/schema.go` has primary/unique keys but few foreign keys,
+  checks, or triggers.
+- malformed JSONL lines currently become diagnostics while the **source file**
+  is preserved as a blob; there is no per-line malformed-entry row.
+- deterministic bundle coverage is currently repeat/shuffle byte equality, not
+  a committed golden byte fixture.
+- fuzz targets exist for parser, refs, archive, and depot address/key parsing;
+  `rapid` is now available for shrinkable PBT/stateful testing.
+
+When this spec says “target,” it means proposed construction, not current
+behavior.
 
 ## Principles
 
-1. **Make illegal states unrepresentable.** A value that violates an invariant
-   should not be constructible. Prefer a type over a check, a constraint over a
-   convention.
-2. **Parse, don't validate.** Untyped input crosses into typed values exactly
-   once, at one fallible constructor per source, which yields either a
-   well-formed value or a recorded diagnostic.
-3. **Open-world boundary.** The raw blob path stays permissive and lossless.
-   Unknown roles, fields, or block types degrade to "stored raw + diagnostic,"
-   never to a panic or a dropped row. Strong types live on the corpus side of
-   the boundary; permissive bytes on the source side. This protects the top
-   invariant (never lose an entry) from over-typing.
-4. **Total functions over partial ones.** Reads and codecs should be total:
-   `ref -> context | typed-not-found`, never "ambiguous at runtime."
-5. **Constraints are the source of truth.** Storage invariants belong in the
-   schema (foreign keys, `CHECK`, `UNIQUE`, triggers), not in the ordering of
-   imperative inserts.
-6. **Determinism by encoder.** Canonical output comes from a type that can only
-   emit one byte sequence, with golden tests as a backstop rather than the
-   primary guarantee.
-7. **Verification matches the risk class.** Types eliminate a class of bugs;
-   PBT/state-machine/fuzz guard the residue that types cannot reach.
-8. **Prove the invariant, then attack it.** Every invariant gets a test that
-   proves it holds (Type A) *and* a model-gap test that tries to construct the
-   state the model claims is impossible (Type B). A Type B test is only
-   meaningful if a mechanism actually rejects the state; otherwise add the
-   mechanism first.
-9. **Collapse repeated checks.** The same guard at three or more layers means an
-   invariant is leaking; move it into one type, constructor, or constraint and
-   delete the downstream re-checks. Keep multiple layers only when they face
-   genuinely different adversaries (untrusted input, process boundary, recovery).
+1. **Make illegal states unrepresentable where Go/SQLite can.** Prefer a type,
+   constructor, constraint, trigger, or capability over a comment or repeated
+   runtime check.
+2. **Parse once at the boundary.** Untyped JSON, paths, refs, depot addresses,
+   and config values cross into typed values exactly once.
+3. **Preserve raw input.** Strong typing must never turn unknown agent data into
+   data loss. Unknown input yields raw bytes plus diagnostics.
+4. **Separate canonical APIs from human convenience.** Canonical refs and keys
+   should be total. Fuzzy/prefix/human resolution should be explicitly fallible.
+5. **Put storage invariants in storage.** If a corpus row relation is invariant,
+   encode it as a `PRIMARY KEY`, `UNIQUE`, `CHECK`, `FOREIGN KEY`, or trigger.
+6. **Do not overclaim.** SHA-256 identity is collision-resistant, not
+   mathematically injective. FTS triggers synchronize normal writes; direct FTS
+   table writes remain possible unless repository/static guards block them.
+7. **Defense in depth only for different adversaries.** Do not repeat the same
+   internal check across layers; keep multiple layers when they defend different
+   risks: hostile input, recovery, external storage, or forensic repair.
+8. **Every invariant needs a mechanism and an oracle.** Mechanism: type/schema/
+   capability/trigger. Oracle: example, property, fuzz, state machine,
+   exhaustive, mutation, or static guard.
 
 ## Invariant inventory
 
-Each invariant gets a construction-level mechanism *and* a generative test that
-fails if the mechanism is removed. Convention-only enforcement is not done.
-
-| Invariant | Enforced today | Target construction | Primary verification |
+| Invariant | Current enforcement | Target construction | Verification |
 |---|---|---|---|
-| Stable identity, no collisions | string concat `source+":"+machine+":"+sid` (`ingest.go:363`) | `SessionKey`/`EntryID` value types; content-addressed canonical encoding | PBT injectivity + fuzz codec |
-| Ref round-trips | `HitRef` struct of optionals + `firstNonEmpty` smear (`model.go:18-75`) | `HitRef` sum type with one total codec | PBT round-trip + fuzz |
-| Read is total | runtime "ambiguous session/entry" (`read.go:77-144`) | unique keys ⇒ lookup; fuzzy human match split out | state-machine: every entry readable |
-| Index decision is total | role string switch with silent default (`ingest.go:438-450`) | closed `Role` type; exhaustive decision | PBT over all roles + lint |
-| Idempotent ingest | `insert or ignore` + attempt logic (`ingest.go:39-69`) | `UNIQUE` constraints encode dedup | state-machine: `ingest∘ingest = ingest` |
-| Append-only merge | absence of `DELETE`/`UPDATE` | trigger rejects delete/update on `entries` | state-machine: entries monotone |
-| Conflict quarantine | imperative select-then-branch (`ingest.go:386-402`, `452-469`) | `INSTEAD OF` trigger routes same-id/diff-hash to `conflicts` | state-machine: exactly-one + conflict row |
-| FTS never drifts | hand dual-write (`ingest.go:412-421`) | FTS5 external-content + triggers | state-machine: `messages ↔ fts` agree |
-| Deterministic bundles | golden byte compare | canonical encoder type | PBT: encode is a function; fuzz inputs |
-| Read-only sources | static grep tests + path checks (`safety/paths.go`) | source handle exposes no write methods | type (compile) + retained static guard |
-| Parser never crashes | `FuzzParseGenericJSONL` (`parser_test.go:11`) | constructor always yields non-empty id + raw | fuzz with post-conditions |
+| Local-only by default | docs + static no-network test | network imports only in `internal/depot`; R2 only via explicit depot address/config | static import guard + CLI JSON contract tests |
+| Credentials never persist | R2 config omits secrets; tests check non-leakage | secret-bearing type never serializes; config writer cannot accept secret fields | config round-trip + redaction/non-leak tests |
+| Source reads are read-only | adapter convention + static grep | adapter/source capability exposes read/discover/open only; no write authority | compile-time interface + static mutation guard |
+| Source path safety | path containment checks | `SafePath`/`SourceRoot` constructed once; write destinations require corpus/depot roots | PBT path containment + Type B unsafe path tests |
+| Parser never drops raw source bytes | source file blob stored before parse | raw file always stored; optional malformed-line diagnostics table for per-line raw | fuzz postconditions + fixture conformance |
+| Parsed entry identity non-empty | fallback `line-%06d-hash` | `EntryID` constructor cannot return empty; zero value invalid at DB boundary | constructor PBT + DB `CHECK(entry_id <> '')` |
+| Session identity stable | `source + ':' + machine + ':' + id` | `SessionKey` from canonical length-prefixed tuple; tuple columns retained for audit | deterministic/collision-class PBT + migration tests |
+| Identity collision handling | primary keys + conflict branch | collision-resistant key plus tuple uniqueness; hash collision becomes explicit conflict | Type B same-key/different-tuple attempt |
+| Refs round-trip | `HitRef` optional fields + parser | sealed ref variants: `MessageRef`, `ArtifactRef`; one versioned string codec | rapid PBT + fuzz + search/read property |
+| Canonical read is total | `read` resolver may be ambiguous | `ReadCanonical(MessageRef|ArtifactRef)` exact lookup; `ResolveHuman` separate | state-machine: every emitted ref readable |
+| Human resolution is honest | ambiguous errors at runtime | fallible resolver returns typed `NotFound`/`Ambiguous` with candidates | table tests + PBT prefix escaping |
+| Bundle determinism | repeat/shuffle byte equality tests | canonical archive/manifest encoder with sorted input and pinned metadata | PBT shuffle invariance + committed golden fixture |
+| Bundle honesty | archive validation/budgets | manifest/data/checksum validation in one typed reader | fuzz corruptions + Type B malformed bundle tests |
+| Bundle identity | content SHA | `BundleRef` always content-addressed; key validates SHA | depot contract + fuzz key/address tests |
+| Depot object truth | bundle object SHA + catalog refs | bundle objects are durable truth; catalog shards are repairable indexes | local/fake-R2 contract + repair state machine |
+| Catalog merge laws | merge helper + property tests | shard merge is idempotent, commutative, deterministic | rapid/quick algebra tests + concurrent fake-R2 tests |
+| Corpus ingest idempotent | bundle PK/unique + explicit skip + `insert or ignore` | bundle identity and row identity encoded as uniqueness; attempt log append-only | state-machine `ingest∘ingest = ingest` |
+| Entries append-only | no `DELETE`/`UPDATE` convention | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | Type B direct SQL update/delete tests |
+| Same `(session,entry)` diff hash quarantined | select-then-branch in Go | `BEFORE INSERT` trigger or writable-view trigger writes `conflicts` and ignores overwrite | Type B conflict insertion + state machine |
+| Cross-machine conflicts preserved | Go query/branch | unique source tuple + conflict relation; no overwrite path | multi-machine model tests |
+| Message rows belong to entries | primary keys but no FK | FK `messages(session_key,entry_id) → entries` | Type B orphan insert rejected |
+| Asset rows belong to entries/images | primary key only | FKs from `entry_assets` to `entries`; image hash relation checked where possible | Type B orphan asset tests |
+| Artifact rows are searchable/readable | manual artifact FTS write | artifact row + FTS trigger/reconciler; artifact ref codec | search/read property includes artifacts |
+| FTS cannot drift through normal writes | manual dual-write | external-content FTS + insert/update/delete triggers for messages/artifacts | state machine + reconciliation query |
+| FTS direct writes are contained | not structurally blocked | repository encapsulation + static guard banning direct FTS writes outside schema/reconciler | static guard + Type B reconciliation test |
+| Blob rows match files | staging + hashes + rollback tests | blob publisher owns atomic write; corpus verifier checks row↔blob↔hash | failure-injection tests + `doctor`/verify tests |
+| Orphan blobs are benign/repairable | some cleanup on bundle promote failure | explicit orphan policy: allowed staging or repairable orphan, never missing committed blob | state-machine + repair tests |
+| Status counts exact | integration tests | status reads from constrained schema/views | property/state-machine count agreement |
+| JSON CLI contracts stable | generated docs + tests | registry metadata and renderers are source of truth | docs sync + golden + JSON envelope tests |
+| Time is explicit | multiple `time.Now`, one `time.Sleep` retry | `Clock` and `Sleeper/Backoff` capabilities at production seams | static debt guard then forbidigo/static ban |
+| No new correctness debt | code review convention | debt inventory tests fail if raw identity/time/FTS patterns spread | `internal/testquality` static inventory |
 
-Note the one place the codebase already does construction right: content-addressed
-blobs are temp-written and atomically renamed, never overwritten in place
-(`ingest.go:713-763`). The refactor applies that same "never overwrite" discipline
-to rows and identity.
+## Construction design
 
-## Foundational primitive changes
+### 1. Typed boundary values
 
-### Identity as a constructed type
+Introduce opaque values in `internal/model` or focused subpackages:
 
-`session_key` and `entry_id` stop being free strings.
+- `SourceName`
+- `MachineID`
+- `SourceSessionID`
+- `SessionKey`
+- `EntryID`
+- `BundleSHA256`
+- `ArtifactSHA256`
+- `Role`, `EntryKind`, `AssetKind`, `CopyState`, `HitKind`
+- `CorpusRoot`, `DepotAddress`, `SafeRelPath`
 
-- Introduce `SessionKey` and `EntryID` as opaque value types in `internal/model`
-  with unexported fields and the **only** constructor taking the component tuple.
-- Canonical encoding is the SHA-256 of a length-prefixed encoding of
-  `(source, machine_id, source_session_id)` — fixed width, delimiter-free,
-  collision-resistant, content-addressed like everything else. This removes the
-  `":"`/`"#"` fragility in `ingest.go:363` and the artifact-key string prefix
-  scheme (`model.go:25-33`).
-- `EntryID` derivation (the `line-%06d-hash` fallback at `parser.go:57`) becomes
-  a constructor that *always* returns a non-empty `EntryID`, so "entry id
-  present" is a type guarantee, not a runtime hope.
+Each has one public constructor/parse function. The zero value is invalid; every
+DB boundary and formatter checks `Valid()` or stores only constructed values.
+This is an explicit Go limitation, not a proof hole to ignore.
 
-Consequence: unique-by-construction keys delete the ambiguity branches in
-`resolveSession`/`resolveEntryLine` (`read.go:77-144`). `read` becomes a total
-lookup; fuzzy human prefix matching moves to a separate, clearly fallible
-`Resolve(humanQuery) -> SessionKey | NotFound` used only by the CLI.
+### 2. Canonical identity without delimiter fragility
 
-### `HitRef` as a sum type
+Current session keys are delimiter strings. The target identity is:
 
-`HitRef` carries `SessionKey`, `EntryID`, and `ArtifactSHA` with `firstNonEmpty`
-fallbacks (`model.go:18-75`) — three fields encoding one of two shapes. Replace
-with a closed union: `MessageRef{SessionKey, EntryID}` | `ArtifactRef{SHA}`,
-modeled as a sealed interface (unexported method) so no third package can add a
-variant and every switch is exhaustive. `FormatHitRef`/`ParseHitRef` collapse to
-one total codec. Better: `search` emits the ref `read` consumes directly, so
-search/read coherence is a type-level fact, not a string contract re-parsed at
-the boundary.
+```text
+SessionKey = "sk1_" + hex(sha256(length_prefixed(source, machine_id, source_session_id)))
+```
 
-### Closed enums replace stringly types
+Retain tuple columns (`source_name`, `machine_id`, `source_session_id`) with a
+`UNIQUE` constraint. This gives:
 
-`Role`, `EntryKind`, `HitKind`, `AssetKind`, `CopyState`, and source `type`
-become defined types produced only by adapter normalization. The payoff is
-concrete: `shouldIndexText` (`ingest.go:438-450`) currently falls through to
-"don't index" on any unrecognized role — exactly the class of the real-Pi
-`message.role` bug recorded in lessons-learned. A closed `Role` makes the
-indexing decision total over a known set; an unseen role is a normalize-time
-decision, not a silently dropped index.
+- compact stable keys for refs;
+- no `:`/`#` delimiter ambiguity;
+- provenance/audit columns for humans;
+- a DB place to detect the practically impossible hash-collision case.
 
-### One typed parse boundary
+PBT can prove deterministic canonical encoding and cover delimiter/pathological
+cases. It cannot prove SHA-256 injectivity; the spec relies on collision
+resistance plus tuple uniqueness.
 
-Replace scattered `map[string]any` access (`stringField`/`nestedString`/
-`numField` in `parser.go`) with one fallible constructor per source that returns
-a fully typed `ParsedEntry` *or* a diagnostic. The `any` and `""`-default values
-stop leaking down the pipeline. The raw line is always preserved regardless of
-normalization outcome (open-world principle).
+### 3. Ref sum type and versioned codec
 
-## Storage as the invariant layer
+Replace the optional-field `HitRef` shape with sealed variants:
 
-The schema is almost entirely untyped `text` columns with no foreign keys
-between `sessions`/`entries`/`messages` (`schema.go:17-21`). Migrate to:
+```go
+type Ref interface{ refVariant(); Valid() bool }
+type MessageRef struct { Session SessionKey; Entry EntryID }
+type SessionRef struct { Session SessionKey }
+type ArtifactRef struct { SHA ArtifactSHA256 }
+```
 
-- Foreign keys `messages → entries → sessions` (and `fts` bound to `messages`).
-- `CHECK` constraints for `role`, `entry_type`, `copy_state`, `kind`.
-- FTS5 **external-content** tables with insert/update/delete triggers so
-  `messages` and `fts_messages` cannot drift (replaces the manual dual write).
-- **Quarantine-as-constraint:** a unique index on `(session_key, entry_id)` plus
-  an `INSTEAD OF INSERT` trigger that, on same id with a different `entry_sha256`,
-  writes a `conflicts` row and refuses to overwrite. The database enforces "never
-  overwrite," replacing the select-then-branch logic in `ingest.go:386-402`.
-- **Append-only:** triggers reject `DELETE`/`UPDATE` on `entries`.
-- **Idempotency as uniqueness:** dedup identity is a `UNIQUE` constraint, so
-  re-ingest is a no-op by the schema, not by `insert or ignore` racing alongside
-  `recordBundleAttempt` (`ingest.go:39-69`).
+The string codec should be versioned and delimiter-safe, e.g.:
 
-All schema changes ship as idempotent migrations with old-shape tests, per the
-existing migration discipline (`schema.go:40-77`).
+```text
+msg:v1:<session-key>#<entry-id>
+session:v1:<session-key>
+artifact:v1:<sha256>
+```
 
-## Determinism and capabilities by construction
+Compatibility parser accepts v1 legacy refs during migration. Formatter emits
+only the new canonical form after the ref phase. `search` emits values accepted
+by `read` without fuzzy resolution.
 
-- A canonical-encoder type for the manifest and tar stream whose API can only
-  build sorted file lists with zeroed mtimes/uids and a pinned zstd level —
-  nondeterminism becomes unrepresentable. Golden tests stay as a backstop.
-- The snapshot path accepts a read-only source capability (an `fs.FS`-style
-  handle with no write methods) instead of raw paths, so writing to a source is
-  a compile error. The static no-mutation/no-network guards
-  (`adapters/read_only_test.go`, `internal/testquality`) are retained as defense
-  in depth, not as the only line. (This is legitimate defense-in-depth under
-  principle 9: the capability and the static guard face different adversaries.)
-- A `Clock` capability replaces ambient `time.Now().UTC()` calls in ingest
-  (bundle-attempt and metadata writes in `ingest.go`), so `ingested_at` and
-  capture timestamps are explicit inputs rather than wall-clock reads. Production
-  wires a real clock at one site; tests pin a fixed instant. A `forbidigo` lint
-  bans `time.Now`/`time.Since`/`time.After` everywhere else, making the
-  determinism invariant checkable rather than racy.
+### 4. Parser boundary and diagnostics
+
+Keep the raw file/blob lossless. Add one typed parse boundary per adapter:
+
+```go
+type ParsedLine struct {
+    Entry       ParsedEntry // present only when valid
+    Diagnostic  *ParseDiagnostic
+    Raw         string
+    LineNo      int
+}
+```
+
+Malformed JSONL can then be represented explicitly instead of being only a
+session-level string diagnostic. Whether malformed lines become searchable is a
+product decision; whether they are preserved should not be.
+
+Adapter conformance fixtures should be data-driven JSON cases:
+
+```text
+adapter input raw line/file → normalized entry/diagnostic
+```
+
+Run the same harness for Pi, Claude Code, and Codex.
+
+### 5. Storage constraints and triggers
+
+Use idempotent migrations and old-shape DB tests. Target constraints:
+
+- `NOT NULL`/`CHECK` for non-empty keys, known enum values, boolean integers,
+  SHA length/hex shape where practical.
+- FKs:
+  - `entries.session_key → sessions.session_key`
+  - `messages(session_key,entry_id) → entries(session_key,entry_id)`
+  - `session_versions.session_key → sessions.session_key`
+  - `session_versions.file_sha256 → files.file_sha256`
+  - `entry_assets(session_key,entry_id) → entries(session_key,entry_id)`
+  - `artifacts.bundle_id → bundles.bundle_id`
+- append-only triggers for `entries`, `messages`, `artifacts`, and conflict log
+  tables where mutation would violate history.
+
+Correct SQLite trigger shape for quarantine on a real table is **not** an
+`INSTEAD OF` trigger. Use one of:
+
+1. `BEFORE INSERT ON entries` trigger:
+   - when same `(session_key,entry_id)` exists with same hash: `RAISE(IGNORE)`;
+   - when same key exists with different hash: insert into `conflicts`, then
+     `RAISE(IGNORE)`;
+   - otherwise allow insert.
+2. a writable view with `INSTEAD OF INSERT` trigger, and ensure all corpus writes
+   go through the view, not the base table.
+
+Option 1 is simpler and should be tried first.
+
+### 6. FTS without overclaiming
+
+FTS5 external-content tables plus triggers are the target for normal writes:
+
+- `messages ↔ fts_messages`
+- `artifacts ↔ fts_artifacts`
+
+But SQLite virtual tables remain directly writable and cannot carry ordinary
+foreign keys. Therefore construction is layered:
+
+- schema triggers keep normal writes synchronized;
+- repository code exposes no direct FTS write API;
+- static tests ban `insert/update/delete fts_*` outside schema/reconciler files;
+- a verifier/reconciler query detects and optionally repairs drift.
+
+The invariant is not “orphan FTS rows are physically impossible under arbitrary
+SQL.” It is “the application construction path cannot create drift, direct drift
+is statically guarded, and drift is detectable/repairable.”
+
+### 7. Blob and row consistency
+
+Treat the filesystem as a second store with its own invariants:
+
+- bundle/file/image blobs are content-addressed by SHA;
+- DB rows must never point at missing or wrong-hash blobs after commit;
+- orphan staging blobs are allowed only before commit or as repairable garbage;
+- rollback after blob promotion must clean up promoted bundle blobs or mark them
+  repairable.
+
+Add a corpus verifier that checks:
+
+```text
+bundles.bundle_sha256 ↔ blobs/bundles/<sha>.tar.zst
+files.file_sha256     ↔ blobs/files/<sha>.zst after decompress/hash
+images.image_sha256   ↔ images blob bytes
+artifacts             ↔ file/blob rows where applicable
+fts rows              ↔ source rows
+```
+
+`doctor` can surface a fast subset; a heavier `verify` command can do full hash
+checks later.
+
+### 8. Depot correctness
+
+Depot invariants are part of correctness by construction, not an add-on:
+
+- bundle key is exactly `bundles/v1/<sha>.tar.zst`;
+- key SHA matches object bytes;
+- catalog shards are provenance/repair indexes, not truth;
+- list is deterministic union of shard refs;
+- merge is idempotent, commutative, and stable-sorted;
+- local and R2 drivers satisfy the same contract;
+- R2 conditional writes are retryable and do not corrupt shards;
+- credentials never appear in config/manifests/catalogs/logs/JSON.
+
+Keep fake-S3 contract tests and add state-machine sequences that interleave
+`Put`, duplicate `Put`, stale catalog refs, `Verify`, and `Repair`.
+
+### 9. Deterministic time and retry seams
+
+Time enters in snapshot/archive metadata, ingest attempt rows, bundle metadata,
+depot markers, and retry backoff. Introduce:
+
+```go
+type Clock interface { Now() time.Time }
+type Sleeper interface { Sleep(time.Duration) }
+type Backoff interface { Delay(attempt int) time.Duration }
+```
+
+Production constructs real implementations once. Tests pass fixed clocks and
+no-sleep sleepers. Static debt inventory should first freeze current ambient
+clock sites; after the refactor, replace it with a ban outside the production
+clock package.
+
+### 10. Capabilities, not raw authority
+
+Adapters and snapshot code should receive capabilities with only the operations
+they need:
+
+- source discovery/open: read/list/stat only;
+- corpus writer: write only under corpus root;
+- depot driver: put/list/fetch/verify only;
+- clock/backoff: explicit seam.
+
+This does not eliminate all path safety tests. It narrows which code can even
+attempt a dangerous operation.
 
 ## Verification strategy
 
-Types remove whole classes of bugs. The remaining risk lives where types stop:
-the untyped input boundary, cross-run determinism, and the algebra of merging
-many bundles in any order. Two kinds of test cover that residue, per the
-`correctness-by-construction` reference:
+### Verification layers
 
-- **Type A — prove the invariant.** For any input meeting the precondition,
-  assert the postcondition (a Hoare triple `{P} S {Q}`). These survive
-  refactoring because they assert what must always be true. PBT, state-machine
-  tests, and fuzz post-conditions are all Type A.
-- **Type B — attack the model.** Try to construct the state the type/schema
-  claims is impossible; assert it is rejected. If it is reachable, the model is
-  incomplete — fix the model, not the test.
+| Layer | Tooling | Purpose |
+|---|---|---|
+| Example/contract tests | Go `testing`, temp dirs, real SQLite, fake-S3 | lock public behavior and sad paths |
+| Golden tests | committed expected output/bundles where reviewable | detect renderer/canonical byte drift |
+| Property tests | `pgregory.net/rapid` for shrinkable PBT; existing `testing/quick` where sufficient | laws over arbitrary inputs |
+| Stateful tests | `rapid.T.Repeat` / state-machine model | operation sequences and interleavings |
+| Fuzz tests | Go native fuzzing | hostile parser/ref/archive/depot bytes |
+| Exhaustive tests | table/enumeration/permutations | small finite spaces like enum × flag |
+| Type B invalid-state tests | direct constructor/SQL attempts | prove the claimed rejecting mechanism exists |
+| CLI journey contracts | future `testscript`/real CLI invocations | prove command behavior, exit codes, JSON contracts, and filesystem effects |
+| Differential tests | old path vs new path during migrations | prove refactors preserve behavior or document intentional changes |
+| Schema contract tests | SQLite introspection helpers + direct SQL attempts | prove constraints/triggers/FKs exist and reject bad states |
+| Static guards | `internal/testquality`, `go vet`, future forbidigo/custom `go/analysis` | stop convention debt from spreading |
+| Mutation testing | `gremlins` on critical packages | prove tests kill likely bugs |
 
-Concentrate tests at trust boundaries; inside the typed core, test only the
-public constructors:
+### Type A and Type B tests
 
-| Boundary | Test |
-|---|---|
-| source JSONL → `ParsedEntry` | parser PBT + fuzz + characterization fixtures |
-| bundle file → corpus row | state-machine/repository test + golden manifest |
-| corpus row → `read` output | search/read coherence PBT |
-| canonical ref ↔ string | codec round-trip PBT + fuzz |
-| inside the typed core | Type A + Type B on public constructors only |
+For every invariant:
 
-### Property-based testing (PBT)
+- **Type A:** for generated/valid inputs, prove the postcondition.
+- **Type B:** try to construct the state the model claims impossible and assert
+  the mechanism rejects it.
 
-Add `pgregory.net/rapid` (shrinking, deterministic seeds, stateful support).
-`testing/quick` is insufficient — no shrinking, weak generators. PBT asserts
-algebraic laws over generated inputs, not hand-picked examples:
+Do not add Type B tests before the rejecting mechanism exists. Otherwise the
+suite documents a fantasy model.
 
-- **Codec round-trip:** `parse(format(ref)) == ref` for all `ref`;
-  `format(parse(s))` is stable for valid `s` and a typed error otherwise.
-- **Identity injectivity & determinism:** distinct component tuples produce
-  distinct `SessionKey`s; equal tuples produce equal keys.
-- **Index totality:** every value of the closed `Role` type maps to a defined
-  index decision (no default branch).
-- **Determinism:** `encode(inputs)` is a pure function — same inputs, identical
-  bytes, across repeated runs and shuffled discovery order.
-- **Search/read coherence, generalized:** for a generated corpus and query,
-  every hit in `search` is readable and the returned window contains the hit.
-- **Merge algebra:** ingest of disjoint bundles commutes; ingest is monotone
-  (append-only); re-ingest is idempotent.
+### Rapid generators
 
-These map to the reference's named invariant patterns — *never crashes*,
-*valid-or-error*, *roundtrip*, *idempotent*, *conservation*, *monotonic*,
-*algebraic laws*. Conservation is worth calling out for `aha`: `include_images=
-false` yields no image rows/blobs and tool output stays unindexed — "filtered
-output contains only allowed input-derived data."
+Shared shrinkable generators should live in `internal/testutil`:
 
-Generators live in `internal/testutil` (e.g. `GenParsedSession`,
-`GenBundle`, `GenRef`) so properties share realistic, shrinkable inputs.
+- refs and ref components;
+- parsed sessions/entries/assets;
+- manifest files and bundles;
+- depot bundle refs/catalog shards;
+- operation sequences for corpus/depot state machines.
 
-### State-machine / model-based testing
+Generators should produce realistic values by default and expose knobs for
+pathological cases: delimiters, empty/near-empty text, duplicate IDs, conflicting
+hashes, malformed refs, weird paths, large-but-budgeted blobs.
 
-The corpus is a state machine; bugs hide in *sequences* of operations
-(re-ingest after conflict, busy-retry during duplicate detection — today only
-narrowly covered by `concurrency_test.go`). Using `rapid`'s stateful testing:
+### Stateful corpus model
 
-- **Model:** an in-memory abstraction — `map[SessionKey][]EntryID`, a conflict
-  set, a seen-bundle set, a blob set.
-- **Commands:** `Snapshot`, `Ingest`, `ReIngest(sameBundle)`,
-  `IngestConflicting(sameIdDiffHash)`, `Read(ref)`, `Search(q)`, `Status`.
-- **After every command**, assert the real SQLite store matches the model and
-  the invariants hold: counts agree, entries are monotone, no orphan
-  `messages`/`fts` rows, every entry is readable, same-id/diff-hash yields
-  exactly one live entry plus one conflict row, status counts are exact.
-- `rapid` generates random command sequences and shrinks any failure to a
-  minimal reproducer.
-- **Concurrency variant:** parallel ingest of same and different bundles under
-  `go test -race`; assert the final state equals some sequential order
-  (linearizable), strengthening the existing busy-retry coverage.
+Model state:
 
-This is the layer that proves the schema-level invariants (append-only,
-quarantine, idempotency) actually hold under interleaving, not just in isolation.
+```text
+seenBundles: set[bundleSHA]
+sessions:    map[SessionKey]SessionModel
+entries:     map[(SessionKey,EntryID)]EntryHash
+messages:    set[(SessionKey,EntryID)]
+artifacts:   map[ArtifactSHA]ArtifactModel
+assets:      set[(SessionKey,EntryID,AssetSHA,contentIndex,promptOrder)]
+conflicts:   multiset[Conflict]
+blobs:       map[sha]BlobKind
+fts:         expected message/artifact search rows
+```
 
-### Fuzzing
+Commands:
 
-Strengthen the three existing fuzz targets from "does not panic" to "preserves
-post-conditions," and add structure-aware targets:
+- ingest new bundle;
+- ingest duplicate bundle;
+- ingest same session/entry/different hash;
+- ingest cross-machine same source session/different hash;
+- search query;
+- read canonical ref;
+- status;
+- simulate interrupted ingest hook;
+- verify/repair corpus or depot.
 
-- `FuzzParseGenericJSONL` (`parser_test.go:11`): every line yields a non-empty
-  `EntryID`, the raw line is preserved, and malformed input produces a recorded
-  diagnostic — never a panic, never a dropped raw line.
-- `FuzzHitRefParseFormat` (`hitref_fuzz_test.go:27`): retarget to the sum-type
-  codec; assert total round-trip and that no input panics.
-- `FuzzWalkBundleRoundTrip` (`archive_fuzz_test.go`): keep; extend to assert
-  manifest honesty (every archived file in the manifest and vice versa).
-- **New — structure-aware bundle fuzz:** a fuzz seed builds a whole bundle, then
-  ingest must leave every corpus invariant intact (fuzz seed feeds the
-  state-machine model check). Catches ingest corruption that line-level fuzzing
-  misses.
-- **New — differential fuzz:** the canonical encoder and any second
-  serialization path must agree byte-for-byte.
-- CI runs fuzz targets with a bounded time budget; the discovered corpus is
-  committed under `testdata/fuzz` so regressions stay covered.
+After every command:
 
-### Model-gap tests (Type B — attack the model)
+- row counts match the model;
+- entries/messages/artifacts are monotone unless operation is explicit repair;
+- every search hit ref is readable;
+- no DB row points at a missing committed blob;
+- FTS reconciliation query is clean;
+- conflicts preserve both hashes and never overwrite original entries.
 
-For every "this state is impossible" claim, a test tries to reach it and asserts
-rejection:
+Concurrency variant: run duplicate and disjoint ingests in parallel under
+`go test -race`; final state must equal some sequential order.
 
-- inserting a second entry with the same `(session_key, entry_id)` and a
-  different `entry_sha256` writes a `conflicts` row and leaves the original
-  unchanged (the quarantine trigger refuses to overwrite).
-- `DELETE`/`UPDATE` on `entries` is rejected by the append-only trigger.
-- an `fts_messages` row with no backing `messages` row is unreachable under the
-  external-content triggers.
-- a `MessageRef` cannot carry an artifact SHA and an `ArtifactRef` cannot carry
-  an entry context — the sum type makes it a compile error (documented, not a
-  runtime test).
+### Depot state model
 
-**Caveat from the reference:** a Type B test is only meaningful when a runtime or
-compile-time mechanism can reject the state; otherwise it passes vacuously. Add
-the mechanism before the test. Go's zero value is the trap (see Tradeoffs).
+Model state:
 
-### Exhaustive testing
+```text
+objects: map[bundleSHA]BundleBytes
+catalogShards: map[machineID]set[bundleSHA]
+```
 
-For the new finite types, enumerate the whole space instead of sampling:
+Commands:
 
-- `shouldIndexText` over (`Role` × `index_tool_output` bool) is a small product;
-  test every combination so no role/flag pair is undefined — directly closing the
-  silent-default class of the real-Pi role bug.
-- every `Role`/`HitKind`/`CopyState`/`AssetKind` value round-trips through its
-  codec.
-- merge-order independence for small N: all `N!` ingest orderings of N disjoint
-  bundles produce an identical corpus (exhaustive for N ≤ 5; PBT/state-machine
-  beyond).
+- put bundle;
+- put duplicate;
+- list;
+- fetch;
+- introduce stale catalog ref;
+- delete catalog shard;
+- verify;
+- repair;
+- concurrent same-machine catalog update.
+
+Properties:
+
+- object keys match bytes;
+- list is deterministic sorted union;
+- repair recreates catalog from objects;
+- stale refs are removed or reported;
+- local and fake-R2 drivers satisfy the same contract.
+
+### Fuzz targets
+
+Keep and strengthen existing fuzz targets:
+
+- parser JSONL: no panic; raw file preserved; valid parsed entries have non-empty
+  IDs; malformed lines produce diagnostics; no invalid UTF-8 crash.
+- hit ref codec: no panic; valid refs round-trip; formatting is stable; legacy
+  compatibility parser is total over old valid refs.
+- archive walk/write: manifest/data/checksum honesty; path safety; budget
+  accounting.
+- depot address/key: valid-or-typed-error; normalized form stable.
+
+Add structure-aware fuzzers when the constructors exist:
+
+- fuzz bundle → ingest → corpus invariant check;
+- fuzz manifest mutations → validation rejects or yields safe typed error;
+- differential fuzz old parser vs new typed parser during migration.
+
+### Exhaustive checks
+
+Small finite spaces should be exhaustive, not sampled:
+
+- every `Role × index_tool_output` combination;
+- every `HitKind`/`AssetKind`/`CopyState` codec value;
+- all ingest permutations for N ≤ 5 small disjoint bundles;
+- output mode mutual exclusions;
+- depot address forms (`local`, `local:`, `r2`, `r2:bucket`, bad schemes).
 
 ### Mutation testing
 
-Run `gremlins` on the invariant-critical packages (`internal/corpus`,
-`internal/model`, `internal/adapters`) to confirm the suite actually kills bugs.
-A surviving mutant means a Type A or Type B test is missing or weak — it is the
-meta-check behind the definition-of-done claim "fails if the mechanism is
-removed." Scope it to critical modules, not every commit; a surviving mutant in
-identity or ingest is a P0. Mutation score matters more than line coverage.
+Run `gremlins` outside normal CI on invariant-critical packages:
 
-### Deterministic time
+```bash
+scripts/verify.sh mutation-dry
+scripts/verify.sh mutation
+```
 
-Inject the `Clock` capability described above (`clockwork` or equivalent) and
-pin a fixed instant in tests, advancing by exact amounts. With wall-clock reads
-banned by `forbidigo`, the determinism property ("same inputs → identical bytes")
-becomes a real assertion instead of a best-effort one, and ingest reports stop
-embedding nondeterministic timestamps.
+Start with dry-run to inventory covered mutants. Then run mutation tests on:
 
-### Static guards
+- `./internal/model`
+- `./internal/corpus`
+- `./internal/archive`
+- `./internal/depot`
+- `./internal/adapters`
 
-Extend `internal/testquality` to prevent regression toward convention:
-ban raw string concatenation to build identity keys, ban `map` iteration inside
-canonical encoders, require enum switches to be exhaustive (an `// exhaustive`
-marker test or a vet-style check), and add a `forbidigo` rule banning
-`time.Now`/`time.Since`/`time.After` outside the clock-construction site. These
-keep the construction guarantees from eroding in later changes.
+A surviving mutant in identity/ref parsing, archive validation, conflict
+quarantine, depot key validation, or path safety is a release blocker.
+
+### Static debt inventory
+
+Before refactoring, freeze known correctness debt so it cannot spread:
+
+- ambient `time.Now`/`time.Sleep` sites;
+- raw identity concatenation sites;
+- direct FTS write sites;
+- network imports outside depot;
+- focused/sleep-based/log-only tests.
+
+As each phase replaces a pattern with construction, shrink the allowlist. The
+static test changing from “known debt inventory” to “hard ban” is part of the
+phase definition of done.
 
 ## Migration plan
 
-Characterize first, then tighten — types and constraints are introduced behind a
-safety net, smallest blast radius first. The identity-format change is last
-because it bumps the bundle/corpus version.
+### Phase 0 — Prep and guardrails
 
-- **Phase 0 — Safety net.** Add `rapid`, the model, generators, and the
-  state-machine harness against *current* code. Capture present behavior as
-  characterization. No behavior change. (Per the testing-best-practices
-  "characterize before refactor" lesson.) During Phases 1–2, keep the old
-  parser/codec alongside the new typed one and run **differential tests** (old
-  vs new on the shared fuzz corpus and fixtures) until they agree, then delete
-  the old path. Separately, **data-driven conformance ("pirate") fixtures** —
-  JSON cases of `raw line → normalized ParsedEntry`, one suite per adapter run
-  through a shared harness — lock each adapter's behavior as data rather than
-  code, which suits the Pi/Claude/Codex multi-adapter design.
-- **Phase 1 — Typed primitives, same wire format.** `SessionKey`, `EntryID`,
-  `Role`, `HitKind`, etc. as newtypes with smart constructors; centralize the
-  codec. Wire/DB representation unchanged. PBT the codecs and enums.
-- **Phase 2 — `HitRef` sum type + opaque handle.** `read` becomes total over
-  canonical refs; fuzzy human resolution split into its own function. PBT +
-  fuzz round-trip; state-machine asserts every entry readable.
-- **Phase 3 — Storage invariants.** Foreign keys, `CHECK`, FTS triggers,
-  quarantine/append-only triggers, idempotency uniqueness, with migrations and
-  old-shape tests. State-machine and Type B tests now assert the DB *rejects*
-  violations. **Delete the redundant runtime-check tests** the constraints
-  replace (the imperative select-then-branch conflict checks, manual dual-write
-  assertions). Coverage may drop — that is correct; the checks moved into the
-  schema.
-- **Phase 4 — Determinism encoder, capabilities, content-addressed identity.**
-  Canonical-encoder type and read-only source capability land first
-  (non-breaking). Content-addressed identity is the breaking step: bump
-  `BundleSchema` to `v2` (`model.go:9`) and ship a `v1 → v2` ingest path that
-  re-keys on ingest so existing bundles still merge.
+No behavior change. Phase 0 exists to make later behavior-changing refactors smaller, more mechanical, and safer.
 
-Each phase keeps `go test ./...`, `go test -race ./...`, and the fuzz/PBT suites
-green before the next begins.
+Required guardrails before production refactors:
+
+1. **Keep expanding static debt inventories before refactors.** Freeze known raw identity construction, ambient time/sleep, manual FTS writes, broad path authority, direct SQL mutation of append-only tables, network imports outside depot, and weak-test patterns. Start with allowlisted known debt; shrink the allowlists as each phase removes debt.
+2. **Add state-machine skeletons for corpus and depot before changing storage.** The first skeleton may characterize current behavior and skip unimplemented commands, but it must define the model state, commands, invariant checks, and replay format before schema/identity changes begin.
+3. **Add adapter conformance fixtures before parser rewrites.** Current Pi, Claude Code, and Codex normalization behavior must be captured as data-driven raw-input → normalized-entry/diagnostic fixtures before replacing parser internals.
+4. **Add schema introspection helpers before FK/trigger migrations.** Tests should be able to assert “table has FK/check/trigger/index X” and run direct-SQL Type B attempts without hand-parsing all schema text in each test.
+5. **Introduce seams by name first.** Add behavior-preserving wrappers/interfaces named `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read capability before changing their internals. Names first, behavior second.
+6. **Add corpus/depot verifier queries before enforcing stricter constraints.** A verifier should detect current drift/missing blobs/stale catalog refs before migrations make those states impossible or repairable.
+7. **Run mutation dry-runs periodically before relying on tests.** `scripts/verify.sh mutation-dry` should be run after adding major invariants and before deleting duplicate runtime checks; use its uncovered/surviving areas to strengthen tests.
+
+Supporting guardrails:
+
+- maintain `scripts/verify.sh` and Make targets as the single local/CI verification entrypoint;
+- keep `rapid` and shared generators available for shrinkable PBT;
+- add differential tests whenever old and new implementations coexist.
+
+Exit criteria:
+
+- `scripts/verify.sh full` passes;
+- `scripts/verify.sh mutation-dry` completes and its gaps are triaged;
+- current known debt is inventoried by static tests;
+- corpus/depot state-machine skeletons compile and can replay a minimal sequence;
+- adapter conformance fixture harness exists for all built-in adapters;
+- schema introspection helpers exist for future Type B tests;
+- `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read-capability seams exist, even if initially backed by legacy code;
+- corpus/depot verifier queries can detect at least one seeded inconsistency each;
+- new PBT/fuzz/state-machine tests can be added without bespoke setup.
+
+### Phase 1 — Typed primitives, same storage/wire format
+
+- Add `EntryID`, `SessionKey`, `Role`, `AssetKind`, `CopyState`, SHA types.
+- Keep DB/string wire representation unchanged.
+- Parse at boundaries; internal code accepts typed values.
+- Add exhaustive role/index tests and constructor Type A/Type B tests.
+
+Exit criteria:
+
+- public behavior unchanged;
+- no new string concatenation for keys;
+- constructors carry the invariant; downstream duplicate validation removed only
+  when it defends the same non-adversarial failure mode.
+
+### Phase 2 — Ref codec and canonical read split
+
+- Introduce ref sum type and versioned codec.
+- `search` emits canonical refs.
+- `read` path splits into `ReadCanonical` and `ResolveHuman`.
+- Legacy ref parser remains for compatibility until bundle/corpus v2.
+
+Exit criteria:
+
+- every search hit canonical ref reads exactly;
+- ambiguity exists only in `ResolveHuman`;
+- PBT/fuzz prove codec stability.
+
+### Phase 3 — Storage invariants
+
+- Add FK/CHECK constraints and append-only/quarantine triggers via migrations.
+- Move FTS to trigger-maintained external-content tables or add a reconciler
+  first if migration risk is high.
+- Add Type B direct-SQL tests for orphan rows, mutation attempts, and conflicts.
+
+Exit criteria:
+
+- schema rejects invalid states;
+- state-machine tests pass under `-race`;
+- static FTS direct-write allowlist shrinks.
+
+### Phase 4 — Canonical encoder, clock, capabilities
+
+- Canonical archive/manifest encoder API.
+- `Clock`/`Sleeper`/`Backoff` seams.
+- read-only source capabilities and root capabilities.
+- Static time debt inventory becomes a hard ban outside the production clock
+  construction site.
+
+Exit criteria:
+
+- deterministic output properties use fixed clocks;
+- retry tests use no real sleep;
+- source write authority is not available to adapters.
+
+### Phase 5 — Identity v2 and compatibility ingest
+
+- Bump bundle/corpus identity schema when necessary.
+- Ingest v1 bundles by translating legacy keys into v2 typed identities.
+- Keep old refs readable or provide clear migration errors with next actions.
+
+Exit criteria:
+
+- existing v1 bundles remain ingestible;
+- new bundles use v2 identity;
+- migration is covered by fixture bundles and state-machine sequences.
+
+## What to do in advance to make implementation simpler and safer
+
+These are Phase 0 tasks and can be done before production refactors. They are intentionally front-loaded because they reduce the risk and blast radius of the later implementation.
+
+1. **Keep expanding static debt inventories before refactors.** Static tests should fail if new raw identity construction, ambient time/sleep, direct FTS writes, raw SQL mutations of append-only tables, network imports outside depot, path writes outside corpus/depot roots, or weak-test patterns appear. Begin with explicit allowlists of current debt; every refactor that removes debt must shrink the allowlist in the same commit. If a category reaches zero, convert the inventory into a hard ban.
+2. **Add state-machine skeletons for corpus and depot before changing storage.** Create minimal `rapid` state-machine tests with model state, commands, invariant checks, and replay traces before schema changes. The first version may only execute `ingest duplicate`, `read`, `search`, `status`, `depot put/list/fetch/verify`, and seeded failure cases, but the structure must be present before adding FK/trigger/identity migrations.
+3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, and Codex behavior as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
+4. **Add schema introspection helpers before FK/trigger migrations.** Provide test helpers for `HasTable`, `HasColumn`, `HasIndex`, `HasForeignKey`, `HasCheck`, `HasTrigger`, and direct-SQL Type B attempts. Migration tests should assert both the structural object exists and the invalid operation is rejected.
+5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add no-op/legacy-backed wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behavior, and storage changes in one diff.
+6. **Add corpus/depot verifier queries before enforcing stricter constraints.** Implement lightweight queries that find orphan messages/assets/artifacts, FTS drift, missing blobs, wrong blob hashes where cheap, stale depot catalog refs, malformed depot keys, and missing catalog shards. The verifier should run against current stores and produce actionable diagnostics before migrations start rejecting these states.
+7. **Run mutation dry-runs periodically to find weak tests before relying on them.** Run `scripts/verify.sh mutation-dry` after each major guardrail and before deleting duplicate runtime checks. Track uncovered critical mutants as work items; do not use a new constructor/schema trigger as justification for deleting old checks until mutation dry-run and targeted Type A/Type B tests show the invariant is covered.
+
+Additional advance work:
+
+8. **Use one verification entrypoint.** `scripts/verify.sh` and Make targets define quick/full/fuzz/mutation profiles so every phase runs the same checks locally and in CI.
+9. **Add shrinkable generators now.** Even small `rapid` generators for refs, catalog refs, manifests, sessions, and operation traces reduce bespoke property-test setup later.
+10. **Keep old and new paths side by side temporarily.** Differential tests compare legacy parser/ref/identity behavior to the new typed path until equivalence or intentional differences are documented.
+
+## Additional verification upgrades
+
+These are not all prerequisites for Phase 1, but they improve the quality of the suite and should be pulled forward whenever they are cheap.
+
+### CLI journey tests with `testscript`
+
+Add `testscript`-style CLI contracts for full user journeys:
+
+- `init --accept-secrets → refresh → search --refs → read <ref>`;
+- explicit bundle-path ingest into alternate `--repo`;
+- depot publish/list/fetch/verify/repair;
+- JSON error envelope behavior for bad flags, bad refs, missing config, and bad depot credentials;
+- no network for local-only commands.
+
+These tests should assert stdout/stderr, exit code, filesystem effects, and JSON shape. They complement Go unit tests because `aha` is primarily a CLI contract.
+
+### Golden update discipline
+
+Golden tests should have an explicit update flag or helper, stable normalization, and reviewable diffs. Add goldens for:
+
+- representative JSON command outputs;
+- Markdown renderers;
+- one tiny canonical bundle/manifest once the canonical encoder lands;
+- doctor/verify diagnostics with stable fake paths.
+
+Do not snapshot large opaque blobs unless the bytes are the contract.
+
+### Fuzz corpus management
+
+When fuzzing finds a bug, commit the minimized input under `testdata/fuzz` and add a named regression when the failure explains an invariant. Fuzz targets should graduate from “no panic” to postconditions:
+
+- parser: raw preserved, non-empty IDs for valid entries, diagnostics for malformed lines;
+- refs: canonical/legacy compatibility and stable formatting;
+- archives: manifest/data/checksum/path/budget honesty;
+- depot: address/key valid-or-typed-error and stable normalization.
+
+### Custom static analysis where grep becomes weak
+
+The debt inventory can start as tests, but high-value invariants should become AST or `go/analysis` checks when substring matching becomes too easy to evade:
+
+- no `time.Now`/`time.Sleep` outside clock/backoff packages;
+- no direct writes to `fts_*` outside schema/reconciler code;
+- no raw SQL `DELETE`/`UPDATE` on append-only tables outside migrations/repair;
+- no network imports outside `internal/depot`;
+- no source-path write authority in adapters;
+- no new string-built identity keys.
+
+### Failure-injection and crash-window tests
+
+Keep extending hooks/fakes that can stop execution between durable steps:
+
+- after staging bundle, before DB transaction;
+- after rows inserted, before blob promotion;
+- after blob promotion, before commit;
+- during catalog shard conditional write conflicts;
+- during verify/repair partial failure.
+
+The oracle is not “no leftovers ever.” The oracle is “no committed row points at missing/wrong bytes; leftover staging/orphan blobs are detectable and repairable.”
+
+### Migration matrix tests
+
+Every schema or bundle/corpus version bump needs a matrix:
+
+| Input | Operation | Expected |
+|---|---|---|
+| old empty corpus | open/migrate | current schema, no data loss |
+| old populated corpus | migrate/status/search/read | counts and refs preserved |
+| v1 bundle | ingest into current corpus | translated identity, readable refs |
+| interrupted migration | reopen | either rolls forward or reports repairable error |
+
+Use real SQLite files and committed tiny fixtures.
+
+### Coverage and mutation triage, not vanity thresholds
+
+Line coverage should be used to find untested branches, not as a release badge. Mutation output is more useful for invariant-critical code. Track:
+
+- uncovered mutants in critical files;
+- surviving mutants after a real mutation run;
+- equivalent-mutant rationale;
+- which Type A/Type B/property/fuzz test was added to kill a non-equivalent mutant.
+
+### Replayable state-machine failures
+
+State-machine tests should print enough to replay failures deterministically:
+
+- random seed;
+- minimized operation list;
+- generated bundle/ref/catalog summaries;
+- temp corpus/depot preservation hint when `AHA_KEEP_FAILED_TESTDATA=1` is set.
+
+A minimized operation trace should be easy to convert into a named regression test.
+
+### Fixture realism and fixture minimization
+
+Keep two fixture classes separate:
+
+- **realish fixtures** from observed Pi/Claude/Codex formats, sanitized only where necessary;
+- **minimal fixtures** for focused invariants.
+
+Realish fixtures catch drift; minimal fixtures make failures easy to understand. Do not let generated fixtures replace realish adapter examples.
+
+### Verify command as test oracle
+
+As corpus/depot verifier queries mature, tests should call the same verifier code that `doctor` or a future `aha verify` uses. This avoids a parallel “test-only validator” drifting away from the user-facing repair tool.
 
 ## Definition of done
 
-- Every row in the invariant inventory has a construction-level mechanism *or* a
-  documented reason it cannot have one (open-world boundary cases).
-- No invariant relies on convention alone; each has a Type A test that proves it
-  and, where a rejecting mechanism exists, a Type B test that attacks it.
-- `gremlins` reports no surviving mutants in `internal/corpus`, `internal/model`,
-  or `internal/adapters` for the invariant-critical paths (the meta-check that
-  the tests fail if the mechanism is removed).
-- New finite types are covered exhaustively (every enum value, every
-  `shouldIndexText` combination), not sampled.
-- Ingest carries an injected `Clock`; `forbidigo` blocks ambient wall-clock reads
-  outside the single clock-construction site.
-- `read` has no runtime "ambiguous" path for canonical refs; ambiguity exists
-  only in the explicitly fallible human resolver.
-- FTS, conflict quarantine, append-only, and idempotency are enforced by schema
-  objects, verified by the state machine under interleaving and `-race`.
-- The parser fuzz target asserts post-conditions (non-empty id, raw preserved,
-  diagnostics on malformed), not just absence of panic.
-- `testquality` guards block raw key concatenation, map iteration in encoders,
-  and non-exhaustive enum switches.
-- `BundleSchema v2` ships with a tested `v1 → v2` ingest path; no existing
-  bundle becomes unreadable.
+- Every invariant in the inventory has a construction mechanism or a documented
+  reason construction cannot fully apply.
+- Every mechanism has a Type A proof test; every rejecting mechanism has a Type B
+  invalid-state test.
+- `ReadCanonical` has no ambiguous branch; `ResolveHuman` owns ambiguity.
+- No direct FTS writes outside schema/reconciler code.
+- No ambient wall-clock/sleep calls outside clock/backoff construction.
+- Parser fuzzing asserts postconditions, not only “does not panic.”
+- Corpus and depot state machines cover duplicate, conflicting, interrupted,
+  repair, and concurrent sequences.
+- `gremlins` has no surviving mutants in identity/ref/archive/path/depot-key/
+  conflict-quarantine critical paths, or surviving mutants are documented with
+  justified equivalent-mutant rationale.
+- Bundle/corpus v2 ships with tested v1 ingest compatibility.
 
-## Tradeoffs and accepted limits
+## Highest-leverage order
 
-- **Go's type system is the ceiling.** No native sum types, no enforced
-  exhaustiveness, no non-empty-string refinement. "Construction" here is mostly
-  encapsulation + smart constructors + DB constraints + retained static guards.
-  Sealed interfaces and `testquality` checks approximate exhaustiveness; they do
-  not replace a compiler that enforces it.
-- **The Go zero value is an escape hatch.** `var k SessionKey` constructs an
-  invalid (empty) key outside the smart constructor, so a newtype cannot make
-  invalid identity *unrepresentable* — only inconvenient. Mitigations: give each
-  newtype a `Valid() bool` method, validate at the DB boundary with `CHECK`/`NOT
-  NULL`, and treat the zero value as "not yet a key." The reference is explicit
-  that such invariants are not fully Type-B-testable in Go and the limitation
-  must be documented rather than assumed away.
-- **The input is irreducibly untyped and evolving.** Over-tight types would turn
-  "a role/field we have never seen" into an ingest failure, violating the top
-  invariant. The open-world rule is non-negotiable: raw stays lossless, only the
-  normalized projection is typed, unknown input degrades to raw + diagnostic.
-- **Breaking format change.** Content-addressed identity requires `v2` bundles
-  and a migration. For a single-user local tool this is the highest-cost change;
-  it is sequenced last and gated behind the `v1 → v2` ingest path.
-- **Generative-test cost.** PBT and state-machine tests are slower and can be
-  flaky if seeds are not pinned. Seeds are fixed in CI; failures must shrink to a
-  committed regression case before the fix is considered done.
-- **Trigger complexity.** Moving quarantine/append-only into triggers trades
-  imperative clarity for schema-enforced guarantees; the state machine is what
-  keeps that trade honest.
-
-## Highest-leverage first step
-
-If only one change ships: make identity content-addressed and turn `HitRef` into
-a sum type with one total codec (Phases 1–2). That single primitive change
-collapses a family of runtime failures — ambiguous reads, ref round-trip bugs,
-delimiter collisions, the artifact-field smear — and it is the primitive the rest
-of the architecture hangs on. Quarantine-as-constraint (Phase 3) follows, because
-it finishes the "never overwrite" instinct the blob writer already demonstrates.
+1. Freeze debt and unify verification commands.
+2. Ref sum type + canonical/human read split.
+3. Typed `EntryID`/`SessionKey` constructors with compatibility storage.
+4. Schema constraints/triggers for append-only, conflict quarantine, and FKs.
+5. FTS trigger/reconciler work for messages and artifacts.
+6. Clock/backoff/source capability seams.
+7. Identity v2 only after compatibility ingest is proven.

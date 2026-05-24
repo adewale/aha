@@ -15,6 +15,9 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - R2 support through the AWS SDK S3 client with Cloudflare endpoint/region handling.
 - Fake-S3 R2 tests plus a real-R2 integration test behind the `integration` build tag.
 - Depot-specific fuzz targets for address parsing and bundle-key validation.
+- Unified verification entrypoints via `scripts/verify.sh` and Make targets, including bounded fuzz and optional mutation profiles.
+- `rapid` property-based testing dependency plus shared test generators for shrinkable invariant tests.
+- Static correctness-debt inventory tests for ambient time, raw identity concatenation, and manual FTS writes.
 - `status --depot` behind-bundle reporting.
 - `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.
@@ -44,5 +47,5 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ### Documentation
 
-- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, and a docs consistency audit.
+- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, verification guidance, a corrected correctness-by-construction spec, and a docs consistency audit.
 - Added OpenCode research and evaluation docs.
