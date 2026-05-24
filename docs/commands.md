@@ -78,7 +78,7 @@ aha doctor [--depot DEPOT] [--json]
 - `aha doctor`
 - `aha doctor --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{version,config,adapters,depot,next}`
+**JSON contract:** `object{version,config,adapters,sources,corpus,depot,next}`
 
 ## aha ingest
 

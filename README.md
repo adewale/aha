@@ -175,7 +175,7 @@ Command roles:
 - `status`: corpus counts and health.
 - `conflicts`: quarantined merge conflicts.
 - `depot`: initialize, list, or verify a local/R2 bundle depot.
-- `doctor`: environment, config, adapter, and next-action diagnostics.
+- `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 
 ## Supported sources
 
@@ -243,6 +243,7 @@ For coding agents using `aha`:
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
+- `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/eval-rubric.md` — rubric for future evals.

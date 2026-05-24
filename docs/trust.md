@@ -54,7 +54,7 @@ go test ./internal/cli -run NoNetworkImports
 
 ## Guarantee 4: remote depot is opt-in and private
 
-If you use an R2 depot, unredacted bundles leave your machine and are stored in your private bucket. `aha` treats that bucket as private storage for sensitive history.
+If you use an R2 depot, unredacted bundles leave your machine and are stored in your private bucket. `aha` treats that bucket as private storage for sensitive history. Recommended bucket/token settings are documented in `docs/r2-bucket-settings.md`.
 
 How this is enforced:
 

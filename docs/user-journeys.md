@@ -136,7 +136,7 @@ Rationale:
 | `status` | Explain corpus health and counts. |
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
 | `depot` | Initialize, list, and verify the durable bundle store. |
-| `doctor` | Debug source discovery, config, and adapter availability. |
+| `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |
 | `init` | Optional: materialize editable defaults and one-time privacy acknowledgement. |
 
 ## When to use flags

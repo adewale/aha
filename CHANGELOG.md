@@ -16,7 +16,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Fake-S3 R2 tests plus a real-R2 integration test behind the `integration` build tag.
 - Depot-specific fuzz targets for address parsing and bundle-key validation.
 - `status --depot` behind-bundle reporting.
-- `doctor --depot` depot diagnostics.
+- `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.
 - Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
 
@@ -44,5 +44,5 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ### Documentation
 
-- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 snapshot aggregation spec updates, and a docs consistency audit.
+- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, and a docs consistency audit.
 - Added OpenCode research and evaluation docs.

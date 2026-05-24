@@ -14,10 +14,40 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
-func TestCLIDoctorReportsDepotDiagnostics(t *testing.T) {
+func TestCLIDoctorReportsR2ConfigurationMistakes(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "aws-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--depot", "r2:https://pub-example.r2.dev", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{"depot address should be r2:BUCKET", "public r2.dev", "AHA ignores AWS_ACCESS_KEY_ID"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor missing %q in %s", want, body)
+		}
+	}
+	if strings.Contains(body, "aws-secret") {
+		t.Fatalf("doctor leaked AWS secret: %s", body)
+	}
+}
+
+func TestCLIDoctorReportsDepotSourceAndCorpusDiagnostics(t *testing.T) {
 	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
 	configPath := filepath.Join(root, "config.jsonc")
 	depotDir := filepath.Join(root, "depot")
+	corpusDir := filepath.Join(root, "corpus")
+	cfg := `{
+		"machine_id":"doctor-machine",
+		"sources":[{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true}],
+		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(depotDir) + `"},
+		"accept_secrets_warning":true
+	}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
 	if err := cli.Run([]string{"depot", "init", "--config", configPath, "local:" + depotDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
@@ -26,8 +56,11 @@ func TestCLIDoctorReportsDepotDiagnostics(t *testing.T) {
 	if err := cli.Run([]string{"doctor", "--config", configPath, "--depot", "local:" + depotDir, "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"depot"`) || !strings.Contains(out.String(), `"ok": true`) || !strings.Contains(out.String(), depotDir) {
-		t.Fatalf("doctor did not report depot diagnostics: %s", out.String())
+	body := out.String()
+	for _, want := range []string{`"depot"`, `"ok": true`, depotDir, `"sources"`, `"session_files"`, `"corpus"`, corpusDir} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor missing %q in %s", want, body)
+		}
 	}
 }
 
