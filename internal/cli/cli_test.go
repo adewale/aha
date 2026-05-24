@@ -10,8 +10,59 @@ import (
 	"testing"
 
 	"github.com/adewale/aha/internal/cli"
+	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/testutil"
 )
+
+func TestCLIDoctorReportsR2ConfigurationMistakes(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "aws-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--depot", "r2:https://pub-example.r2.dev", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{"depot address should be r2:BUCKET", "public r2.dev", "AHA ignores AWS_ACCESS_KEY_ID"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor missing %q in %s", want, body)
+		}
+	}
+	if strings.Contains(body, "aws-secret") {
+		t.Fatalf("doctor leaked AWS secret: %s", body)
+	}
+}
+
+func TestCLIDoctorReportsDepotSourceAndCorpusDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	configPath := filepath.Join(root, "config.jsonc")
+	depotDir := filepath.Join(root, "depot")
+	corpusDir := filepath.Join(root, "corpus")
+	cfg := `{
+		"machine_id":"doctor-machine",
+		"sources":[{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true}],
+		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(depotDir) + `"},
+		"accept_secrets_warning":true
+	}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"depot", "init", "--config", configPath, "local:" + depotDir}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"doctor", "--config", configPath, "--depot", "local:" + depotDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`"depot"`, `"ok": true`, depotDir, `"sources"`, `"session_files"`, `"corpus"`, corpusDir} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor missing %q in %s", want, body)
+		}
+	}
+}
 
 func TestSubcommandHelpIsSuccessful(t *testing.T) {
 	for _, cmd := range cli.CommandNames() {
@@ -40,12 +91,24 @@ func TestOutputModesAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func snapshotPathFromOutput(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, ".tar.zst") {
+			return line
+		}
+	}
+	t.Fatalf("snapshot output missing bundle path: %s", output)
+	return ""
+}
+
 func TestSnapshotJSONIncludesGeneratedMetadata(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)
 	outDir := filepath.Join(root, "bundles")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--json", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--json", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), `"bundle_id": ""`) || strings.Contains(out.String(), `"captured_at": ""`) {
@@ -61,14 +124,14 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	fx := testutil.WriteAgentFixtures(t, root)
 	outDir := filepath.Join(root, "bundles")
 	var out, stderr bytes.Buffer
-	err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir}, &out, &stderr)
+	err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir}, &out, &stderr)
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}
 	if !strings.Contains(stderr.String(), "does not redact secrets") {
 		t.Fatalf("missing privacy warning: %s", stderr.String())
 	}
-	matches, _ := filepath.Glob(filepath.Join(outDir, "*.tar.zst"))
+	matches, _ := filepath.Glob(filepath.Join(outDir, "bundles", "v1", "*.tar.zst"))
 	if len(matches) != 0 {
 		t.Fatalf("snapshot wrote bundles despite rejected privacy acknowledgement: %v", matches)
 	}
@@ -79,26 +142,30 @@ func TestCLIRejectsWritesInsideSourceRoots(t *testing.T) {
 	fx := testutil.WriteAgentFixtures(t, root)
 	insideSource := filepath.Join(fx.PiRoot, "aha-output")
 	var out, stderr bytes.Buffer
-	err := cli.Run([]string{"snapshot", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", insideSource}, &out, &stderr)
+	err := cli.Run([]string{"snapshot", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + insideSource}, &out, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
 		t.Fatalf("snapshot did not reject output inside source root: err=%v stderr=%s", err, stderr.String())
 	}
 	outDir := filepath.Join(root, "bundles")
-	err = cli.Run([]string{"refresh", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir, "--repo", insideSource}, &out, &stderr)
+	err = cli.Run([]string{"refresh", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--repo", insideSource}, &out, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
 		t.Fatalf("refresh did not reject repo inside source root before snapshot: err=%v", err)
 	}
-	matches, _ := filepath.Glob(filepath.Join(outDir, "*.tar.zst"))
+	matches, _ := filepath.Glob(filepath.Join(outDir, "bundles", "v1", "*.tar.zst"))
 	if len(matches) != 0 {
 		t.Fatalf("refresh wrote snapshot before repo validation: %v", matches)
 	}
 	cfgPath := filepath.Join(root, "config.jsonc")
-	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"bundle_out_dir":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`","corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"depot":{"type":"local","location":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`"},"corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	err = cli.Run([]string{"ingest", "--config", cfgPath, "--repo", insideSource, filepath.Join(root, "bundle.tar.zst")}, &out, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
 		t.Fatalf("ingest did not reject repo inside source root: err=%v", err)
+	}
+	err = cli.Run([]string{"depot", "init", "--config", cfgPath, "local:" + insideSource}, &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "must not be inside source root") {
+		t.Fatalf("depot init did not reject depot inside source root: err=%v", err)
 	}
 	linkToSource := filepath.Join(root, "repo-link")
 	if err := os.Symlink(fx.PiRoot, linkToSource); err == nil {
@@ -114,7 +181,7 @@ func TestCLIReadCommandsDoNotCreateMissingCorpus(t *testing.T) {
 	fx := testutil.WriteAgentFixtures(t, root)
 	missingRepo := filepath.Join(root, "missing-corpus")
 	cfgPath := filepath.Join(root, "config.jsonc")
-	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"bundle_out_dir":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`","corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"machine_id":"m1","accept_secrets_warning":true,"depot":{"type":"local","location":"`+filepath.ToSlash(filepath.Join(root, "bundles"))+`"},"corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","sources":[{"type":"pi","root":"`+filepath.ToSlash(fx.PiRoot)+`","enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	commands := [][]string{
@@ -147,7 +214,7 @@ func TestCLIRefreshCreatesAggregationCorpus(t *testing.T) {
 			{"type":"claude-code","root":"` + filepath.ToSlash(fx.ClaudeRoot) + `","enabled":true}
 		],
 		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
-		"bundle_out_dir":"` + filepath.ToSlash(outDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
 		"path_mode":"raw",
 		"include_subagents":true,
 		"include_images":true,
@@ -180,10 +247,10 @@ func TestCLIRepoAliasAndSessionScopedJourneys(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--machine", "scoped", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--out", outDir, "--accept-secrets", "--session", "pi-session", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "pi-only"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--machine", "scoped", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--session", "pi-session", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "pi-only"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	bundle := filepath.Join(outDir, "aha-sessions-scoped-2026-01-03T00-00-00Z-pi-only.tar.zst")
+	bundle := snapshotPathFromOutput(t, out.String())
 	out.Reset()
 	if err := cli.Run([]string{"ingest", "--repo", repoDir, bundle}, &out, io.Discard); err != nil {
 		t.Fatal(err)
@@ -206,11 +273,92 @@ func TestCLIRefreshCanLimitLocalSessions(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--machine", "limited", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--out", outDir, "--repo", repoDir, "--accept-secrets", "--max-sessions", "1", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "one"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--machine", "limited", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--max-sessions", "1", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "one"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "sessions=1") {
 		t.Fatalf("expected refresh to ingest one session: %s", out.String())
+	}
+}
+
+func TestCLIDepotInitBindsConfig(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.jsonc")
+	depotDir := filepath.Join(root, "bound-depot")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"depot", "init", "--config", configPath, "local:" + depotDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), depotDir) || !strings.Contains(out.String(), configPath) {
+		t.Fatalf("depot init did not report bound config: %s", out.String())
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Depot.Type != "local" || cfg.Depot.Location != depotDir {
+		t.Fatalf("config depot not bound: %+v", cfg.Depot)
+	}
+}
+
+func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	depotDir := filepath.Join(root, "depot")
+	corpusDir := filepath.Join(root, "corpus")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "depot-cli"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), filepath.Join("bundles", "v1")) || !strings.Contains(out.String(), "sha256:") {
+		t.Fatalf("snapshot did not write content-addressed depot bundle: %s", out.String())
+	}
+	receipts, err := filepath.Glob(filepath.Join(depotDir, "bundles", "v1", "*.receipt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 0 {
+		t.Fatalf("snapshot wrote removed receipt sidecars: %v", receipts)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, "--depot", "local:" + depotDir}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sessions=1") {
+		t.Fatalf("ingest from local depot failed: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"status", "--corpus", corpusDir, "--depot", "local:" + depotDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"depot_behind_bundles": 0`) {
+		t.Fatalf("status did not compare depot/corpus: %s", out.String())
+	}
+}
+
+func TestCLIRefreshIsIdempotentWhenSourcesUnchanged(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	depotDir := filepath.Join(root, "depot")
+	corpusDir := filepath.Join(root, "corpus")
+	args := []string{"refresh", "--machine", "idem", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--corpus", corpusDir, "--accept-secrets"}
+	var out bytes.Buffer
+	if err := cli.Run(args, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := cli.Run(args, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(depotDir, "bundles", "v1", "*.tar.zst"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("refresh should not create a second unchanged bundle, got %d: %v", len(matches), matches)
+	}
+	if strings.Contains(out.String(), "sessions=") {
+		t.Fatalf("second refresh should not re-ingest already-current corpus: %s", out.String())
 	}
 }
 
@@ -227,7 +375,7 @@ func TestCLIDefaultSnapshotAndIngestJourney(t *testing.T) {
 			{"type":"claude-code","root":"` + filepath.ToSlash(fx.ClaudeRoot) + `","enabled":true}
 		],
 		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
-		"bundle_out_dir":"` + filepath.ToSlash(outDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
 		"path_mode":"raw",
 		"include_subagents":true,
 		"include_images":true,
@@ -264,11 +412,11 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	outDir := filepath.Join(root, "out")
 	corpusDir := filepath.Join(root, "corpus")
 	var out bytes.Buffer
-	args := []string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--out", outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "fixed"}
+	args := []string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "fixed"}
 	if err := cli.Run(args, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	bundle := filepath.Join(outDir, "aha-sessions-m1-2026-01-03T00-00-00Z-fixed.tar.zst")
+	bundle := snapshotPathFromOutput(t, out.String())
 	out.Reset()
 	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, bundle}, &out, io.Discard); err != nil {
 		t.Fatal(err)

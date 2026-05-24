@@ -35,6 +35,23 @@ type Conflict struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+func BundleSHAs(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`select bundle_sha256 from bundles`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, err
+		}
+		out[sha] = true
+	}
+	return out, rows.Err()
+}
+
 func Conflicts(db *sql.DB) ([]Conflict, error) {
 	rows, err := db.Query(`select conflict_id,session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json,created_at from conflicts order by conflict_id`)
 	if err != nil {

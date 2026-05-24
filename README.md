@@ -31,11 +31,11 @@ Many users start with:
 ## Why use it?
 
 - **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
-- **Private by default**: everything stays on your machine unless you move the bundle/corpus.
-- **Portable history**: copy a bundle from another machine and `aha ingest` it.
+- **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
+- **Portable history**: share a depot, copy a bundle from another machine, or `aha ingest` it.
 - **Better than snippets**: search finds leads; read retrieves full context so humans and agents do not answer from snippets alone.
 - **Agent-friendly retrieval**: JSON, refs, Markdown, and stable `search → read` workflows.
-- **Auditable trust claims**: read-only source access and no-network behavior are tested.
+- **Auditable trust claims**: read-only source access, local-by-default behavior, and network boundaries are tested.
 
 ## Privacy warning
 
@@ -153,27 +153,29 @@ More journey rationale: `docs/user-journeys.md`.
 
 ```txt
 aha init [--config PATH] [--accept-secrets] [--json]
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]
-aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]
-aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]
+aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
+aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
+aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
 aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
-aha status [--repo DIR] [--json]
+aha status [--repo DIR] [--depot DEPOT] [--json]
 aha conflicts [--repo DIR] [--json]
-aha doctor [--json]
+aha depot <init|ls|verify> [DEPOT] [--json]
+aha doctor [--depot DEPOT] [--json]
 ```
 
 Command roles:
 
 - `init`: write starter JSONC config and optionally persist privacy acknowledgement.
 - `refresh`: common local update: `snapshot` then ingest the just-created bundle.
-- `snapshot`: create an immutable bundle without touching a corpus.
-- `ingest`: merge bundles into a corpus/repo.
+- `snapshot`: create an immutable bundle and store it in the configured depot.
+- `ingest`: merge bundles from paths or a depot into a corpus/repo.
 - `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts.
 - `read`: retrieve full context from `--session/--entry` or a `<session>#<entry>` ref.
 - `status`: corpus counts and health.
 - `conflicts`: quarantined merge conflicts.
-- `doctor`: environment, config, adapter, and next-action diagnostics.
+- `depot`: initialize, list, or verify a local/R2 bundle depot.
+- `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 
 ## Supported sources
 
@@ -191,7 +193,7 @@ A source is read-only during snapshot. Raw files are copied into the bundle and 
 |---|---|
 | Config | `~/.config/aha/config.jsonc` |
 | Corpus | `~/.aha` |
-| Bundle output | `~/agent-session-bundles` |
+| Depot | `~/.aha/depot` local bundle store |
 | Machine ID | sanitized local hostname |
 | Tool output indexing | off |
 | Redaction | none in v1 |
@@ -207,7 +209,7 @@ Config is JSONC; flags override config.
     { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
   "corpus_dir": "~/.aha",
-  "bundle_out_dir": "~/agent-session-bundles",
+  "depot": { "type": "local", "location": "~/.aha/depot" },
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
@@ -237,14 +239,17 @@ For coding agents using `aha`:
 
 ## Project docs
 
+- `CHANGELOG.md` — notable unreleased changes.
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
+- `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
 - `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
+- `docs/audits/docs-consistency-audit.md` — latest docs consistency audit.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 

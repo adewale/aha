@@ -1,20 +1,16 @@
 package cli_test
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestNoNetworkImportsInApplicationPackages(t *testing.T) {
+func TestNoNetworkImportsOutsideDepot(t *testing.T) {
 	roots := []string{"../../cmd", "../../internal"}
-	forbidden := []string{
-		`"net"`,
-		`"net/http"`,
-		`"net/url"`,
-		`"net/rpc"`,
-	}
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -23,14 +19,17 @@ func TestNoNetworkImportsInApplicationPackages(t *testing.T) {
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			b, err := os.ReadFile(path)
+			if strings.Contains(filepath.ToSlash(path), "/internal/depot/") {
+				return nil
+			}
+			f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 			if err != nil {
 				return err
 			}
-			text := string(b)
-			for _, token := range forbidden {
-				if strings.Contains(text, token) {
-					t.Fatalf("%s imports network API %s; update docs/trust.md if v1 network behavior changes", path, token)
+			for _, imp := range f.Imports {
+				p := strings.Trim(imp.Path.Value, `"`)
+				if p == "net" || strings.HasPrefix(p, "net/") {
+					t.Fatalf("%s imports network API %q outside internal/depot; update docs/trust.md if core network behavior changes", path, p)
 				}
 			}
 			return nil

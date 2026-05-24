@@ -3,7 +3,15 @@
 ## Agent-friendly roadmap
 
 - Keep `--json` available for every command and continue enriching schemas over time with paths, counts, timestamps, policy/config context, diagnostics, and next suggested commands. Machine-readable top-level JSON errors and copy-pastable search refs are in place.
-- Add explicit agent documentation/skill: recommended `search -> read -> answer` workflow, privacy caveats, which commands are read-only, examples for `--json`, and guidance to avoid answering from snippets alone.
+- Add explicit agent documentation/skill for `aha`:
+  - teach the required `search -> read -> answer` workflow;
+  - state that snippets are leads, not evidence;
+  - list read-only commands (`search`, `read`, `status`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `depot init/verify --repair`);
+  - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, and JSON error envelopes;
+  - explain privacy caveats: v1 does not redact secrets, R2 is opt-in upload, and bundles/corpora are private;
+  - show how an agent should cite/quote refs in its own notes;
+  - include failure handling: if search returns nothing, broaden query; if read fails, report the stale ref and run `aha status --json`/`aha doctor --json`;
+  - include config/depot caveats: use `--repo` for alternate corpora and do not pass `--depot` to search/read.
 - Continue improving `HitRef` as first-class CLI input/output. Search JSON now includes structured `ref` plus copy-pastable `ref_text`; next steps are multi-read and MCP resource mapping.
 - Keep qmd-inspired output modes for agent retrieval (`--refs`, `--files`, and `--md`) stable and documented.
 - Keep command metadata as the source of truth for generated command docs, docs sync tests, examples, JSON schema notes, and future MCP tool schemas; eventually remove remaining manual flag-definition duplication.
@@ -13,7 +21,7 @@
 
 - Explore additional search forms beyond SQLite FTS: structured filters, saved searches, semantic/vector search, hybrid ranking, query expansion, and explain/debug output for rankings.
 - Consider an MCP interface exposing `search`, `read`, `status`, and `conflicts` as tools/resources before adding any long-running daemon.
-- Improve `status` and `doctor`: quick next-action hints exist; deeper config/source/corpus/schema/bundle diagnostics in `doctor` remain.
+- Continue improving `doctor`: source, corpus, depot, and common R2 misconfiguration diagnostics exist; remaining depth includes schema migration details, bundle blob-store checks, adapter fixture/version drift checks, and optional R2 bucket setting verification where Cloudflare exposes it.
 - Add multi-read or batch-read for agent workflows that need to retrieve several hits from one search. A likely syntax is `aha read --refs-file refs.txt --json` or `aha read <ref1> <ref2> ... --json`, returning grouped context per ref.
 
 ## Future adapters

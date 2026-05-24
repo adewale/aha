@@ -256,6 +256,29 @@ func openRegularNoFollow(path string) (*os.File, os.FileInfo, error) {
 	return f, st, nil
 }
 
+func ManifestStateSHA256(m model.Manifest) string {
+	state := struct {
+		Schema       string
+		MachineID    string
+		MachineLabel string
+		Source       model.ManifestSource
+		Policy       model.ManifestPolicy
+		Adapters     []model.ManifestAdapt
+		Files        []model.ManifestFile
+	}{
+		Schema:       m.Schema,
+		MachineID:    m.MachineID,
+		MachineLabel: m.MachineLabel,
+		Source:       m.Source,
+		Policy:       m.Policy,
+		Adapters:     m.Adapters,
+		Files:        m.Files,
+	}
+	b, _ := json.Marshal(state)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 func StableCopy(path, dir string) (string, string, int64, string, error) {
 	check := func() (os.FileInfo, error) {
 		st, err := os.Lstat(path)

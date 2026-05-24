@@ -19,7 +19,7 @@ func Default() model.Config {
 		MachineID:            defaultMachineID(),
 		Sources:              defaultSources(),
 		CorpusDir:            "~/.aha",
-		BundleOutDir:         "~/agent-session-bundles",
+		Depot:                model.DepotConfig{Type: "local", Location: "~/.aha/depot"},
 		PathMode:             "raw",
 		IncludeSubagents:     true,
 		IncludeImages:        true,

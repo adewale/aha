@@ -3,3 +3,7 @@
 *.out
 .DS_Store
 coverage.out
+
+# Installed agent skills (dev tooling, not project source)
+/.agents/
+/skills-lock.json

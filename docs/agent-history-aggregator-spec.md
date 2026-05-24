@@ -267,7 +267,7 @@ Determinism rules:
 - canonical JSON for `manifest.json` with stable field ordering and no incidental whitespace;
 - normalized tar metadata: owner/group IDs, owner/group names, modes, mtimes, type flags, and path separators;
 - deterministic zstd settings with no embedded wall-clock metadata;
-- bundle SHA-256 computed after archive creation and written to a receipt outside the bundle;
+- bundle SHA-256 computed after archive creation and emitted in command output / JSON;
 - tests pin `captured_at`, `bundle_id`, and machine/config values to prove deterministic fixtures.
 
 ## Manifest
@@ -351,7 +351,7 @@ aha snapshot \
   --machine ade-mbp \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --out ~/agent-session-bundles/
+  --depot local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -365,7 +365,7 @@ Responsibilities:
 7. Write deterministic `manifest.json`.
 8. Write `tar.zst` bundle.
 9. Compute bundle SHA-256.
-10. Write a local receipt.
+10. Emit bundle path/key and SHA in command output / JSON.
 
 V1 does not redact secrets. The command should print a direct warning unless a non-interactive flag accepts it:
 
@@ -444,7 +444,7 @@ V1 does not require OCR or image captioning. Image text search is metadata-only 
 Example:
 
 ```bash
-aha ingest ~/agent-session-bundles/aha-sessions-*.tar.zst
+aha ingest --depot local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -505,11 +505,13 @@ Directory layout:
   corpus.db
   blobs/
     bundles/{bundle_sha256}.tar.zst
-    files/{file_sha256}.zst
+    files/{file_sha256}.zst        # includes artifact file bytes
     images/{image_sha256}.{ext}
-    artifacts/{artifact_sha256}
-  reports/
 ```
+
+Artifact bytes are stored as ordinary file blobs under `blobs/files/`; artifact
+text and provenance live in the SQLite `artifacts` table. Ingest reports are
+returned to the caller and emitted to stdout/JSON, not persisted to disk.
 
 V1 uses `modernc.org/sqlite` with SQLite FTS5. SQLite schema, FTS, constraints, indexes, transactions, and migrations are part of the product contract; filesystem blobs store immutable large bytes.
 
@@ -635,12 +637,13 @@ Config should cover:
   "machine_label": "Adewale MacBook Pro",
 
   "sources": [
-    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true },
-    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true }
+    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true },
+    { "type": "codex", "root": "~/.codex/sessions", "enabled": true },
+    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
 
   "corpus_dir": "~/.aha",
-  "bundle_out_dir": "~/agent-session-bundles",
+  "depot": { "type": "local", "location": "~/.aha/depot" },
   "path_mode": "raw",
   "include_subagents": true,
   "include_images": true,
@@ -662,6 +665,7 @@ aha search
 aha read
 aha status
 aha conflicts
+aha depot
 aha doctor
 ```
 
@@ -1055,7 +1059,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 3. **Same bundle ingested twice**
    - Input: identical archive.
-   - Expected: second ingest is a no-op except ingest-attempt receipt.
+   - Expected: second ingest is a no-op except ingest-attempt audit row.
 
 4. **Later bundle from same machine**
    - Input: prior archive plus a changed/grown session file.
@@ -1141,4 +1145,4 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 
 Remembered line:
 
-> The bundle is the receipt. The corpus is the index.
+> The bundle is the durable evidence. The corpus is the index.

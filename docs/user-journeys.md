@@ -12,7 +12,7 @@ Design rules:
 
 ## Journey 1: first local archive
 
-User goal: “I want all of this machine's Pi and Claude Code history searchable.”
+User goal: “I want all of this machine's Pi, Claude Code, and Codex history searchable.”
 
 ```bash
 aha init --accept-secrets
@@ -24,14 +24,14 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `refresh` creates a snapshot bundle and ingests that bundle into the local corpus.
-- The user should not need to remember Pi/Claude paths for the standard layout.
+- `refresh` snapshots configured sources into the depot and ingests pending depot bundles into the local corpus.
+- The user should not need to remember Pi/Claude/Codex paths for the standard layout.
 
 Defaults used:
 
 - machine ID: sanitized local hostname, written to config;
-- sources: `~/.pi/agent/sessions` and `~/.claude/projects`;
-- bundle output: `~/agent-session-bundles`;
+- sources: `~/.pi/agent/sessions`, `~/.claude/projects`, and `~/.codex/sessions`;
+- depot: local bundle store at `~/.aha/depot`; remote/R2 depot is opt-in;
 - corpus: `~/.aha`;
 - subagents/images: included;
 - redaction: none in v1.
@@ -87,6 +87,7 @@ Rationale:
 
 - Ingest creates the repo/corpus directory if needed.
 - Bundle identity and machine provenance come from the manifest.
+- Explicit bundle-path ingest imports into the corpus; publishing to a depot is done by `snapshot`/`refresh --depot`.
 - Users should not need to rename files or edit config before import.
 - Duplicate imports should be harmless.
 
@@ -99,7 +100,7 @@ AHA_ACCEPT_SECRETS=1 aha refresh \
   --machine ci-mac \
   --source pi="$HOME/.pi/agent/sessions" \
   --source claude-code="$HOME/.claude/projects" \
-  --out "$RUNNER_TEMP/aha-bundles" \
+  --depot "local:$RUNNER_TEMP/aha-bundles" \
   --repo "$RUNNER_TEMP/aha-corpus" \
   --max-sessions 10
 ```
@@ -114,11 +115,11 @@ Rationale:
 
 | Command | No-flag behavior |
 |---|---|
-| `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default corpus/bundle dirs, and privacy acknowledgement set to false. |
+| `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default local depot/corpus dirs, and privacy acknowledgement set to false. |
 | `aha init --accept-secrets` | Same as `init`, but records one-time privacy acknowledgement. |
-| `aha refresh` | Snapshot configured sources into configured bundle output, then ingest the new bundle into configured corpus. Supports `--session` and `--max-sessions` for 1-to-all local-session scope. |
-| `aha snapshot` | Use config/default machine ID, sources, and bundle output. Supports `--session` and `--max-sessions`; requires prior privacy acknowledgement. |
-| `aha ingest` | Ingest explicit bundle paths, or all `*.tar.zst` from configured bundle output when no paths are given. `--repo` is an alias for the corpus directory. |
+| `aha refresh` | Snapshot configured sources into the configured depot, then ingest depot bundles into configured corpus. Supports `--session` and `--max-sessions` for 1-to-all local-session scope. |
+| `aha snapshot` | Use config/default machine ID, sources, and depot. Supports `--session` and `--max-sessions`; requires prior privacy acknowledgement. |
+| `aha ingest` | Ingest explicit bundle paths, or ingest from the configured depot when no paths are given. `--repo` is an alias for the corpus directory. |
 | `aha search <query>` | Search configured corpus, limit 20. |
 | `aha read ...` | Read from configured corpus. |
 | `aha status` / `aha conflicts` | Inspect configured corpus. |
@@ -134,7 +135,8 @@ Rationale:
 | `read` | Context expansion around compact search results. |
 | `status` | Explain corpus health and counts. |
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
-| `doctor` | Debug source discovery, config, and adapter availability. |
+| `depot` | Initialize, list, and verify the durable bundle store. |
+| `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |
 | `init` | Optional: materialize editable defaults and one-time privacy acknowledgement. |
 
 ## When to use flags
@@ -144,5 +146,5 @@ Use flags for:
 - deterministic test bundles (`--captured-at`, `--bundle-id`);
 - copied bundles from another machine;
 - multiple corpora;
-- nonstandard Pi or Claude roots;
+- nonstandard Pi, Claude Code, or Codex roots;
 - temporary workspaces and CI.
