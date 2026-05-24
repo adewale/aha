@@ -18,6 +18,7 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/media"
@@ -36,14 +37,14 @@ type IngestReport struct {
 	Duplicate bool `json:"duplicate"`
 }
 
-func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) (duplicate bool, skip bool, err error) {
+func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA, ingestedAt string) (duplicate bool, skip bool, err error) {
 	var shaForID string
 	err = tx.QueryRow(`select bundle_sha256 from bundles where bundle_id=?`, manifest.BundleID).Scan(&shaForID)
 	if err == nil {
 		if shaForID != bundleSHA {
 			return false, false, fmt.Errorf("bundle_id %s already exists with different sha", manifest.BundleID)
 		}
-		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
 			return false, false, err
 		}
 		return true, true, nil
@@ -54,7 +55,7 @@ func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) 
 	var idForSHA string
 	err = tx.QueryRow(`select bundle_id from bundles where bundle_sha256=?`, bundleSHA).Scan(&idForSHA)
 	if err == nil {
-		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
 			return false, false, err
 		}
 		return true, true, nil
@@ -62,7 +63,7 @@ func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA string) 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, false, err
 	}
-	if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,0)`, manifest.BundleID, bundleSHA, time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,0)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
 		return false, false, err
 	}
 	return false, false, nil
@@ -76,6 +77,9 @@ type ingestHooks struct {
 type Ingestor struct {
 	Store    *Store
 	Registry map[string]adapters.SourceAdapter
+	Clock    ahaclock.Clock
+	Sleeper  ahaclock.Sleeper
+	Backoff  ahaclock.Backoff
 	hooks    ingestHooks
 }
 
@@ -100,7 +104,7 @@ type corpusWriter struct {
 }
 
 func NewIngestor(store *Store, registry map[string]adapters.SourceAdapter) Ingestor {
-	return Ingestor{Store: store, Registry: registry}
+	return Ingestor{Store: store, Registry: registry, Clock: ahaclock.RealClock{}, Sleeper: ahaclock.RealSleeper{}, Backoff: ahaclock.LinearBackoff{}}
 }
 
 func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path string) (IngestReport, error) {
@@ -114,7 +118,7 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
 			return rep, err
 		}
-		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+		ing.sleeper().Sleep(ing.backoff().Delay(attempt))
 	}
 }
 
@@ -133,7 +137,8 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 		return IngestReport{}, err
 	}
 	defer tx.Rollback()
-	dup, skip, err := recordBundleAttempt(tx, plan.manifest, plan.bundleSHA)
+	ingestedAt := ing.clock().Now().Format(time.RFC3339)
+	dup, skip, err := recordBundleAttempt(tx, plan.manifest, plan.bundleSHA, ingestedAt)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -143,7 +148,7 @@ func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
 		}
 		return IngestReport{Duplicate: dup}, nil
 	}
-	if err := insertBundleMetadata(tx, plan); err != nil {
+	if err := insertBundleMetadata(tx, plan, ingestedAt); err != nil {
 		return IngestReport{}, err
 	}
 	manifest := plan.manifest
@@ -208,6 +213,27 @@ func validateIngestAdapters(manifest model.Manifest, registry map[string]adapter
 	return nil
 }
 
+func (ing Ingestor) clock() ahaclock.Clock {
+	if ing.Clock == nil {
+		return ahaclock.RealClock{}
+	}
+	return ing.Clock
+}
+
+func (ing Ingestor) sleeper() ahaclock.Sleeper {
+	if ing.Sleeper == nil {
+		return ahaclock.RealSleeper{}
+	}
+	return ing.Sleeper
+}
+
+func (ing Ingestor) backoff() ahaclock.Backoff {
+	if ing.Backoff == nil {
+		return ahaclock.LinearBackoff{}
+	}
+	return ing.Backoff
+}
+
 func isSQLiteBusy(err error) bool {
 	if err == nil {
 		return false
@@ -247,9 +273,9 @@ func (p bundlePlanner) Prepare(sourcePath string) (ingestPlan, error) {
 	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(p.Store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest}, nil
 }
 
-func insertBundleMetadata(tx *sql.Tx, plan ingestPlan) error {
+func insertBundleMetadata(tx *sql.Tx, plan ingestPlan, ingestedAt string) error {
 	manifestJSON, _ := json.Marshal(plan.manifest)
-	_, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, plan.manifest.BundleID, plan.bundleSHA, plan.manifest.MachineID, plan.manifest.CapturedAt, time.Now().UTC().Format(time.RFC3339), string(manifestJSON))
+	_, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, plan.manifest.BundleID, plan.bundleSHA, plan.manifest.MachineID, plan.manifest.CapturedAt, ingestedAt, string(manifestJSON))
 	return err
 }
 
@@ -360,15 +386,32 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 		ps.Metadata["diagnostics"] = ps.Diagnostics
 	}
 	sessionID := firstNonEmpty(ps.SourceSessionID, mf.SessionID, strings.TrimSuffix(filepath.Base(mf.RelativePath), filepath.Ext(mf.RelativePath)))
-	sessionKey := mf.Source + ":" + manifest.MachineID + ":" + sessionID
+	legacySessionKeyValue, err := model.NewLegacySessionKey(mf.Source, manifest.MachineID, sessionID)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	sessionKeyValue, err := model.NewSessionKey(mf.Source, manifest.MachineID, sessionID)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	sessionKey := sessionKeyValue.String()
+	legacySessionKey := legacySessionKeyValue.String()
 	if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
 		return IngestReport{}, err
+	}
+	for _, alias := range []string{sessionKey, legacySessionKey} {
+		if _, err := tx.Exec(`insert or ignore into session_key_aliases(alias,session_key) values(?,?)`, alias, sessionKey); err != nil {
+			return IngestReport{}, err
+		}
 	}
 	if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
 		return IngestReport{}, err
 	}
 	rep := IngestReport{Sessions: 1}
 	for _, pe := range ps.Entries {
+		if _, err := model.NewEntryID(pe.EntryID); err != nil {
+			return IngestReport{}, err
+		}
 		r, err := ingestEntry(tx, w.Store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
 		if err != nil {
 			return IngestReport{}, err
@@ -414,9 +457,6 @@ func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourc
 			return entryReport{}, err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			if _, err := tx.Exec(`insert into fts_messages(session_key,entry_id,text) values(?,?,?)`, sessionKey, pe.EntryID, pe.Text); err != nil {
-				return entryReport{}, err
-			}
 			rep.Messages++
 		}
 	}
@@ -603,7 +643,11 @@ func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.M
 	}
 	var parent any
 	if mf.ParentHint != "" {
-		parent = mf.Source + ":" + manifest.MachineID + ":" + mf.ParentHint
+		key, err := model.NewSessionKey(mf.Source, manifest.MachineID, mf.ParentHint)
+		if err != nil {
+			return false, err
+		}
+		parent = key.String()
 	}
 	res, err := tx.Exec(`insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview, fullText)
 	if err != nil {
@@ -612,15 +656,6 @@ func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.M
 	added := false
 	if n, _ := res.RowsAffected(); n > 0 {
 		added = true
-		var artifactID int64
-		if err := tx.QueryRow(`select artifact_id from artifacts where artifact_sha256=? and bundle_id=? and relative_path=? and coalesce(parent_session_key,'')=coalesce(?, '')`, mf.SHA256, manifest.BundleID, mf.RelativePath, parent).Scan(&artifactID); err != nil {
-			return false, err
-		}
-		if fullText != "" {
-			if _, err := tx.Exec(`insert into fts_artifacts(artifact_id,text) values(?,?)`, artifactID, fullText); err != nil {
-				return false, err
-			}
-		}
 		if manifest.Policy.IncludeImages {
 			if err := maybeStoreImageArtifact(tx, root, manifest, mf, path); err != nil {
 				return false, err

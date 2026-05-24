@@ -15,6 +15,13 @@ func TestFixedClockReturnsPinnedUTCInstant(t *testing.T) {
 	}
 }
 
+func TestLinearBackoffUsesAttemptNumber(t *testing.T) {
+	b := clock.LinearBackoff{Base: 5 * time.Millisecond}
+	if got := b.Delay(2); got != 15*time.Millisecond {
+		t.Fatalf("Delay(2)=%s want 15ms", got)
+	}
+}
+
 func TestNoopSleeperReturnsImmediately(t *testing.T) {
 	start := time.Now()
 	clock.NoopSleeper{}.Sleep(time.Hour)

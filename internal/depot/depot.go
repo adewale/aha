@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/adewale/aha/internal/archive"
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 )
@@ -302,7 +303,8 @@ type marker struct {
 }
 
 func newMarker() marker {
-	return marker{Schema: MarkerSchema, DepotID: fmt.Sprintf("depot-%d", time.Now().UTC().UnixNano()), Layout: LayoutVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339), CreatedBy: "aha " + model.Version}
+	now := ahaclock.RealClock{}.Now()
+	return marker{Schema: MarkerSchema, DepotID: fmt.Sprintf("depot-%d", now.UnixNano()), Layout: LayoutVersion, CreatedAt: now.Format(time.RFC3339), CreatedBy: "aha " + model.Version}
 }
 
 func validateMarkerBytes(b []byte) error {

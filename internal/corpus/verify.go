@@ -40,6 +40,7 @@ func Verify(store *Store) (VerifyReport, error) {
 		{"orphan_fts_messages", "fts_messages rows without backing messages", `select count(*) from fts_messages f left join messages m on m.session_key=f.session_key and m.entry_id=f.entry_id where m.session_key is null`},
 		{"missing_fts_messages", "messages without fts_messages rows", `select count(*) from messages m left join fts_messages f on f.session_key=m.session_key and f.entry_id=m.entry_id where f.session_key is null`},
 		{"orphan_fts_artifacts", "fts_artifacts rows without backing artifacts", `select count(*) from fts_artifacts f left join artifacts a on a.artifact_id=f.artifact_id where a.artifact_id is null`},
+		{"missing_fts_artifacts", "artifacts without fts_artifacts rows", `select count(*) from artifacts a left join fts_artifacts f on f.artifact_id=a.artifact_id where trim(coalesce(nullif(a.text_body,''),a.text_preview,''))<>'' and f.artifact_id is null`},
 	}
 	for _, check := range checks {
 		count, err := verifyCount(store.DB, check.query)

@@ -14,15 +14,8 @@ import (
 
 func TestAmbientTimeDebtInventoryDoesNotGrow(t *testing.T) {
 	want := map[string]int{
-		"internal/archive/archive.go:Capture:Now":                       1,
-		"internal/cli/cli.go:writeSnapshot:Now":                         1,
-		"internal/cli/command_snapshot.go:finalizeSnapshotMetadata:Now": 1,
-		"internal/clock/clock.go:Now:Now":                               1,
-		"internal/clock/clock.go:Sleep:Sleep":                           1,
-		"internal/corpus/ingest.go:IngestBundle:Sleep":                  1,
-		"internal/corpus/ingest.go:insertBundleMetadata:Now":            1,
-		"internal/corpus/ingest.go:recordBundleAttempt:Now":             3,
-		"internal/depot/depot.go:newMarker:Now":                         2,
+		"internal/clock/clock.go:Now:Now":     1,
+		"internal/clock/clock.go:Sleep:Sleep": 1,
 	}
 	got := ambientTimeCalls(t)
 	if !reflect.DeepEqual(got, want) {
@@ -32,8 +25,12 @@ func TestAmbientTimeDebtInventoryDoesNotGrow(t *testing.T) {
 
 func TestManualFTSDebtInventoryDoesNotGrow(t *testing.T) {
 	want := map[string]int{
-		"internal/corpus/ingest.go:insert:fts_artifacts": 1,
-		"internal/corpus/ingest.go:insert:fts_messages":  1,
+		"internal/corpus/fts_reconcile.go:delete:fts_artifacts": 1,
+		"internal/corpus/fts_reconcile.go:delete:fts_messages":  1,
+		"internal/corpus/fts_reconcile.go:insert:fts_artifacts": 1,
+		"internal/corpus/fts_reconcile.go:insert:fts_messages":  1,
+		"internal/corpus/schema.go:insert:fts_artifacts":        1,
+		"internal/corpus/schema.go:insert:fts_messages":         1,
 	}
 	got := manualFTSWrites(t)
 	if !reflect.DeepEqual(got, want) {
@@ -49,18 +46,9 @@ func TestNoDirectAppendOnlyTableMutationDebt(t *testing.T) {
 }
 
 func TestRawIdentityConcatDebtInventoryDoesNotGrow(t *testing.T) {
-	known := map[string][]string{
-		"internal/corpus/ingest.go": {
-			`sessionKey := mf.Source + ":" + manifest.MachineID + ":" + sessionID`,
-			`parent = mf.Source + ":" + manifest.MachineID + ":" + mf.ParentHint`,
-		},
-	}
-	got := rawIdentityDebt(t, known)
-	want := map[string]int{
-		"internal/corpus/ingest.go": 2,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("raw identity construction debt inventory changed\ngot:  %#v\nwant: %#v\nUse a typed/canonical identity constructor instead of adding string-built keys.", got, want)
+	got := rawIdentityDebt(t, nil)
+	if len(got) > 0 {
+		t.Fatalf("raw identity construction debt must stay inside model constructors; offenders: %#v", got)
 	}
 }
 
@@ -143,6 +131,9 @@ func rawIdentityDebt(t *testing.T, known map[string][]string) map[string]int {
 	out := map[string]int{}
 	joinRe := regexp.MustCompile(`strings\.Join\s*\([^\n]+,\s*":"\s*\)`)
 	walkProductionGo(t, func(rel, _ string, b []byte) {
+		if rel == "internal/model/identity.go" || rel == "internal/model/ref.go" {
+			return
+		}
 		text := string(b)
 		for _, snippet := range known[rel] {
 			count := strings.Count(text, snippet)

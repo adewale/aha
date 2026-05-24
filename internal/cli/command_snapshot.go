@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
@@ -133,7 +134,7 @@ func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapsho
 
 func finalizeSnapshotMetadata(req *snapshotRequest) {
 	if req.CapturedAt == "" {
-		req.CapturedAt = time.Now().UTC().Format(time.RFC3339)
+		req.CapturedAt = ahaclock.RealClock{}.Now().Format(time.RFC3339)
 	}
 	if req.BundleID == "" {
 		req.BundleID = hash.RandomID()

@@ -17,6 +17,7 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/hash"
@@ -243,11 +244,12 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	defer os.RemoveAll(tmpDir)
 	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID, SessionFilters: req.SessionFilters, MaxSessions: req.MaxSessions}
 	if opts.CapturedAt == "" {
-		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
+		opts.CapturedAt = ahaclock.RealClock{}.Now().Format(time.RFC3339)
 	}
 	if opts.BundleID == "" {
 		opts.BundleID = hash.RandomID()
 	}
+	opts.Clock = ahaclock.RealClock{}
 	bundle, err := archive.Capture(context.Background(), req.Config, adapters.Builtins(), opts)
 	if err != nil {
 		return "", "", err

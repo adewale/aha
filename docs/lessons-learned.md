@@ -79,6 +79,9 @@ Current counts after cycle 10:
 - Phase-0 guardrails are not busywork. Static debt inventories, state-machine skeletons, adapter conformance fixtures, schema introspection helpers, named seams, verifier queries, and mutation dry-runs make later refactors smaller and safer.
 - Verification should be one workflow, not a wiki list of commands. CI and local development need the same scriptable profiles for quick checks, full checks, fuzzing, and mutation dry-runs.
 - Mutation dry-runs are useful before trusting a new test net: they show uncovered critical code before a refactor removes duplicate runtime checks.
+- Completing the CbC phases pragmatically required compatibility bridges: new canonical refs and v2 session keys can coexist with legacy refs through exact aliases instead of breaking old `aha read` workflows.
+- SQLite construction is strongest when paired with repair: triggers now maintain normal-write FTS rows and reject append-only mutation, while verifier/reconciler queries remain necessary for direct SQL drift and recovery.
+- Open-world agent data should not get strict enum `CHECK` constraints too early. Typed role helpers can centralize decisions without rejecting future roles from raw histories.
 
 ## Testing lessons
 

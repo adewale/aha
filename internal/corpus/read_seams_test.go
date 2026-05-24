@@ -36,8 +36,8 @@ func TestResolveHumanOwnsPrefixResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != ref {
-		t.Fatalf("ResolveHuman=%+v want %+v", resolved, ref)
+	if resolved.EntryID != ref.EntryID || resolved.SessionKey == ref.SessionKey || !strings.HasPrefix(resolved.SessionKey, "sk1_") {
+		t.Fatalf("ResolveHuman=%+v want v2 session for legacy %+v", resolved, ref)
 	}
 }
 

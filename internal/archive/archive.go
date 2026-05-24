@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/adewale/aha/internal/adapters"
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/media"
@@ -33,6 +34,7 @@ type Options struct {
 	BundleID       string
 	SessionFilters []string
 	MaxSessions    int
+	Clock          ahaclock.Clock
 }
 
 const (
@@ -52,7 +54,11 @@ type Bundle struct {
 
 func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters.SourceAdapter, opts Options) (Bundle, error) {
 	if opts.CapturedAt == "" {
-		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
+		clk := opts.Clock
+		if clk == nil {
+			clk = ahaclock.RealClock{}
+		}
+		opts.CapturedAt = clk.Now().Format(time.RFC3339)
 	}
 	if opts.BundleID == "" {
 		opts.BundleID = hash.RandomID()
@@ -485,9 +491,13 @@ func normalizeBundleForWrite(b Bundle) Bundle {
 	return b
 }
 
+func supportedBundleSchema(schema string) bool {
+	return schema == model.BundleSchemaV1 || schema == model.BundleSchemaV2
+}
+
 func ValidateManifestSemantics(m model.Manifest) error {
-	if m.Schema != model.BundleSchema {
-		return fmt.Errorf("invalid manifest: schema must be %q", model.BundleSchema)
+	if !supportedBundleSchema(m.Schema) {
+		return fmt.Errorf("invalid manifest: unsupported schema %q", m.Schema)
 	}
 	if strings.TrimSpace(m.BundleID) == "" {
 		return fmt.Errorf("invalid manifest: bundle_id required")
@@ -776,7 +786,7 @@ func readManifestOnly(path string) (model.Manifest, error) {
 	if err := json.Unmarshal(b, &manifest); err != nil {
 		return model.Manifest{}, err
 	}
-	if manifest.Schema != model.BundleSchema {
+	if !supportedBundleSchema(manifest.Schema) {
 		return model.Manifest{}, fmt.Errorf("unsupported schema %q", manifest.Schema)
 	}
 	return manifest, nil

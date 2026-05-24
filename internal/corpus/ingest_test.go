@@ -219,7 +219,11 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err := store.DB.QueryRow(`select parent_session_key from artifacts where parent_session_key is not null`).Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
-	if parent != "pi:test-machine:pi-session" {
+	wantParent, err := model.NewSessionKey("pi", "test-machine", "pi-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent != wantParent.String() {
 		t.Fatalf("artifact parent=%q", parent)
 	}
 	var unlinked int
@@ -308,7 +312,7 @@ func TestLaterBundleAppendOnlyMerge(t *testing.T) {
 	}
 	assertCount(t, store.DB, "sessions", 3)
 	var versions int
-	if err := store.DB.QueryRow(`select count(*) from session_versions where session_key='pi:test-machine:pi-session'`).Scan(&versions); err != nil {
+	if err := store.DB.QueryRow(`select count(*) from session_versions where session_key=(select session_key from session_key_aliases where alias='pi:test-machine:pi-session')`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
 	if versions != 2 {

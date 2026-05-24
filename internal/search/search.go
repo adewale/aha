@@ -71,7 +71,7 @@ func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
 			return nil, err
 		}
 		r.Ref = model.HitRef{Kind: model.HitKindMessage, SessionKey: r.SessionKey, EntryID: r.EntryID}
-		r.RefText = model.FormatHitRef(r.Ref)
+		r.RefText = refText(r.Ref)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -153,12 +153,19 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 			ref.SessionKey = model.ArtifactSessionKey(ref.ArtifactSHA)
 		}
 		r.Ref = ref
-		r.RefText = model.FormatHitRef(ref)
+		r.RefText = refText(ref)
 		r.SessionKey, r.EntryID = ref.SessionKey, ref.EntryID
 		r.Role = "artifact"
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func refText(ref model.HitRef) string {
+	if typed, err := model.HitRefToRef(ref); err == nil {
+		return model.FormatRef(typed)
+	}
+	return model.FormatHitRef(ref)
 }
 
 func likeContains(q string) string {

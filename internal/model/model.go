@@ -6,7 +6,9 @@ import (
 )
 
 const Version = "0.1.0"
-const BundleSchema = "agent-session-snapshot-bundle/v1"
+const BundleSchemaV1 = "agent-session-snapshot-bundle/v1"
+const BundleSchemaV2 = "agent-session-snapshot-bundle/v2"
+const BundleSchema = BundleSchemaV2
 
 type HitKind string
 

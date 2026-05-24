@@ -11,6 +11,9 @@ import (
 func TestVerifyReportsSeededCorpusDrift(t *testing.T) {
 	store, _ := corpusWithOneEntry(t)
 	defer store.Close()
+	if _, err := store.DB.Exec(`drop trigger if exists messages_require_entry`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.DB.Exec(`insert into messages(session_key,entry_id,role,text) values('missing-session','missing-entry','user','orphan')`); err != nil {
 		t.Fatal(err)
 	}

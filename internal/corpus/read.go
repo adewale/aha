@@ -36,11 +36,8 @@ func ReadCanonical(db *sql.DB, ref model.HitRef, before, after int) ([]ReadEntry
 	if ref.Kind == model.HitKindArtifact {
 		return ReadRef(db, ref, before, after)
 	}
-	var sessionKey string
-	if err := db.QueryRow(`select session_key from sessions where session_key=?`, ref.SessionKey).Scan(&sessionKey); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("session not found: %s", ref.SessionKey)
-		}
+	sessionKey, err := resolveCanonicalSession(db, ref.SessionKey)
+	if err != nil {
 		return nil, err
 	}
 	center := 1
@@ -122,6 +119,21 @@ func readWindow(db *sql.DB, sessionKey string, center, before, after int) ([]Rea
 	return out, rows.Err()
 }
 
+func resolveCanonicalSession(db *sql.DB, q string) (string, error) {
+	var sessionKey string
+	if err := db.QueryRow(`select session_key from sessions where session_key=?`, q).Scan(&sessionKey); err == nil {
+		return sessionKey, nil
+	} else if err != sql.ErrNoRows {
+		return "", err
+	}
+	if err := db.QueryRow(`select session_key from session_key_aliases where alias=?`, q).Scan(&sessionKey); err == nil {
+		return sessionKey, nil
+	} else if err != sql.ErrNoRows {
+		return "", err
+	}
+	return "", fmt.Errorf("session not found: %s", q)
+}
+
 func resolveSession(db *sql.DB, q string) (string, error) {
 	rows, err := db.Query(`select session_key from sessions where session_key=? or source_session_id=?`, q, q)
 	if err != nil {
@@ -136,6 +148,9 @@ func resolveSession(db *sql.DB, q string) (string, error) {
 	}
 	if len(matches) > 1 {
 		return "", fmt.Errorf("ambiguous session %q", q)
+	}
+	if sk, err := resolveCanonicalSession(db, q); err == nil {
+		return sk, nil
 	}
 	prefix := likePrefix(q)
 	rows, err = db.Query(`select session_key from sessions where session_key like ? escape '\' or source_session_id like ? escape '\'`, prefix, prefix)

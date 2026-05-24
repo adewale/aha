@@ -18,7 +18,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Unified verification entrypoints via `scripts/verify.sh` and Make targets, including bounded fuzz and optional mutation profiles.
 - `rapid` property-based testing dependency plus shared test generators for shrinkable invariant tests.
 - Static correctness-debt inventory tests for ambient time, raw identity concatenation, manual FTS writes, and direct append-only table mutations.
-- Correctness-by-construction Phase 0 guardrails: corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, named read/time/source-capability seams, and corpus verifier queries.
+- Correctness-by-construction guardrails and implementation hardening: typed identity/ref primitives, canonical ref parsing/formatting, corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, exact canonical read/human resolution split, clock/sleeper/backoff/source-capability seams, corpus verifier/reconciler queries, v2 bundle schema acceptance/emission, v2 session-key construction with legacy aliases, append-only/quarantine triggers, and trigger-maintained FTS rows.
 - `status --depot` behind-bundle reporting.
 - `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.

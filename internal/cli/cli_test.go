@@ -440,7 +440,7 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &searchJSON); err != nil {
 		t.Fatalf("search JSON did not decode: %v\n%s", err, out.String())
 	}
-	if len(searchJSON) == 0 || !strings.Contains(searchJSON[0].RefText, "#") || searchJSON[0].Ref.Kind == "" {
+	if len(searchJSON) == 0 || !strings.HasPrefix(searchJSON[0].RefText, "msg:v1:") || searchJSON[0].Ref.Kind == "" {
 		t.Fatalf("search JSON missing round-trippable refs: %+v", searchJSON)
 	}
 	out.Reset()
