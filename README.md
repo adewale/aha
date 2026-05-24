@@ -246,6 +246,7 @@ For coding agents using `aha`:
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
+- `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
 - `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
