@@ -70,6 +70,20 @@ anti-deletion** over confidentiality hardening; and the corpus is always
 TLS, scoped tokens, and R2's at-rest encryption — defenses that cannot orphan
 your data.
 
+## Backwards compatibility
+
+`aha` has **no users yet** — a one-time luxury. We therefore **lock the public
+contracts now** (the `bundles/v1/` key layout, the `aha-depot/v1` marker, the
+`aha-depot-catalog/v1` and manifest schemas, the bundle content hash, `--json`
+shapes, and CLI flags) and freeze them with the golden/determinism tests below,
+while **changing defaults and retiring flags freely, without migration shims**,
+because nothing depends on current behavior. The concrete default/flag changes
+this enables are listed under "What must change" — notably relocating the default
+bundle store to `~/.aha/depot` and retiring `--out` in favor of `--depot`.
+Hyrum's Law (below) thus becomes a **future** constraint we get to pre-empt, not
+a present one to unwind. The discipline is to pay the contract-locking cost once,
+before the first user.
+
 ## Domain model
 
 The tool's nouns and how they relate. The remote feature **adds nouns** (depot,
@@ -478,6 +492,9 @@ and per-op costs low.
   encryption before enabling a remote depot.
 - `writeSnapshot`/`cmdIngest`/`cmdRefresh` route bundle bytes through the
   selected depot driver.
+- Relocate the default bundle store from `~/agent-session-bundles`
+  (`bundle_out_dir`) to the local depot `~/.aha/depot`. No migration shim — there
+  are no users (see Backwards compatibility).
 
 ### Remove / explicitly avoid
 
@@ -485,6 +502,8 @@ and per-op costs low.
 - Do **not** store `corpus.db` in R2 as a shared writable query engine (unsafe
   multi-writer SQLite; contradicts "SQLite is the engine, not a cache").
 - Avoid querying bundles in place over the network for analyses.
+- Retire `snapshot`/`refresh` `--out`; the bundle destination is named only via
+  `--depot` (e.g. `--depot local:./bundles`). Safe to drop outright — no users.
 - Retire the words `destination`, `receipt` (as a name for a bundle), `index`
   (as a key prefix), and the `push`/`pull`/`sync` verbs.
 
@@ -580,62 +599,95 @@ keep search local and the depot a pure bundle pool; and where restic/kopia
 encrypt by default, we consciously choose **not** to, because for an archive a
 lost key is worse than a read bucket.
 
-## Verification: how we verify the new functionality
+## Testing and verification
 
-Grounded in the installed `testing-best-practices` skill (real objects over
-mocks, table-driven, golden files, property tests, regression-test-first,
-contract tests for external APIs, both-directions for security, no live network
-in unit tests):
+This work is verified to two standards at once: it must **prove the new depot
+functionality** and **prove v1 still works untouched**. The approach follows the
+installed `testing-best-practices` skill — real objects over mocks, table-driven
+cases, golden files for contracts, property/fuzz tests, regression-test-first,
+contract tests for the external API, both-directions for security, and **no live
+network in the default suite**.
 
-- **One depot-driver contract suite, run against every driver.** The same
-  table-driven behavior tests run against `local`, an in-process S3 fake
-  (`gofakes3`/in-memory), and — behind a `//go:build integration` tag with env
-  creds — a real R2 bucket. Differential testing: all drivers satisfy identical
-  observable behavior.
-- **Use a real S3-compatible server, not hand mocks.** `gofakes3` in-process (or
-  MinIO) gives real request/response + SigV4 with **no live network**.
-- **SigV4 golden vectors** — sign known requests against AWS's published vectors
-  (contract test that catches signer drift).
-- **Roundtrip property:** `Get(Put(x)) == x` and the bytes hash to the expected
-  SHA.
-- **Idempotency:** pushing the same bundle twice → one object; pull+ingest twice
-  → zero new rows (reuse existing ingest-idempotence tests through the depot).
-- **Integrity regression (test-first):** mutate one byte of a stored object →
-  pull/ingest rejects it on SHA mismatch and never promotes it.
-- **Sync delta correctness:** assert the *exact* key set pulled equals
-  `catalog − corpus`, not just "non-empty."
-- **Multi-machine end-to-end:** machines A and B push distinct bundles through
-  the fake depot; C ingests and `search` returns hits from both with `--machine`
-  filtering.
-- **Encryption (optional, only when enabled):** `decrypt(encrypt(x)) == x`;
-  ciphertext ≠ plaintext; wrong key fails closed; both directions asserted.
-- **Security, both directions:** credentials authenticate **and** never appear in
-  any emitted artifact.
-- **Throttling/backoff:** fake depot returns HTTP 429 → bounded backoff with an
-  injected clock (no real sleeps).
-- **Doc-sync:** new commands/flags/config keys validated against the registry and
-  config struct (`internal/cli/docs_test.go`, `flag_metadata_sync_test.go`).
-- **No unconditional skips:** real-R2 tests live behind a build tag with a
-  documented rationale.
+### Harness and layout
 
-## Verification: how we confirm we did not break existing functionality
+- `internal/depot/*_test.go` holds the driver **contract suite**; `t.TempDir()`
+  for `local` depots and corpora.
+- The `r2` driver is tested against an **in-process S3 fake** (`gofakes3`, or
+  MinIO) — real requests, real SigV4, **no live network**. A real R2 bucket is
+  exercised only behind `//go:build integration` with env credentials.
+- Reuse the existing realistic bundle/corpus fixtures and the idempotent
+  `IngestBundle` path; do not mock the filesystem, tar/zstd, SQLite, or S3.
+- Time is injected (for backoff); no `sleep`, no wall-clock, no live network in
+  the default `go test ./...` run.
 
-- **Whole existing suite stays green:** `go test ./...`, `-race`, `go vet`, parser
-  fuzz, determinism tests, and **all golden files unchanged** with the depot
-  disabled. Bundle bytes and manifests are byte-identical — the depot only
-  changes transport.
-- **No-network guarantee stays mechanically enforced for the core.** The reworked
-  static test still fails the build if any package other than `internal/depot`
-  imports a network package; add it test-first before writing the `r2` driver.
-- **Depot-off path is provably inert:** with no depot configured,
+### Test-type matrix
+
+| Type | Coverage for the depot feature |
+|---|---|
+| Smoke | `aha depot --help`, `aha depot init/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
+| Contract / differential | One suite asserts **identical** observable behavior for the `local` driver, the S3 fake, and (tagged) real R2. |
+| Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, sync-delta computation. |
+| Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
+| Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
+| Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
+| Security (both directions) | credentials authenticate **and** never appear in any manifest, bundle, `.receipt.json`, `--json`, or config; the depot is private by default. |
+| Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; passes `go test -race`. |
+| Throttling | the S3 fake returns HTTP 429 → bounded exponential backoff with an injected clock. |
+| Encryption (opt-in path) | `decrypt(encrypt(x)) == x`; ciphertext ≠ plaintext; wrong key fails closed. |
+| Doc-sync | new commands/flags/config keys match the registry and config struct (extends `docs_test.go`, `flag_metadata_sync_test.go`). |
+| No-regression | the depot-off path is byte-identical to v1; the reworked no-network test; the full v1 suite green. |
+
+### Core properties and invariants
+
+- **Driver symmetry:** the `local` and `r2` drivers pass one shared contract
+  suite — identical behavior, only transport differs.
+- **Roundtrip / idempotency / sync-delta / integrity** as above, asserted on
+  *exact* sets and hashes, never "non-empty."
+- **Depot-off inertness:** with no depot configured,
   `snapshot`/`ingest`/`refresh`/`search`/`read`/`status`/`conflicts` take the
-  local path and produce identical output (golden + characterization).
-- **Trust Guarantees 1 and 2 untouched:** snapshot read-only behavior and
-  immutable-bundle ingest are unaffected; their tests pass unchanged.
-- **Bundle-format characterization:** existing v1 bundles round-trip through the
-  drivers and ingest identically.
-- **Performance non-regression:** large-corpus ingest/parse benchmarks unchanged
-  with the depot off.
+  local path and produce output identical to v1 (golden + characterization).
+- **No-network core (test-first):** the reworked static test fails the build if
+  any package other than `internal/depot` imports a network package; add it
+  **before** writing the `r2` driver.
+- **Trust Guarantees 1 & 2 unchanged:** snapshot read-only behavior and
+  immutable-bundle ingest are unaffected; their existing tests pass unchanged.
+- **Determinism preserved:** transport never alters bundle bytes, the manifest,
+  or the content hash — the determinism tests guard this as a now-public contract.
+- **Both-directions security:** credentials work **and** never leak.
+
+### Test-quality rules (from the skill)
+
+- Prefer real temp dirs, real archives, real SQLite, and a real (fake) S3 server;
+  avoid hand-written mocks of those boundaries.
+- No weak sole assertions ("not empty", truthy); assert exact key sets, hashes,
+  JSON, and negative cases.
+- Every bug gets a failing regression test first; record the red phase or state
+  why it could not be observed.
+- No unconditional skips — real-R2 tests live behind a build tag with a
+  documented rationale.
+- Golden-file changes require human review because they define the public
+  contracts (key layout, catalog/manifest schemas, JSON).
+- For security and transform tests, assert **both** directions
+  (rejected/removed *and* preserved/usable).
+
+### Validation commands
+
+```bash
+go test ./...                                   # full suite, depot off by default
+go test -race ./...                             # concurrency/race
+go vet ./...
+go test ./internal/depot/...                    # driver contract suite vs local + S3 fake
+go test -tags integration ./internal/depot/...  # real R2 (env credentials)
+go test ./internal/cli -run 'NoNetwork|Docs|Readme'   # trust + doc-sync
+go build ./cmd/aha
+```
+
+### Manual / end-to-end
+
+Run the three-machine flow (two machines `snapshot --depot`, one `ingest
+--depot`) against the S3 fake or a scratch R2 bucket; confirm `search` returns
+hits from both machines with `--machine` filtering, then delete the corpus and
+rebuild it from the depot to prove the corpus is disposable.
 
 ## Hyrum's Law implications
 
