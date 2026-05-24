@@ -47,6 +47,8 @@ Current counts after cycle 10:
 - V1 should preserve raw source data even when normalization is incomplete.
 - Artifact data is part of agent history, not ancillary output. Text artifacts need full indexing; image artifacts need blob preservation; unlinked artifacts need readable identities.
 - Search/read coherence is a product invariant: every hit must be passable to `aha read`.
+- Depot behavior is clearest as set and round-trip properties: `Fetch(Put(x)) == x`, duplicate `Put(x)` is not new work, pending ingest is `catalog - corpus`, and catalog merge preserves one ref per bundle SHA.
+- Sidecar metadata is a product surface. Removing local receipt sidecars simplified the depot model: bundle bytes, embedded manifests, catalog refs, and command JSON are enough.
 - Tool output is preserved but not indexed in v1. This must be enforced in ingest, not left as documentation.
 - Image prompt reconstruction needs occurrence metadata: content index, prompt order, raw reference, mime type, and blob hash.
 - Windows support is a v2 concern; keeping Windows-shaped fixtures is still useful to avoid v1 assumptions that would block v2.

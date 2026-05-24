@@ -18,6 +18,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - `status --depot` behind-bundle reporting.
 - `doctor --depot` depot diagnostics.
 - Refresh idempotency for unchanged source state.
+- Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
 
 ### Changed
 
@@ -43,5 +44,5 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ### Documentation
 
-- Added architecture docs, generated command docs, trust documentation updates, and R2 snapshot aggregation spec updates.
+- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 snapshot aggregation spec updates, and a docs consistency audit.
 - Added OpenCode research and evaluation docs.

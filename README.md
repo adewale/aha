@@ -32,7 +32,7 @@ Many users start with:
 
 - **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
 - **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
-- **Portable history**: sync a depot, copy a bundle from another machine, or `aha ingest` it.
+- **Portable history**: share a depot, copy a bundle from another machine, or `aha ingest` it.
 - **Better than snippets**: search finds leads; read retrieves full context so humans and agents do not answer from snippets alone.
 - **Agent-friendly retrieval**: JSON, refs, Markdown, and stable `search → read` workflows.
 - **Auditable trust claims**: read-only source access, local-by-default behavior, and network boundaries are tested.
@@ -248,6 +248,7 @@ For coding agents using `aha`:
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
 - `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
+- `docs/audits/docs-consistency-audit.md` — latest docs consistency audit.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 

@@ -24,7 +24,7 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `refresh` creates a snapshot bundle and ingests that bundle into the local corpus.
+- `refresh` snapshots configured sources into the depot and ingests pending depot bundles into the local corpus.
 - The user should not need to remember Pi/Claude/Codex paths for the standard layout.
 
 Defaults used:
@@ -87,6 +87,7 @@ Rationale:
 
 - Ingest creates the repo/corpus directory if needed.
 - Bundle identity and machine provenance come from the manifest.
+- Explicit bundle-path ingest imports into the corpus; publishing to a depot is done by `snapshot`/`refresh --depot`.
 - Users should not need to rename files or edit config before import.
 - Duplicate imports should be harmless.
 

@@ -351,7 +351,7 @@ aha snapshot \
   --machine ade-mbp \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --out ~/agent-session-bundles/
+  --depot local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -444,7 +444,7 @@ V1 does not require OCR or image captioning. Image text search is metadata-only 
 Example:
 
 ```bash
-aha ingest ~/agent-session-bundles/aha-sessions-*.tar.zst
+aha ingest --depot local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -637,12 +637,13 @@ Config should cover:
   "machine_label": "Adewale MacBook Pro",
 
   "sources": [
-    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true },
-    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true }
+    { "type": "claude-code", "root": "~/.claude/projects", "enabled": true },
+    { "type": "codex", "root": "~/.codex/sessions", "enabled": true },
+    { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
 
   "corpus_dir": "~/.aha",
-  "bundle_out_dir": "~/agent-session-bundles",
+  "depot": { "type": "local", "location": "~/.aha/depot" },
   "path_mode": "raw",
   "include_subagents": true,
   "include_images": true,
@@ -664,6 +665,7 @@ aha search
 aha read
 aha status
 aha conflicts
+aha depot
 aha doctor
 ```
 

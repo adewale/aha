@@ -95,7 +95,13 @@ Default corpus: `~/.aha`.
 
 SQLite tables store machines, sources, bundles, files, sessions, entries, messages, artifacts, images, and conflicts. FTS5 virtual tables index message text and text artifacts. Blob files preserve raw bundle content needed for reads.
 
-## Main flows
+## Command flows and walkthrough
+
+The shortest mental model is:
+
+```text
+local agent histories → snapshot bundle → depot → local corpus → search/read
+```
 
 ### `aha snapshot`
 
@@ -108,7 +114,7 @@ config + flags
   → catalog shard is merged/updated
 ```
 
-Snapshot does not touch the corpus. It writes only to the depot.
+Snapshot creates durable evidence and writes only to the depot; it does not touch the corpus.
 
 ### `aha ingest`
 
@@ -124,7 +130,7 @@ depot.List or explicit paths
   → SQLite rows + FTS + blobs
 ```
 
-Ingest never rereads mutable source roots to decide identity. Identity comes from bundled bytes.
+Ingest builds the query corpus. It never rereads mutable source roots to decide identity; identity comes from bundled bytes.
 
 ### `aha refresh`
 
@@ -157,6 +163,54 @@ optionally rebuild catalog shards from objects
 ```
 
 Bundle objects are durable truth; catalog shards are repairable.
+
+## Multiple snapshots, aggregation, deduplication, and efficiency
+
+A user can capture many snapshots from one or many machines and publish them to the same depot. Today publishing happens through `aha snapshot --depot ...` or `aha refresh --depot ...`; explicit path ingestion (`aha ingest bundle.tar.zst`) imports into the corpus and does not publish that existing bundle into the depot.
+
+```text
+machine A snapshot A1 ─┐
+machine A snapshot A2 ─┼─→ depot bundle pool → local corpus on each machine
+machine B snapshot B1 ─┘
+```
+
+Aggregation is a union over depot catalog shards:
+
+```text
+bundles/v1/<sha-a1>.tar.zst
+bundles/v1/<sha-a2>.tar.zst
+bundles/v1/<sha-b1>.tar.zst
+catalog/v1/machine-a.json  # refs A1, A2
+catalog/v1/machine-b.json  # refs B1
+```
+
+`aha depot ls`, no-argument `aha ingest`, and `status --depot` read catalog shards and treat their bundle refs as the depot's current known set. Each machine has its own shard so normal publishing does not require every machine to write the same catalog object.
+
+The catalog is not absolute truth. If shards are stale or corrupt, `aha depot verify --repair` scans `bundles/v1/*`, reads each embedded manifest, and rewrites catalog shards from the object set.
+
+### How deduplication works
+
+| Layer | Key | Effect |
+|---|---|---|
+| Depot object store | `bundle_sha256` in `bundles/v1/<sha>.tar.zst` | Identical bundle bytes are stored once. |
+| Depot catalog merge | `bundle_sha256` | Re-adding the same bundle ref updates/keeps one ref instead of appending duplicates. |
+| Refresh source-state check | manifest state signature ignoring `bundle_id`/`captured_at` | Unchanged sources reuse an equivalent existing same-machine bundle instead of creating a new one. |
+| Ingest pending set | `catalog bundle_sha256 - corpus bundle_sha256` | No-argument ingest fetches/imports only bundles not already in the corpus. |
+| Corpus bundle table | unique `bundle_sha256` and `bundle_id` | Re-ingesting the same bundle is a duplicate no-op/audit attempt. |
+| Corpus file/blob table | file SHA-256 | Raw file/blob payloads are content-addressed and reused across ingested bundles. |
+
+If two machines somehow produce byte-identical bundles, the depot object key is identical and only one object is needed. If two snapshots contain many of the same raw files but differ as bundles, the corpus still deduplicates individual file blobs by file SHA.
+
+### How efficiency is preserved
+
+- **Content-addressed writes:** local depot checks whether the target object exists; R2 checks object existence and uses conditional writes.
+- **Per-machine catalog shards:** publishing one machine's bundle only updates that machine's shard, reducing write contention.
+- **Delta ingest:** no-arg `ingest` computes `catalog - corpus` and skips already-ingested bundle SHAs.
+- **Idempotent refresh:** unchanged sources avoid creating another bundle unless deterministic metadata overrides are supplied.
+- **Local query engine:** search/read never scan depot objects and never query R2; all analysis uses SQLite + FTS5 locally.
+- **Repair is explicit:** expensive full object listing/rehashing is done by `depot verify --repair`, not on every search or refresh.
+
+Current note: the unchanged-source check compares against existing same-machine depot refs by reading bundle manifests. That is acceptable for small histories and keeps catalog schema simple; if it becomes costly, a future catalog schema can include a precomputed state signature to avoid fetching manifests for this check.
 
 ## Trust boundaries
 

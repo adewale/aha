@@ -37,15 +37,12 @@ deliberately relaxes two v1 boundaries — "local-only, no network" (Guarantee 3
 in `docs/trust.md`) and "do not upload bundles" (the README privacy warning) —
 so it is a v2-class capability that must stay opt-in.
 
-The v1 design already contains the seam that makes this clean. The v1 spec ends:
-
-> The bundle is the receipt. The corpus is the index.
-
-That line motivates the design, but to keep the vocabulary clean this spec uses
-exactly one name per entity: the snapshot artifact is always a **bundle**, and
-the searchable database is always the **corpus** (its full-text index is a
-component *inside* the corpus, not a synonym for it). There is no receipt sidecar
-in the depot model.
+The v1 design already contains the seam that makes this clean: the bundle is the
+durable evidence, and the corpus is the query index. To keep the vocabulary
+clean this spec uses exactly one name per entity: the snapshot artifact is always
+a **bundle**, and the searchable database is always the **corpus** (its full-text
+index is a component *inside* the corpus, not a synonym for it). There is no
+sidecar metadata file in the depot model.
 
 Bundles are immutable, deterministic, and content-addressed by SHA-256 — exactly
 the contract object storage wants. This spec routes those same bundle bytes
@@ -151,7 +148,7 @@ Two relationships carry the whole design:
 
 | Term | Meaning | Notes |
 |---|---|---|
-| **bundle** | the immutable, content-addressed `tar.zst` snapshot | canonical name; not called a "receipt" |
+| **bundle** | the immutable, content-addressed `tar.zst` snapshot | canonical durable evidence object |
 | **depot** | a bundle store addressed as `type:location` (`local:~/agent-depot`, `r2:aha-depot`); `type ∈ {local, r2}`; the configured one is your default, `--depot` overrides | renames the v1 "aggregation point"/`bundle_out_dir`; one noun for the store, its address, and the default role; implies central storage without implying source control |
 | **depot driver** | the code implementing a depot type (`local`, `r2`) | implementation detail in `internal/depot`; not a user-facing entity |
 | **catalog** | the repairable bundle listing in a depot, sharded per machine | an acceleration/provenance layer, not the durable source of truth; distinct from the corpus's full-text index |
@@ -160,8 +157,6 @@ Two relationships carry the whole design:
 
 Retired from earlier drafts so no entity carries two names:
 
-- **`receipt`** as a name for a bundle or a sidecar → use **bundle**. The depot
-  model has no receipt sidecar.
 - **`destination`** as a separate noun → collapsed into **depot** (the depot *is*
   the addressable store; `type:location` is just its address form).
 - **`index`** as a key prefix → **catalog** (frees "index" for the corpus's FTS).
@@ -558,8 +553,8 @@ and per-op costs low.
 - Avoid querying bundles in place over the network for analyses.
 - Rename the bundle destination to `--depot` (e.g. `--depot local:./bundles`)
   and remove `snapshot`/`refresh` `--out`.
-- Retire the words `destination`, `receipt` (as a name for a bundle), `index`
-  (as a key prefix), and the `push`/`pull`/`sync` verbs.
+- Retire the words `destination`, `index` (as a key prefix), and the
+  `push`/`pull`/`sync` verbs.
 
 ## Trade-offs
 
@@ -585,8 +580,8 @@ cannot orphan data.
   Class A `PUT`, each catalog/`LIST` is Class A, each pull is a Class B `GET`.
   Keep bundles aggregating many session files into one object; never fan out to
   per-session objects.
-- **Avoid full-bucket `LIST` on every sync.** Per-machine catalog shards make
-  sync cost proportional to **machines**, not total bundles; full `LIST` is a
+- **Avoid full-bucket `LIST` on every refresh/ingest.** Per-machine catalog shards make
+  update cost proportional to **machines**, not total bundles; full `LIST` is a
   repair path only. `depot verify --repair` uses that path to rebuild catalog
   shards from bundle objects and embedded manifests.
 - **Pull is N round trips.** Parallelize downloads with bounded concurrency and
@@ -600,7 +595,7 @@ cannot orphan data.
 - **Query performance does not improve.** The depot aggregates *bundles*;
   analyses still run on local SQLite. A very large aggregate corpus is an
   FTS/SQLite scaling problem independent of R2.
-- **Strong consistency simplifies sync;** use the S3/Workers data plane (not the
+- **Strong consistency simplifies depot updates;** use the S3/Workers data plane (not the
   REST cap), honor HTTP 429 with bounded backoff, and cap concurrency.
 
 ## Security: how depot access is secured
@@ -677,7 +672,7 @@ network in the default suite**.
 |---|---|
 | Smoke | `aha depot --help`, `aha depot init/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
 | Contract / differential | One suite asserts **identical** observable behavior for the `local` driver, the S3 fake, and (tagged) real R2. |
-| Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, sync-delta computation. |
+| Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, pending-ingest delta computation. |
 | Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
 | Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
 | Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
@@ -691,7 +686,7 @@ network in the default suite**.
 
 - **Driver symmetry:** the `local` and `r2` drivers pass one shared contract
   suite — identical behavior, only transport differs.
-- **Roundtrip / idempotency / sync-delta / integrity** as above, asserted on
+- **Roundtrip / idempotency / pending-delta / integrity** as above, asserted on
   *exact* sets and hashes, never "non-empty."
 - **Remote-depot-off inertness:** with no R2 depot configured,
   `snapshot`/`ingest`/`refresh`/`search`/`read`/`status`/`conflicts` take the
@@ -787,8 +782,8 @@ additions.
   `ingest` still builds the corpus, now location-aware via `--depot`. The tool
   reads as "the same `aha`, with the depot able to live in R2."
 - **One name per entity.** Earlier drafts carried dual names; this revision fixed
-  them: **bundle** (never "receipt"), **depot** (the single noun for the store, its address, and the default role —
-  the separate "destination" noun was collapsed in), **corpus** (with "index"
+  them: **bundle**, **depot** (the single noun for the store, its address, and
+  the default role — the separate "destination" noun was collapsed in), **corpus** (with "index"
   reserved for its FTS component), and **catalog** (not "index") for the depot
   listing. This reverses my earlier defense of a depot-vs-destination
   role/primitive split in favor of the single-name principle.
