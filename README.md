@@ -239,6 +239,7 @@ For coding agents using `aha`:
 
 ## Project docs
 
+- `CHANGELOG.md` — notable unreleased changes.
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.

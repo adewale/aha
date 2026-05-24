@@ -59,7 +59,7 @@ If you use an R2 depot, unredacted bundles leave your machine and are stored in 
 How this is enforced:
 
 - R2 credentials are loaded from environment variables (future keychain/0600-file support may be added), not manifests or bundles;
-- R2 credentials must not appear in catalog shards, receipt JSON, command JSON, config, or logs;
+- R2 credentials must not appear in catalog shards, command JSON, config, or logs;
 - downloaded depot bundles are still validated by bundle SHA, manifest file list, entry sizes, and per-file SHA before ingest.
 
 ## Guarantee 5: no v1 redaction
@@ -77,7 +77,6 @@ Implication:
 Depending on command/configuration, `aha` may write:
 
 - bundle files under the selected local depot directory;
-- receipt JSON next to local depot bundles;
 - corpus SQLite/blob files under the corpus directory;
 - config JSONC via `aha init`.
 

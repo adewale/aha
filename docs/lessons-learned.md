@@ -43,7 +43,7 @@ Current counts after cycle 10:
 
 ## Product lessons
 
-- The bundle is the receipt; the corpus is the index. Ingest must trust bundled bytes over mutable live paths.
+- The bundle is the durable evidence; the corpus is the query index. Ingest must trust bundled bytes over mutable live paths.
 - V1 should preserve raw source data even when normalization is incomplete.
 - Artifact data is part of agent history, not ancillary output. Text artifacts need full indexing; image artifacts need blob preservation; unlinked artifacts need readable identities.
 - Search/read coherence is a product invariant: every hit must be passable to `aha read`.

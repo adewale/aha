@@ -42,11 +42,10 @@ The v1 design already contains the seam that makes this clean. The v1 spec ends:
 > The bundle is the receipt. The corpus is the index.
 
 That line motivates the design, but to keep the vocabulary clean this spec uses
-exactly one name per entity: the snapshot artifact is always a **bundle**
-("receipt" in v1 refers to the small `.receipt.json` sidecar that `snapshot`
-writes — a different artifact), and the searchable database is always the
-**corpus** (its full-text index is a component *inside* the corpus, not a synonym
-for it).
+exactly one name per entity: the snapshot artifact is always a **bundle**, and
+the searchable database is always the **corpus** (its full-text index is a
+component *inside* the corpus, not a synonym for it). There is no receipt sidecar
+in the depot model.
 
 Bundles are immutable, deterministic, and content-addressed by SHA-256 — exactly
 the contract object storage wants. This spec routes those same bundle bytes
@@ -152,7 +151,7 @@ Two relationships carry the whole design:
 
 | Term | Meaning | Notes |
 |---|---|---|
-| **bundle** | the immutable, content-addressed `tar.zst` snapshot | canonical name; **not** called a "receipt" — that is the existing `.receipt.json` sidecar |
+| **bundle** | the immutable, content-addressed `tar.zst` snapshot | canonical name; not called a "receipt" |
 | **depot** | a bundle store addressed as `type:location` (`local:~/agent-depot`, `r2:aha-depot`); `type ∈ {local, r2}`; the configured one is your default, `--depot` overrides | renames the v1 "aggregation point"/`bundle_out_dir`; one noun for the store, its address, and the default role; implies central storage without implying source control |
 | **depot driver** | the code implementing a depot type (`local`, `r2`) | implementation detail in `internal/depot`; not a user-facing entity |
 | **catalog** | the repairable bundle listing in a depot, sharded per machine | an acceleration/provenance layer, not the durable source of truth; distinct from the corpus's full-text index |
@@ -161,8 +160,8 @@ Two relationships carry the whole design:
 
 Retired from earlier drafts so no entity carries two names:
 
-- **`receipt`** as a name for a bundle (it is the `.receipt.json` sidecar) → use
-  **bundle**.
+- **`receipt`** as a name for a bundle or a sidecar → use **bundle**. The depot
+  model has no receipt sidecar.
 - **`destination`** as a separate noun → collapsed into **depot** (the depot *is*
   the addressable store; `type:location` is just its address form).
 - **`index`** as a key prefix → **catalog** (frees "index" for the corpus's FTS).
@@ -503,7 +502,7 @@ R2 account, endpoint, and credentials are resolved separately, in this order:
    implemented.
 
 Aha-introduced R2 secrets are never written to config, manifests, bundle sidecar
-metadata, catalog shards, `.receipt.json`, JSON output, or logs. This does not
+metadata, catalog shards, JSON output, or logs. This does not
 claim general secret redaction: source transcripts may already contain user-
 provided secrets. The account ID and endpoint are not secret, but emitted
 diagnostics should still avoid dumping full credential-provider state.
@@ -527,7 +526,7 @@ and per-op costs low.
   keys; `depot verify --repair` to rebuild catalog entries from bundle objects
   when shards are missing or corrupt.
 - Credential loading from env / OS keychain / `0600` file — never committed,
-  never written into manifests, catalog shards, receipts, JSON output, or logs.
+  never written into manifests, catalog shards, JSON output, or logs.
 
 ### Change
 
@@ -617,8 +616,7 @@ the guiding principle, the security posture prioritizes defenses that protect
    token per machine so a lost laptop is revoked without rotating everyone.
 3. **Aha-introduced credentials never leak.** Loaded from env, OS keychain, or a
    `0600` file outside the corpus/depot trees. `aha` must assert R2 credentials
-   never appear in `manifest.json`, catalog shards, `--json`, logs, the
-   `.receipt.json` sidecar, or config. This is not general secret redaction:
+   never appear in `manifest.json`, catalog shards, `--json`, logs, or config. This is not general secret redaction:
    source transcripts may already contain user-provided secrets.
 4. **TLS-only transport** via the S3-compatible client.
 5. **Integrity verification on download** — already enforced: ingest re-hashes
@@ -683,7 +681,7 @@ network in the default suite**.
 | Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
 | Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
 | Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
-| Security (both directions) | credentials authenticate **and** never appear in any manifest, catalog, `.receipt.json`, `--json`, config, or log output; the depot is private by default. |
+| Security (both directions) | credentials authenticate **and** never appear in any manifest, catalog, `--json`, config, or log output; the depot is private by default. |
 | Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; same-machine catalog update conflicts merge/retry; passes `go test -race`. |
 | Throttling | the S3 fake returns HTTP 429 → bounded exponential backoff with an injected clock. |
 | Doc-sync | new commands/flags/config keys match the registry and config struct (extends `docs_test.go`, `flag_metadata_sync_test.go`). |
@@ -789,8 +787,7 @@ additions.
   `ingest` still builds the corpus, now location-aware via `--depot`. The tool
   reads as "the same `aha`, with the depot able to live in R2."
 - **One name per entity.** Earlier drafts carried dual names; this revision fixed
-  them: **bundle** (never "receipt", which is the `.receipt.json` sidecar),
-  **depot** (the single noun for the store, its address, and the default role —
+  them: **bundle** (never "receipt"), **depot** (the single noun for the store, its address, and the default role —
   the separate "destination" noun was collapsed in), **corpus** (with "index"
   reserved for its FTS component), and **catalog** (not "index") for the depot
   listing. This reverses my earlier defense of a depot-vs-destination

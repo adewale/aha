@@ -267,7 +267,7 @@ Determinism rules:
 - canonical JSON for `manifest.json` with stable field ordering and no incidental whitespace;
 - normalized tar metadata: owner/group IDs, owner/group names, modes, mtimes, type flags, and path separators;
 - deterministic zstd settings with no embedded wall-clock metadata;
-- bundle SHA-256 computed after archive creation and written to a receipt outside the bundle;
+- bundle SHA-256 computed after archive creation and emitted in command output / JSON;
 - tests pin `captured_at`, `bundle_id`, and machine/config values to prove deterministic fixtures.
 
 ## Manifest
@@ -365,7 +365,7 @@ Responsibilities:
 7. Write deterministic `manifest.json`.
 8. Write `tar.zst` bundle.
 9. Compute bundle SHA-256.
-10. Write a local receipt.
+10. Emit bundle path/key and SHA in command output / JSON.
 
 V1 does not redact secrets. The command should print a direct warning unless a non-interactive flag accepts it:
 
@@ -1057,7 +1057,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 3. **Same bundle ingested twice**
    - Input: identical archive.
-   - Expected: second ingest is a no-op except ingest-attempt receipt.
+   - Expected: second ingest is a no-op except ingest-attempt audit row.
 
 4. **Later bundle from same machine**
    - Input: prior archive plus a changed/grown session file.
@@ -1143,4 +1143,4 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 
 Remembered line:
 
-> The bundle is the receipt. The corpus is the index.
+> The bundle is the durable evidence. The corpus is the index.

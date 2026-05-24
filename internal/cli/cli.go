@@ -278,11 +278,6 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	if path == "" {
 		path = ref.Key
 	}
-	receipt := map[string]any{"bundle": path, "sha256": sha, "bundle_id": opts.BundleID, "captured_at": opts.CapturedAt, "depot": drv.Address()}
-	if local := localDepotBundlePath(drv, ref); local != "" {
-		rb, _ := json.MarshalIndent(receipt, "", "  ")
-		_ = os.WriteFile(local+".receipt.json", append(rb, '\n'), 0o644)
-	}
 	return path, sha, nil
 }
 

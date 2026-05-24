@@ -280,6 +280,13 @@ func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
 	if !strings.Contains(out.String(), filepath.Join("bundles", "v1")) || !strings.Contains(out.String(), "sha256:") {
 		t.Fatalf("snapshot did not write content-addressed depot bundle: %s", out.String())
 	}
+	receipts, err := filepath.Glob(filepath.Join(depotDir, "bundles", "v1", "*.receipt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 0 {
+		t.Fatalf("snapshot wrote removed receipt sidecars: %v", receipts)
+	}
 	out.Reset()
 	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, "--depot", "local:" + depotDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
