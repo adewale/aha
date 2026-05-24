@@ -17,6 +17,8 @@ func TestAmbientTimeDebtInventoryDoesNotGrow(t *testing.T) {
 		"internal/archive/archive.go:Capture:Now":                       1,
 		"internal/cli/cli.go:writeSnapshot:Now":                         1,
 		"internal/cli/command_snapshot.go:finalizeSnapshotMetadata:Now": 1,
+		"internal/clock/clock.go:Now:Now":                               1,
+		"internal/clock/clock.go:Sleep:Sleep":                           1,
 		"internal/corpus/ingest.go:IngestBundle:Sleep":                  1,
 		"internal/corpus/ingest.go:insertBundleMetadata:Now":            1,
 		"internal/corpus/ingest.go:recordBundleAttempt:Now":             3,
@@ -36,6 +38,13 @@ func TestManualFTSDebtInventoryDoesNotGrow(t *testing.T) {
 	got := manualFTSWrites(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("manual FTS write debt inventory changed\ngot:  %#v\nwant: %#v\nMove FTS writes behind schema triggers/reconcilers instead of adding direct writes.", got, want)
+	}
+}
+
+func TestNoDirectAppendOnlyTableMutationDebt(t *testing.T) {
+	mutations := directAppendOnlyMutations(t)
+	if len(mutations) > 0 {
+		t.Fatalf("append-only table mutations must go through explicit migration/repair mechanisms, offenders: %#v", mutations)
 	}
 }
 
@@ -109,6 +118,18 @@ func manualFTSWrites(t *testing.T) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	re := regexp.MustCompile(`(?is)\b(insert|update|delete)\s+(?:or\s+\w+\s+)?(?:(?:into|from)\s+)?(fts_(?:messages|artifacts))\b`)
+	walkProductionGo(t, func(rel, _ string, b []byte) {
+		for _, m := range re.FindAllSubmatch(b, -1) {
+			out[rel+":"+strings.ToLower(string(m[1]))+":"+strings.ToLower(string(m[2]))]++
+		}
+	})
+	return out
+}
+
+func directAppendOnlyMutations(t *testing.T) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	re := regexp.MustCompile(`(?is)\b(delete\s+from|update)\s+(entries|messages|artifacts|conflicts)\b`)
 	walkProductionGo(t, func(rel, _ string, b []byte) {
 		for _, m := range re.FindAllSubmatch(b, -1) {
 			out[rel+":"+strings.ToLower(string(m[1]))+":"+strings.ToLower(string(m[2]))]++

@@ -72,6 +72,14 @@ Current counts after cycle 10:
 - Archive validation must bound compressed size, manifest size, file count, per-entry size, and total declared uncompressed bytes before spooling untrusted bundle content.
 - Trust-doc commands are contracts; test names and docs must stay synchronized.
 
+## Correctness-by-construction preparation lessons
+
+- Prior art agrees with the `aha` architecture: immutable raw evidence first, normalized records second, derived indexes third, stable refs and verification on top.
+- “Correct by construction” in Go/SQLite must be honest: some states can be made unconstructible, while others can only be encapsulated, statically guarded, detected, and repaired.
+- Phase-0 guardrails are not busywork. Static debt inventories, state-machine skeletons, adapter conformance fixtures, schema introspection helpers, named seams, verifier queries, and mutation dry-runs make later refactors smaller and safer.
+- Verification should be one workflow, not a wiki list of commands. CI and local development need the same scriptable profiles for quick checks, full checks, fuzzing, and mutation dry-runs.
+- Mutation dry-runs are useful before trusting a new test net: they show uncovered critical code before a refactor removes duplicate runtime checks.
+
 ## Testing lessons
 
 Invariant tests should come before feature breadth. The non-negotiable invariants are:
