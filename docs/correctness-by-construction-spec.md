@@ -35,7 +35,12 @@ us if we break it"* to *"the broken code does not compile, the database rejects
 it, or the value cannot be constructed."* Where construction cannot reach (the
 untyped JSON boundary, cross-run determinism, merge algebra), the residual risk
 is pinned by **property-based testing (PBT)**, **state-machine / model-based
-testing**, and **fuzzing** — not by example tests alone.
+testing**, **fuzzing**, **adversarial "pirate" tests**, **exhaustive
+enumeration**, and **mutation testing** — not by example tests alone.
+
+Verification techniques and the type-vs-test discipline here are drawn from
+`adewale/testing-best-practices` (notably its `correctness-by-construction`,
+`mutation-testing`, `exhaustive-testing`, and `deterministic-time` references).
 
 This is an engineering-quality refactor, not a feature change. User-visible
 behavior is preserved except where the identity format necessarily bumps to a
@@ -75,6 +80,15 @@ new bundle/corpus version (Phase 4).
    primary guarantee.
 7. **Verification matches the risk class.** Types eliminate a class of bugs;
    PBT/state-machine/fuzz guard the residue that types cannot reach.
+8. **Prove the invariant, then attack it.** Every invariant gets a test that
+   proves it holds (Type A) *and* a test that tries to construct the state the
+   model claims is impossible (Type B / "pirate"). A Type B test is only
+   meaningful if a mechanism actually rejects the state; otherwise add the
+   mechanism first.
+9. **Collapse repeated checks.** The same guard at three or more layers means an
+   invariant is leaking; move it into one type, constructor, or constraint and
+   delete the downstream re-checks. Keep multiple layers only when they face
+   genuinely different adversaries (untrusted input, process boundary, recovery).
 
 ## Invariant inventory
 
@@ -181,13 +195,40 @@ existing migration discipline (`schema.go:40-77`).
   handle with no write methods) instead of raw paths, so writing to a source is
   a compile error. The static no-mutation/no-network guards
   (`adapters/read_only_test.go`, `internal/testquality`) are retained as defense
-  in depth, not as the only line.
+  in depth, not as the only line. (This is legitimate defense-in-depth under
+  principle 9: the capability and the static guard face different adversaries.)
+- A `Clock` capability replaces ambient `time.Now().UTC()` calls in ingest
+  (bundle-attempt and metadata writes in `ingest.go`), so `ingested_at` and
+  capture timestamps are explicit inputs rather than wall-clock reads. Production
+  wires a real clock at one site; tests pin a fixed instant. A `forbidigo` lint
+  bans `time.Now`/`time.Since`/`time.After` everywhere else, making the
+  determinism invariant checkable rather than racy.
 
 ## Verification strategy
 
 Types remove whole classes of bugs. The remaining risk lives where types stop:
 the untyped input boundary, cross-run determinism, and the algebra of merging
-many bundles in any order. Three generative techniques cover that residue.
+many bundles in any order. Two kinds of test cover that residue, per the
+`correctness-by-construction` reference:
+
+- **Type A — prove the invariant.** For any input meeting the precondition,
+  assert the postcondition (a Hoare triple `{P} S {Q}`). These survive
+  refactoring because they assert what must always be true. PBT, state-machine
+  tests, and fuzz post-conditions are all Type A.
+- **Type B — attack the model.** Try to construct the state the type/schema
+  claims is impossible; assert it is rejected. If it is reachable, the model is
+  incomplete — fix the model, not the test.
+
+Concentrate tests at trust boundaries; inside the typed core, test only the
+public constructors:
+
+| Boundary | Test |
+|---|---|
+| source JSONL → `ParsedEntry` | parser PBT + fuzz + characterization fixtures |
+| bundle file → corpus row | state-machine/repository test + golden manifest |
+| corpus row → `read` output | search/read coherence PBT |
+| canonical ref ↔ string | codec round-trip PBT + fuzz |
+| inside the typed core | Type A + Type B on public constructors only |
 
 ### Property-based testing (PBT)
 
@@ -207,6 +248,12 @@ algebraic laws over generated inputs, not hand-picked examples:
   every hit in `search` is readable and the returned window contains the hit.
 - **Merge algebra:** ingest of disjoint bundles commutes; ingest is monotone
   (append-only); re-ingest is idempotent.
+
+These map to the reference's named invariant patterns — *never crashes*,
+*valid-or-error*, *roundtrip*, *idempotent*, *conservation*, *monotonic*,
+*algebraic laws*. Conservation is worth calling out for `aha`: `include_images=
+false` yields no image rows/blobs and tool output stays unindexed — "filtered
+output contains only allowed input-derived data."
 
 Generators live in `internal/testutil` (e.g. `GenParsedSession`,
 `GenBundle`, `GenRef`) so properties share realistic, shrinkable inputs.
@@ -255,13 +302,63 @@ post-conditions," and add structure-aware targets:
 - CI runs fuzz targets with a bounded time budget; the discovered corpus is
   committed under `testdata/fuzz` so regressions stay covered.
 
+### Pirate tests (Type B — attack the model)
+
+For every "this state is impossible" claim, a test tries to reach it and asserts
+rejection:
+
+- inserting a second entry with the same `(session_key, entry_id)` and a
+  different `entry_sha256` writes a `conflicts` row and leaves the original
+  unchanged (the quarantine trigger refuses to overwrite).
+- `DELETE`/`UPDATE` on `entries` is rejected by the append-only trigger.
+- an `fts_messages` row with no backing `messages` row is unreachable under the
+  external-content triggers.
+- a `MessageRef` cannot carry an artifact SHA and an `ArtifactRef` cannot carry
+  an entry context — the sum type makes it a compile error (documented, not a
+  runtime test).
+
+**Caveat from the reference:** a Type B test is only meaningful when a runtime or
+compile-time mechanism can reject the state; otherwise it passes vacuously. Add
+the mechanism before the test. Go's zero value is the trap (see Tradeoffs).
+
+### Exhaustive testing
+
+For the new finite types, enumerate the whole space instead of sampling:
+
+- `shouldIndexText` over (`Role` × `index_tool_output` bool) is a small product;
+  test every combination so no role/flag pair is undefined — directly closing the
+  silent-default class of the real-Pi role bug.
+- every `Role`/`HitKind`/`CopyState`/`AssetKind` value round-trips through its
+  codec.
+- merge-order independence for small N: all `N!` ingest orderings of N disjoint
+  bundles produce an identical corpus (exhaustive for N ≤ 5; PBT/state-machine
+  beyond).
+
+### Mutation testing
+
+Run `gremlins` on the invariant-critical packages (`internal/corpus`,
+`internal/model`, `internal/adapters`) to confirm the suite actually kills bugs.
+A surviving mutant means a Type A or Type B test is missing or weak — it is the
+meta-check behind the definition-of-done claim "fails if the mechanism is
+removed." Scope it to critical modules, not every commit; a surviving mutant in
+identity or ingest is a P0. Mutation score matters more than line coverage.
+
+### Deterministic time
+
+Inject the `Clock` capability described above (`clockwork` or equivalent) and
+pin a fixed instant in tests, advancing by exact amounts. With wall-clock reads
+banned by `forbidigo`, the determinism property ("same inputs → identical bytes")
+becomes a real assertion instead of a best-effort one, and ingest reports stop
+embedding nondeterministic timestamps.
+
 ### Static guards
 
 Extend `internal/testquality` to prevent regression toward convention:
 ban raw string concatenation to build identity keys, ban `map` iteration inside
-canonical encoders, and require enum switches to be exhaustive (an
-`// exhaustive` marker test or a vet-style check). These keep the construction
-guarantees from eroding in later changes.
+canonical encoders, require enum switches to be exhaustive (an `// exhaustive`
+marker test or a vet-style check), and add a `forbidigo` rule banning
+`time.Now`/`time.Since`/`time.After` outside the clock-construction site. These
+keep the construction guarantees from eroding in later changes.
 
 ## Migration plan
 
@@ -272,7 +369,10 @@ because it bumps the bundle/corpus version.
 - **Phase 0 — Safety net.** Add `rapid`, the model, generators, and the
   state-machine harness against *current* code. Capture present behavior as
   characterization. No behavior change. (Per the testing-best-practices
-  "characterize before refactor" lesson.)
+  "characterize before refactor" lesson.) During Phases 1–2, keep the old
+  parser/codec alongside the new typed one and run **differential tests** (old
+  vs new on the shared fuzz corpus and fixtures) until they agree, then delete
+  the old path.
 - **Phase 1 — Typed primitives, same wire format.** `SessionKey`, `EntryID`,
   `Role`, `HitKind`, etc. as newtypes with smart constructors; centralize the
   codec. Wire/DB representation unchanged. PBT the codecs and enums.
@@ -281,7 +381,11 @@ because it bumps the bundle/corpus version.
   fuzz round-trip; state-machine asserts every entry readable.
 - **Phase 3 — Storage invariants.** Foreign keys, `CHECK`, FTS triggers,
   quarantine/append-only triggers, idempotency uniqueness, with migrations and
-  old-shape tests. State-machine tests now assert the DB *rejects* violations.
+  old-shape tests. State-machine and Type B tests now assert the DB *rejects*
+  violations. **Delete the redundant runtime-check tests** the constraints
+  replace (the imperative select-then-branch conflict checks, manual dual-write
+  assertions). Coverage may drop — that is correct; the checks moved into the
+  schema.
 - **Phase 4 — Determinism encoder, capabilities, content-addressed identity.**
   Canonical-encoder type and read-only source capability land first
   (non-breaking). Content-addressed identity is the breaking step: bump
@@ -295,8 +399,15 @@ green before the next begins.
 
 - Every row in the invariant inventory has a construction-level mechanism *or* a
   documented reason it cannot have one (open-world boundary cases).
-- No invariant relies on convention alone; each has a PBT, state-machine, or
-  fuzz test that fails if the mechanism is removed.
+- No invariant relies on convention alone; each has a Type A test that proves it
+  and, where a rejecting mechanism exists, a Type B test that attacks it.
+- `gremlins` reports no surviving mutants in `internal/corpus`, `internal/model`,
+  or `internal/adapters` for the invariant-critical paths (the meta-check that
+  the tests fail if the mechanism is removed).
+- New finite types are covered exhaustively (every enum value, every
+  `shouldIndexText` combination), not sampled.
+- Ingest carries an injected `Clock`; `forbidigo` blocks ambient wall-clock reads
+  outside the single clock-construction site.
 - `read` has no runtime "ambiguous" path for canonical refs; ambiguity exists
   only in the explicitly fallible human resolver.
 - FTS, conflict quarantine, append-only, and idempotency are enforced by schema
@@ -315,6 +426,13 @@ green before the next begins.
   encapsulation + smart constructors + DB constraints + retained static guards.
   Sealed interfaces and `testquality` checks approximate exhaustiveness; they do
   not replace a compiler that enforces it.
+- **The Go zero value is an escape hatch.** `var k SessionKey` constructs an
+  invalid (empty) key outside the smart constructor, so a newtype cannot make
+  invalid identity *unrepresentable* — only inconvenient. Mitigations: give each
+  newtype a `Valid() bool` method, validate at the DB boundary with `CHECK`/`NOT
+  NULL`, and treat the zero value as "not yet a key." The reference is explicit
+  that such invariants are not fully Type-B-testable in Go and the limitation
+  must be documented rather than assumed away.
 - **The input is irreducibly untyped and evolving.** Over-tight types would turn
   "a role/field we have never seen" into an ingest failure, violating the top
   invariant. The open-world rule is non-negotiable: raw stays lossless, only the
