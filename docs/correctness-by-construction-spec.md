@@ -35,7 +35,7 @@ us if we break it"* to *"the broken code does not compile, the database rejects
 it, or the value cannot be constructed."* Where construction cannot reach (the
 untyped JSON boundary, cross-run determinism, merge algebra), the residual risk
 is pinned by **property-based testing (PBT)**, **state-machine / model-based
-testing**, **fuzzing**, **adversarial "pirate" tests**, **exhaustive
+testing**, **fuzzing**, **adversarial model-gap tests**, **exhaustive
 enumeration**, and **mutation testing** — not by example tests alone.
 
 Verification techniques and the type-vs-test discipline here are drawn from
@@ -81,8 +81,8 @@ new bundle/corpus version (Phase 4).
 7. **Verification matches the risk class.** Types eliminate a class of bugs;
    PBT/state-machine/fuzz guard the residue that types cannot reach.
 8. **Prove the invariant, then attack it.** Every invariant gets a test that
-   proves it holds (Type A) *and* a test that tries to construct the state the
-   model claims is impossible (Type B / "pirate"). A Type B test is only
+   proves it holds (Type A) *and* a model-gap test that tries to construct the
+   state the model claims is impossible (Type B). A Type B test is only
    meaningful if a mechanism actually rejects the state; otherwise add the
    mechanism first.
 9. **Collapse repeated checks.** The same guard at three or more layers means an
@@ -302,7 +302,7 @@ post-conditions," and add structure-aware targets:
 - CI runs fuzz targets with a bounded time budget; the discovered corpus is
   committed under `testdata/fuzz` so regressions stay covered.
 
-### Pirate tests (Type B — attack the model)
+### Model-gap tests (Type B — attack the model)
 
 For every "this state is impossible" claim, a test tries to reach it and asserts
 rejection:
@@ -372,7 +372,10 @@ because it bumps the bundle/corpus version.
   "characterize before refactor" lesson.) During Phases 1–2, keep the old
   parser/codec alongside the new typed one and run **differential tests** (old
   vs new on the shared fuzz corpus and fixtures) until they agree, then delete
-  the old path.
+  the old path. Separately, **data-driven conformance ("pirate") fixtures** —
+  JSON cases of `raw line → normalized ParsedEntry`, one suite per adapter run
+  through a shared harness — lock each adapter's behavior as data rather than
+  code, which suits the Pi/Claude/Codex multi-adapter design.
 - **Phase 1 — Typed primitives, same wire format.** `SessionKey`, `EntryID`,
   `Role`, `HitKind`, etc. as newtypes with smart constructors; centralize the
   codec. Wire/DB representation unchanged. PBT the codecs and enums.
