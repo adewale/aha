@@ -28,12 +28,14 @@ aliases:
 ## Status and relationship to v1
 
 This is a **proposed** design, not a locked v1 decision. It extends the v1
-system in `docs/agent-history-aggregator-spec.md` by adding an **optional,
-off-by-default** aggregation tier: a **depot** that can live on the local
-filesystem (as today) or in a **private Cloudflare R2 bucket**. It deliberately
-relaxes two v1 boundaries — "local-only, no network" (Guarantee 3 in
-`docs/trust.md`) and "do not upload bundles" (the README privacy warning) — so
-it is a v2-class capability that must stay off by default.
+system in `docs/agent-history-aggregator-spec.md` by adding a **depot**: a
+bundle store that can live on the local filesystem (the v2 default) or in a
+**private Cloudflare R2 bucket**. When this spec says "depot off by default," it
+means the **remote/R2 depot is off by default**. A local depot is just the local
+bundle store; it does not relax the local-only trust boundary. The R2 mode
+deliberately relaxes two v1 boundaries — "local-only, no network" (Guarantee 3
+in `docs/trust.md`) and "do not upload bundles" (the README privacy warning) —
+so it is a v2-class capability that must stay opt-in.
 
 The v1 design already contains the seam that makes this clean. The v1 spec ends:
 
@@ -62,24 +64,23 @@ already supports.
 ## Guiding principle: data loss outweighs data theft
 
 For an agent-history archive, **losing the history is worse than someone reading
-it.** This principle drives several decisions below: encryption is **optional and
-off by default** (a mandatory key is itself a data-loss vector — lose the key,
-lose every bundle); the depot favors **immutability, versioning, and
-anti-deletion** over confidentiality hardening; and the corpus is always
-**rebuildable from the depot**. Confidentiality is handled by a private bucket,
-TLS, scoped tokens, and R2's at-rest encryption — defenses that cannot orphan
-your data.
+it.** This principle drives several decisions below: the depot favors
+**immutability, versioning, repairability, and anti-deletion** over features that
+can orphan data; the corpus is always **rebuildable from the depot**; and
+client-side encryption is deliberately **out of scope for this feature**.
+Confidentiality is handled by a private bucket, TLS, scoped tokens, and R2's
+at-rest encryption — defenses that cannot make bundles unrecoverable.
 
 ## Backwards compatibility
 
 `aha` has **no users yet** — a one-time luxury. We therefore **lock the public
 contracts now** (the `bundles/v1/` key layout, the `aha-depot/v1` marker, the
 `aha-depot-catalog/v1` and manifest schemas, the bundle content hash, `--json`
-shapes, and CLI flags) and freeze them with the golden/determinism tests below,
-while **changing defaults and retiring flags freely, without migration shims**,
-because nothing depends on current behavior. The concrete default/flag changes
-this enables are listed under "What must change" — notably relocating the default
-bundle store to `~/.aha/depot` and retiring `--out` in favor of `--depot`.
+shapes, and CLI flags) and freeze them with the golden/determinism tests below.
+This v2 intentionally removes the current `--out`/`bundle_out_dir` behavior,
+relocates the default bundle store to `~/.aha/depot`, and names bundle
+destinations only with `--depot`. There are no released users, so there is no
+migration shim. Once released, these observable contracts become sticky.
 Hyrum's Law (below) thus becomes a **future** constraint we get to pre-empt, not
 a present one to unwind. The discipline is to pay the contract-locking cost once,
 before the first user.
@@ -134,9 +135,13 @@ bundle's home can be local or remote. Every entity below has exactly one name.
 
 Two relationships carry the whole design:
 
-- A **depot is addressed as `type:location`** (`r2:aha-depot`, `local:~/agent-depot`).
-  You configure one as your default; `--depot` points any depot-touching command
-  at a different one for a single invocation. (Like restic's default repo vs.
+- A **depot is addressed as `type:location`** (`local:~/agent-depot`,
+  `r2:aha-depot`). `local:` locations are filesystem paths. `r2:` locations name
+  a bucket; `r2` with no location means the opinionated default bucket
+  `aha-depot`. R2 account, endpoint, and credentials are resolved separately
+  (below), so they never have to appear in the depot address. You configure one
+  depot as your default; `--depot` points any depot-touching command at a
+  different one for a single invocation. (Like restic's default repo vs.
   `--repo`, or git's `origin` vs. an explicit remote.) There is no separate
   "destination" noun — a depot *is* the addressable store.
 - A **corpus is derived from bundles.** Bundles are the source of truth; the
@@ -148,9 +153,9 @@ Two relationships carry the whole design:
 | Term | Meaning | Notes |
 |---|---|---|
 | **bundle** | the immutable, content-addressed `tar.zst` snapshot | canonical name; **not** called a "receipt" — that is the existing `.receipt.json` sidecar |
-| **depot** | a bundle store addressed as `type:location` (`r2:aha-depot`, `local:~/agent-depot`); `type ∈ {local, r2}`; the configured one is your default, `--depot` overrides | renames the v1 "aggregation point"/`bundle_out_dir`; one noun for the store, its address, and the default role; implies central storage without implying source control |
+| **depot** | a bundle store addressed as `type:location` (`local:~/agent-depot`, `r2:aha-depot`); `type ∈ {local, r2}`; the configured one is your default, `--depot` overrides | renames the v1 "aggregation point"/`bundle_out_dir`; one noun for the store, its address, and the default role; implies central storage without implying source control |
 | **depot driver** | the code implementing a depot type (`local`, `r2`) | implementation detail in `internal/depot`; not a user-facing entity |
-| **catalog** | the bundle listing in a depot, sharded per machine | distinct from the corpus's full-text index |
+| **catalog** | the repairable bundle listing in a depot, sharded per machine | an acceleration/provenance layer, not the durable source of truth; distinct from the corpus's full-text index |
 | **corpus** | the local SQLite + FTS database built from bundles | unchanged from v1; "index" only ever refers to its FTS component |
 | **`BundleRef`** | an in-code reference to a bundle (key + metadata) | a reference type, not a second name for a bundle |
 
@@ -207,6 +212,11 @@ as it ingests:
 
 ## Opinionated defaults
 
+**Local depot default: `~/.aha/depot`.** This replaces the old
+`~/agent-session-bundles` output directory in v2. It is still local-only: no
+network, no credentials, no upload. The remote depot remains off until the user
+runs `aha depot init r2…` or passes `--depot r2…`.
+
 **R2 depot bucket: `aha-depot`.** No suffix, no machine name, no random token.
 Lowercase, 9 chars, a valid R2/S3 bucket name, one per account.
 
@@ -216,11 +226,11 @@ randomised default would silently create separate buckets that never merge — t
 opposite of the feature. So the default must be stable and identical everywhere;
 a second depot is an explicit override (`--depot r2:aha-archive`).
 
-Local depot default `~/.aha/depot`, overridable with `--depot local:/some/path`
-(a USB drive, NFS mount, or synced folder — which is how a *local* depot can
-still be shared across machines). A local depot is just a directory whose
-internal layout **mirrors the R2 key space**, so the `local` and `r2` drivers
-stay symmetric (one writes paths, the other object keys):
+The local depot is overridable with `--depot local:/some/path` (a USB drive, NFS
+mount, or synced folder — which is how a *local* depot can still be shared across
+machines). A local depot is just a directory whose internal layout **mirrors the
+R2 key space**, so the `local` and `r2` drivers stay symmetric (one writes paths,
+the other object keys):
 
 ```text
 <depot-root>/                       # default ~/.aha/depot ; or --depot local:PATH
@@ -237,7 +247,8 @@ stay symmetric (one writes paths, the other object keys):
 The bundle file is named by its **content hash**, not the pretty
 `aha-sessions-…` name; the human-readable filename and per-bundle provenance live
 in the catalog shard (on R2 they may also sit in object metadata; a local FS has
-none, so the catalog is the canonical record).
+none). The catalog is **not** the durable source of truth: bundle objects are.
+The catalog is repairable from `bundles/v1/` plus embedded manifests.
 
 Populated, for the three-machine walkthrough:
 
@@ -256,7 +267,14 @@ Populated, for the three-machine walkthrough:
 ```
 
 A **catalog shard** (`catalog/v1/<machine>.json`) is append-mostly, one per
-machine so there is no write contention:
+machine so there is no cross-machine write contention. It is still written with
+compare-and-swap semantics: local depots use a lock + temp file + atomic rename;
+R2 depots use conditional writes (ETag / If-Match when updating an existing
+shard, If-None-Match when creating one) and retry by reloading, merging, and
+writing again. This protects two concurrent `aha refresh` processes on the same
+machine and accidental machine-id reuse.
+
+Example shard:
 
 ```json
 {
@@ -290,7 +308,7 @@ subtrees under `~/.aha`:
 
 ```text
 ~/.aha/
-  depot/        ← the depot (shared source of truth: bundles + catalog)
+  depot/        ← the depot (durable bundle pool + repairable catalog)
   corpus.db     ← the corpus (local database/index)
   blobs/        ← corpus's own content-addressed blobs (files/, images/, …)
 ```
@@ -315,13 +333,14 @@ Two subsystems with different jobs, lifetimes, and locations:
 |---|---|---|
 | Holds | immutable, content-addressed bundles | SQLite + FTS database built from bundles |
 | Scope | **one, shared** across machines | **one per machine**, local |
-| Role | durable **source of truth** | **derived**, disposable, rebuildable |
+| Role | durable bundle **source of truth** + repairable catalog | **derived**, disposable, rebuildable |
 | Written by | `snapshot` | `ingest` |
 | Read by | `ingest` | `search` / `read` / `status` / `conflicts` |
 | Needs network | yes (if R2) | no — always local |
 
 Mental model in brand-neutral terms: the depot is a **shared folder of immutable
-bundles**; the corpus is a **locally-built search index** over them — like macOS
+bundles**; its catalog is a repairable listing, not the truth itself. The corpus
+is a **locally-built search index** over those bundles — like macOS
 Spotlight, Windows Search, or `locate`'s database on Linux: derived from your
 files, rebuildable from scratch, and never the source of truth. Nobody "searches
 the shared folder" — you search your local corpus, which you keep fed from the
@@ -346,7 +365,7 @@ once); any depot-touching command can override it for one invocation with
 | `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
 | `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |
 | `aha depot ls` | read catalog | — | yes (r2) | lists what is in the shared pool |
-| `aha depot verify` | read | — | yes (r2) | integrity: re-hash objects, catalog↔bucket agree |
+| `aha depot verify` | read | — | yes (r2) | integrity: re-hash objects, catalog↔bucket agree; `--repair` rebuilds catalog from bundles |
 | `aha search` | — | read | **no** | queries your local corpus |
 | `aha read` | — | read | **no** | retrieves full context/blob from your local corpus |
 | `aha status` | optional | read | no by default | local corpus health; `--depot` adds a "behind by N bundles" line |
@@ -374,10 +393,11 @@ Notable behaviors:
 Machines `ade-mbp`, `work-mac`, `linux-box`, all sharing `r2:aha-depot`.
 
 One-time setup (per machine); the first creates the bucket, the others connect;
-credentials come from the environment, never config:
+account/credential values come from the environment (or later keychain/`0600`
+file support), never from bundle/corpus data:
 
 ```console
-ade-mbp$ export R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
+ade-mbp$ export R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
 ade-mbp$ aha depot init r2                 # opinionated default bucket "aha-depot"
 created depot r2:aha-depot  (account ...e91)
 
@@ -435,9 +455,13 @@ ade-mbp$ aha snapshot --depot local:/Volumes/usb/depot
 
 ## Cloudflare R2 facts this design relies on
 
-From `https://developers.cloudflare.com/r2/how-r2-works/` and the R2 limits docs:
+From `https://developers.cloudflare.com/r2/how-r2-works/`,
+`https://developers.cloudflare.com/r2/api/s3/api/`,
+`https://developers.cloudflare.com/r2/api/s3/tokens/`, and the R2 limits docs:
 
-- **S3-compatible API**, SigV4 auth, region `auto`; the S3 API is the data plane.
+- **S3-compatible API**; the S3 API is the data plane. Cloudflare documents the
+  endpoint as `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` and S3 clients use
+  region `auto`.
 - **No egress fees** — pulling the whole pool to many machines is not metered by
   bytes; operations (Class A writes/lists, Class B reads) are metered.
 - **Strong consistency** (read-after-write, list-after-write) — "push then
@@ -449,6 +473,41 @@ From `https://developers.cloudflare.com/r2/how-r2-works/` and the R2 limits docs
   the REST API for high object counts (REST cap ~**1,200 req / 5 min**);
   same-object concurrent writes throttled ~1/s.
 
+### R2 address and credential resolution
+
+The depot address names the **bucket only**:
+
+| Input | Meaning |
+|---|---|
+| `--depot r2` | bucket `aha-depot` |
+| `--depot r2:aha-depot` | bucket `aha-depot` |
+| `--depot r2:aha-archive` | bucket `aha-archive` |
+
+R2 account, endpoint, and credentials are resolved separately, in this order:
+
+1. **Account ID** (not secret): `AHA_R2_ACCOUNT_ID`, then `R2_ACCOUNT_ID`, then
+   optional config `depot.r2.account_id`. It is required unless an explicit
+   endpoint is provided.
+2. **Endpoint**: `AHA_R2_ENDPOINT`, then `R2_ENDPOINT`, otherwise derive
+   `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. For jurisdiction-specific
+   buckets, users can set `AHA_R2_ENDPOINT` explicitly (for example
+   `https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com` or
+   `https://<ACCOUNT_ID>.fedramp.r2.cloudflarestorage.com`, matching Cloudflare's
+   documented endpoints).
+3. **Region**: always pass `auto` to the S3 client unless an integration test
+   explicitly overrides it.
+4. **Access key ID**: `AHA_R2_ACCESS_KEY_ID`, then `R2_ACCESS_KEY_ID`, then OS
+   keychain / `0600` credentials file support if implemented.
+5. **Secret access key**: `AHA_R2_SECRET_ACCESS_KEY`, then
+   `R2_SECRET_ACCESS_KEY`, then OS keychain / `0600` credentials file support if
+   implemented.
+
+Aha-introduced R2 secrets are never written to config, manifests, bundle sidecar
+metadata, catalog shards, `.receipt.json`, JSON output, or logs. This does not
+claim general secret redaction: source transcripts may already contain user-
+provided secrets. The account ID and endpoint are not secret, but emitted
+diagnostics should still avoid dumping full credential-provider state.
+
 Two consequences: the current `MaxBundleBytes = 2 GiB` cap fits under the **5 GiB
 single-PUT** limit (no multipart needed unless the cap is raised); and bundles
 already aggregate many tiny session files into one object, keeping object counts
@@ -459,20 +518,16 @@ and per-op costs low.
 ### Add
 
 - `internal/depot` package: a **depot driver** interface with `local` and `r2`
-  implementations, plus a minimal S3 **SigV4** signer. **Recommendation:** a
-  small hand-rolled SigV4 client over `net/http` + stdlib
-  `crypto/sha256`/`crypto/hmac` to preserve `aha`'s pure-Go, CGO-free,
-  minimal-dependency ethos; alternative `minio-go`. Either way the signer needs
-  golden SigV4 vector tests.
-- `depot` config block (`type` + `location`, off by default), `aha depot
-  init/ls/verify`, and `--depot` on the depot-touching commands.
+  implementations. The R2 driver uses a mature S3-compatible client; `aha` does
+  **not** hand-roll request signing or other S3 authentication details.
+- `depot` config block (`type` + `location`, with remote/R2 off by default) plus
+  optional non-secret R2 account/endpoint fields; `aha depot init/ls/verify`; and
+  `--depot` on the depot-touching commands.
 - Per-machine catalog shard reader/writer; content-addressed `bundles/v1/<sha>`
-  keys.
-- **Optional** client-side encryption (off by default — see Security). `aha`
-  deliberately diverges from restic/kopia here: a mandatory key is itself a
-  data-loss vector, and the guiding principle is data loss > data theft.
+  keys; `depot verify --repair` to rebuild catalog entries from bundle objects
+  when shards are missing or corrupt.
 - Credential loading from env / OS keychain / `0600` file — never committed,
-  never written into manifests or bundles.
+  never written into manifests, catalog shards, receipts, JSON output, or logs.
 
 ### Change
 
@@ -488,22 +543,22 @@ and per-op costs low.
   opt-in, private, scoped, integrity-checked," and add a depot-security
   guarantee.
 - README privacy warning: uploading **unredacted** bundles is real exposure even
-  to a private bucket; recommend v2 redaction and/or the optional client-side
-  encryption before enabling a remote depot.
+  to a private bucket; recommend v2 redaction/review workflows before enabling a
+  remote depot.
 - `writeSnapshot`/`cmdIngest`/`cmdRefresh` route bundle bytes through the
   selected depot driver.
 - Relocate the default bundle store from `~/agent-session-bundles`
-  (`bundle_out_dir`) to the local depot `~/.aha/depot`. No migration shim — there
-  are no users (see Backwards compatibility).
+  (`bundle_out_dir`) to the local depot `~/.aha/depot` and remove `--out` (see
+  Backwards compatibility).
 
 ### Remove / explicitly avoid
 
-- Do **not** weaken the local-first default; the depot is opt-in.
+- Do **not** weaken the local-first default; remote/R2 depot use is opt-in.
 - Do **not** store `corpus.db` in R2 as a shared writable query engine (unsafe
   multi-writer SQLite; contradicts "SQLite is the engine, not a cache").
 - Avoid querying bundles in place over the network for analyses.
-- Retire `snapshot`/`refresh` `--out`; the bundle destination is named only via
-  `--depot` (e.g. `--depot local:./bundles`). Safe to drop outright — no users.
+- Rename the bundle destination to `--depot` (e.g. `--depot local:./bundles`)
+  and remove `snapshot`/`refresh` `--out`.
 - Retire the words `destination`, `receipt` (as a name for a bundle), `index`
   (as a key prefix), and the `push`/`pull`/`sync` verbs.
 
@@ -512,9 +567,9 @@ and per-op costs low.
 | Dimension | Local-only v1 (today) | With a depot (proposed) |
 |---|---|---|
 | Trust model | "Everything stays on your machine." Mechanically proven no-network. | Histories leave the machine; no-network becomes "local-only by default." Biggest cost. |
-| Secrets | Bundles never uploaded; v1 does not redact. | Unredacted content lands in third-party storage → mitigated by a private bucket + TLS + scoped tokens + R2 at-rest encryption, with redaction (v2) or optional client-side encryption as add-ons. |
+| Secrets | Bundles never uploaded; v1 does not redact. | Unredacted content lands in third-party storage → mitigated by a private bucket + TLS + scoped tokens + R2 at-rest encryption, with redaction/review as a later add-on. |
 | Setup | Zero credentials. | Cloudflare account, bucket, scoped tokens. |
-| Dependencies | Pure-Go, tiny dep set. | Adds an S3 client / SigV4 (dep weight or hand-rolled + tested). |
+| Dependencies | Pure-Go, tiny dep set. | Adds a mature S3-compatible client for R2 transport. |
 | Multi-machine | Manual bundle copy + `ingest`. | One shared depot; `refresh` converges automatically. |
 | Durability | One disk. | Cloudflare-managed redundancy; corpus rebuildable from the depot. |
 | Offline | Always. | Analyses still local/offline; only snapshot-push and ingest-pull need network. |
@@ -522,8 +577,8 @@ and per-op costs low.
 
 Net: trades `aha`'s strongest privacy property for durable, low-friction,
 egress-free multi-machine aggregation — acceptable only as an explicit,
-off-by-default opt-in, with confidentiality handled by defenses that cannot
-orphan data.
+remote-off-by-default opt-in, with confidentiality handled by defenses that
+cannot orphan data.
 
 ## Performance and scalability concerns
 
@@ -533,7 +588,8 @@ orphan data.
   per-session objects.
 - **Avoid full-bucket `LIST` on every sync.** Per-machine catalog shards make
   sync cost proportional to **machines**, not total bundles; full `LIST` is a
-  repair path only.
+  repair path only. `depot verify --repair` uses that path to rebuild catalog
+  shards from bundle objects and embedded manifests.
 - **Pull is N round trips.** Parallelize downloads with bounded concurrency and
   stream into the existing staging path; the SQLite write
   (`db.SetMaxOpenConns(1)`) is the serialization point, so overlap network with
@@ -559,24 +615,20 @@ the guiding principle, the security posture prioritizes defenses that protect
 2. **Scoped, least-privilege API tokens — never account-scoped.** Per-machine
    write tokens for snapshot; read-only tokens for pull-only/analysis hosts; one
    token per machine so a lost laptop is revoked without rotating everyone.
-3. **Credentials never in repo or bundles.** Loaded from env, OS keychain, or a
-   `0600` file outside the corpus/depot trees. `aha` must assert credentials
-   never appear in `manifest.json`, bundle bytes, `--json`, the `.receipt.json`
-   sidecar, or config.
-4. **TLS-only transport**, SigV4 signing.
+3. **Aha-introduced credentials never leak.** Loaded from env, OS keychain, or a
+   `0600` file outside the corpus/depot trees. `aha` must assert R2 credentials
+   never appear in `manifest.json`, catalog shards, `--json`, logs, the
+   `.receipt.json` sidecar, or config. This is not general secret redaction:
+   source transcripts may already contain user-provided secrets.
+4. **TLS-only transport** via the S3-compatible client.
 5. **Integrity verification on download** — already enforced: ingest re-hashes
    every file against the manifest and the bundle SHA against the key; tampered
    or truncated objects are rejected before promotion.
 6. **Anti-deletion / retention (data-loss priority).** Enable object versioning
-   or bucket lock so bundles cannot be silently overwritten or deleted;
-   immutability + content addressing makes any mutation detectable. This is the
-   security control that matters most given data loss > data theft.
-7. **Optional client-side encryption (off by default).** Users who need
-   zero-knowledge storage can opt in (e.g. `age`/AES-256-GCM with a user-held
-   key), accepting the explicit trade: **if the key is lost, the bundles are
-   unrecoverable** — a data-loss risk the default avoids. R2 already encrypts at
-   rest, so the default relies on that plus the private bucket and TLS.
-8. **Auditability** — R2 event notifications / access logs.
+   or bucket lock where available so bundles cannot be silently overwritten or
+   deleted; immutability + content addressing makes any mutation detectable. This
+   is the security control that matters most given data loss > data theft.
+7. **Auditability** — R2 event notifications / access logs.
 
 ## Prior art
 
@@ -585,7 +637,7 @@ an object-store backend with a separate, rebuildable index.
 
 | Tool | What we borrow | Difference / lesson |
 |---|---|---|
-| **restic** | `repository`/`snapshot`/`index`/`pack`/`backend` vocabulary; S3 backend; default-repo vs `--repo`; `check`/`prune` lifecycle | encrypts client-side **by default** — we deliberately **diverge** (optional only), because a mandatory key is a data-loss vector; its "index" is blob-location, not full-text, so our corpus is richer |
+| **restic** | `repository`/`snapshot`/`index`/`pack`/`backend` vocabulary; S3 backend; default-repo vs `--repo`; `check`/`prune` lifecycle | encrypts client-side by default; client-side encryption is out of scope for this feature because key management is a separate product surface and a key-loss vector; restic's "index" is blob-location, not full-text, so our corpus is richer |
 | **kopia** | object-store-native, **multi-client-safe** shared repository; clean backend/index/manifest layering | closest operational analog to "many machines, one depot"; our content-addressed unique keys give the same write-safety |
 | **borg** | dedup ideas | **not** object-store-native (needs FS/SSH, in-place mutation) — the example of what *not* to require |
 | **perkeep** | content-addressed blobs + a **separate, rebuildable search index** + multi-backend sync | closest *architectural* analog to the bundle↔corpus split; validates keeping search local and the depot a pure blob store |
@@ -595,9 +647,9 @@ an object-store backend with a separate, rebuildable index.
 | `badlogic/pi-share-hf` | incremental collection, **redaction, review, upload** | the exact snapshot→redact→upload shape, plus the redaction we flag as a prerequisite |
 
 Key transferable lessons: **the index/corpus is derived from blobs** (perkeep) —
-keep search local and the depot a pure bundle pool; and where restic/kopia
-encrypt by default, we consciously choose **not** to, because for an archive a
-lost key is worse than a read bucket.
+keep search local and the depot a pure bundle pool; and key-management-heavy
+features like client-side encryption should not be smuggled into the first depot
+implementation.
 
 ## Testing and verification
 
@@ -613,8 +665,9 @@ network in the default suite**.
 - `internal/depot/*_test.go` holds the driver **contract suite**; `t.TempDir()`
   for `local` depots and corpora.
 - The `r2` driver is tested against an **in-process S3 fake** (`gofakes3`, or
-  MinIO) — real requests, real SigV4, **no live network**. A real R2 bucket is
-  exercised only behind `//go:build integration` with env credentials.
+  MinIO) — real HTTP requests through the chosen S3 client, **no live network**.
+  A real R2 bucket is exercised only behind `//go:build integration` with env
+  credentials.
 - Reuse the existing realistic bundle/corpus fixtures and the idempotent
   `IngestBundle` path; do not mock the filesystem, tar/zstd, SQLite, or S3.
 - Time is injected (for backoff); no `sleep`, no wall-clock, no live network in
@@ -630,12 +683,11 @@ network in the default suite**.
 | Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
 | Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
 | Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
-| Security (both directions) | credentials authenticate **and** never appear in any manifest, bundle, `.receipt.json`, `--json`, or config; the depot is private by default. |
-| Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; passes `go test -race`. |
+| Security (both directions) | credentials authenticate **and** never appear in any manifest, catalog, `.receipt.json`, `--json`, config, or log output; the depot is private by default. |
+| Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; same-machine catalog update conflicts merge/retry; passes `go test -race`. |
 | Throttling | the S3 fake returns HTTP 429 → bounded exponential backoff with an injected clock. |
-| Encryption (opt-in path) | `decrypt(encrypt(x)) == x`; ciphertext ≠ plaintext; wrong key fails closed. |
 | Doc-sync | new commands/flags/config keys match the registry and config struct (extends `docs_test.go`, `flag_metadata_sync_test.go`). |
-| No-regression | the depot-off path is byte-identical to v1; the reworked no-network test; the full v1 suite green. |
+| No-regression | the remote-depot-off path is byte-identical except for the intentional v2 local-depot default/`--depot` rename and `--out` removal; the reworked no-network test; the full v1 suite green. |
 
 ### Core properties and invariants
 
@@ -643,9 +695,11 @@ network in the default suite**.
   suite — identical behavior, only transport differs.
 - **Roundtrip / idempotency / sync-delta / integrity** as above, asserted on
   *exact* sets and hashes, never "non-empty."
-- **Depot-off inertness:** with no depot configured,
+- **Remote-depot-off inertness:** with no R2 depot configured,
   `snapshot`/`ingest`/`refresh`/`search`/`read`/`status`/`conflicts` take the
-  local path and produce output identical to v1 (golden + characterization).
+  local path. Golden tests document the intentional v2 default move to the local
+  depot, the `--depot` rename, and the `--out` removal; every other behavior
+  stays characterized.
 - **No-network core (test-first):** the reworked static test fails the build if
   any package other than `internal/depot` imports a network package; add it
   **before** writing the `r2` driver.
@@ -653,7 +707,8 @@ network in the default suite**.
   immutable-bundle ingest are unaffected; their existing tests pass unchanged.
 - **Determinism preserved:** transport never alters bundle bytes, the manifest,
   or the content hash — the determinism tests guard this as a now-public contract.
-- **Both-directions security:** credentials work **and** never leak.
+- **Both-directions security:** credentials work **and** `aha`-introduced R2
+  credentials never leak.
 
 ### Test-quality rules (from the skill)
 
@@ -673,7 +728,7 @@ network in the default suite**.
 ### Validation commands
 
 ```bash
-go test ./...                                   # full suite, depot off by default
+go test ./...                                   # full suite, remote depot off by default
 go test -race ./...                             # concurrency/race
 go vet ./...
 go test ./internal/depot/...                    # driver contract suite vs local + S3 fake
@@ -743,8 +798,9 @@ additions.
 - **Clean layering** — depot driver (transport) / depot (logical store) / corpus
   (database) — mirrors restic (backend/repo) and perkeep (blobs/index).
   Principled, not ad hoc.
-- **Defaults preserved.** Depot off by default; all v1 behavior, output, and
-  trust guarantees unchanged — the relaxation is explicit and bounded.
+- **Defaults clear.** The local depot is the v2 default bundle store; remote/R2
+  remains off by default. `--depot` is the only public destination flag; `--out`
+  is removed before release. The trust relaxation is bounded to opt-in R2 use.
 
 **Genuine tensions (bounded and decided, not hidden):**
 
@@ -753,19 +809,16 @@ additions.
    Dropbox-like. It does not continuously sync or mutate live session files, so
    it honors the non-goal's spirit; the word "sync" is kept off the command
    surface.
-2. **"Everything stays on your machine" vs. the whole feature.** The biggest
-   shift, resolved by opt-in + off-by-default + a confidentiality posture that
-   never risks data. Integrity holds *because* the default is unchanged and the
-   relaxation is explicit.
+2. **"Everything stays on your machine" vs. R2.** The biggest shift, resolved by
+   making only the remote depot opt-in and keeping analysis local/offline. The
+   local depot default stays within the original machine-local trust boundary.
 
-**Resolved by the guiding principle (no longer a core tension):**
+**Out of scope (removed from this feature):**
 
-- **Content-addressing vs. encryption.** Earlier this was the sharpest tension
-  because encryption was default: zero-knowledge encryption fights dedup-by-
-  plaintext-SHA. With encryption now **optional and off by default**, the default
-  path has no conflict — dedup and content addressing are clean. A user who opts
-  into encryption accepts the documented trade (weaker cross-machine dedup and a
-  key-loss risk); the tool does not impose it.
+- **Client-side encryption and hand-rolled request signing.** Both are separate
+  product surfaces with their own failure modes. The depot feature uses a mature
+  S3-compatible client and relies on private R2 buckets, TLS, scoped tokens, and
+  R2 at-rest encryption; it does not design key management or low-level signing.
 
 **Minor warts (acceptable, noted not hidden):**
 
@@ -791,16 +844,16 @@ contradictions.
   A cache/replica, never the multi-writer source of truth.
 - **Per-session objects instead of bundles** — rejected: explodes object/op
   counts and discards the deterministic, content-addressed bundle.
-- **Client-side encryption by default** — rejected: a mandatory key is a
-  data-loss vector, and data loss outweighs data theft for an archive.
+- **Client-side encryption in this feature** — deferred/rejected for now: key
+  management is a separate product surface and key loss is a data-loss vector.
 - **`push`/`pull`/`sync` verbs** — rejected: `sync` collides with a non-goal; the
   others carry git baggage. Generalizing `snapshot`/`ingest` via `--depot` keeps
   the bundle→corpus seam visible.
 
 ## Definition of done for this feature
 
-- Depot off by default; all v1 behavior, output, golden files, and trust
-  guarantees unchanged.
+- Remote/R2 depot off by default; the local depot is the v2 default bundle store;
+  the intentional `--depot`/local-depot default is documented and golden-tested.
 - `internal/depot` is the only package importing a network package, enforced by
   the reworked static test.
 - `snapshot`/`ingest`/`refresh` + `aha depot init/ls/verify` work through the
@@ -809,10 +862,10 @@ contradictions.
 - Integrity verification rejects tampered/truncated objects (regression test).
 - Anti-deletion (object versioning / bucket lock) documented as the primary
   confidentiality-independent durability control.
-- Client-side encryption is **optional and off by default**; if enabled,
-  roundtrip + wrong-key tests pass and the key-loss data-loss risk is documented.
-- Credentials never appear in any emitted artifact (security test, both
-  directions).
+- Client-side encryption and hand-rolled request signing are not implemented in
+  this feature.
+- Aha-introduced R2 credentials never appear in any emitted artifact (security
+  test, both directions).
 - `docs/trust.md` and README state the opt-in depot posture and the
   unredacted-upload warning; doc-sync covers new commands/flags/config.
 - Key layout, catalog schema, manifest schema, and content-hash determinism are

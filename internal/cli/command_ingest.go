@@ -8,13 +8,13 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/corpus"
-	"github.com/adewale/aha/internal/paths"
 )
 
 func cmdIngest(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cf := registerCorpusFlags(fs)
+	depotAddr := fs.String("depot", "", "depot address")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -24,25 +24,29 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	bundles := fs.Args()
-	if len(bundles) == 0 {
-		out, err := paths.Expand(cfg.BundleOutDir)
-		if err != nil {
-			return err
-		}
-		bundles = []string{filepath.Join(out, "*.tar.zst")}
-	}
 	store, err := openCorpusForCommand(cfg, true)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
 	var reports []map[string]any
+	if len(bundles) == 0 {
+		drv, err := depotDriverForConfig(cfg, *depotAddr)
+		if err != nil {
+			return err
+		}
+		reports, err = ingestFromDepot(stdout, store, drv, *jsonOut)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return writeJSON(stdout, reports)
+		}
+		return nil
+	}
 	for _, pattern := range bundles {
 		matches, _ := filepath.Glob(pattern)
 		if len(matches) == 0 {
-			if len(fs.Args()) == 0 {
-				return fmt.Errorf("no bundles found for %s", pattern)
-			}
 			matches = []string{pattern}
 		}
 		for _, path := range matches {

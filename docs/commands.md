@@ -38,36 +38,61 @@ aha conflicts [--repo DIR] [--json]
 
 **JSON contract:** `array<object{id,session_key,entry_id,first,second,created_at}>`
 
+## aha depot
+
+initialize, list, or verify a bundle depot
+
+```txt
+aha depot <init|ls|verify> [DEPOT] [--json]
+```
+
+**Flags:**
+
+- `--config`
+- `--json`
+- `--repair`
+
+**Examples:**
+
+- `aha depot init local:~/.aha/depot`
+- `aha depot ls --json`
+
+**JSON contract:** `object|array`
+
 ## aha doctor
 
 show diagnostics and next actions
 
 ```txt
-aha doctor [--json]
+aha doctor [--depot DEPOT] [--json]
 ```
 
 **Flags:**
 
+- `--config`
+- `--depot`
 - `--json`
 
 **Examples:**
 
 - `aha doctor`
+- `aha doctor --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{version,config,adapters,next}`
+**JSON contract:** `object{version,config,adapters,depot,next}`
 
 ## aha ingest
 
 merge one or more bundles into a corpus
 
 ```txt
-aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]
+aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 ```
 
 **Flags:**
 
 - `--config`
 - `--corpus`
+- `--depot`
 - `--repo`
 - `--json`
 
@@ -75,6 +100,7 @@ aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]
 
 - `aha ingest ./bundle.tar.zst`
 - `aha ingest --repo ./aha-repo`
+- `aha ingest --depot local:~/.aha/depot`
 
 **JSON contract:** `array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>`
 
@@ -127,10 +153,10 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 ## aha refresh
 
-snapshot configured sources and ingest the new bundle
+snapshot configured sources to the depot and ingest new bundles
 
 ```txt
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]
+aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
 ```
 
 **Flags:**
@@ -140,9 +166,9 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]
 - `--captured-at`
 - `--config`
 - `--corpus`
+- `--depot`
 - `--machine`
 - `--max-sessions`
-- `--out`
 - `--repo`
 - `--session`
 - `--source`
@@ -189,10 +215,10 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 
 ## aha snapshot
 
-create an immutable local history bundle
+create an immutable local history bundle and store it in a depot
 
 ```txt
-aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]
+aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
 ```
 
 **Flags:**
@@ -201,16 +227,16 @@ aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]
 - `--bundle-id`
 - `--captured-at`
 - `--config`
+- `--depot`
 - `--machine`
 - `--max-sessions`
-- `--out`
 - `--session`
 - `--source`
 - `--json`
 
 **Examples:**
 
-- `aha snapshot --accept-secrets --out ./bundles`
+- `aha snapshot --accept-secrets --depot local:./bundles`
 
 **JSON contract:** `object{bundle,sha256,bundle_id,captured_at}`
 
@@ -219,19 +245,21 @@ aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]
 summarize corpus health
 
 ```txt
-aha status [--repo DIR] [--json]
+aha status [--repo DIR] [--depot DEPOT] [--json]
 ```
 
 **Flags:**
 
 - `--config`
 - `--corpus`
+- `--depot`
 - `--json`
 - `--repo`
 
 **Examples:**
 
 - `aha status --json`
+- `aha status --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,next}`
+**JSON contract:** `object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}`
 

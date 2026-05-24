@@ -75,7 +75,7 @@ func TestRefreshJSONUsesStableLowercaseReportKeys(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--json", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--out", outDir, "--repo", repoDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "json-contract"}, &out, &out); err != nil {
+	if err := cli.Run([]string{"refresh", "--json", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "json-contract"}, &out, &out); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {

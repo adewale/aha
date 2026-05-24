@@ -19,6 +19,13 @@ func TestDefaultSourcesComeFromRegisteredAdapters(t *testing.T) {
 	}
 }
 
+func TestDefaultUsesLocalDepot(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Depot.Type != "local" || cfg.Depot.Location != "~/.aha/depot" {
+		t.Fatalf("bad depot defaults: depot=%+v", cfg.Depot)
+	}
+}
+
 func TestLoadJSONC(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.jsonc")
 	content := `// comment

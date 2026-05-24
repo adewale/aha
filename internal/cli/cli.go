@@ -21,7 +21,6 @@ import (
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
-	"github.com/adewale/aha/internal/paths"
 	"github.com/adewale/aha/internal/safety"
 )
 
@@ -59,14 +58,15 @@ type errorPayload struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--machine", "--max-sessions", "--out", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources and ingest the new bundle", Run: cmdRefresh},
-		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--out DIR] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--machine", "--max-sessions", "--out", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --out ./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle", Run: cmdSnapshot},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
+		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--depot", "--machine", "--max-sessions", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources to the depot and ingest new bundles", Run: cmdRefresh},
+		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--depot", "--machine", "--max-sessions", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle and store it in a depot", Run: cmdSnapshot},
+		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
 		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
 		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
-		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha status --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,next}", Docs: "summarize corpus health", Run: cmdStatus},
+		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}", Docs: "summarize corpus health", Run: cmdStatus},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
-		"doctor":    {Name: "doctor", Usage: "aha doctor [--json]", Flags: []string{"--json"}, Examples: []string{"aha doctor"}, JSONSchema: "object{version,config,adapters,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
+		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,depot,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
+		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify> [DEPOT] [--json]", Flags: []string{"--config", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json"}, JSONSchema: "object|array", Docs: "initialize, list, or verify a bundle depot", Run: cmdDepot},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
 	}
 }
@@ -229,13 +229,18 @@ func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) 
 }
 
 func writeSnapshot(req snapshotRequest) (string, string, error) {
-	out, err := paths.Expand(req.Config.BundleOutDir)
+	drv, err := depotDriverForConfig(req.Config, req.DepotOverride)
 	if err != nil {
 		return "", "", err
 	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
+	if err := ensureDepot(context.Background(), drv); err != nil {
 		return "", "", err
 	}
+	tmpDir, err := os.MkdirTemp("", "aha-snapshot-*")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(tmpDir)
 	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID, SessionFilters: req.SessionFilters, MaxSessions: req.MaxSessions}
 	if opts.CapturedAt == "" {
 		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
@@ -247,14 +252,37 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	path := filepath.Join(out, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
-	sha, err := archive.Write(path, bundle)
+	if req.SkipIfUnchanged {
+		ref, ok, err := findDepotBundleWithSameState(context.Background(), drv, bundle.Manifest, tmpDir)
+		if err != nil {
+			return "", "", err
+		}
+		if ok {
+			path := localDepotBundlePath(drv, ref)
+			if path == "" {
+				path = ref.Key
+			}
+			return path, ref.BundleSHA256, nil
+		}
+	}
+	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
+	sha, err := archive.Write(tmpPath, bundle)
 	if err != nil {
 		return "", "", err
 	}
-	receipt := map[string]any{"bundle": path, "sha256": sha, "bundle_id": opts.BundleID, "captured_at": opts.CapturedAt}
-	rb, _ := json.MarshalIndent(receipt, "", "  ")
-	_ = os.WriteFile(path+".receipt.json", append(rb, '\n'), 0o644)
+	ref, _, err := drv.PutBundle(context.Background(), tmpPath)
+	if err != nil {
+		return "", "", err
+	}
+	path := localDepotBundlePath(drv, ref)
+	if path == "" {
+		path = ref.Key
+	}
+	receipt := map[string]any{"bundle": path, "sha256": sha, "bundle_id": opts.BundleID, "captured_at": opts.CapturedAt, "depot": drv.Address()}
+	if local := localDepotBundlePath(drv, ref); local != "" {
+		rb, _ := json.MarshalIndent(receipt, "", "  ")
+		_ = os.WriteFile(local+".receipt.json", append(rb, '\n'), 0o644)
+	}
 	return path, sha, nil
 }
 

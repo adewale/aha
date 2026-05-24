@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/config"
-	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
@@ -23,12 +22,14 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 type snapshotRequest struct {
-	Config         model.Config
-	CapturedAt     string
-	BundleID       string
-	SessionFilters []string
-	MaxSessions    int
-	JSON           bool
+	Config          model.Config
+	DepotOverride   string
+	CapturedAt      string
+	BundleID        string
+	SessionFilters  []string
+	MaxSessions     int
+	JSON            bool
+	SkipIfUnchanged bool
 }
 
 func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
@@ -52,7 +53,7 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	machine := fs.String("machine", "", "machine id")
-	outDir := fs.String("out", "", "output directory")
+	depotAddr := fs.String("depot", "", "depot address")
 	corpusDir := fs.String("corpus", "", "corpus dir")
 	repoDir := fs.String("repo", "", "repo/corpus dir")
 	configPath := fs.String("config", "", "JSONC config path")
@@ -68,10 +69,11 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	req, err := buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
+	req, err := buildSnapshotRequest(*configPath, *machine, *depotAddr, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
 	if err != nil {
 		return err
 	}
+	req.SkipIfUnchanged = *capturedAt == "" && *bundleID == ""
 	applyCorpusOverride(&req.Config, *repoDir, *corpusDir)
 	if err := safety.ValidateWriteOutsideSources(req.Config, req.Config.CorpusDir, "corpus"); err != nil {
 		return err
@@ -89,14 +91,17 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	rep, err := corpus.IngestBundle(store, adapters.Builtins(), path)
+	drv, err := depotDriverForConfig(req.Config, req.DepotOverride)
+	if err != nil {
+		return err
+	}
+	reports, err := ingestFromDepot(stdout, store, drv, *jsonOut)
 	if err != nil {
 		return err
 	}
 	if *jsonOut {
-		return writeJSON(stdout, map[string]any{"bundle": path, "sha256": sha, "report": rep})
+		return writeJSON(stdout, map[string]any{"bundle": path, "sha256": sha, "report": summarizeReports(reports), "reports": reports})
 	}
-	fmt.Fprintf(stdout, "%s: sessions=%d entries=%d messages=%d images=%d artifacts=%d duplicate=%v\n", path, rep.Sessions, rep.Entries, rep.Messages, rep.Images, rep.Artifacts, rep.Duplicate)
 	return nil
 }
 
@@ -104,7 +109,7 @@ func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapsho
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	machine := fs.String("machine", "", "machine id")
-	outDir := fs.String("out", "", "output directory")
+	depotAddr := fs.String("depot", "", "depot address")
 	configPath := fs.String("config", "", "JSONC config path")
 	acceptSecrets := fs.Bool("accept-secrets", false, "acknowledge v1 does not redact secrets")
 	capturedAt := fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
@@ -118,7 +123,7 @@ func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapsho
 	if err := fs.Parse(args); err != nil {
 		return snapshotRequest{}, err
 	}
-	req, err := buildSnapshotRequest(*configPath, *machine, *outDir, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
+	req, err := buildSnapshotRequest(*configPath, *machine, *depotAddr, *acceptSecrets, *capturedAt, *bundleID, sourceFlags, sessionFlags, *maxSessions, stderr)
 	if err != nil {
 		return snapshotRequest{}, err
 	}
@@ -135,16 +140,13 @@ func finalizeSnapshotMetadata(req *snapshotRequest) {
 	}
 }
 
-func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
+func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return snapshotRequest{}, err
 	}
 	if machine != "" {
 		cfg.MachineID = machine
-	}
-	if outDir != "" {
-		cfg.BundleOutDir = outDir
 	}
 	if len(sourceFlags) > 0 {
 		cfg.Sources = nil
@@ -169,8 +171,18 @@ func buildSnapshotRequest(configPath, machine, outDir string, acceptSecrets bool
 	if maxSessions < 0 {
 		return snapshotRequest{}, errors.New("--max-sessions must be >= 0")
 	}
-	if err := safety.ValidateWriteOutsideSources(cfg, cfg.BundleOutDir, "bundle output"); err != nil {
-		return snapshotRequest{}, err
+	depotAddress := depot.AddressFromConfig(cfg.Depot)
+	if depotAddr != "" {
+		parsed, err := depot.ParseAddress(depotAddr)
+		if err != nil {
+			return snapshotRequest{}, err
+		}
+		depotAddress = parsed
 	}
-	return snapshotRequest{Config: cfg, CapturedAt: capturedAt, BundleID: bundleID, SessionFilters: []string(sessionFlags), MaxSessions: maxSessions}, nil
+	if depotAddress.Type == "local" {
+		if err := safety.ValidateWriteOutsideSources(cfg, depotAddress.Location, "depot"); err != nil {
+			return snapshotRequest{}, err
+		}
+	}
+	return snapshotRequest{Config: cfg, DepotOverride: depotAddr, CapturedAt: capturedAt, BundleID: bundleID, SessionFilters: []string(sessionFlags), MaxSessions: maxSessions}, nil
 }

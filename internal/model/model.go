@@ -88,7 +88,7 @@ type Config struct {
 	MachineLabel         string         `json:"machine_label,omitempty"`
 	Sources              []SourceConfig `json:"sources"`
 	CorpusDir            string         `json:"corpus_dir"`
-	BundleOutDir         string         `json:"bundle_out_dir"`
+	Depot                DepotConfig    `json:"depot"`
 	PathMode             string         `json:"path_mode"`
 	IncludeSubagents     bool           `json:"include_subagents"`
 	IncludeImages        bool           `json:"include_images"`
@@ -101,6 +101,18 @@ type SourceConfig struct {
 	Type    string `json:"type"`
 	Root    string `json:"root"`
 	Enabled bool   `json:"enabled"`
+}
+
+type DepotConfig struct {
+	Type     string        `json:"type"`
+	Location string        `json:"location"`
+	R2       R2DepotConfig `json:"r2,omitempty"`
+}
+
+type R2DepotConfig struct {
+	AccountID string `json:"account_id,omitempty"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	Region    string `json:"region,omitempty"`
 }
 
 type DefaultRoot struct{ OS, Path string }
