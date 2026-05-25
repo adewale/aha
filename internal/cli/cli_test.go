@@ -586,7 +586,7 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	if err := cli.Run([]string{"verify", "--corpus", corpusDir, "--repair-fts", "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "missing_fts_messages") || !strings.Contains(out.String(), `"repaired_fts": true`) {
-		t.Fatalf("verify --repair-fts did not repair drift: %s", out.String())
+	if strings.Contains(out.String(), "missing_fts_messages") || !strings.Contains(out.String(), `"repaired_fts": true`) || !strings.Contains(out.String(), `"inserted_message_rows"`) || !strings.Contains(out.String(), `"stats"`) {
+		t.Fatalf("verify --repair-fts did not repair drift or emit counters: %s", out.String())
 	}
 }

@@ -34,21 +34,23 @@ func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, js
 			return nil, err
 		}
 		path := localDepotBundlePath(drv, ref)
+		fetched := false
 		if path == "" {
 			path = filepath.Join(tmpDir, ref.BundleSHA256+".tar.zst")
 			if err := drv.Fetch(context.Background(), ref, path); err != nil {
 				return nil, err
 			}
+			fetched = true
 		}
 		rep, err := corpus.IngestBundleWithExpectedSHA(store, adapters.Builtins(), path, ref.BundleSHA256)
 		if err != nil {
 			return nil, err
 		}
-		item := map[string]any{"bundle": path, "sha256": ref.BundleSHA256, "sessions": rep.Sessions, "entries": rep.Entries, "messages": rep.Messages, "images": rep.Images, "artifacts": rep.Artifacts, "duplicate": rep.Duplicate}
+		item := map[string]any{"bundle": path, "sha256": ref.BundleSHA256, "bytes": ref.Bytes, "fetched": fetched, "sessions": rep.Sessions, "entries": rep.Entries, "messages": rep.Messages, "images": rep.Images, "artifacts": rep.Artifacts, "duplicate": rep.Duplicate}
 		if jsonOut {
 			reports = append(reports, item)
 		} else {
-			fmt.Fprintf(stdout, "%s: sessions=%d entries=%d messages=%d images=%d artifacts=%d duplicate=%v\n", path, rep.Sessions, rep.Entries, rep.Messages, rep.Images, rep.Artifacts, rep.Duplicate)
+			fmt.Fprintf(stdout, "%s: bytes=%d fetched=%v sessions=%d entries=%d messages=%d images=%d artifacts=%d duplicate=%v\n", path, ref.Bytes, fetched, rep.Sessions, rep.Entries, rep.Messages, rep.Images, rep.Artifacts, rep.Duplicate)
 		}
 	}
 	return reports, nil

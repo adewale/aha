@@ -136,7 +136,7 @@ aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 - `aha ingest --repo ./aha-repo`
 - `aha ingest --depot local:~/.aha/depot`
 
-**JSON contract:** `array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>`
+**JSON contract:** `array<object{bundle,sha256?,bytes?,fetched?,sessions,entries,messages,images,artifacts,duplicate}>`
 
 ## aha init
 
@@ -320,5 +320,5 @@ aha verify [--repo DIR] [--repair-fts] [--json]
 - `aha verify --json`
 - `aha verify --repair-fts`
 
-**JSON contract:** `object{root,problems,repaired_fts}`
+**JSON contract:** `object{root,stats,problems,repaired_fts,fts_repair?}`
 

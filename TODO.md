@@ -28,7 +28,7 @@
 
 - Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
 - Continue tracking `aha verify` with pathological benchmarks; the rowid/query-plan fix removed the first superlinear cliff, but future FTS changes must keep the cheap query-plan guard green.
-- Continue tracking byte/call counters for archive/depot/ingest known-SHA handoffs; depot verify/status counters and known-blob tests exist, but more command-level SQL/FTS counters can be added if agent workflows need them.
+- Continue tracking byte/call counters for archive/depot/ingest known-SHA handoffs; depot verify/status/ingest counters, verify/FTS repair counters, and known-blob tests now exist. Add SQL row-insert counters only if agent workflows need them.
 - Expand `state_sha256` refresh PBT only if duplicate/many-machine catalog shapes regress; zero-fetch state metadata coverage exists.
 - Consider true multi-row ingest inserts if benchmarks show SQLite step overhead dominating after prepared statements/prefetch/zstd pooling.
 - Prefer indexed `--project`/`--path-token`; keep `--path` contains as convenience and monitor broad-term FTS costs.

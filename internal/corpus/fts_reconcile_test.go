@@ -19,8 +19,12 @@ func TestReconcileFTSRepairsMessageDrift(t *testing.T) {
 	if !report.HasProblem("missing_fts_messages") {
 		t.Fatalf("expected missing fts problem, got %+v", report.Problems)
 	}
-	if err := corpus.ReconcileFTS(store); err != nil {
+	repair, err := corpus.ReconcileFTSWithReport(store)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if repair.DeletedMessageRows != 0 || repair.InsertedMessageRows != 1 {
+		t.Fatalf("unexpected FTS repair counters: %+v", repair)
 	}
 	var n int
 	if err := store.DB.QueryRow(`select count(*) from fts_messages where session_key=? and entry_id=?`, ref.Session.String(), ref.Entry.String()).Scan(&n); err != nil {

@@ -257,6 +257,7 @@ For coding agents using `aha`:
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
 - `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.
 - `docs/performance-scalability-plan.md` — pathological benchmark results, profiling lessons, and scalability/longevity roadmap.
+- `docs/performance-results.md` — latest benchmark capture, success metrics, regressions, and deferred performance work.
 - `docs/verification.md` — local/CI verification profiles, fuzzing, static guardrails, and mutation testing.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.

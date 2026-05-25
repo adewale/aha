@@ -2,7 +2,7 @@
 
 Date: 2026-05-25
 
-This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic bundles, content-addressed identity, append-only ingest, or repairability.
+This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic bundles, content-addressed identity, append-only ingest, or repairability. Latest captured benchmark results live in `docs/performance-results.md`.
 
 ## Revised testing strategy
 
@@ -111,14 +111,14 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. The
 
 | Area | Case | Latest observation | Change vs first pathological run |
 |---|---:|---:|---|
-| Corpus verify | 5k messages | `14.8ms`, `5.4KB`, `119 allocs` | ~`7.68s` -> ~`15ms` via rowid-backed FTS verification. |
-| Ingest | 10k tiny entries | `1.13s`, `88.9MB`, `728k allocs` | Memory down from `136MB`; time improved vs first `1.23s` run but regressed vs an intermediate `1.01s` run after adding path-token maintenance. |
-| Search | 10k broad term, limit requested 1000 | `52.9ms`, `344KB`, `6.7k allocs` | Output is capped at 200, reducing high-limit allocations from the original `1.78MB`/`33k allocs`; broad FTS time remains SQLite/candidate dominated. |
-| Search | 10k path-token rare match | `44.0ms`, `43KB`, `733 allocs` | Indexed token filter is available and guarded; broad common-term FTS still dominates this synthetic case. |
+| Corpus verify | 5k messages | `16.2ms`, `7.5KB`, `188 allocs` | ~`7.68s` -> ~`16ms` via rowid-backed FTS verification; extra allocs are from user-facing stats counters. |
+| Ingest | 10k tiny entries | `1.12s`, `84.1MB`, `728k allocs` | Memory down from `136MB`; time improved vs first `1.23s` run but regressed vs an intermediate `1.01s` run after adding path-token maintenance. |
+| Search | 10k broad term, limit requested 1000 | `50.6ms`, `344KB`, `6.7k allocs` | Output is capped at 200, reducing high-limit allocations from the original `1.78MB`/`33k allocs`; broad FTS time remains SQLite/candidate dominated. |
+| Search | 10k path-token rare match | `42.7ms`, `43KB`, `729 allocs` | Indexed token filter is available and guarded; broad common-term FTS still dominates this synthetic case. |
 | Search | 20×100 normal bench, path-token filter | `7.36ms`, `38.6KB`, `730 allocs` over `10x` | Similar to path/project filters with exact indexed semantics. |
-| Depot merge | 1000 unique refs × 4 duplicates | `1.27ms`, `1.49MB`, `9.8k allocs` | Map-backed merge prevents quadratic duplicate behavior and is used by repair/compact. |
-| Local depot verify | 250 refs | `27.8ms`, `21.4MB` | Deep verify remains explicitly byte-linear. |
-| Status support | 5k messages + 5k bundles | counts `1.6ms`; `BundleSHAs` `1.6ms` / `1.25MB` | Status remains metadata-only; JSON exposes listed/unique depot refs and zero fetches. |
+| Depot merge | 1000 unique refs × 4 duplicates | `1.51ms`, `1.49MB`, `9.8k allocs` | Map-backed merge prevents quadratic duplicate behavior and is used by repair/compact. |
+| Local depot verify | 250 refs | `28.2ms`, `21.6MB` | Deep verify remains explicitly byte-linear. |
+| Status support | 5k messages + 5k bundles | counts `2.0ms`; `BundleSHAs` `1.66ms` / `1.25MB` | Status remains metadata-only; JSON exposes listed/unique depot refs and zero fetches. |
 
 ## Metrics and measurable improvement targets
 
@@ -141,7 +141,7 @@ Instrumentation to add as optimizations land:
 - benchmark names and `benchstat` comparisons for package hot paths;
 - fake-driver counters: `List`, `Fetch`, R2 `Head/Get/List/Put`, bytes downloaded;
 - local byte counters for bundle/file hash passes;
-- JSON command counters now include depot verify bytes read/downloaded and status listed/unique refs/fetches; future work can add SQL rows inserted and FTS rows verified/repaired;
+- JSON command counters now include depot verify bytes read/downloaded, status listed/unique refs/fetches, verify row counts, FTS rows verified, and FTS repair rows;
 - query-plan assertions for verifier/search paths.
 
 ## Property-based performance invariants
@@ -353,6 +353,6 @@ Remaining watch list, not blockers for this plan:
 2. Search broad/common terms are still FTS-candidate bound; exact filters reduce output/allocation cost and are indexed, but SQLite still ranks broad terms.
 3. Catalog summary files/local stale caches should be added only if real depots show raw catalog scanning as a bottleneck; `compact` and map-backed merge are in place.
 4. Deletion/retention beyond orphan pruning remains a product-policy decision because raw preservation is the default trust model.
-5. More command-level JSON counters can be added for SQL row counts and FTS repair counts if agent workflows need them.
+5. More command-level JSON counters can be added for SQL row insert counts if agent workflows need them; verify/FTS/depot/status counters are in place.
 
 The principle: keep strict/deep integrity operations available, but make routine `refresh`, `search`, `status`, and `verify` scale with metadata or indexed row counts rather than historical bytes and unindexed virtual-table scans.

@@ -13,8 +13,17 @@ type VerifyProblem struct {
 	Count   int    `json:"count,omitempty"`
 }
 
+type VerifyStats struct {
+	Messages     int `json:"messages"`
+	Artifacts    int `json:"artifacts"`
+	FTSMessages  int `json:"fts_messages"`
+	FTSArtifacts int `json:"fts_artifacts"`
+	Bundles      int `json:"bundles"`
+}
+
 type VerifyReport struct {
 	Root     string          `json:"root"`
+	Stats    VerifyStats     `json:"stats"`
 	Problems []VerifyProblem `json:"problems,omitempty"`
 }
 
@@ -29,6 +38,23 @@ func (r VerifyReport) HasProblem(code string) bool {
 
 func Verify(store *Store) (VerifyReport, error) {
 	report := VerifyReport{Root: filepath.Clean(store.Root)}
+	stats := []struct {
+		dst   *int
+		query string
+	}{
+		{&report.Stats.Messages, `select count(*) from messages`},
+		{&report.Stats.Artifacts, `select count(*) from artifacts`},
+		{&report.Stats.FTSMessages, `select count(*) from fts_messages`},
+		{&report.Stats.FTSArtifacts, `select count(*) from fts_artifacts`},
+		{&report.Stats.Bundles, `select count(*) from bundles`},
+	}
+	for _, stat := range stats {
+		count, err := verifyCount(store.DB, stat.query)
+		if err != nil {
+			return report, err
+		}
+		*stat.dst = count
+	}
 	checks := []struct {
 		code    string
 		message string
