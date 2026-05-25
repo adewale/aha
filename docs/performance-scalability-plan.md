@@ -13,6 +13,19 @@ Pathological performance testing now has two layers:
 
 The second layer is especially important for depot/status/refresh behavior because the failure mode is often not a 100MiB object; it is years of tiny no-op snapshots and duplicate catalog refs.
 
+## Layer-selection rules
+
+Use the cheapest layer that can falsify the performance claim:
+
+1. **Pure/model PBT first** for set semantics, deduplication, idempotence, ordering, cardinality, and “must not become work” claims. Example: pending/behind refs are `unique(catalog_sha) - ingested_sha` even when generators produce many duplicate trivial bundles.
+2. **Fake-driver operation-count tests** for network, fetch, byte-read, and API-call claims. Example: `status --depot` may list metadata once, but must not fetch bundle bytes.
+3. **Tiny SQLite/query-plan tests** for schema/index claims. Example: verifier/search regressions should fail because `EXPLAIN QUERY PLAN` shows an unindexed/virtual-table scan, not because a 5k-row benchmark got slow.
+4. **Package benchmarks** for constant factors and row/byte-heavy loops. Example: `corpus.Verify`, `search.Query`, `archive.Write`, and `depot.Verify` benchmarks are useful once the algorithmic invariant is correct.
+5. **Package-level pprof** before CLI-level pprof. Profile the smallest benchmark that reproduces the cost; use CLI profiles only to confirm end-to-end command behavior.
+6. **Large real datasets last** as smoke/perception tests. They are valuable before release, but too expensive and too opaque to be the primary guard.
+
+Wall-clock assertions should almost never be unit tests. Prefer deterministic counters: unique refs, fetch calls, bytes read, SQL query plans, rows touched, output cardinality, and idempotent state transitions.
+
 ## Cheapest-layer audit results
 
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
@@ -86,9 +99,13 @@ For many-trivial-bundle scenarios, tests should generate compact catalog/corpus 
 - **idempotence invariants**: repeated trivial bundles do not increase pending ingest work after the first successful ingest;
 - **shape invariants**: many machines/shards and many duplicate refs produce the same answer as a set model.
 
-A first example is now covered by `TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty`: `status --depot` behind counts are computed as `unique(catalog_sha) - ingested_sha`, so duplicate refs from many trivial bundles do not inflate work/counts.
+Current examples:
 
-This changes the roadmap: every optimization below should get both a benchmark and a small-model property test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT answers “what must not grow with duplicates, stale refs, or old trivial bundles?”
+- `TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty`: `status --depot` behind counts are computed as `unique(catalog_sha) - ingested_sha`, so duplicate refs from many trivial bundles do not inflate output/work units.
+- `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles`: `status --depot` performs one metadata list and zero bundle fetches.
+- `BenchmarkPathologicalCatalogMergeManyTrivialRefs`: measures catalog merge/sort for many trivial refs entirely in memory, avoiding generated bundle files.
+
+This changes the roadmap: every optimization below should get both a benchmark and a small-model property/operation test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT/counter tests answer “what must not grow with duplicates, stale refs, old trivial bundles, or remote object bytes?”
 
 ## Profiling lessons
 
@@ -250,12 +267,13 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 
 ## Cross-cutting longevity work
 
-1. **Performance contracts in tests**: keep pathological benchmarks non-gating, but add query-plan/static/PBT tests for known algorithmic hazards: unindexed FTS verification, non-indexed exact project filters, accidental network/fetch calls in status/refresh, repeated hash passes where APIs promise known SHA, and duplicate trivial bundles inflating work.
-2. **Telemetry-free local metrics**: add `--json` timing/counter fields for expensive commands: files scanned, bytes read, bytes written, bundles listed/fetched, SQL rows inserted, FTS rows repaired.
-3. **Disk-growth tools**: add `aha corpus size`, `aha corpus vacuum`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
-4. **Depot catalog compaction**: as refs grow, support compacted per-machine catalog snapshots or sharded-by-time catalogs while keeping bundle objects content-addressed.
-5. **Background/deferred maintenance**: make deep verify, FTS repair, and vacuum explicit maintenance operations with progress and resumability instead of hidden costs in routine commands.
-6. **Scalable defaults**: cap dangerous limits, choose quick checks by default, and require explicit flags for deep/network-heavy work.
+1. **Cheapest-layer gate before optimization**: before changing a hot path, state the claim and choose the cheapest falsifier: pure PBT, fake-driver counter, tiny query-plan test, package benchmark, package profile, or CLI profile. Do not start with large fixtures unless the claim is specifically about real-world perception.
+2. **Performance contracts in tests**: keep pathological benchmarks non-gating, but add query-plan/static/PBT tests for known algorithmic hazards: unindexed FTS verification, non-indexed exact project filters, accidental network/fetch calls in status/refresh, repeated hash passes where APIs promise known SHA, and duplicate trivial bundles inflating work.
+3. **Telemetry-free local metrics**: add `--json` timing/counter fields for expensive commands: files scanned, bytes read, bytes written, bundles listed/fetched, SQL rows inserted, FTS rows repaired.
+4. **Disk-growth tools**: add `aha corpus size`, `aha corpus vacuum`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
+5. **Depot catalog compaction**: as refs grow, support compacted per-machine catalog snapshots or sharded-by-time catalogs while keeping bundle objects content-addressed.
+6. **Background/deferred maintenance**: make deep verify, FTS repair, and vacuum explicit maintenance operations with progress and resumability instead of hidden costs in routine commands.
+7. **Scalable defaults**: cap dangerous limits, choose quick checks by default, and require explicit flags for deep/network-heavy work.
 
 ## Priority order
 

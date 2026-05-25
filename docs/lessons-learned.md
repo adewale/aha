@@ -108,6 +108,15 @@ Additional testing lessons:
 - Tests should assert specific fields and negative cases, not just non-empty output.
 - Documentation examples are tests: if README shows `aha search query --json`, the CLI must support that form.
 
+## Performance testing lessons
+
+- Pathological does not always mean large. Years of trivial bundles, duplicate catalog refs, or repeated no-op refreshes can be a worse scalability shape than one huge archive.
+- Test performance claims at the cheapest layer that can falsify them: pure/model PBT for cardinality and idempotence, fake-driver counters for network/fetch/byte-read claims, tiny SQLite query-plan tests for indexing claims, package benchmarks for constants, and CLI pprof only for end-to-end confirmation.
+- Prefer deterministic performance invariants over wall-clock assertions in unit tests. Assert unique work units, fetch counts, bytes read, output cardinality, query plans, and idempotent state transitions.
+- Benchmarks and pprof answer different questions than PBT. Benchmarks show cost; profiles show where cost lands; PBT says what must not grow with duplicates, stale refs, old trivial bundles, or catalog ordering.
+- Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimize from the smallest benchmark that reproduces the issue.
+- Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalog rows. Distinguish metadata scanned from work performed.
+
 ## Documentation lessons
 
 - The README is the front door: answer what it is, why it matters, and how to use it within the first screen.
