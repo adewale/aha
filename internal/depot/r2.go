@@ -91,6 +91,28 @@ func (d *R2) PutBundle(ctx context.Context, bundlePath string) (BundleRef, bool,
 	if err != nil {
 		return BundleRef{}, false, err
 	}
+	return d.PutBundleKnown(ctx, bundlePath, ref)
+}
+
+func (d *R2) PutBundleKnown(ctx context.Context, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Filename == "" {
+		ref.Filename = filepath.Base(bundlePath)
+	}
+	if err := ValidateKnownBundleRef(ref); err != nil {
+		return BundleRef{}, false, err
+	}
+	if ref.Bytes > 0 {
+		st, err := os.Stat(bundlePath)
+		if err != nil {
+			return BundleRef{}, false, err
+		}
+		if st.Size() != ref.Bytes {
+			return BundleRef{}, false, fmt.Errorf("known bundle size mismatch: ref=%d actual=%d", ref.Bytes, st.Size())
+		}
+	}
 	created := false
 	_, headErr := d.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(ref.Key)})
 	if headErr != nil {
@@ -190,8 +212,65 @@ func (d *R2) Fetch(ctx context.Context, ref BundleRef, dst string) error {
 	return writeReaderToFile(dst, obj.Body)
 }
 
+func (d *R2) VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyReport, error) {
+	if opts.Deep || opts.Repair {
+		return d.Verify(ctx, opts.Repair)
+	}
+	return d.verifyQuick(ctx)
+}
+
+func (d *R2) verifyQuick(ctx context.Context) (VerifyReport, error) {
+	report := VerifyReport{Deep: false}
+	if obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")}); err == nil {
+		var m marker
+		decodeErr := json.NewDecoder(obj.Body).Decode(&m)
+		_ = obj.Body.Close()
+		if decodeErr != nil {
+			report.Problems = append(report.Problems, "invalid depot marker: "+decodeErr.Error())
+		} else if err := validateMarker(m); err != nil {
+			report.Problems = append(report.Problems, "invalid depot marker: "+err.Error())
+		}
+	} else {
+		report.Problems = append(report.Problems, "missing depot marker")
+	}
+	catalogRefs, err := d.List(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Catalogs = len(catalogRefs)
+	seen := map[string]bool{}
+	for _, ref := range catalogRefs {
+		if ref.BundleSHA256 == "" {
+			report.Problems = append(report.Problems, "catalog reference missing bundle sha")
+			continue
+		}
+		if seen[ref.BundleSHA256] {
+			continue
+		}
+		seen[ref.BundleSHA256] = true
+		key := ref.Key
+		if key == "" {
+			key = BundleKey(ref.BundleSHA256)
+		}
+		if key != BundleKey(ref.BundleSHA256) {
+			report.Problems = append(report.Problems, "catalog key mismatch "+ref.BundleSHA256)
+			continue
+		}
+		if err := ValidateBundleKey(key); err != nil {
+			report.Problems = append(report.Problems, err.Error())
+			continue
+		}
+		if _, err := d.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key)}); err != nil {
+			report.Problems = append(report.Problems, "catalog references missing bundle "+ref.BundleSHA256)
+			continue
+		}
+		report.Bundles++
+	}
+	return report, nil
+}
+
 func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
-	report := VerifyReport{}
+	report := VerifyReport{Deep: true}
 	if obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")}); err == nil {
 		var m marker
 		decodeErr := json.NewDecoder(obj.Body).Decode(&m)

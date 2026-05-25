@@ -88,6 +88,7 @@ type ingestPlan struct {
 	bundleSHA   string
 	bundleBlob  string
 	manifest    model.Manifest
+	expectedSHA string
 }
 
 type bundlePlanner struct {
@@ -111,10 +112,18 @@ func IngestBundle(store *Store, registry map[string]adapters.SourceAdapter, path
 	return NewIngestor(store, registry).IngestBundle(path)
 }
 
+func IngestBundleWithExpectedSHA(store *Store, registry map[string]adapters.SourceAdapter, path, expectedSHA string) (IngestReport, error) {
+	return NewIngestor(store, registry).IngestBundleWithExpectedSHA(path, expectedSHA)
+}
+
 func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
+	return ing.IngestBundleWithExpectedSHA(path, "")
+}
+
+func (ing Ingestor) IngestBundleWithExpectedSHA(path, expectedSHA string) (IngestReport, error) {
 	const maxBusyRetries = 20
 	for attempt := 0; ; attempt++ {
-		rep, err := ing.ingestBundleOnce(path)
+		rep, err := ing.ingestBundleOnce(path, expectedSHA)
 		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
 			return rep, err
 		}
@@ -122,9 +131,9 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 	}
 }
 
-func (ing Ingestor) ingestBundleOnce(path string) (IngestReport, error) {
+func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, error) {
 	store := ing.Store
-	plan, err := (bundlePlanner{Store: store}).Prepare(path)
+	plan, err := (bundlePlanner{Store: store}).Prepare(path, expectedSHA)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -242,7 +251,7 @@ func isSQLiteBusy(err error) bool {
 	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
 }
 
-func (p bundlePlanner) Prepare(sourcePath string) (ingestPlan, error) {
+func (p bundlePlanner) Prepare(sourcePath, expectedSHA string) (ingestPlan, error) {
 	stagingDir := filepath.Join(p.Store.Root, "blobs", "bundles")
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
 		return ingestPlan{}, err
@@ -261,6 +270,10 @@ func (p bundlePlanner) Prepare(sourcePath string) (ingestPlan, error) {
 		_ = os.Remove(stagingPath)
 		return ingestPlan{}, err
 	}
+	if expectedSHA != "" && bundleSHA != expectedSHA {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, fmt.Errorf("bundle sha mismatch: expected=%s actual=%s", expectedSHA, bundleSHA)
+	}
 	manifest, err := archive.ReadManifest(stagingPath)
 	if err != nil {
 		_ = os.Remove(stagingPath)
@@ -270,7 +283,7 @@ func (p bundlePlanner) Prepare(sourcePath string) (ingestPlan, error) {
 		_ = os.Remove(stagingPath)
 		return ingestPlan{}, err
 	}
-	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(p.Store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest}, nil
+	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(p.Store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest, expectedSHA: expectedSHA}, nil
 }
 
 func insertBundleMetadata(tx *sql.Tx, plan ingestPlan, ingestedAt string) error {

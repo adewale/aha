@@ -359,7 +359,7 @@ once); any depot-touching command can override it for one invocation with
 | `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
 | `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |
 | `aha depot ls` | read catalog | — | yes (r2) | lists what is in the shared pool |
-| `aha depot verify` | read | — | yes (r2) | integrity: re-hash objects, catalog↔bucket agree; `--repair` rebuilds catalog from bundles |
+| `aha depot verify` | read | — | yes (r2) | quick/default: marker/catalog/object-existence metadata; `--deep` re-hashes/downloads objects and checks catalog↔bucket agreement; `--repair` rebuilds catalog from bundles |
 | `aha search` | — | read | **no** | queries your local corpus |
 | `aha read` | — | read | **no** | retrieves full context/blob from your local corpus |
 | `aha status` | optional | read | no by default | local corpus health; `--depot` adds a "behind by N bundles" line |

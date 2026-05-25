@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/adewale/aha/internal/adapters"
-	"github.com/adewale/aha/internal/archive"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 )
@@ -41,14 +40,7 @@ func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, js
 				return nil, err
 			}
 		}
-		sha, err := archive.FileSHA256(path)
-		if err != nil {
-			return nil, err
-		}
-		if sha != ref.BundleSHA256 {
-			return nil, fmt.Errorf("depot bundle sha mismatch: catalog=%s actual=%s", ref.BundleSHA256, sha)
-		}
-		rep, err := corpus.IngestBundle(store, adapters.Builtins(), path)
+		rep, err := corpus.IngestBundleWithExpectedSHA(store, adapters.Builtins(), path, ref.BundleSHA256)
 		if err != nil {
 			return nil, err
 		}

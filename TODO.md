@@ -27,11 +27,12 @@
 ## Performance work
 
 - Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
-- Optimize corpus `verify` query shape/indexing first; pathological benchmarks show current FTS-key verification becomes superlinear (`5k` messages took about `7.7s`). Add the tiny query-plan/schema guard before or with the fix.
-- Avoid redundant full-bundle hashing across archive write, depot put, and depot ingest while preserving a deep verification path.
-- Store source-state signatures in depot catalog refs so unchanged `refresh` does not fetch old bundles just to compare manifests.
+- Continue tracking `aha verify` with pathological benchmarks; the rowid/query-plan fix removed the first superlinear cliff, but future FTS changes must keep the cheap query-plan guard green.
+- Add byte/call counters for archive/depot/ingest known-SHA handoffs so future regressions show up as repeated hash/read passes.
+- Expand PBT/operation-count coverage for `state_sha256` refresh across duplicate refs, many machines, and catalog orderings.
 - Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state to reduce per-entry SQL chatter.
-- Consider quick/deep depot verify and status modes; keep current deep behavior available for integrity audits.
+- Add indexed project/path filtering and cap/warn high-limit broad searches.
+- Expand quick/deep depot verify/status operation-budget tests, especially for R2 repair and deep verification accounting.
 
 ## Future adapters
 

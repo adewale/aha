@@ -84,6 +84,37 @@ func TestR2DepotPutListFetchVerifyRepairWithFakeS3(t *testing.T) {
 	}
 }
 
+func TestR2VerifyQuickDoesNotDownloadBundles(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := writeDepotTestBundle(t, filepath.Join(t.TempDir(), "src"))
+	ref, _, err := d.PutBundle(t.Context(), bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.resetCounts()
+	report, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Deep {
+		t.Fatalf("quick verify reported deep: %+v", report)
+	}
+	if len(report.Problems) != 0 {
+		t.Fatalf("quick verify problems: %+v", report.Problems)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 0 {
+		t.Fatalf("quick verify downloaded bundle %s %d times", ref.Key, got)
+	}
+	if got := fake.count(http.MethodHead, ref.Key); got == 0 {
+		t.Fatalf("quick verify did not head bundle %s", ref.Key)
+	}
+}
+
 func TestR2InitRejectsInvalidMarkerWithFakeS3(t *testing.T) {
 	fake := newFakeS3(t)
 	defer fake.Close()
@@ -99,11 +130,12 @@ type fakeS3 struct {
 	mu      sync.Mutex
 	objects map[string][]byte
 	etags   map[string]string
+	counts  map[string]int
 }
 
 func newFakeS3(t *testing.T) *fakeS3 {
 	t.Helper()
-	f := &fakeS3{t: t, objects: map[string][]byte{}, etags: map[string]string{}}
+	f := &fakeS3{t: t, objects: map[string][]byte{}, etags: map[string]string{}, counts: map[string]int{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.handle))
 	return f
 }
@@ -126,6 +158,18 @@ func (f *fakeS3) get(key string) []byte {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]byte(nil), f.objects[key]...)
+}
+
+func (f *fakeS3) resetCounts() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts = map[string]int{}
+}
+
+func (f *fakeS3) count(method, key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[method+" "+key]
 }
 
 func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +196,7 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.mu.Lock()
+	f.counts[r.Method+" "+key]++
 	defer f.mu.Unlock()
 	switch r.Method {
 	case http.MethodHead:

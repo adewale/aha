@@ -41,12 +41,34 @@ func (d *Local) Init(ctx context.Context) error {
 }
 
 func (d *Local) PutBundle(ctx context.Context, bundlePath string) (BundleRef, bool, error) {
-	if err := d.Init(ctx); err != nil {
-		return BundleRef{}, false, err
-	}
 	ref, err := BundleRefFromPath(bundlePath)
 	if err != nil {
 		return BundleRef{}, false, err
+	}
+	return d.PutBundleKnown(ctx, bundlePath, ref)
+}
+
+func (d *Local) PutBundleKnown(ctx context.Context, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
+	if err := d.Init(ctx); err != nil {
+		return BundleRef{}, false, err
+	}
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Filename == "" {
+		ref.Filename = filepath.Base(bundlePath)
+	}
+	if err := ValidateKnownBundleRef(ref); err != nil {
+		return BundleRef{}, false, err
+	}
+	if ref.Bytes > 0 {
+		st, err := os.Stat(bundlePath)
+		if err != nil {
+			return BundleRef{}, false, err
+		}
+		if st.Size() != ref.Bytes {
+			return BundleRef{}, false, fmt.Errorf("known bundle size mismatch: ref=%d actual=%d", ref.Bytes, st.Size())
+		}
 	}
 	finalPath := filepath.Join(d.Root, filepath.FromSlash(ref.Key))
 	created := false
@@ -57,9 +79,6 @@ func (d *Local) PutBundle(ctx context.Context, bundlePath string) (BundleRef, bo
 		created = true
 	} else if err != nil {
 		return BundleRef{}, false, err
-	}
-	if ref.Filename == "" {
-		ref.Filename = filepath.Base(bundlePath)
 	}
 	if err := d.appendCatalog(ref); err != nil {
 		return BundleRef{}, false, err
@@ -129,8 +148,66 @@ func (d *Local) Fetch(ctx context.Context, ref BundleRef, dst string) error {
 	return copyFile(dst, filepath.Join(d.Root, filepath.FromSlash(key)))
 }
 
+func (d *Local) VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyReport, error) {
+	if opts.Deep || opts.Repair {
+		return d.Verify(ctx, opts.Repair)
+	}
+	return d.verifyQuick(ctx)
+}
+
+func (d *Local) verifyQuick(ctx context.Context) (VerifyReport, error) {
+	report := VerifyReport{Deep: false}
+	markerPath := filepath.Join(d.Root, "depot.json")
+	if b, err := os.ReadFile(markerPath); err == nil {
+		if err := validateMarkerBytes(b); err != nil {
+			report.Problems = append(report.Problems, "invalid depot marker: "+err.Error())
+		}
+	} else if os.IsNotExist(err) {
+		report.Problems = append(report.Problems, "missing depot marker")
+	} else {
+		return report, err
+	}
+	catalogRefs, err := d.List(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Catalogs = len(catalogRefs)
+	seen := map[string]bool{}
+	for _, ref := range catalogRefs {
+		if ref.BundleSHA256 == "" {
+			report.Problems = append(report.Problems, "catalog reference missing bundle sha")
+			continue
+		}
+		if seen[ref.BundleSHA256] {
+			continue
+		}
+		seen[ref.BundleSHA256] = true
+		key := ref.Key
+		if key == "" {
+			key = BundleKey(ref.BundleSHA256)
+		}
+		if key != BundleKey(ref.BundleSHA256) {
+			report.Problems = append(report.Problems, "catalog key mismatch "+ref.BundleSHA256)
+			continue
+		}
+		if err := ValidateBundleKey(key); err != nil {
+			report.Problems = append(report.Problems, err.Error())
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(d.Root, filepath.FromSlash(key))); err != nil {
+			if os.IsNotExist(err) {
+				report.Problems = append(report.Problems, "catalog references missing bundle "+ref.BundleSHA256)
+				continue
+			}
+			return report, err
+		}
+		report.Bundles++
+	}
+	return report, nil
+}
+
 func (d *Local) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
-	report := VerifyReport{}
+	report := VerifyReport{Deep: true}
 	markerPath := filepath.Join(d.Root, "depot.json")
 	if b, err := os.ReadFile(markerPath); err == nil {
 		if err := validateMarkerBytes(b); err != nil {

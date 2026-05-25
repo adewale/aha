@@ -29,8 +29,10 @@ func TestManualFTSDebtInventoryDoesNotGrow(t *testing.T) {
 		"internal/corpus/fts_reconcile.go:delete:fts_messages":  1,
 		"internal/corpus/fts_reconcile.go:insert:fts_artifacts": 1,
 		"internal/corpus/fts_reconcile.go:insert:fts_messages":  1,
-		"internal/corpus/schema.go:insert:fts_artifacts":        1,
-		"internal/corpus/schema.go:insert:fts_messages":         1,
+		"internal/corpus/schema.go:delete:fts_artifacts":        1,
+		"internal/corpus/schema.go:delete:fts_messages":         1,
+		"internal/corpus/schema.go:insert:fts_artifacts":        3,
+		"internal/corpus/schema.go:insert:fts_messages":         3,
 	}
 	got := manualFTSWrites(t)
 	if !reflect.DeepEqual(got, want) {

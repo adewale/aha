@@ -32,14 +32,16 @@ type Address struct {
 }
 
 type BundleRef struct {
-	BundleSHA256 string `json:"bundle_sha256"`
-	BundleID     string `json:"bundle_id"`
-	MachineID    string `json:"machine_id"`
-	CapturedAt   string `json:"captured_at"`
-	Bytes        int64  `json:"bytes"`
-	Sessions     int    `json:"sessions"`
-	Filename     string `json:"filename"`
-	Key          string `json:"key"`
+	BundleSHA256   string `json:"bundle_sha256"`
+	BundleID       string `json:"bundle_id"`
+	MachineID      string `json:"machine_id"`
+	CapturedAt     string `json:"captured_at"`
+	Bytes          int64  `json:"bytes"`
+	Sessions       int    `json:"sessions"`
+	Filename       string `json:"filename"`
+	Key            string `json:"key"`
+	ManifestSHA256 string `json:"manifest_sha256,omitempty"`
+	StateSHA256    string `json:"state_sha256,omitempty"`
 }
 
 type CatalogShard struct {
@@ -52,6 +54,7 @@ type VerifyReport struct {
 	Bundles  int      `json:"bundles"`
 	Catalogs int      `json:"catalogs"`
 	Repaired bool     `json:"repaired"`
+	Deep     bool     `json:"deep"`
 	Problems []string `json:"problems,omitempty"`
 }
 
@@ -62,6 +65,35 @@ type Driver interface {
 	List(ctx context.Context) ([]BundleRef, error)
 	Fetch(ctx context.Context, ref BundleRef, dst string) error
 	Verify(ctx context.Context, repair bool) (VerifyReport, error)
+}
+
+type KnownBundleDriver interface {
+	PutBundleKnown(ctx context.Context, bundlePath string, ref BundleRef) (BundleRef, bool, error)
+}
+
+type VerifyOptions struct {
+	Repair bool
+	Deep   bool
+}
+
+type OptionsVerifier interface {
+	VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyReport, error)
+}
+
+func PutBundleKnown(ctx context.Context, d Driver, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
+	if kd, ok := d.(KnownBundleDriver); ok {
+		return kd.PutBundleKnown(ctx, bundlePath, ref)
+	}
+	return d.PutBundle(ctx, bundlePath)
+}
+
+func VerifyWithOptions(ctx context.Context, d Driver, opts VerifyOptions) (VerifyReport, error) {
+	if v, ok := d.(OptionsVerifier); ok {
+		return v.VerifyWithOptions(ctx, opts)
+	}
+	report, err := d.Verify(ctx, opts.Repair)
+	report.Deep = true
+	return report, err
 }
 
 func ParseAddress(s string) (Address, error) {
@@ -107,6 +139,34 @@ func ConfigFromAddress(addr Address) model.DepotConfig {
 
 func BundleKey(sha string) string {
 	return filepath.ToSlash(filepath.Join("bundles", "v1", sha+".tar.zst"))
+}
+
+func ValidateKnownBundleRef(ref BundleRef) error {
+	if ref.BundleSHA256 == "" {
+		return fmt.Errorf("bundle sha required")
+	}
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Key != BundleKey(ref.BundleSHA256) {
+		return fmt.Errorf("bundle key %q does not match sha %s", ref.Key, ref.BundleSHA256)
+	}
+	if err := ValidateBundleKey(ref.Key); err != nil {
+		return err
+	}
+	if ref.BundleID == "" {
+		return fmt.Errorf("bundle id required")
+	}
+	if ref.MachineID == "" {
+		return fmt.Errorf("machine id required")
+	}
+	if ref.CapturedAt == "" {
+		return fmt.Errorf("captured_at required")
+	}
+	if ref.Bytes < 0 {
+		return fmt.Errorf("bundle bytes must be non-negative")
+	}
+	return nil
 }
 
 func CatalogKey(machine string) string {
@@ -175,7 +235,20 @@ func BundleRefFromPath(bundlePath string) (BundleRef, error) {
 	if err != nil {
 		return BundleRef{}, err
 	}
-	return BundleRef{BundleSHA256: sha, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: st.Size(), Sessions: manifest.Counts.SessionFiles, Filename: filepath.Base(bundlePath), Key: BundleKey(sha)}, nil
+	mb, err := archive.CanonicalManifest(manifest)
+	if err != nil {
+		return BundleRef{}, err
+	}
+	return BundleRef{BundleSHA256: sha, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: st.Size(), Sessions: manifest.Counts.SessionFiles, Filename: filepath.Base(bundlePath), Key: BundleKey(sha), ManifestSHA256: hashBytes(mb), StateSHA256: archive.ManifestStateSHA256(manifest)}, nil
+}
+
+func BundleRefFromWriteInfo(manifest model.Manifest, info archive.WriteInfo, filename string) BundleRef {
+	return BundleRef{BundleSHA256: info.BundleSHA256, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: info.SizeBytes, Sessions: manifest.Counts.SessionFiles, Filename: filename, Key: BundleKey(info.BundleSHA256), ManifestSHA256: info.ManifestSHA256, StateSHA256: info.StateSHA256}
+}
+
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func mergeBundleRef(list []BundleRef, ref BundleRef) []BundleRef {
@@ -209,6 +282,12 @@ func mergeRef(old, new BundleRef) BundleRef {
 	}
 	if old.Key == "" {
 		old.Key = new.Key
+	}
+	if old.ManifestSHA256 == "" {
+		old.ManifestSHA256 = new.ManifestSHA256
+	}
+	if old.StateSHA256 == "" {
+		old.StateSHA256 = new.StateSHA256
 	}
 	return old
 }

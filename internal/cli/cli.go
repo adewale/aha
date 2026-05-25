@@ -20,6 +20,7 @@ import (
 	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
@@ -68,7 +69,7 @@ func Registry() map[string]Command {
 		"verify":    {Name: "verify", Usage: "aha verify [--repo DIR] [--repair-fts] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repair-fts", "--repo"}, Examples: []string{"aha verify --json", "aha verify --repair-fts"}, JSONSchema: "object{root,problems,repaired_fts}", Docs: "verify corpus invariants and optionally repair derived FTS rows", Run: cmdVerify},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,sources,corpus,depot,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
-		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify> [DEPOT] [--json] [--repair]", Flags: []string{"--config", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json", "aha depot verify --repair"}, JSONSchema: "object|array", Docs: "initialize, list, or verify a bundle depot", Run: cmdDepot},
+		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]", Flags: []string{"--config", "--deep", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json", "aha depot verify --deep", "aha depot verify --repair"}, JSONSchema: "object|array", Docs: "initialize, list, or verify a bundle depot", Run: cmdDepot},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
 	}
 }
@@ -299,11 +300,12 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 		}
 	}
 	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
-	sha, err := archive.Write(tmpPath, bundle)
+	info, err := archive.WriteWithInfo(tmpPath, bundle)
 	if err != nil {
 		return "", "", err
 	}
-	ref, _, err := drv.PutBundle(context.Background(), tmpPath)
+	ref := depot.BundleRefFromWriteInfo(bundle.Manifest, info, filepath.Base(tmpPath))
+	ref, _, err = depot.PutBundleKnown(context.Background(), drv, tmpPath, ref)
 	if err != nil {
 		return "", "", err
 	}
@@ -311,7 +313,7 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	if path == "" {
 		path = ref.Key
 	}
-	return path, sha, nil
+	return path, info.BundleSHA256, nil
 }
 
 func reorderSearchArgs(args []string) []string {

@@ -47,12 +47,12 @@ If a row lacks a characterization gate, the abstraction is not ready to change y
 
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
 |---|---|---|---|
-| FTS verify superlinear behavior | Schema/query-plan tests over tiny corpora; package benchmark only for magnitude/profile | Benchmarks/profile identify the issue; no cheap guard yet | After the rowid/shadow-key fix, add `EXPLAIN QUERY PLAN` assertions so regressions fail without 5k-row benchmarks. |
+| FTS verify superlinear behavior | Schema/query-plan tests over tiny corpora; package benchmark only for magnitude/profile | Implemented: FTS rows use rowid identity; `TestVerifyFTSChecksUseRowIDLookups` guards the query shape; 5k pathological verify dropped from ~`7.7s` to ~`15ms` on the same machine class. | Keep query-plan guard; use benchmarks only for trend checks. |
 | Many trivial depot bundles / duplicate refs | Pure set-model PBT and in-memory catalog merge benchmark | `pendingDepotRefs` and `depotBehindFromRefs` now have PBT; `BenchmarkPathologicalCatalogMergeManyTrivialRefs` measures merge/sort without bundle files | Add map-based bulk catalog merge and PBT/benchmarks for many machines/shards. |
-| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches | Add fake-R2 operation budgets once quick/deep status modes exist. |
-| Unchanged refresh should not fetch old bundles | Fake-driver/PBT over refs with `state_sha256` metadata | Not implemented because catalog refs do not yet carry state metadata | Add the operation-count PBT with the catalog schema change. |
-| Depot ingest duplicate/pre-hash behavior | Pending-set PBT plus expected-SHA ingest seam tests | Pending-set PBT exists; byte-read invariant waits for `IngestBundleWithExpectedSHA` | Test that catalog-validated ingest performs one staging hash and no pre-hash. |
-| Archive repeated hashing | Unit/golden test for `WriteWithInfo` SHA handoff | Current coverage is at archive/depot benchmark layer | Add single-pass SHA equality tests before optimizing. |
+| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches | Add R2 operation budgets for future summary/quick status paths if they are added. |
+| Unchanged refresh should not fetch old bundles | Fake-driver/PBT over refs with `state_sha256` metadata | Implemented: catalog refs carry `state_sha256`; `findDepotBundleWithSameState` checks it before fetching; fake-driver test proves zero fetches for matching state metadata. | Add broader PBT over duplicate refs/machines/orderings. |
+| Depot ingest duplicate/pre-hash behavior | Pending-set PBT plus expected-SHA ingest seam tests | Implemented: `corpus.IngestBundleWithExpectedSHA` validates during staging; depot ingest no longer pre-hashes separately. | Add byte-counter instrumentation for large pending bundles. |
+| Archive repeated hashing | Unit/golden test for `WriteWithInfo` SHA handoff | Implemented: `archive.WriteWithInfo` streams compressed SHA/size/manifest/state info; CLI depot publish uses `depot.PutBundleKnown`. | Add byte-counter instrumentation for snapshot/refresh publish. |
 | Ingest per-entry SQL chatter | Package benchmark plus small-model duplicate/idempotence PBT | Benchmarks expose cost; PBT for duplicate trivial bundles is still pending | Add session-local duplicate/conflict model tests before prepared-statement refactor. |
 | Search path/filter cost | Query-plan tests and `search.Query` benchmarks | Benchmarks exist; exact project/path query-plan guard pending | Add indexed `--project`/path-token plan tests with tiny data. |
 | Profiling | Package-level pprof first; CLI pprof only for end-to-end confirmation | Optional CLI profiling exists; benchmark profiles were more useful for root cause | Keep CLI pprof opt-in; prefer package benchmark profiles for optimization loops. |
@@ -111,14 +111,14 @@ The plan should produce improvements we can point to. Treat these as scenario me
 
 | Scenario / user journey | Current pain signal | Primary metric | Expected measurable improvement |
 |---|---|---|---|
-| `aha verify` on a growing corpus | 5k-message pathological verify took about `7.7s`; scaling was worse than linear. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope, `ns/op`, and query-plan guard. | Verification becomes near-linear in messages/artifacts; 5k-message verify drops from seconds to a small multiple of `ReconcileFTS`/indexed row scans. |
-| Routine no-op `aha refresh` with local/R2 depot | Existing code may fetch/hash old same-machine bundles to compare state. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | With catalog `state_sha256`, no-op refresh lists metadata but fetches `0` old bundles and reads `0` old bundle bytes. |
-| `aha ingest --depot` with pending bundles | Depot ingest hashes a fetched/local bundle before corpus ingest hashes/copies it again. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
-| `aha snapshot` / `aha refresh` publish | Archive write computes bundle SHA by reopening the just-written tar.zst; depot publish re-derives identity. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Writer-produced SHA/size/state identity is handed to depot; one or more full compressed-bundle reads disappear from the hot path. |
+| `aha verify` on a growing corpus | Before rowid identity, 5k-message pathological verify took about `7.7s`; after the fix, the same benchmark took about `15ms`. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope, `ns/op`, and query-plan guard. | Maintain near-linear verification and prevent regressions to unindexed FTS joins. |
+| Routine no-op `aha refresh` with local/R2 depot | Old refs without state metadata still require fallback fetch; new refs carry state metadata. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | New catalog refs allow no-op refresh to list metadata but fetch `0` old bundles when a matching `state_sha256` exists. |
+| `aha ingest --depot` with pending bundles | Expected SHA is now checked during ingest staging instead of by a separate pre-hash. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
+| `aha snapshot` / `aha refresh` publish | `WriteWithInfo` now computes compressed bundle SHA while writing; known identity is handed to depot. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Snapshot/refresh publish avoids re-reading the just-written bundle for archive/depot identity. |
 | Many tiny entries in one ingest | 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared/batched ingest lowers allocations and SQL chatter per entry while reports/conflicts remain identical. |
 | Broad `aha search` / high `--limit` | 10k broad-term search took `51-57ms`; high limit allocated `1.78MB`/`33k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce broad/path-filter latency and allocations for common agent workflows. |
 | `aha status --depot` on years of trivial bundles | Behind calculation and catalog parsing scale with raw catalog rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
-| `aha depot verify` on local/R2 depot | Deep verify is intentionally `O(bundle bytes)` and expensive, especially over R2. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
+| `aha depot verify` on local/R2 depot | Quick/default verify now checks metadata/existence; `--deep`/`--repair` retains full object reads. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
 | Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalog bytes, vacuum/compaction reclaimed bytes. | Future size/vacuum/retention commands make growth visible and maintenance explicit without weakening raw preservation defaults. |
 
 Instrumentation to add as optimizations land:
@@ -150,7 +150,7 @@ This changes the roadmap: every optimization below should get both a benchmark a
 
 ## Profiling lessons
 
-- `corpus.Verify` is the urgent hotspot. CPU profiles for 5k messages put about 90%+ of time under `corpus.Verify -> verifyCount -> sqlite VDBE`, with FTS5 cursor/column work visible. The verifier joins `messages` to `fts_messages` on unindexed FTS columns, so it does not behave like a normal b-tree join.
+- `corpus.Verify` was the urgent hotspot. CPU profiles for 5k messages put about 90%+ of time under `corpus.Verify -> verifyCount -> sqlite VDBE`, with FTS5 cursor/column work visible. The verifier used to join `messages` to `fts_messages` on unindexed FTS columns; it now uses FTS rowid identity and has a tiny query-plan guard.
 - Ingest CPU is mostly SQLite stepping and writes from `ingestEntry`. Allocation profiles show `zstd` encoder/decoder buffers, `parseGenericJSONL`, `database/sql` argument binding, and conflict-detection queries.
 - Search broad-term CPU is SQLite/IO dominated. Allocation profiles show result construction and `model.FormatRef`/base64 output becoming visible at high limits.
 - Archive many-tiny-file memory profiles show `zstd`, `encoding/json.MarshalIndent`/`Unmarshal`, `normalizeBundleForWrite`, tar header/PAX parsing, and per-file formatting/allocation.
@@ -318,13 +318,20 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 
 ## Priority order
 
-1. Fix FTS verification identity (`rowid`/indexed shadow keys). This removes the first observed superlinear cliff.
-2. Add PBT/operation-count invariants for many trivial bundles, duplicate catalog refs, and no-op depot/status/refresh paths.
-3. Remove depot refresh old-bundle fetches by storing `state_sha256` in catalog refs.
-4. Remove duplicate bundle hashing across depot ingest and archive/depot publish.
-5. Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state.
-6. Add indexed project/path filtering and cap/warn high-limit broad searches.
-7. Split depot/status quick vs deep modes and add R2 operation-budget tests.
-8. Add disk-size/vacuum/retention tooling for multi-year longevity.
+Completed from the original priority list:
+
+- FTS verification identity now uses rowid and has a query-plan guard.
+- Initial PBT/operation-count invariants cover duplicate depot refs, status metadata-only behavior, and no-op refresh state metadata.
+- New catalog refs carry `state_sha256`/`manifest_sha256`.
+- Archive/depot/ingest known-SHA handoffs remove redundant hot-path hashing.
+- Depot verify has quick/default and deep/repair paths, with fake-R2 coverage that quick verify does not download bundles.
+
+Remaining priority order:
+
+1. Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state.
+2. Add indexed project/path filtering and cap/warn high-limit broad searches.
+3. Expand R2 operation-budget tests beyond quick verify into status, repair, and deep verify accounting.
+4. Add disk-size/vacuum/retention tooling for multi-year longevity.
+5. Add catalog summary/compaction if raw catalog metadata scans become the next bottleneck.
 
 The principle: keep strict/deep integrity operations available, but make routine `refresh`, `search`, `status`, and `verify` scale with metadata or indexed row counts rather than historical bytes and unindexed virtual-table scans.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdhash "hash"
 	"io"
 	"os"
 	"path"
@@ -50,6 +51,14 @@ type Bundle struct {
 	Manifest model.Manifest
 	Files    []model.CapturedFile
 	TempDir  string
+}
+
+type WriteInfo struct {
+	Path           string
+	BundleSHA256   string
+	SizeBytes      int64
+	ManifestSHA256 string
+	StateSHA256    string
 }
 
 func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters.SourceAdapter, opts Options) (Bundle, error) {
@@ -388,12 +397,20 @@ func StableRead(path string) ([]byte, string, error) {
 }
 
 func Write(path string, b Bundle) (string, error) {
-	b = normalizeBundleForWrite(b)
-	if err := ValidateManifestSemantics(b.Manifest); err != nil {
+	info, err := WriteWithInfo(path, b)
+	if err != nil {
 		return "", err
 	}
+	return info.BundleSHA256, nil
+}
+
+func WriteWithInfo(path string, b Bundle) (WriteInfo, error) {
+	b = normalizeBundleForWrite(b)
+	if err := ValidateManifestSemantics(b.Manifest); err != nil {
+		return WriteInfo{}, err
+	}
 	if err := ValidateManifestBudgets(b.Manifest); err != nil {
-		return "", err
+		return WriteInfo{}, err
 	}
 	if b.TempDir != "" {
 		defer os.RemoveAll(b.TempDir)
@@ -402,85 +419,97 @@ func Write(path string, b Bundle) (string, error) {
 	captured := map[string]model.ManifestFile{}
 	for _, f := range b.Files {
 		if err := validateArchiveDataPath(f.Manifest.RelativePath); err != nil {
-			return "", err
+			return WriteInfo{}, err
 		}
 		if seenNames[f.Manifest.RelativePath] {
-			return "", fmt.Errorf("duplicate archive path %s", f.Manifest.RelativePath)
+			return WriteInfo{}, fmt.Errorf("duplicate archive path %s", f.Manifest.RelativePath)
 		}
 		seenNames[f.Manifest.RelativePath] = true
 		captured[f.Manifest.RelativePath] = f.Manifest
 	}
 	for _, mf := range b.Manifest.Files {
 		if err := validateArchiveDataPath(mf.RelativePath); err != nil {
-			return "", err
+			return WriteInfo{}, err
 		}
 		got, ok := captured[mf.RelativePath]
 		if !ok {
-			return "", fmt.Errorf("manifest file has no captured data: %s", mf.RelativePath)
+			return WriteInfo{}, fmt.Errorf("manifest file has no captured data: %s", mf.RelativePath)
 		}
 		if got.SHA256 != mf.SHA256 || got.Bytes != mf.Bytes || got.Kind != mf.Kind || got.Source != mf.Source {
-			return "", fmt.Errorf("captured metadata mismatch for %s", mf.RelativePath)
+			return WriteInfo{}, fmt.Errorf("captured metadata mismatch for %s", mf.RelativePath)
 		}
 	}
 	if len(captured) != len(b.Manifest.Files) {
-		return "", fmt.Errorf("captured file missing from manifest")
+		return WriteInfo{}, fmt.Errorf("captured file missing from manifest")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
+		return WriteInfo{}, err
 	}
 	out, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
-		return "", err
+		return WriteInfo{}, err
 	}
 	tmp := out.Name()
 	defer os.Remove(tmp)
-	enc, err := zstd.NewWriter(out, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	compressed := &hashingWriter{w: out, h: sha256.New()}
+	enc, err := zstd.NewWriter(compressed, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
 		out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	tw := tar.NewWriter(enc)
 	mb, err := CanonicalManifest(b.Manifest)
 	if err != nil {
 		_ = out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	if err := addTar(tw, "manifest.json", mb, 0o644); err != nil {
 		_ = out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	var sums []string
 	for _, f := range b.Files {
 		if err := addTarCaptured(tw, f); err != nil {
 			_ = out.Close()
-			return "", err
+			return WriteInfo{}, err
 		}
 		sums = append(sums, fmt.Sprintf("%s  %s", f.Manifest.SHA256, f.Manifest.RelativePath))
 	}
 	sort.Strings(sums)
 	if err := addTar(tw, "checksums/sha256sums.txt", []byte(strings.Join(sums, "\n")+"\n"), 0o644); err != nil {
 		_ = out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	if err := tw.Close(); err != nil {
 		_ = out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	if err := enc.Close(); err != nil {
 		_ = out.Close()
-		return "", err
+		return WriteInfo{}, err
 	}
 	if err := out.Close(); err != nil {
-		return "", err
-	}
-	sha, err := FileSHA256(tmp)
-	if err != nil {
-		return "", err
+		return WriteInfo{}, err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return "", err
+		return WriteInfo{}, err
 	}
-	return sha, nil
+	return WriteInfo{Path: path, BundleSHA256: hex.EncodeToString(compressed.h.Sum(nil)), SizeBytes: compressed.n, ManifestSHA256: hash.SHA256Bytes(mb), StateSHA256: ManifestStateSHA256(b.Manifest)}, nil
+}
+
+type hashingWriter struct {
+	w io.Writer
+	h stdhash.Hash
+	n int64
+}
+
+func (w *hashingWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	if n > 0 {
+		_, _ = w.h.Write(p[:n])
+		w.n += int64(n)
+	}
+	return n, err
 }
 
 func normalizeBundleForWrite(b Bundle) Bundle {

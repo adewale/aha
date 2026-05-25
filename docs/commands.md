@@ -49,12 +49,13 @@ aha conflicts [--repo DIR] [--json]
 initialize, list, or verify a bundle depot
 
 ```txt
-aha depot <init|ls|verify> [DEPOT] [--json] [--repair]
+aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]
 ```
 
 **Flags:**
 
 - `--config`
+- `--deep`
 - `--json`
 - `--repair`
 
@@ -62,6 +63,7 @@ aha depot <init|ls|verify> [DEPOT] [--json] [--repair]
 
 - `aha depot init local:~/.aha/depot`
 - `aha depot ls --json`
+- `aha depot verify --deep`
 - `aha depot verify --repair`
 
 **JSON contract:** `object|array`

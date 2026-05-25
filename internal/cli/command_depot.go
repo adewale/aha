@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/adewale/aha/internal/config"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/safety"
 )
 
@@ -16,7 +17,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		return errors.New("depot requires subcommand: init, ls, verify")
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify> [DEPOT] [--json] [--repair]")
+		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]")
 		return nil
 	}
 	sub := args[0]
@@ -25,6 +26,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 	configPath := fs.String("config", "", "config path")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	repair := fs.Bool("repair", false, "repair catalog from bundle objects")
+	deep := fs.Bool("deep", false, "deep verify bundle bytes/manifests")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	case "verify":
-		report, err := drv.Verify(ctx, *repair)
+		report, err := depot.VerifyWithOptions(ctx, drv, depot.VerifyOptions{Repair: *repair, Deep: *deep})
 		if err != nil {
 			return err
 		}

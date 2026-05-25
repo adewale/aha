@@ -28,13 +28,16 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Optional command-level Go pprof output via `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, and `AHA_MEM_PROFILE`.
 - Pathological performance benchmarks for many tiny archive files, large ingest/verify/search/status corpora, and large local depot catalogs.
 - Performance scalability/longevity plan tying benchmark/profiling findings to concrete optimization phases.
+- Rowid-based FTS verification with query-plan guard, reducing pathological 5k-message verify from seconds to milliseconds.
+- Known bundle identity handoffs: `archive.WriteWithInfo`, catalog `state_sha256`/`manifest_sha256`, depot known-SHA publish, and expected-SHA ingest staging.
+- Quick/default depot verification with `--deep` for byte/manifests checks; fake-R2 coverage ensures quick verify does not download bundles.
 
 ### Changed
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
 - Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
-- Generated command docs now include depot commands, depot-aware flags, corpus verification, and global profiling guidance.
+- Generated command docs now include depot commands, depot-aware flags, corpus verification, global profiling guidance, and depot quick/deep verification flags.
 
 ### Removed
 
@@ -47,7 +50,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Depot ingest verifies catalog SHA/key against actual bundle bytes before corpus ingest.
 - Local depot catalog updates use locking plus atomic writes.
 - R2 catalog updates use conditional writes and retry-on-conflict behavior.
-- `depot verify` validates marker schema/layout and catalog/object agreement.
+- `depot verify` is quick by default and validates marker/catalog/object-existence metadata; `depot verify --deep` validates bundle bytes/manifests and catalog/object agreement.
 - Local depot paths and catalog-derived bundle keys are validated against traversal and malformed-key attacks.
 - Network imports are restricted to `internal/depot` by static tests.
 

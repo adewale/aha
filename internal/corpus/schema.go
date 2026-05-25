@@ -35,12 +35,12 @@ func Init(db *sql.DB) error {
 		`create trigger if not exists entries_no_update before update on entries begin select raise(abort,'entries are append-only'); end`,
 		`create trigger if not exists entries_no_delete before delete on entries begin select raise(abort,'entries are append-only'); end`,
 		`create trigger if not exists messages_require_entry before insert on messages when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.entry_id) begin select raise(abort,'message entry missing'); end`,
-		`create trigger if not exists messages_ai after insert on messages when trim(coalesce(new.text,''))<>'' begin insert into fts_messages(session_key,entry_id,text) values(new.session_key,new.entry_id,new.text); end`,
+		`create trigger if not exists messages_ai after insert on messages when trim(coalesce(new.text,''))<>'' begin insert into fts_messages(rowid,session_key,entry_id,text) values(new.rowid,new.session_key,new.entry_id,new.text); end`,
 		`create trigger if not exists messages_no_update before update on messages begin select raise(abort,'messages are append-only'); end`,
 		`create trigger if not exists messages_no_delete before delete on messages begin select raise(abort,'messages are append-only'); end`,
 		`create trigger if not exists entry_assets_require_entry before insert on entry_assets when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.entry_id) begin select raise(abort,'entry asset entry missing'); end`,
 		`create trigger if not exists artifacts_require_bundle before insert on artifacts when not exists(select 1 from bundles where bundle_id=new.bundle_id) begin select raise(abort,'artifact bundle missing'); end`,
-		`create trigger if not exists artifacts_ai after insert on artifacts when trim(coalesce(new.text_body,new.text_preview,''))<>'' begin insert into fts_artifacts(artifact_id,text) values(new.artifact_id,coalesce(new.text_body,new.text_preview,'')); end`,
+		`create trigger if not exists artifacts_ai after insert on artifacts when trim(coalesce(new.text_body,new.text_preview,''))<>'' begin insert into fts_artifacts(rowid,artifact_id,text) values(new.artifact_id,new.artifact_id,coalesce(new.text_body,new.text_preview,'')); end`,
 		`create trigger if not exists artifacts_no_update before update on artifacts begin select raise(abort,'artifacts are append-only'); end`,
 		`create trigger if not exists artifacts_no_delete before delete on artifacts begin select raise(abort,'artifacts are append-only'); end`,
 		`create trigger if not exists conflicts_no_update before update on conflicts begin select raise(abort,'conflicts are append-only'); end`,
@@ -67,6 +67,24 @@ var migrations = []migration{
 		}
 		if !hasTextBody {
 			if _, err := db.Exec(`alter table artifacts add column text_body text`); err != nil {
+				return err
+			}
+		}
+		return nil
+	}},
+	{version: 3, apply: func(db *sql.DB) error {
+		stmts := []string{
+			`drop trigger if exists messages_ai`,
+			`drop trigger if exists artifacts_ai`,
+			`delete from fts_messages`,
+			`insert into fts_messages(rowid,session_key,entry_id,text) select rowid,session_key,entry_id,text from messages where trim(coalesce(text,''))<>''`,
+			`delete from fts_artifacts`,
+			`insert into fts_artifacts(rowid,artifact_id,text) select artifact_id,artifact_id,coalesce(nullif(text_body,''),text_preview,'') from artifacts where trim(coalesce(nullif(text_body,''),text_preview,''))<>''`,
+			`create trigger messages_ai after insert on messages when trim(coalesce(new.text,''))<>'' begin insert into fts_messages(rowid,session_key,entry_id,text) values(new.rowid,new.session_key,new.entry_id,new.text); end`,
+			`create trigger artifacts_ai after insert on artifacts when trim(coalesce(new.text_body,new.text_preview,''))<>'' begin insert into fts_artifacts(rowid,artifact_id,text) values(new.artifact_id,new.artifact_id,coalesce(new.text_body,new.text_preview,'')); end`,
+		}
+		for _, st := range stmts {
+			if _, err := db.Exec(st); err != nil {
 				return err
 			}
 		}

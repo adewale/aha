@@ -160,7 +160,7 @@ optionally rebuild FTS rows from messages/artifacts
 report machine-readable problems for agents and scripts
 ```
 
-The corpus verifier checks rebuildable local state. It does not contact the depot; use `depot verify` for depot object/catalog integrity.
+The corpus verifier checks rebuildable local state. It does not contact the depot; use `depot verify` for depot object/catalog integrity. `depot verify` is quick by default and checks metadata/object existence; use `depot verify --deep` for byte/manifest validation.
 
 ### `aha depot verify --repair`
 
@@ -218,7 +218,7 @@ If two machines somehow produce byte-identical bundles, the depot object key is 
 - **Delta ingest:** no-arg `ingest` computes `catalog - corpus` and skips already-ingested bundle SHAs.
 - **Idempotent refresh:** unchanged sources avoid creating another bundle unless deterministic metadata overrides are supplied.
 - **Local query engine:** search/read never scan depot objects and never query R2; all analysis uses SQLite + FTS5 locally.
-- **Repair is explicit:** expensive full object listing/rehashing is done by `depot verify --repair`, not on every search or refresh.
+- **Repair/deep verification is explicit:** expensive full object listing/rehashing is done by `depot verify --deep` or `depot verify --repair`, not on every search or refresh.
 
 Current note: the unchanged-source check compares against existing same-machine depot refs by reading bundle manifests. That is acceptable for small histories and keeps catalog schema simple; if it becomes costly, a future catalog schema can include a precomputed state signature to avoid fetching manifests for this check.
 

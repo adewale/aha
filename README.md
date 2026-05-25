@@ -162,7 +162,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha depot <init|ls|verify> [DEPOT] [--json] [--repair]
+aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
 ```
 
@@ -177,7 +177,7 @@ Command roles:
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `depot`: initialize, list, or verify a local/R2 bundle depot.
+- `depot`: initialize, list, or verify a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
