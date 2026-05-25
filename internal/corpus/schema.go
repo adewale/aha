@@ -21,13 +21,19 @@ func Init(db *sql.DB) error {
 		`create table if not exists artifacts(artifact_id integer primary key,artifact_sha256 text check(length(artifact_sha256)=64),source_name text,machine_id text,bundle_id text not null references bundles(bundle_id),kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,text_body text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`,
 		`create table if not exists images(image_sha256 text primary key check(length(image_sha256)=64),source_name text,mime_type text,bytes integer check(bytes>=0),width integer,height integer,ext text,blob_path text)`,
 		`create table if not exists entry_assets(session_key text,entry_id text,asset_sha256 text,asset_kind text,content_index integer,prompt_order integer,raw_ref text,mime_type text,metadata_json text,primary key(session_key,entry_id,asset_sha256,content_index,prompt_order),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
+		`create table if not exists session_path_tokens(session_key text,token text,primary key(session_key,token),foreign key(session_key) references sessions(session_key))`,
+		`create table if not exists artifact_path_tokens(artifact_id integer,token text,primary key(artifact_id,token),foreign key(artifact_id) references artifacts(artifact_id))`,
 		`create table if not exists conflicts(conflict_id integer primary key,session_key text,entry_id text,first_entry_sha256 text,second_entry_sha256 text,details_json text,created_at text default current_timestamp)`,
 		`create virtual table if not exists fts_messages using fts5(session_key unindexed,entry_id unindexed,text)`,
 		`create virtual table if not exists fts_artifacts using fts5(artifact_id unindexed,text)`,
 		`create index if not exists idx_sessions_source_machine on sessions(source_name,machine_id)`,
 		`create index if not exists idx_sessions_source_session on sessions(source_name,source_session_id,machine_id)`,
+		`create index if not exists idx_sessions_project on sessions(project_key)`,
+		`create index if not exists idx_session_path_tokens_token_session on session_path_tokens(token,session_key)`,
+		`create index if not exists idx_artifact_path_tokens_token_artifact on artifact_path_tokens(token,artifact_id)`,
 		`create trigger if not exists sessions_require_v2_key before insert on sessions when new.session_key='' or length(new.session_key)<>68 or substr(new.session_key,1,4)<>'sk1_' or substr(new.session_key,5) glob '*[^0-9a-f]*' begin select raise(abort,'session key must be sk1'); end`,
 		`create index if not exists idx_entries_session_line on entries(session_key,line_no)`,
+		`create index if not exists idx_entries_session_entry_hash on entries(session_key,entry_id,entry_sha256)`,
 		`create index if not exists idx_entries_time_role on entries(timestamp,role)`,
 		`create trigger if not exists entries_require_session before insert on entries when not exists(select 1 from sessions where session_key=new.session_key) begin select raise(abort,'entry session missing'); end`,
 		`create trigger if not exists entries_require_nonempty before insert on entries when new.session_key='' or new.entry_id='' begin select raise(abort,'entry key required'); end`,
@@ -90,6 +96,118 @@ var migrations = []migration{
 		}
 		return nil
 	}},
+	{version: 4, apply: func(db *sql.DB) error {
+		_, err := db.Exec(`create index if not exists idx_sessions_project on sessions(project_key)`)
+		return err
+	}},
+	{version: 5, apply: migratePathTokens},
+	{version: 6, apply: func(db *sql.DB) error {
+		_, err := db.Exec(`create index if not exists idx_entries_session_entry_hash on entries(session_key,entry_id,entry_sha256)`)
+		return err
+	}},
+}
+
+func migratePathTokens(db *sql.DB) error {
+	stmts := []string{
+		`create table if not exists session_path_tokens(session_key text,token text,primary key(session_key,token),foreign key(session_key) references sessions(session_key))`,
+		`create table if not exists artifact_path_tokens(artifact_id integer,token text,primary key(artifact_id,token),foreign key(artifact_id) references artifacts(artifact_id))`,
+		`create index if not exists idx_session_path_tokens_token_session on session_path_tokens(token,session_key)`,
+		`create index if not exists idx_artifact_path_tokens_token_artifact on artifact_path_tokens(token,artifact_id)`,
+	}
+	for _, st := range stmts {
+		if _, err := db.Exec(st); err != nil {
+			return err
+		}
+	}
+	if err := backfillSessionPathTokens(db); err != nil {
+		return err
+	}
+	return backfillArtifactPathTokens(db)
+}
+
+func backfillSessionPathTokens(db *sql.DB) error {
+	rows, err := db.Query(`select session_key,coalesce(raw_cwd,'') from sessions`)
+	if err != nil {
+		return err
+	}
+	type sessionPath struct{ sessionKey, rawCWD string }
+	var sessions []sessionPath
+	for rows.Next() {
+		var rec sessionPath
+		if err := rows.Scan(&rec.sessionKey, &rec.rawCWD); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		sessions = append(sessions, rec)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`insert or ignore into session_path_tokens(session_key,token) values(?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, rec := range sessions {
+		for _, token := range pathTokens(rec.rawCWD) {
+			if _, err := stmt.Exec(rec.sessionKey, token); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+func backfillArtifactPathTokens(db *sql.DB) error {
+	rows, err := db.Query(`select artifact_id,coalesce(raw_path,''),coalesce(relative_path,'') from artifacts`)
+	if err != nil {
+		return err
+	}
+	type artifactPath struct {
+		artifactID            int64
+		rawPath, relativePath string
+	}
+	var artifacts []artifactPath
+	for rows.Next() {
+		var rec artifactPath
+		if err := rows.Scan(&rec.artifactID, &rec.rawPath, &rec.relativePath); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		artifacts = append(artifacts, rec)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, rec := range artifacts {
+		for _, token := range pathTokens(rec.rawPath, rec.relativePath) {
+			if _, err := stmt.Exec(rec.artifactID, token); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func migrate(db *sql.DB) error {

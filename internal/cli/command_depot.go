@@ -14,10 +14,10 @@ import (
 
 func cmdDepot(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("depot requires subcommand: init, ls, verify")
+		return errors.New("depot requires subcommand: init, ls, verify, compact")
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]")
+		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]")
 		return nil
 	}
 	sub := args[0]
@@ -92,6 +92,16 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 			return writeJSON(stdout, report)
 		}
 		fmt.Fprintf(stdout, "bundles=%d catalogs=%d repaired=%v problems=%d\n", report.Bundles, report.Catalogs, report.Repaired, len(report.Problems))
+		return nil
+	case "compact":
+		report, err := depot.Compact(ctx, drv)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return writeJSON(stdout, report)
+		}
+		fmt.Fprintf(stdout, "catalogs=%d refs_before=%d refs_after=%d duplicate_refs=%d catalogs_written=%d\n", report.Catalogs, report.RefsBefore, report.RefsAfter, report.DuplicateRefs, report.CatalogsWritten)
 		return nil
 	default:
 		return fmt.Errorf("unknown depot subcommand %q", sub)

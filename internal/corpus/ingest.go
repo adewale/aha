@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,6 +28,8 @@ import (
 )
 
 const MaxArtifactTextIndexBytes int64 = 4 << 20
+
+var zstdEncoderPool sync.Pool
 
 type IngestReport struct {
 	Sessions  int  `json:"sessions"`
@@ -102,6 +105,65 @@ type corpusWriter struct {
 	Registry map[string]adapters.SourceAdapter
 	tx       *sql.Tx
 	manifest model.Manifest
+	stmts    writerStatements
+}
+
+type writerStatements struct {
+	insertMachine           *sql.Stmt
+	upsertSource            *sql.Stmt
+	insertFile              *sql.Stmt
+	insertSession           *sql.Stmt
+	insertSessionVersion    *sql.Stmt
+	insertSessionPathToken  *sql.Stmt
+	insertEntry             *sql.Stmt
+	insertMessage           *sql.Stmt
+	insertConflict          *sql.Stmt
+	insertArtifact          *sql.Stmt
+	insertArtifactPathToken *sql.Stmt
+	insertImage             *sql.Stmt
+	insertEntryAsset        *sql.Stmt
+}
+
+func (w *corpusWriter) PrepareStatements() error {
+	prepared := []struct {
+		dst **sql.Stmt
+		sql string
+	}{
+		{&w.stmts.insertMachine, `insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`},
+		{&w.stmts.upsertSource, `insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`},
+		{&w.stmts.insertFile, `insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`},
+		{&w.stmts.insertSession, `insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertSessionVersion, `insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`},
+		{&w.stmts.insertSessionPathToken, `insert or ignore into session_path_tokens(session_key,token) values(?,?)`},
+		{&w.stmts.insertEntry, `insert or ignore into entries(session_key,entry_id,parent_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json,source_metadata_json) values(?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertMessage, `insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cost) values(?,?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertConflict, `insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`},
+		{&w.stmts.insertArtifact, `insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertArtifactPathToken, `insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`},
+		{&w.stmts.insertImage, `insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertEntryAsset, `insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`},
+	}
+	for _, item := range prepared {
+		stmt, err := w.tx.Prepare(item.sql)
+		if err != nil {
+			return err
+		}
+		*item.dst = stmt
+	}
+	return nil
+}
+
+func (w *corpusWriter) CloseStatements() error {
+	var first error
+	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset} {
+		if stmt == nil {
+			continue
+		}
+		if err := stmt.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func NewIngestor(store *Store, registry map[string]adapters.SourceAdapter) Ingestor {
@@ -162,6 +224,10 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 	}
 	manifest := plan.manifest
 	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest}
+	if err := writer.PrepareStatements(); err != nil {
+		return IngestReport{}, err
+	}
+	defer writer.CloseStatements()
 	if err := writer.InsertMachineAndSources(); err != nil {
 		return IngestReport{}, err
 	}
@@ -309,11 +375,11 @@ func (blobPublisher) PromoteBundle(plan ingestPlan) (bool, error) {
 
 func (w corpusWriter) InsertMachineAndSources() error {
 	manifest := w.manifest
-	if _, err := w.tx.Exec(`insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`, manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
+	if _, err := w.stmts.insertMachine.Exec(manifest.MachineID, manifest.CapturedAt, manifest.CapturedAt, mustJSON(map[string]any{"label": manifest.MachineLabel})); err != nil {
 		return err
 	}
 	for _, ad := range manifest.Adapters {
-		if _, err := w.tx.Exec(`insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`, ad.Name, ad.Version, mustJSON(ad.Capabilities)); err != nil {
+		if _, err := w.stmts.upsertSource.Exec(ad.Name, ad.Version, mustJSON(ad.Capabilities)); err != nil {
 			return err
 		}
 	}
@@ -323,7 +389,6 @@ func (w corpusWriter) InsertMachineAndSources() error {
 func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (IngestReport, error) {
 	store := w.Store
 	manifest := w.manifest
-	tx := w.tx
 	entryReader := io.Reader(r)
 	if !manifest.Policy.IncludeImages && mf.Kind != "session" {
 		if isImageManifestFile(mf) {
@@ -357,14 +422,20 @@ func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (In
 	if sha != mf.SHA256 || n != mf.Bytes {
 		return IngestReport{}, fmt.Errorf("sha/size mismatch for %s", mf.RelativePath)
 	}
-	if err := storeFileBlobFromPath(store.Root, mf.SHA256, tmpPath); err != nil {
+	knownBlob, err := w.fileBlobKnown(mf.SHA256)
+	if err != nil {
 		return IngestReport{}, err
 	}
-	if _, err := tx.Exec(`insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`, mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
+	if !knownBlob {
+		if err := storeFileBlobFromPath(store.Root, mf.SHA256, tmpPath); err != nil {
+			return IngestReport{}, err
+		}
+	}
+	if _, err := w.stmts.insertFile.Exec(mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
 		return IngestReport{}, err
 	}
 	if mf.Kind != "session" {
-		added, err := ingestArtifact(tx, store.Root, manifest, mf, tmpPath)
+		added, err := w.ingestArtifact(mf, tmpPath)
 		if err != nil {
 			return IngestReport{}, err
 		}
@@ -374,6 +445,27 @@ func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (In
 		return IngestReport{}, nil
 	}
 	return w.IngestSessionFile(mf, tmpPath)
+}
+
+func (w corpusWriter) fileBlobKnown(sha string) (bool, error) {
+	var rel string
+	err := w.tx.QueryRow(`select compressed_blob_path from files where file_sha256=?`, sha).Scan(&rel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if rel == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(filepath.Join(w.Store.Root, filepath.FromSlash(rel))); err == nil {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (IngestReport, error) {
@@ -404,10 +496,22 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 		return IngestReport{}, err
 	}
 	sessionKey := sessionKeyValue.String()
-	if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
+	rawCWD := firstNonEmpty(ps.CWD, mf.CWD)
+	if _, err := w.stmts.insertSession.Exec(sessionKey, mf.Source, sessionID, manifest.MachineID, rawCWD, projectKey(rawCWD), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
 		return IngestReport{}, err
 	}
-	if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+	if err := w.insertSessionPathTokens(sessionKey, rawCWD); err != nil {
+		return IngestReport{}, err
+	}
+	if _, err := w.stmts.insertSessionVersion.Exec(sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+		return IngestReport{}, err
+	}
+	existingEntries, err := existingEntryHashes(tx, sessionKey)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	crossConflicts, err := crossMachineEntryHashes(tx, manifest, mf.Source, sessionID)
+	if err != nil {
 		return IngestReport{}, err
 	}
 	rep := IngestReport{Sessions: 1}
@@ -415,7 +519,7 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 		if _, err := model.NewEntryID(pe.EntryID); err != nil {
 			return IngestReport{}, err
 		}
-		r, err := ingestEntry(tx, w.Store.Root, manifest, mf.Source, sessionID, sessionKey, pe)
+		r, err := w.ingestEntry(mf.Source, sessionID, sessionKey, pe, existingEntries, crossConflicts)
 		if err != nil {
 			return IngestReport{}, err
 		}
@@ -428,34 +532,68 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 
 type entryReport struct{ Entries, Messages, Images int }
 
-func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourceSessionID, sessionKey string, pe model.ParsedEntry) (entryReport, error) {
-	eh := hash.SHA256Bytes([]byte(pe.RawJSON))
-	var oldHash string
-	err := tx.QueryRow(`select entry_sha256 from entries where session_key=? and entry_id=?`, sessionKey, pe.EntryID).Scan(&oldHash)
-	if err == nil && oldHash != eh {
-		_, err := tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": manifest.BundleID}))
-		return entryReport{}, err
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return entryReport{}, err
-	}
-	conflicted, err := detectCrossMachineConflict(tx, manifest, source, sourceSessionID, sessionKey, pe.EntryID, eh)
+type crossEntryHash struct {
+	sessionKey string
+	hash       string
+}
+
+func existingEntryHashes(tx *sql.Tx, sessionKey string) (map[string]string, error) {
+	rows, err := tx.Query(`select entry_id,entry_sha256 from entries where session_key=?`, sessionKey)
 	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var entryID, entryHash string
+		if err := rows.Scan(&entryID, &entryHash); err != nil {
+			return nil, err
+		}
+		out[entryID] = entryHash
+	}
+	return out, rows.Err()
+}
+
+func crossMachineEntryHashes(tx *sql.Tx, manifest model.Manifest, source, sourceSessionID string) (map[string][]crossEntryHash, error) {
+	rows, err := tx.Query(`select e.entry_id,e.session_key,e.entry_sha256 from entries e indexed by idx_entries_session_entry_hash join sessions s indexed by idx_sessions_source_session on s.session_key=e.session_key where s.source_name=? and s.source_session_id=? and s.machine_id<>?`, source, sourceSessionID, manifest.MachineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]crossEntryHash{}
+	for rows.Next() {
+		var entryID, sessionKey, entryHash string
+		if err := rows.Scan(&entryID, &sessionKey, &entryHash); err != nil {
+			return nil, err
+		}
+		out[entryID] = append(out[entryID], crossEntryHash{sessionKey: sessionKey, hash: entryHash})
+	}
+	return out, rows.Err()
+}
+
+func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe model.ParsedEntry, existing map[string]string, cross map[string][]crossEntryHash) (entryReport, error) {
+	eh := hash.SHA256Bytes([]byte(pe.RawJSON))
+	if oldHash, ok := existing[pe.EntryID]; ok && oldHash != eh {
+		_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": w.manifest.BundleID}))
 		return entryReport{}, err
 	}
-	if conflicted {
-		return entryReport{}, nil
+	for _, other := range cross[pe.EntryID] {
+		if other.hash != eh {
+			_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, other.hash, eh, mustJSON(map[string]any{"bundle_id": w.manifest.BundleID, "other_session_key": other.sessionKey, "kind": "cross-machine"}))
+			return entryReport{}, err
+		}
 	}
-	res, err := tx.Exec(`insert or ignore into entries(session_key,entry_id,parent_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json,source_metadata_json) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, pe.EntryID, pe.ParentID, pe.LineNo, pe.EntryType, pe.Timestamp, pe.Role, eh, pe.RawJSON, mustJSON(pe.Metadata))
+	res, err := w.stmts.insertEntry.Exec(sessionKey, pe.EntryID, pe.ParentID, pe.LineNo, pe.EntryType, pe.Timestamp, pe.Role, eh, pe.RawJSON, mustJSON(pe.Metadata))
 	if err != nil {
 		return entryReport{}, err
 	}
 	rep := entryReport{}
 	if n, _ := res.RowsAffected(); n > 0 {
 		rep.Entries++
+		existing[pe.EntryID] = eh
 	}
-	if shouldIndexText(pe, manifest.Policy.IndexToolOutput) {
-		res, err := tx.Exec(`insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cost) values(?,?,?,?,?,?,?,?,?,?,?)`, sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.Cost)
+	if shouldIndexText(pe, w.manifest.Policy.IndexToolOutput) {
+		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.Cost)
 		if err != nil {
 			return entryReport{}, err
 		}
@@ -463,11 +601,11 @@ func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourc
 			rep.Messages++
 		}
 	}
-	if !manifest.Policy.IncludeImages {
+	if !w.manifest.Policy.IncludeImages {
 		return rep, nil
 	}
 	for _, asset := range pe.Assets {
-		added, err := ingestAsset(tx, root, source, sessionKey, pe.EntryID, asset)
+		added, err := w.ingestAsset(source, sessionKey, pe.EntryID, asset)
 		if err != nil {
 			return entryReport{}, err
 		}
@@ -476,6 +614,24 @@ func ingestEntry(tx *sql.Tx, root string, manifest model.Manifest, source, sourc
 		}
 	}
 	return rep, nil
+}
+
+func (w corpusWriter) insertSessionPathTokens(sessionKey, rawCWD string) error {
+	for _, token := range pathTokens(rawCWD) {
+		if _, err := w.stmts.insertSessionPathToken.Exec(sessionKey, token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w corpusWriter) insertArtifactPathTokens(artifactID int64, paths ...string) error {
+	for _, token := range pathTokens(paths...) {
+		if _, err := w.stmts.insertArtifactPathToken.Exec(artifactID, token); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
@@ -492,26 +648,7 @@ func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
 	}
 }
 
-func detectCrossMachineConflict(tx *sql.Tx, manifest model.Manifest, source, sourceSessionID, sessionKey, entryID, entryHash string) (bool, error) {
-	rows, err := tx.Query(`select e.session_key,e.entry_sha256 from entries e join sessions s on s.session_key=e.session_key where s.source_name=? and s.source_session_id=? and s.machine_id<>? and e.entry_id=?`, source, sourceSessionID, manifest.MachineID, entryID)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var otherSession, otherHash string
-		if err := rows.Scan(&otherSession, &otherHash); err != nil {
-			return false, err
-		}
-		if otherHash != entryHash {
-			_, err := tx.Exec(`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`, sessionKey, entryID, otherHash, entryHash, mustJSON(map[string]any{"bundle_id": manifest.BundleID, "other_session_key": otherSession, "kind": "cross-machine"}))
-			return true, err
-		}
-	}
-	return false, rows.Err()
-}
-
-func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset model.ParsedAsset) (bool, error) {
+func (w corpusWriter) ingestAsset(source, sessionKey, entryID string, asset model.ParsedAsset) (bool, error) {
 	assetSHA := ""
 	added := false
 	if len(asset.Data) > 0 {
@@ -521,10 +658,10 @@ func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset mod
 			ext = ".bin"
 		}
 		blobPath := filepath.ToSlash(filepath.Join("blobs", "images", assetSHA+ext))
-		if err := writeImageBlobAtomic(root, blobPath, asset.Data); err != nil {
+		if err := writeImageBlobAtomic(w.Store.Root, blobPath, asset.Data); err != nil {
 			return false, err
 		}
-		res, err := tx.Exec(`insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`, assetSHA, source, asset.MimeType, len(asset.Data), asset.Width, asset.Height, ext, blobPath)
+		res, err := w.stmts.insertImage.Exec(assetSHA, source, asset.MimeType, len(asset.Data), asset.Width, asset.Height, ext, blobPath)
 		if err != nil {
 			return false, err
 		}
@@ -534,7 +671,7 @@ func ingestAsset(tx *sql.Tx, root, source, sessionKey, entryID string, asset mod
 	} else {
 		assetSHA = hash.SHA256Bytes([]byte(asset.RawRef))
 	}
-	_, err := tx.Exec(`insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`, sessionKey, entryID, assetSHA, asset.AssetKind, asset.ContentIndex, asset.PromptOrder, asset.RawRef, asset.MimeType, mustJSON(asset.Metadata))
+	_, err := w.stmts.insertEntryAsset.Exec(sessionKey, entryID, assetSHA, asset.AssetKind, asset.ContentIndex, asset.PromptOrder, asset.RawRef, asset.MimeType, mustJSON(asset.Metadata))
 	return added, err
 }
 
@@ -639,7 +776,8 @@ func readArtifactText(path string) (string, string, error) {
 	return preview, fullText, nil
 }
 
-func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) (bool, error) {
+func (w corpusWriter) ingestArtifact(mf model.ManifestFile, path string) (bool, error) {
+	manifest := w.manifest
 	preview, fullText, err := readArtifactText(path)
 	if err != nil {
 		return false, err
@@ -652,15 +790,22 @@ func ingestArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.M
 		}
 		parent = key.String()
 	}
-	res, err := tx.Exec(`insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview, fullText)
+	res, err := w.stmts.insertArtifact.Exec(mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview, fullText)
 	if err != nil {
 		return false, err
 	}
 	added := false
 	if n, _ := res.RowsAffected(); n > 0 {
 		added = true
+		artifactID, err := res.LastInsertId()
+		if err != nil {
+			return false, err
+		}
+		if err := w.insertArtifactPathTokens(artifactID, mf.RawPath, mf.RelativePath); err != nil {
+			return false, err
+		}
 		if manifest.Policy.IncludeImages {
-			if err := maybeStoreImageArtifact(tx, root, manifest, mf, path); err != nil {
+			if err := w.maybeStoreImageArtifact(mf, path); err != nil {
 				return false, err
 			}
 		}
@@ -677,7 +822,7 @@ func isImageManifestFile(mf model.ManifestFile) bool {
 	return ok
 }
 
-func maybeStoreImageArtifact(tx *sql.Tx, root string, manifest model.Manifest, mf model.ManifestFile, path string) error {
+func (w corpusWriter) maybeStoreImageArtifact(mf model.ManifestFile, path string) error {
 	mt, ok := media.ImageMIMEFromPath(firstNonEmpty(mf.RawPath, mf.RelativePath))
 	if !ok {
 		mt, ok = media.ImageMIMEFromPath(mf.RelativePath)
@@ -709,10 +854,10 @@ func maybeStoreImageArtifact(tx *sql.Tx, root string, manifest model.Manifest, m
 		ext = ".bin"
 	}
 	blobPath := filepath.ToSlash(filepath.Join("blobs", "images", mf.SHA256+ext))
-	if err := writeImageBlobFromPathAtomic(root, blobPath, path); err != nil {
+	if err := writeImageBlobFromPathAtomic(w.Store.Root, blobPath, path); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`, mf.SHA256, mf.Source, mt, mf.Bytes, width, height, ext, blobPath)
+	_, err = w.stmts.insertImage.Exec(mf.SHA256, mf.Source, mt, mf.Bytes, width, height, ext, blobPath)
 	return err
 }
 
@@ -769,7 +914,7 @@ func storeFileBlobFromPath(root, sha, path string) error {
 		return err
 	}
 	tmpPath := out.Name()
-	enc, err := zstd.NewWriter(out)
+	enc, err := pooledZstdWriter(out)
 	if err != nil {
 		_ = out.Close()
 		_ = os.Remove(tmpPath)
@@ -777,6 +922,9 @@ func storeFileBlobFromPath(root, sha, path string) error {
 	}
 	_, copyErr := io.Copy(enc, in)
 	closeEncErr := enc.Close()
+	if closeEncErr == nil {
+		putZstdWriter(enc)
+	}
 	closeOutErr := out.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmpPath)
@@ -798,4 +946,18 @@ func storeFileBlobFromPath(root, sha, path string) error {
 		return err
 	}
 	return nil
+}
+
+func pooledZstdWriter(w io.Writer) (*zstd.Encoder, error) {
+	if v := zstdEncoderPool.Get(); v != nil {
+		enc := v.(*zstd.Encoder)
+		enc.Reset(w)
+		return enc, nil
+	}
+	return zstd.NewWriter(w)
+}
+
+func putZstdWriter(enc *zstd.Encoder) {
+	enc.Reset(io.Discard)
+	zstdEncoderPool.Put(enc)
 }

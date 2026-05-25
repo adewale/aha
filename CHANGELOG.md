@@ -31,13 +31,18 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Rowid-based FTS verification with query-plan guard, reducing pathological 5k-message verify from seconds to milliseconds.
 - Known bundle identity handoffs: `archive.WriteWithInfo`, catalog `state_sha256`/`manifest_sha256`, depot known-SHA publish, and expected-SHA ingest staging.
 - Quick/default depot verification with `--deep` for byte/manifests checks; fake-R2 coverage ensures quick verify does not download bundles.
+- Ingest performance contracts: prepared statement lifecycle, session-local duplicate/conflict prefetch, covering conflict-query index, known file-blob no-recompression, duplicate-bundle parse-skip guard, and file-blob zstd encoder pooling.
+- Indexed search filters: `--project` exact filter, `--path-token` path-segment filter for sessions/artifacts, actual query-plan guards, artifact coverage, and high-limit capping/warnings.
+- Corpus maintenance commands: `aha corpus size`, `aha corpus vacuum`, and dry-run/forced `aha corpus prune-orphans`.
+- Depot catalog compaction via `aha depot compact`, plus map-backed `MergeBundleRefs` properties and local/R2 compaction tests.
+- Verify/status cost counters for depot bytes read/downloaded and listed/unique depot refs.
 
 ### Changed
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
 - Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
-- Generated command docs now include depot commands, depot-aware flags, corpus verification, global profiling guidance, and depot quick/deep verification flags.
+- Generated command docs now include depot commands, depot-aware flags, corpus verification/maintenance, indexed search filters, global profiling guidance, depot quick/deep verification flags, and depot compaction.
 
 ### Removed
 

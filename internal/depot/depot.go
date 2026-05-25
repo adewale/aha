@@ -51,11 +51,21 @@ type CatalogShard struct {
 }
 
 type VerifyReport struct {
-	Bundles  int      `json:"bundles"`
-	Catalogs int      `json:"catalogs"`
-	Repaired bool     `json:"repaired"`
-	Deep     bool     `json:"deep"`
-	Problems []string `json:"problems,omitempty"`
+	Bundles         int      `json:"bundles"`
+	Catalogs        int      `json:"catalogs"`
+	Repaired        bool     `json:"repaired"`
+	Deep            bool     `json:"deep"`
+	BytesRead       int64    `json:"bytes_read"`
+	BytesDownloaded int64    `json:"bytes_downloaded"`
+	Problems        []string `json:"problems,omitempty"`
+}
+
+type CompactReport struct {
+	Catalogs        int `json:"catalogs"`
+	RefsBefore      int `json:"refs_before"`
+	RefsAfter       int `json:"refs_after"`
+	DuplicateRefs   int `json:"duplicate_refs"`
+	CatalogsWritten int `json:"catalogs_written"`
 }
 
 type Driver interface {
@@ -80,11 +90,22 @@ type OptionsVerifier interface {
 	VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyReport, error)
 }
 
+type Compactor interface {
+	Compact(ctx context.Context) (CompactReport, error)
+}
+
 func PutBundleKnown(ctx context.Context, d Driver, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
 	if kd, ok := d.(KnownBundleDriver); ok {
 		return kd.PutBundleKnown(ctx, bundlePath, ref)
 	}
 	return d.PutBundle(ctx, bundlePath)
+}
+
+func Compact(ctx context.Context, d Driver) (CompactReport, error) {
+	if c, ok := d.(Compactor); ok {
+		return c.Compact(ctx)
+	}
+	return CompactReport{}, fmt.Errorf("depot %s does not support compaction", d.Address().Type)
 }
 
 func VerifyWithOptions(ctx context.Context, d Driver, opts VerifyOptions) (VerifyReport, error) {
@@ -259,6 +280,26 @@ func mergeBundleRef(list []BundleRef, ref BundleRef) []BundleRef {
 		}
 	}
 	return append(list, ref)
+}
+
+func MergeBundleRefs(refs []BundleRef) []BundleRef {
+	bySHA := make(map[string]BundleRef, len(refs))
+	for _, ref := range refs {
+		if ref.BundleSHA256 == "" {
+			continue
+		}
+		if old, ok := bySHA[ref.BundleSHA256]; ok {
+			bySHA[ref.BundleSHA256] = mergeRef(old, ref)
+		} else {
+			bySHA[ref.BundleSHA256] = ref
+		}
+	}
+	out := make([]BundleRef, 0, len(bySHA))
+	for _, ref := range bySHA {
+		out = append(out, ref)
+	}
+	sortRefs(out)
+	return out
 }
 
 func mergeRef(old, new BundleRef) BundleRef {

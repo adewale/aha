@@ -157,12 +157,13 @@ aha init [--config PATH] [--accept-secrets] [--json]
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
 aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
 aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
 aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
 aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]
+aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
+aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
 ```
 
@@ -172,12 +173,13 @@ Command roles:
 - `refresh`: common local update: `snapshot` then ingest the just-created bundle.
 - `snapshot`: create an immutable bundle and store it in the configured depot.
 - `ingest`: merge bundles from paths or a depot into a corpus/repo.
-- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts.
+- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts. Prefer indexed `--project`/`--path-token` over contains-style `--path` for large corpora; requested limits above 200 are capped with a warning.
 - `read`: retrieve full context from `--session/--entry` or a canonical `ref_text` emitted by `search` (`msg:v1:...`, `session:v1:...`, or `artifact:v1:...`).
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `depot`: initialize, list, or verify a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
+- `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
+- `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
@@ -265,4 +267,4 @@ For coding agents using `aha`:
 
 ## License
 
-No license file is currently included. Add one before broad external adoption.
+MIT; see `LICENSE`.

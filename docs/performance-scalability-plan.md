@@ -48,13 +48,13 @@ If a row lacks a characterization gate, the abstraction is not ready to change y
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
 |---|---|---|---|
 | FTS verify superlinear behavior | Schema/query-plan tests over tiny corpora; package benchmark only for magnitude/profile | Implemented: FTS rows use rowid identity; `TestVerifyFTSChecksUseRowIDLookups` guards the query shape; 5k pathological verify dropped from ~`7.7s` to ~`15ms` on the same machine class. | Keep query-plan guard; use benchmarks only for trend checks. |
-| Many trivial depot bundles / duplicate refs | Pure set-model PBT and in-memory catalog merge benchmark | `pendingDepotRefs` and `depotBehindFromRefs` now have PBT; `BenchmarkPathologicalCatalogMergeManyTrivialRefs` measures merge/sort without bundle files | Add map-based bulk catalog merge and PBT/benchmarks for many machines/shards. |
-| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches | Add R2 operation budgets for future summary/quick status paths if they are added. |
+| Many trivial depot bundles / duplicate refs | Pure set-model PBT and in-memory catalog merge benchmark | Implemented: `pendingDepotRefs`, `depotBehindFromRefs`, and `MergeBundleRefs` have set/metadata properties; repair/compact use map-backed bulk merge. | Keep benchmark trend checks as catalogs grow. |
+| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | Implemented: `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches; status JSON now exposes listed/unique refs and `depot_fetches=0`. | Add summaries only if raw catalog scans become visible on real depots. |
 | Unchanged refresh should not fetch old bundles | Fake-driver/PBT over refs with `state_sha256` metadata | Implemented: catalog refs carry `state_sha256`; `findDepotBundleWithSameState` checks it before fetching; fake-driver test proves zero fetches for matching state metadata. | Add broader PBT over duplicate refs/machines/orderings. |
 | Depot ingest duplicate/pre-hash behavior | Pending-set PBT plus expected-SHA ingest seam tests | Implemented: `corpus.IngestBundleWithExpectedSHA` validates during staging; depot ingest no longer pre-hashes separately. | Add byte-counter instrumentation for large pending bundles. |
 | Archive repeated hashing | Unit/golden test for `WriteWithInfo` SHA handoff | Implemented: `archive.WriteWithInfo` streams compressed SHA/size/manifest/state info; CLI depot publish uses `depot.PutBundleKnown`. | Add byte-counter instrumentation for snapshot/refresh publish. |
-| Ingest per-entry SQL chatter | Package benchmark plus small-model duplicate/idempotence PBT | Benchmarks expose cost; PBT for duplicate trivial bundles is still pending | Add session-local duplicate/conflict model tests before prepared-statement refactor. |
-| Search path/filter cost | Query-plan tests and `search.Query` benchmarks | Benchmarks exist; exact project/path query-plan guard pending | Add indexed `--project`/path-token plan tests with tiny data. |
+| Ingest per-entry SQL chatter | Package benchmark plus small-model duplicate/idempotence PBT | Implemented: transaction-scoped prepared statements, session-local existing-entry prefetch, cross-machine conflict prefetch, indexed query-plan guard, duplicate-bundle parse-skip test, known-file-blob no-recompress test, and zstd encoder pooling for file blobs. | True multi-row insert batching remains an optional future constant-factor optimization; correctness/perf guards are in place. |
+| Search path/filter cost | Query-plan tests and `search.Query` benchmarks | Implemented: `sessions(project_key)` index, `--project`, indexed `session_path_tokens`/`artifact_path_tokens`, `--path-token`, actual SQL query-plan guards, artifact coverage, and high-limit capping/warnings. | Keep `--path` as documented slow contains filter for convenience. |
 | Profiling | Package-level pprof first; CLI pprof only for end-to-end confirmation | Optional CLI profiling exists; benchmark profiles were more useful for root cause | Keep CLI pprof opt-in; prefer package benchmark profiles for optimization loops. |
 
 ## Pathological benchmark suite
@@ -70,7 +70,7 @@ go test ./internal/depot   -run=^$ -bench=BenchmarkPathological -benchmem
 
 Scale knobs:
 
-- `AHA_PATHOLOGICAL_INGEST_ENTRIES` default `10000`;
+- `AHA_PATHOLOGICAL_INGEST_ENTRIES` default `10000`; set `AHA_PATHOLOGICAL_INGEST_LARGE` to also run 50k/100k ingest cases;
 - `AHA_PATHOLOGICAL_VERIFY_MESSAGES` default `5000`;
 - `AHA_PATHOLOGICAL_RECONCILE_MESSAGES` default `5000`;
 - `AHA_PATHOLOGICAL_STATUS_MESSAGES` default `5000`;
@@ -105,6 +105,21 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | In-memory catalog merge | 1000 unique trivial refs × 4 duplicates | single-digit milliseconds, `1.24MB` | Cheapest-layer benchmark shows bulk merge is linear-scan based and should become map-based before very large catalogs. |
 | Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --depot` set-difference memory grows with ingested bundle count. |
 
+## Latest post-plan benchmark snapshot
+
+Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. These are not CI thresholds; they are before/after signals for the abstractions added by this plan.
+
+| Area | Case | Latest observation | Change vs first pathological run |
+|---|---:|---:|---|
+| Corpus verify | 5k messages | `14.8ms`, `5.4KB`, `119 allocs` | ~`7.68s` -> ~`15ms` via rowid-backed FTS verification. |
+| Ingest | 10k tiny entries | `1.13s`, `88.9MB`, `728k allocs` | Memory down from `136MB`; time improved vs first `1.23s` run but regressed vs an intermediate `1.01s` run after adding path-token maintenance. |
+| Search | 10k broad term, limit requested 1000 | `52.9ms`, `344KB`, `6.7k allocs` | Output is capped at 200, reducing high-limit allocations from the original `1.78MB`/`33k allocs`; broad FTS time remains SQLite/candidate dominated. |
+| Search | 10k path-token rare match | `44.0ms`, `43KB`, `733 allocs` | Indexed token filter is available and guarded; broad common-term FTS still dominates this synthetic case. |
+| Search | 20×100 normal bench, path-token filter | `7.36ms`, `38.6KB`, `730 allocs` over `10x` | Similar to path/project filters with exact indexed semantics. |
+| Depot merge | 1000 unique refs × 4 duplicates | `1.27ms`, `1.49MB`, `9.8k allocs` | Map-backed merge prevents quadratic duplicate behavior and is used by repair/compact. |
+| Local depot verify | 250 refs | `27.8ms`, `21.4MB` | Deep verify remains explicitly byte-linear. |
+| Status support | 5k messages + 5k bundles | counts `1.6ms`; `BundleSHAs` `1.6ms` / `1.25MB` | Status remains metadata-only; JSON exposes listed/unique depot refs and zero fetches. |
+
 ## Metrics and measurable improvement targets
 
 The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood.
@@ -115,18 +130,18 @@ The plan should produce improvements we can point to. Treat these as scenario me
 | Routine no-op `aha refresh` with local/R2 depot | Old refs without state metadata still require fallback fetch; new refs carry state metadata. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | New catalog refs allow no-op refresh to list metadata but fetch `0` old bundles when a matching `state_sha256` exists. |
 | `aha ingest --depot` with pending bundles | Expected SHA is now checked during ingest staging instead of by a separate pre-hash. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
 | `aha snapshot` / `aha refresh` publish | `WriteWithInfo` now computes compressed bundle SHA while writing; known identity is handed to depot. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Snapshot/refresh publish avoids re-reading the just-written bundle for archive/depot identity. |
-| Many tiny entries in one ingest | 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared/batched ingest lowers allocations and SQL chatter per entry while reports/conflicts remain identical. |
-| Broad `aha search` / high `--limit` | 10k broad-term search took `51-57ms`; high limit allocated `1.78MB`/`33k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce broad/path-filter latency and allocations for common agent workflows. |
+| Many tiny entries in one ingest | First 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`; latest is `1.13s`, `88.9MB`, `728k allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared statements, duplicate/conflict prefetch, known-blob skip, and zstd pooling lower memory and SQL chatter while reports/conflicts remain identical. |
+| Broad `aha search` / high `--limit` | First 10k broad-term high-limit search allocated `1.78MB`/`33k allocs`; latest capped high-limit search is `344KB`/`6.7k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce output/allocation cost for common agent workflows; broad FTS candidate work is still term-selectivity bound. |
 | `aha status --depot` on years of trivial bundles | Behind calculation and catalog parsing scale with raw catalog rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
 | `aha depot verify` on local/R2 depot | Quick/default verify now checks metadata/existence; `--deep`/`--repair` retains full object reads. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
-| Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalog bytes, vacuum/compaction reclaimed bytes. | Future size/vacuum/retention commands make growth visible and maintenance explicit without weakening raw preservation defaults. |
+| Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalog bytes, vacuum/compaction/prune reclaimed bytes. | `aha corpus size`, `vacuum`, dry-run/forced `prune-orphans`, and `aha depot compact` make growth visible and maintenance explicit without weakening raw preservation defaults. |
 
 Instrumentation to add as optimizations land:
 
 - benchmark names and `benchstat` comparisons for package hot paths;
 - fake-driver counters: `List`, `Fetch`, R2 `Head/Get/List/Put`, bytes downloaded;
 - local byte counters for bundle/file hash passes;
-- optional JSON command counters: bundles listed/fetched/ingested, bytes read/written, SQL rows inserted, FTS rows verified/repaired;
+- JSON command counters now include depot verify bytes read/downloaded and status listed/unique refs/fetches; future work can add SQL rows inserted and FTS rows verified/repaired;
 - query-plan assertions for verifier/search paths.
 
 ## Property-based performance invariants
@@ -144,6 +159,9 @@ Current examples:
 
 - `TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty`: `status --depot` behind counts are computed as `unique(catalog_sha) - ingested_sha`, so duplicate refs from many trivial bundles do not inflate output/work units.
 - `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles`: `status --depot` performs one metadata list and zero bundle fetches.
+- `TestMergeBundleRefsSetSemanticsAndMetadataProperty`: map-backed catalog merge preserves first non-empty metadata while deduplicating by bundle SHA.
+- `TestDuplicateBundleSkipsSessionParsing`: duplicate bundle ingest does not parse session files again.
+- `TestKnownFileBlobSkipsRecompression`: known file blobs are not recompressed/re-written.
 - `BenchmarkPathologicalCatalogMergeManyTrivialRefs`: measures catalog merge/sort for many trivial refs entirely in memory, avoiding generated bundle files.
 
 This changes the roadmap: every optimization below should get both a benchmark and a small-model property/operation test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT/counter tests answer “what must not grow with duplicates, stale refs, old trivial bundles, or remote object bytes?”
@@ -321,17 +339,20 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 Completed from the original priority list:
 
 - FTS verification identity now uses rowid and has a query-plan guard.
-- Initial PBT/operation-count invariants cover duplicate depot refs, status metadata-only behavior, and no-op refresh state metadata.
+- PBT/operation-count invariants cover duplicate depot refs, map-backed catalog merge, status metadata-only behavior, duplicate ingest parse skipping, known file blob no-recompression, and no-op refresh state metadata.
 - New catalog refs carry `state_sha256`/`manifest_sha256`.
 - Archive/depot/ingest known-SHA handoffs remove redundant hot-path hashing.
-- Depot verify has quick/default and deep/repair paths, with fake-R2 coverage that quick verify does not download bundles.
+- Ingest uses transaction-scoped prepared statements, prefetches same-session and cross-machine conflict state, has a covering query-plan guard, skips known file-blob recompression, and pools zstd encoders for file blobs.
+- Search has exact indexed `--project`, indexed `--path-token` for sessions/artifacts, a capped `--limit` (`200`) with CLI warning, actual-SQL query-plan guards, and artifact filter coverage. `--path` remains a documented contains filter.
+- Depot verify has quick/default and deep/repair paths, with fake-R2 operation-budget coverage for quick, deep, repair, list, and compact. Verify JSON reports bytes read/downloaded.
+- Disk/longevity tooling exists: `aha corpus size`, `aha corpus vacuum`, dry-run/forced `aha corpus prune-orphans`, and `aha depot compact`.
 
-Remaining priority order:
+Remaining watch list, not blockers for this plan:
 
-1. Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state.
-2. Add indexed project/path filtering and cap/warn high-limit broad searches.
-3. Expand R2 operation-budget tests beyond quick verify into status, repair, and deep verify accounting.
-4. Add disk-size/vacuum/retention tooling for multi-year longevity.
-5. Add catalog summary/compaction if raw catalog metadata scans become the next bottleneck.
+1. True multi-row SQL `INSERT` batching could reduce ingest constant factors further, but prepared statements and prefetching already changed the algorithmic shape and are covered by tests.
+2. Search broad/common terms are still FTS-candidate bound; exact filters reduce output/allocation cost and are indexed, but SQLite still ranks broad terms.
+3. Catalog summary files/local stale caches should be added only if real depots show raw catalog scanning as a bottleneck; `compact` and map-backed merge are in place.
+4. Deletion/retention beyond orphan pruning remains a product-policy decision because raw preservation is the default trust model.
+5. More command-level JSON counters can be added for SQL row counts and FTS repair counts if agent workflows need them.
 
 The principle: keep strict/deep integrity operations available, but make routine `refresh`, `search`, `status`, and `verify` scale with metadata or indexed row counts rather than historical bytes and unindexed virtual-table scans.

@@ -22,6 +22,8 @@ func BenchmarkPathologicalQueryBroadTermPathFilter(b *testing.B) {
 		{name: "broad-term-limit-20", filters: search.Filters{Limit: 20}},
 		{name: "broad-term-limit-1000", filters: search.Filters{Limit: 1000}},
 		{name: "path-filter-rare-match", filters: search.Filters{Path: "rare/pathological-target", Limit: 20}},
+		{name: "path-token-rare-match", filters: search.Filters{PathToken: "pathological-target", Limit: 20}},
+		{name: "project-filter-rare-match", filters: search.Filters{Project: "pathological-target", Limit: 20}},
 		{name: "path-filter-no-match", filters: search.Filters{Path: "definitely-not-present", Limit: 20}},
 	}
 	for _, tc := range cases {
@@ -56,11 +58,16 @@ func seedSearchPathologicalCorpus(tb testing.TB, messages int) *corpus.Store {
 	if _, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values('search-pathological-bundle','` + searchPathologicalHex(1) + `','bench-machine','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z','{}')`); err != nil {
 		fail(err)
 	}
-	sessionStmt, err := tx.Prepare(`insert into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,started_at) values(?,?,?,?,?,?)`)
+	sessionStmt, err := tx.Prepare(`insert into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at) values(?,?,?,?,?,?,?)`)
 	if err != nil {
 		fail(err)
 	}
 	defer sessionStmt.Close()
+	pathTokenStmt, err := tx.Prepare(`insert into session_path_tokens(session_key,token) values(?,?)`)
+	if err != nil {
+		fail(err)
+	}
+	defer pathTokenStmt.Close()
 	entryStmt, err := tx.Prepare(`insert into entries(session_key,entry_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json) values(?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		fail(err)
@@ -79,8 +86,17 @@ func seedSearchPathologicalCorpus(tb testing.TB, messages int) *corpus.Store {
 		if s == sessions-1 {
 			cwd = "/bench/rare/pathological-target"
 		}
-		if _, err := sessionStmt.Exec(sk, "pi", fmt.Sprintf("search-pathological-session-%04d", s), "bench-machine", cwd, "2026-01-01T00:00:00Z"); err != nil {
+		project := fmt.Sprintf("project-%04d", s)
+		if s == sessions-1 {
+			project = "pathological-target"
+		}
+		if _, err := sessionStmt.Exec(sk, "pi", fmt.Sprintf("search-pathological-session-%04d", s), "bench-machine", cwd, project, "2026-01-01T00:00:00Z"); err != nil {
 			fail(err)
+		}
+		for _, token := range []string{"bench", "common", project} {
+			if _, err := pathTokenStmt.Exec(sk, token); err != nil {
+				fail(err)
+			}
 		}
 		start, end := s*perSession, (s+1)*perSession
 		if end > messages {

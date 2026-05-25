@@ -25,6 +25,8 @@ func BenchmarkQuery(b *testing.B) {
 		{name: "default", query: "bench needle", filters: search.Filters{Limit: 20}},
 		{name: "source-filter", query: "bench needle", filters: search.Filters{Source: "pi", Limit: 20}},
 		{name: "path-filter", query: "bench needle", filters: search.Filters{Path: "project-001", Limit: 20}},
+		{name: "path-token-filter", query: "bench needle", filters: search.Filters{PathToken: "project-001", Limit: 20}},
+		{name: "project-filter", query: "bench needle", filters: search.Filters{Project: "project-001", Limit: 20}},
 		{name: "no-hit", query: "definitely-not-present", filters: search.Filters{Limit: 20}},
 	}
 	for _, bm := range benchmarks {

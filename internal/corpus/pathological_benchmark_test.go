@@ -12,30 +12,42 @@ import (
 )
 
 func BenchmarkPathologicalIngestManyTinyEntries(b *testing.B) {
-	entries := pathologicalScale("AHA_PATHOLOGICAL_INGEST_ENTRIES", 10000)
-	sessions := 20
-	if entries < sessions {
-		sessions = entries
+	cases := []int{10000, pathologicalScale("AHA_PATHOLOGICAL_INGEST_ENTRIES", 10000)}
+	if v := os.Getenv("AHA_PATHOLOGICAL_INGEST_LARGE"); v != "" {
+		cases = append(cases, pathologicalScale("AHA_PATHOLOGICAL_INGEST_LARGE", 50000), pathologicalScale("AHA_PATHOLOGICAL_INGEST_XL", 100000))
 	}
-	entriesPerSession := (entries + sessions - 1) / sessions
-	path := writeCorpusBenchBundle(b, b.TempDir(), sessions, entriesPerSession)
-	info, err := os.Stat(path)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ReportAllocs()
-	b.SetBytes(info.Size())
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		store, err := corpus.Open(filepath.Join(b.TempDir(), fmt.Sprintf("corpus-pathological-ingest-%d", i)))
-		if err != nil {
-			b.Fatal(err)
+	seen := map[int]bool{}
+	for _, entries := range cases {
+		if seen[entries] {
+			continue
 		}
-		if _, err := corpus.IngestBundle(store, adapters.Builtins(), path); err != nil {
-			store.Close()
-			b.Fatal(err)
-		}
-		store.Close()
+		seen[entries] = true
+		b.Run(fmt.Sprintf("entries_%d", entries), func(b *testing.B) {
+			sessions := 20
+			if entries < sessions {
+				sessions = entries
+			}
+			entriesPerSession := (entries + sessions - 1) / sessions
+			path := writeCorpusBenchBundle(b, b.TempDir(), sessions, entriesPerSession)
+			info, err := os.Stat(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(info.Size())
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				store, err := corpus.Open(filepath.Join(b.TempDir(), fmt.Sprintf("corpus-pathological-ingest-%d", i)))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := corpus.IngestBundle(store, adapters.Builtins(), path); err != nil {
+					store.Close()
+					b.Fatal(err)
+				}
+				store.Close()
+			}
+		})
 	}
 }
 

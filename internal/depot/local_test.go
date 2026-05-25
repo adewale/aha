@@ -1,6 +1,7 @@
 package depot_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,6 +83,36 @@ func TestLocalDepotPutListFetchVerifyRepair(t *testing.T) {
 	}
 	if report.Bundles != 1 || !report.Repaired || len(report.Problems) != 0 {
 		t.Fatalf("Verify repair report=%+v", report)
+	}
+}
+
+func TestLocalDepotCompactDedupe(t *testing.T) {
+	root := t.TempDir()
+	d, err := depot.NewLocal(filepath.Join(root, "depot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("d", 64)
+	shard := depot.CatalogShard{Schema: depot.CatalogSchema, MachineID: "m1", Bundles: []depot.BundleRef{{BundleSHA256: sha, MachineID: "m1", Key: depot.BundleKey(sha)}, {BundleSHA256: sha, MachineID: "m1", Key: depot.BundleKey(sha)}}}
+	if err := writeDepotTestJSON(filepath.Join(root, "depot", "catalog", "v1", "m1.json"), shard); err != nil {
+		t.Fatal(err)
+	}
+	report, err := depot.Compact(t.Context(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.RefsBefore != 2 || report.RefsAfter != 1 || report.DuplicateRefs != 1 || report.CatalogsWritten != 1 {
+		t.Fatalf("compact report: %+v", report)
+	}
+	refs, err := d.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0].BundleSHA256 != sha {
+		t.Fatalf("refs after compact: %+v", refs)
 	}
 }
 
@@ -206,6 +237,17 @@ func TestLocalDepotConcurrentCatalogUpdatesDoNotLoseRefs(t *testing.T) {
 	if len(refs) != len(bundles) {
 		t.Fatalf("catalog has %d refs, want %d: %+v", len(refs), len(bundles), refs)
 	}
+}
+
+func writeDepotTestJSON(path string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
 }
 
 func writeDepotTestBundle(t *testing.T, root string) string {

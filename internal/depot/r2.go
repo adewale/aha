@@ -219,6 +219,59 @@ func (d *R2) VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyR
 	return d.verifyQuick(ctx)
 }
 
+func (d *R2) Compact(ctx context.Context) (CompactReport, error) {
+	report := CompactReport{}
+	byMachine := map[string][]BundleRef{}
+	prefix := "catalog/v1/"
+	p := s3.NewListObjectsV2Paginator(d.Client, &s3.ListObjectsV2Input{Bucket: aws.String(d.Bucket), Prefix: aws.String(prefix)})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return report, err
+		}
+		for _, obj := range page.Contents {
+			got, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: obj.Key})
+			if err != nil {
+				return report, err
+			}
+			var shard CatalogShard
+			err = json.NewDecoder(got.Body).Decode(&shard)
+			_ = got.Body.Close()
+			if err != nil {
+				return report, err
+			}
+			report.Catalogs++
+			for _, ref := range shard.Bundles {
+				machine := ref.MachineID
+				if machine == "" {
+					machine = shard.MachineID
+					ref.MachineID = machine
+				}
+				byMachine[machine] = append(byMachine[machine], ref)
+				report.RefsBefore++
+			}
+		}
+	}
+	for machine, refs := range byMachine {
+		merged := MergeBundleRefs(refs)
+		report.RefsAfter += len(merged)
+		shard := CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: merged}
+		b, err := json.MarshalIndent(shard, "", "  ")
+		if err != nil {
+			return report, err
+		}
+		_, err = d.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(CatalogKey(machine)), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json")})
+		if err != nil {
+			return report, err
+		}
+		report.CatalogsWritten++
+	}
+	if report.RefsBefore > report.RefsAfter {
+		report.DuplicateRefs = report.RefsBefore - report.RefsAfter
+	}
+	return report, nil
+}
+
 func (d *R2) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	report := VerifyReport{Deep: false}
 	if obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")}); err == nil {
@@ -339,6 +392,8 @@ func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 				report.Problems = append(report.Problems, fmt.Sprintf("read %s: %v", sha, err))
 				continue
 			}
+			report.BytesRead += full.Bytes
+			report.BytesDownloaded += full.Bytes
 			if full.BundleSHA256 != sha {
 				report.Problems = append(report.Problems, fmt.Sprintf("bundle key/content sha mismatch %s", *obj.Key))
 				continue
@@ -363,10 +418,10 @@ func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 		}
 		byMachine := map[string][]BundleRef{}
 		for _, ref := range bundleRefs {
-			byMachine[ref.MachineID] = mergeBundleRef(byMachine[ref.MachineID], ref)
+			byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
 		}
 		for machine, refs := range byMachine {
-			sortRefs(refs)
+			refs = MergeBundleRefs(refs)
 			shard := CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: refs}
 			b, err := json.MarshalIndent(shard, "", "  ")
 			if err != nil {

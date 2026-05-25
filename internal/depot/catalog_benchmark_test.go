@@ -9,11 +9,7 @@ func BenchmarkPathologicalCatalogMergeManyTrivialRefs(b *testing.B) {
 	refs := trivialCatalogRefs(1000, 4)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		var merged []BundleRef
-		for _, ref := range refs {
-			merged = mergeBundleRef(merged, ref)
-		}
-		sortRefs(merged)
+		merged := MergeBundleRefs(refs)
 		if len(merged) != 1000 {
 			b.Fatalf("merged refs=%d, want 1000", len(merged))
 		}

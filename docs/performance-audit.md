@@ -27,13 +27,13 @@ Variables:
 | Operation | Time | Extra space | Notes |
 |---|---:|---:|---|
 | `snapshot` capture | `O(F log F + B)` | `O(max file)` plus temp copies | Sorting gives determinism; stable copy and parsing scan source bytes. |
-| archive write | `O(F log F + B + Z)` | `O(max file)` | Sorts manifest/files, streams tar/zstd, then currently hashes final bundle. |
-| local depot put | `O(Z + D_m log D_m)` | `O(Z)` during copy buffers / catalog JSON | Current path derives bundle ref by reading/hash-validating the bundle and rewrites one machine catalog shard of size `D_m`. |
+| archive write | `O(F log F + B + Z)` | `O(max file)` | Sorts manifest/files and streams tar/zstd; `WriteWithInfo` computes compressed SHA/size during the write. |
+| local depot put | `O(Z + D_m log D_m)` | `O(Z)` during copy buffers / catalog JSON | Known bundle refs avoid rehashing after snapshot; one machine catalog shard is rewritten. |
 | R2 depot put | `O(Z + D_m log D_m)` plus network | `O(D_m)` catalog JSON | Upload bytes dominate for large bundles; catalog conditional write retries can repeat shard merge. |
 | unchanged `refresh` check | `O(C)` for refs with `state_sha256`; legacy/missing state fallback `O(C + K*Z_old)` | `O(max old bundle)` only on fallback | New catalog refs compare state metadata without fetching old bundles. |
-| ingest bundle | `O(Z + B + E*q_entry + assets)` | `O(max file)` temp plus SQLite rows | `q_entry` is per-entry lookup/conflict SQL cost; indexes keep it near logarithmic but the loop is chatty. |
+| ingest bundle | `O(Z + B + E + assets + path_tokens)` | `O(max file + entries_in_session)` temp plus SQLite rows | Prepared statements and per-session prefetch remove per-entry duplicate/conflict queries; inserts remain linear. Known file blobs skip recompression. |
 | duplicate ingest | `O(Z)` currently | `O(1)` plus staging | Bundle is copied/hashed before duplicate detection completes. |
-| search | `O(FTS(query) + L log L)` | `O(L)` | Message/artifact FTS queries each cap at `L`, then Go merges/sorts. Path filters can force more scanning because `LIKE '%x%'` is not indexable. |
+| search | `O(FTS(query) + min(L,200) log min(L,200))` | `O(min(L,200))` | Message/artifact FTS queries each cap at `L<=200`, then Go merges/sorts. Exact `--project` and `--path-token` are indexed; `--path` remains non-indexable contains. |
 | status | `O(number of tables + D if --depot)` | `O(D)` for depot refs | Local status is count queries; `--depot` can perform network catalog listing. |
 | corpus verify | `O(M + A + FTS + bundles)` | `O(problems)` | Full left-join counts and bundle blob stats. |
 | `verify --repair-fts` | `O(M + A + FTS)` | SQLite FTS rebuild space | Deletes/reinserts derived FTS rows. |
@@ -43,15 +43,15 @@ Variables:
 
 | Area | Evidence | Risk | Improvement |
 |---|---|---|---|
-| Snapshot/archive repeated passes | `archive.Capture` still stable-copies and hashes source files; `archive.WriteWithInfo` now computes compressed SHA while writing and depot publish can use known identity. | Source-file passes remain; finished-bundle rehashes are reduced on snapshot/refresh publish. | Add byte counters to guard against regression and continue collapsing safe passes. |
-| Refresh unchanged check | New catalog refs include `state_sha256`; `findDepotBundleWithSameState` uses it before fetching old bundles. | Refs missing state metadata still use fallback; broad duplicate/machine orderings need more PBT. | Add wider PBT/fake-R2 operation-count tests. |
+| Snapshot/archive repeated passes | `archive.Capture` still stable-copies and hashes source files; `archive.WriteWithInfo` computes compressed SHA while writing and depot publish uses known identity. | Source-file passes remain; finished-bundle rehashes are reduced on snapshot/refresh publish. | Byte-counter tests guard depot/status paths; add more counters only if regression risk grows. |
+| Refresh unchanged check | New catalog refs include `state_sha256`; `findDepotBundleWithSameState` uses it before fetching old bundles. | Refs missing state metadata still use fallback. | Operation-count tests prove matching state metadata fetches zero old bundle bytes. |
 | Depot ingest pre-hash | `ingestFromDepot` now passes expected SHA to ingest staging instead of hashing separately. | Staging still copies/hashes once, which is the integrity boundary. | Add byte counters and benchmark large pending bundles. |
-| Ingest entry materialization | Archive walker hashes each entry; ingest spools/hashes each entry; file blob publishing re-reads temp files to zstd-compress. | Large session/artifact files are read more than once. | Collapse spool/hash/blob compression where safe; skip compression rewrite when content-addressed blob already exists. |
-| Per-entry SQL chatter | Each parsed entry performs lookup/conflict checks/inserts and optional asset/image writes. | Many small entries can be dominated by prepare/step overhead. | Prepare statements per transaction; prefetch existing hashes/conflict candidates per session. |
-| FTS verify/reconcile | `Verify` runs full left-join counts; `ReconcileFTS` deletes/rebuilds all FTS rows. | Expensive on large corpora; `--repair-fts` is intentionally a maintenance operation. | Keep default verify read-only; consider scoped/incremental repair later. |
-| Search path filters | Path filters use `LIKE '%...%'`; message and artifact results are queried separately then merged/sorted in Go. | Non-indexable path filters and high limits can be slow. | Cap/validate `--limit`; add benchmarks for default, filtered, no-hit, and high-limit searches. |
-| Depot verify | Quick/default verify checks metadata/object existence; `--deep` rehashes every local bundle or downloads every R2 bundle. | Correct deep verification remains expensive and network-heavy. | Expand operation-budget tests and progress/counter reporting. |
-| Status with depot | `status --depot` lists catalog refs; R2 listing performs network calls. | A nominal status command can become remote/costly when `--depot` is set. | Document this; add operation-count tests with fake R2. |
+| Ingest entry materialization | Archive walker hashes each entry; ingest spools/hashes each entry; file blob publishing re-reads temp files only when a content-addressed blob is not already present. | Large new session/artifact files are still read more than once at the integrity boundary. | Streaming parser is a future adapter-level optimization, not required for current correctness/perf claims. |
+| Per-entry SQL chatter | Prepared statements cover ingest writes; same-session and cross-machine conflict state are prefetched per session. | Inserts remain one row at a time so SQLite step cost is still linear. | Multi-row insert batching is optional future constant-factor work. |
+| FTS verify/reconcile | `Verify` uses rowid-backed FTS identity; `ReconcileFTS` deletes/rebuilds all FTS rows. | Default verify is now near-linear; `--repair-fts` remains maintenance. | Keep query-plan guard; consider scoped repair only after evidence. |
+| Search path filters | `--project` and `--path-token` use indexes; `--path` uses `LIKE '%...%'`. | Contains filters and broad/common terms can still be slow. | Prefer indexed filters in docs/agent workflows; keep contains for convenience. |
+| Depot verify | Quick/default verify checks metadata/object existence; `--deep` rehashes every local bundle or downloads every R2 bundle and reports bytes. | Correct deep verification remains expensive and network-heavy. | Operation-budget tests cover quick/deep/repair/list/compact. |
+| Status with depot | `status --depot` lists catalog refs and reports listed/unique refs plus zero fetches. | R2 listing performs network calls when explicitly requested. | Keep default status corpus-only; add summaries only if catalog scans become a real bottleneck. |
 
 ## Benchmark and profiling plan
 
@@ -94,7 +94,7 @@ A one-shot smoke benchmark (`go test ./internal/archive ./internal/corpus ./inte
 - Default FTS search over the 2000-entry corpus took about `9ms`; no-hit search was much cheaper.
 - Local depot list/verify over small seeded depots was sub-millisecond to a few milliseconds, but complexity remains linear in catalog refs/bundle bytes.
 
-The first optimization target, corpus verify query shape/indexing, has been implemented. The next targets are ingest SQL chatter, indexed project/path filters, and operation-budget coverage for depot/status paths.
+The main optimization targets have now landed: rowid FTS verification, known-SHA handoffs, prepared/prefetched ingest, indexed project/path-token search, high-limit guardrails, quick/deep depot verification, operation-budget tests, disk maintenance commands, and catalog compaction.
 
 ## Guardrails for optimization
 

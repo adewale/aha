@@ -44,12 +44,36 @@ aha conflicts [--repo DIR] [--json]
 
 **JSON contract:** `array<object{id,session_key,entry_id,first,second,created_at}>`
 
-## aha depot
+## aha corpus
 
-initialize, list, or verify a bundle depot
+inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs
 
 ```txt
-aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]
+aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--force`
+- `--json`
+- `--repo`
+
+**Examples:**
+
+- `aha corpus size --json`
+- `aha corpus vacuum`
+- `aha corpus prune-orphans --json`
+
+**JSON contract:** `object{root,total_bytes,database_bytes,bundle_blob_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}`
+
+## aha depot
+
+initialize, list, verify, or compact a bundle depot
+
+```txt
+aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 ```
 
 **Flags:**
@@ -65,6 +89,7 @@ aha depot <init|ls|verify> [DEPOT] [--json] [--repair] [--deep]
 - `aha depot ls --json`
 - `aha depot verify --deep`
 - `aha depot verify --repair`
+- `aha depot compact --json`
 
 **JSON contract:** `object|array`
 
@@ -195,7 +220,7 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT
 find relevant messages/artifacts; use read on returned refs before answering
 
 ```txt
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
 ```
 
 **Flags:**
@@ -210,6 +235,8 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `--machine`
 - `--md`
 - `--path`
+- `--path-token`
+- `--project`
 - `--refs`
 - `--repo`
 - `--role`

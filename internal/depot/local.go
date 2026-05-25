@@ -155,6 +155,58 @@ func (d *Local) VerifyWithOptions(ctx context.Context, opts VerifyOptions) (Veri
 	return d.verifyQuick(ctx)
 }
 
+func (d *Local) Compact(ctx context.Context) (CompactReport, error) {
+	report := CompactReport{}
+	return report, withLocalLock(d.Root, func() error {
+		root := filepath.Join(d.Root, "catalog", "v1")
+		byMachine := map[string][]BundleRef{}
+		if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".json") {
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			var shard CatalogShard
+			if err := json.Unmarshal(b, &shard); err != nil {
+				return err
+			}
+			report.Catalogs++
+			for _, ref := range shard.Bundles {
+				machine := ref.MachineID
+				if machine == "" {
+					machine = shard.MachineID
+					ref.MachineID = machine
+				}
+				byMachine[machine] = append(byMachine[machine], ref)
+				report.RefsBefore++
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for machine, refs := range byMachine {
+			merged := MergeBundleRefs(refs)
+			report.RefsAfter += len(merged)
+			if err := writeJSONAtomic(filepath.Join(d.Root, filepath.FromSlash(CatalogKey(machine))), CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: merged}); err != nil {
+				return err
+			}
+			report.CatalogsWritten++
+		}
+		if report.RefsBefore > report.RefsAfter {
+			report.DuplicateRefs = report.RefsBefore - report.RefsAfter
+		}
+		return nil
+	})
+}
+
 func (d *Local) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	report := VerifyReport{Deep: false}
 	markerPath := filepath.Join(d.Root, "depot.json")
@@ -240,6 +292,7 @@ func (d *Local) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 			report.Problems = append(report.Problems, fmt.Sprintf("%s: %v", path, err))
 			return nil
 		}
+		report.BytesRead += ref.Bytes
 		rel, _ := filepath.Rel(d.Root, path)
 		if filepath.ToSlash(rel) != BundleKey(ref.BundleSHA256) {
 			report.Problems = append(report.Problems, fmt.Sprintf("bundle key/content sha mismatch %s", path))
@@ -279,10 +332,10 @@ func (d *Local) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 			}
 			byMachine := map[string][]BundleRef{}
 			for _, ref := range refsBySHA {
-				byMachine[ref.MachineID] = mergeBundleRef(byMachine[ref.MachineID], ref)
+				byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
 			}
 			for machine, refs := range byMachine {
-				sortRefs(refs)
+				refs = MergeBundleRefs(refs)
 				if err := writeJSONAtomic(filepath.Join(d.Root, filepath.FromSlash(CatalogKey(machine))), CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: refs}); err != nil {
 					return err
 				}
