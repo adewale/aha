@@ -26,8 +26,8 @@
 
 ## Performance work
 
-- Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including the cheapest-layer audit, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
-- Optimize corpus `verify` query shape/indexing first; pathological benchmarks show current FTS-key verification becomes superlinear (`5k` messages took about `7.7s`).
+- Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
+- Optimize corpus `verify` query shape/indexing first; pathological benchmarks show current FTS-key verification becomes superlinear (`5k` messages took about `7.7s`). Add the tiny query-plan/schema guard before or with the fix.
 - Avoid redundant full-bundle hashing across archive write, depot put, and depot ingest while preserving a deep verification path.
 - Store source-state signatures in depot catalog refs so unchanged `refresh` does not fetch old bundles just to compare manifests.
 - Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state to reduce per-entry SQL chatter.

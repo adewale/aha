@@ -26,6 +26,23 @@ Use the cheapest layer that can falsify the performance claim:
 
 Wall-clock assertions should almost never be unit tests. Prefer deterministic counters: unique refs, fetch calls, bytes read, SQL query plans, rows touched, output cardinality, and idempotent state transitions.
 
+## Phase 0: abstraction-readiness characterization
+
+Before changing an abstraction for performance, add a characterization gate that freezes the externally important behavior and the performance invariant the new abstraction is supposed to improve. This is the minimum test net needed to reconsider internals freely.
+
+| Proposed abstraction change | Correctness characterization | Performance/scalability characterization | Metric that should improve |
+|---|---|---|---|
+| FTS `rowid` / indexed shadow-key verifier | Seed tiny corpora with matching rows, missing FTS rows, orphan FTS rows, artifact text rows, and repaired rows; assert `Verify`/`ReconcileFTS` reports are unchanged. | Tiny `EXPLAIN QUERY PLAN`/schema guard that verifier uses indexed row identity rather than scanning unindexed FTS columns; keep pathological verify benchmark for magnitude. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope and `ns/op`; query-plan scan count. |
+| Catalog `state_sha256` refs | State signature equality remains `ManifestStateSHA256`-equivalent and ignores volatile bundle metadata; catalog repair preserves bundle truth. | Fake-driver/PBT over refs with duplicates, many machines, stale ordering: unchanged refresh performs `0` `Fetch` calls and reads `0` old bundle bytes when state metadata exists. | Old bundle fetch count, old bundle bytes read, unchanged `refresh` latency. |
+| `archive.WriteWithInfo` known-SHA handoff | Golden bundles remain byte-identical; returned SHA/size/manifest/state fields equal independently recomputed values. | Unit/operation test proves depot publish can accept writer-produced identity without rehashing the finished bundle. | Compressed-bundle read passes after write; snapshot/refresh publish bytes read. |
+| `corpus.IngestBundleWithExpectedSHA` | Expected SHA mismatch fails before promotion; duplicate/corrupt bundle behavior and JSON errors stay unchanged. | Fake/local operation test proves depot ingest performs one staging copy/hash and no separate pre-hash. | Bundle read passes per pending depot ingest; ingest wall time for large pending bundles. |
+| Prepared/batched ingest writer | Corpus rows, conflicts, FTS rows, image/artifact blobs, and append-only behavior match existing ingest on representative fixtures. | Small-model duplicate/conflict PBT plus package benchmark tracking `allocs/entry` and SQL calls/entry. | `allocs/op`, `allocs/entry`, SQL executions/entry, ingest `ns/op`. |
+| Indexed project/path search | Search/read coherence and deterministic ordering stay unchanged; exact project/path filters return the same logical subset as old contains where applicable. | Tiny query-plan tests for indexed exact filters; broad-term/path benchmarks for magnitude. | Query plan, broad query `ns/op`, high-limit allocs, path-filter latency. |
+| Quick/deep depot verify | Deep verify still detects corrupt/missing/mismatched bundle bytes; quick verify reports metadata/catalog problems only and says what it did not check. | Fake-R2 operation-budget tests: quick uses list/head metadata only; deep downloads/hashes; repair has explicit cost. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. |
+| Depot/status summaries or compaction | `depot ls`, pending ingest, repair, and status answers match the uncompacted catalog model. | PBT over many trivial bundles/machines/shards; in-memory catalog benchmarks before/after map-backed merge. | Catalog rows scanned/read, JSON bytes parsed, refs merged/sec, status latency. |
+
+If a row lacks a characterization gate, the abstraction is not ready to change yet. This is the direct application of the testing-best-practices rule: make illegal states unrepresentable when possible, then keep only invariant-proof and model-gap tests at the boundary where the type/schema stops helping.
+
 ## Cheapest-layer audit results
 
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
@@ -87,6 +104,30 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | Local depot | 250 refs | list `0.7ms`; append to growing catalog `2.0ms`; verify `24.9ms` / `20MB` | Local catalog costs are acceptable at 250 refs, but deep verify scales with object count/bytes. |
 | In-memory catalog merge | 1000 unique trivial refs × 4 duplicates | single-digit milliseconds, `1.24MB` | Cheapest-layer benchmark shows bulk merge is linear-scan based and should become map-based before very large catalogs. |
 | Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --depot` set-difference memory grows with ingested bundle count. |
+
+## Metrics and measurable improvement targets
+
+The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood.
+
+| Scenario / user journey | Current pain signal | Primary metric | Expected measurable improvement |
+|---|---|---|---|
+| `aha verify` on a growing corpus | 5k-message pathological verify took about `7.7s`; scaling was worse than linear. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope, `ns/op`, and query-plan guard. | Verification becomes near-linear in messages/artifacts; 5k-message verify drops from seconds to a small multiple of `ReconcileFTS`/indexed row scans. |
+| Routine no-op `aha refresh` with local/R2 depot | Existing code may fetch/hash old same-machine bundles to compare state. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | With catalog `state_sha256`, no-op refresh lists metadata but fetches `0` old bundles and reads `0` old bundle bytes. |
+| `aha ingest --depot` with pending bundles | Depot ingest hashes a fetched/local bundle before corpus ingest hashes/copies it again. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
+| `aha snapshot` / `aha refresh` publish | Archive write computes bundle SHA by reopening the just-written tar.zst; depot publish re-derives identity. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Writer-produced SHA/size/state identity is handed to depot; one or more full compressed-bundle reads disappear from the hot path. |
+| Many tiny entries in one ingest | 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared/batched ingest lowers allocations and SQL chatter per entry while reports/conflicts remain identical. |
+| Broad `aha search` / high `--limit` | 10k broad-term search took `51-57ms`; high limit allocated `1.78MB`/`33k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce broad/path-filter latency and allocations for common agent workflows. |
+| `aha status --depot` on years of trivial bundles | Behind calculation and catalog parsing scale with raw catalog rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
+| `aha depot verify` on local/R2 depot | Deep verify is intentionally `O(bundle bytes)` and expensive, especially over R2. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
+| Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalog bytes, vacuum/compaction reclaimed bytes. | Future size/vacuum/retention commands make growth visible and maintenance explicit without weakening raw preservation defaults. |
+
+Instrumentation to add as optimizations land:
+
+- benchmark names and `benchstat` comparisons for package hot paths;
+- fake-driver counters: `List`, `Fetch`, R2 `Head/Get/List/Put`, bytes downloaded;
+- local byte counters for bundle/file hash passes;
+- optional JSON command counters: bundles listed/fetched/ingested, bytes read/written, SQL rows inserted, FTS rows verified/repaired;
+- query-plan assertions for verifier/search paths.
 
 ## Property-based performance invariants
 

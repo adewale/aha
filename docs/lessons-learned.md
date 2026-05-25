@@ -116,6 +116,7 @@ Additional testing lessons:
 - Benchmarks and pprof answer different questions than PBT. Benchmarks show cost; profiles show where cost lands; PBT says what must not grow with duplicates, stale refs, old trivial bundles, or catalog ordering.
 - Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimize from the smallest benchmark that reproduces the issue.
 - Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalog rows. Distinguish metadata scanned from work performed.
+- A performance plan is incomplete without user-journey metrics. Each abstraction change needs a baseline, a scenario that should become measurably better, and a counter/benchmark/profile that proves the improvement happened.
 
 ## Documentation lessons
 
