@@ -26,7 +26,7 @@
 
 ## Performance work
 
-- Expand the initial benchmarks from `docs/performance-audit.md` before optimizing archive, ingest, search, depot, status, or verify paths.
+- Expand the initial benchmarks from `docs/performance-audit.md` and capture pprof profiles before optimizing archive, ingest, search, depot, status, or verify paths.
 - Optimize corpus `verify` query shape/indexing first; the initial synthetic benchmark shows full FTS/left-join verification is the largest local maintenance hotspot.
 - Avoid redundant full-bundle hashing across archive write, depot put, and depot ingest while preserving a deep verification path.
 - Store source-state signatures in depot catalog refs so unchanged `refresh` does not fetch old bundles just to compare manifests.

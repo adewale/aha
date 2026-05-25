@@ -78,9 +78,10 @@ Depending on command/configuration, `aha` may write:
 
 - bundle files under the selected local depot directory;
 - corpus SQLite/blob files under the corpus directory;
-- config JSONC via `aha init`.
+- config JSONC via `aha init`;
+- optional local pprof files when `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, or `AHA_MEM_PROFILE` is explicitly set.
 
-It should not write inside Pi, Claude Code, or Codex source-history roots.
+It should not write inside Pi, Claude Code, or Codex source-history roots. Treat profiles as local debugging artifacts; do not attach them to public issues without review because they can reveal code paths, filesystem paths, and workload shape.
 
 ## Quick verification checklist
 

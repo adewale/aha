@@ -2,6 +2,12 @@
 
 This file is generated from CLI command metadata. Update command metadata, then regenerate this file.
 
+## Global profiling
+
+Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.
+
+Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.
+
 ## JSON errors
 
 When a command is invoked with `--json`, failures are written to stderr as:

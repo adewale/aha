@@ -152,6 +152,7 @@ More journey rationale: `docs/user-journeys.md`.
 ## Commands
 
 ```txt
+aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]
 aha init [--config PATH] [--accept-secrets] [--json]
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
 aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
@@ -178,6 +179,8 @@ Command roles:
 - `conflicts`: quarantined merge conflicts.
 - `depot`: initialize, list, or verify a local/R2 bundle depot.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
+
+Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
 
 ## Supported sources
 

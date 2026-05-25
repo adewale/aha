@@ -96,16 +96,25 @@ func Run(args []string, stdout, stderr io.Writer) error {
 }
 
 func RunMain(args []string, stdout, stderr io.Writer) int {
-	if wantsJSON(args) {
+	cleanArgs, profileOpts, profileErr := profileOptionsFromArgs(args)
+	if profileErr != nil {
+		if wantsJSON(args) {
+			_ = writeJSON(stderr, errorEnvelope{Error: machineError(profileErr, cleanArgs)})
+		} else {
+			fmt.Fprintln(stderr, "error:", profileErr)
+		}
+		return 1
+	}
+	if wantsJSON(cleanArgs) {
 		var commandStderr bytes.Buffer
-		if err := Run(args, stdout, &commandStderr); err != nil {
-			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, args)})
+		if err := runWithProfiling(profileOpts, func() error { return Run(cleanArgs, stdout, &commandStderr) }); err != nil {
+			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, cleanArgs)})
 			return 1
 		}
 		_, _ = stderr.Write(commandStderr.Bytes())
 		return 0
 	}
-	if err := Run(args, stdout, stderr); err != nil {
+	if err := runWithProfiling(profileOpts, func() error { return Run(cleanArgs, stdout, stderr) }); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -169,16 +178,21 @@ func classifyError(err error) string {
 
 func Usage(w io.Writer) {
 	fmt.Fprintf(w, "aha %s\n\nUsage:\n", model.Version)
+	fmt.Fprintln(w, "  aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]")
 	names := CommandNames()
 	for _, name := range names {
 		fmt.Fprintf(w, "  %s\n", Registry()[name].Usage)
 	}
+	fmt.Fprintln(w, "\nGlobal profiling flags may also be supplied after the subcommand, or via AHA_CPU_PROFILE/AHA_MEM_PROFILE.")
 }
 
 func GenerateCommandsMarkdown() string {
 	var b strings.Builder
 	b.WriteString("# aha commands\n\n")
 	b.WriteString("This file is generated from CLI command metadata. Update command metadata, then regenerate this file.\n\n")
+	b.WriteString("## Global profiling\n\n")
+	b.WriteString("Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.\n\n")
+	b.WriteString("Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.\n\n")
 	b.WriteString("## JSON errors\n\n")
 	b.WriteString("When a command is invoked with `--json`, failures are written to stderr as:\n\n")
 	b.WriteString("```json\n{\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor\"]\n  }\n}\n```\n\n")

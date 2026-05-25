@@ -8,7 +8,7 @@ Scope: snapshot/archive, ingest, search, depot, status, verify, and refresh flow
 
 `aha` optimizes first for determinism, integrity, and repairability. That is the right tradeoff for a history archive, but it creates several predictable cost centers: repeated hashing, repeated archive reads, serial ingest SQL, full-scan verification, and depot operations that scale with catalog/bundle count.
 
-No benchmark suite exists yet. The risks below are based on code inspection and should be converted into benchmarks before optimization work.
+An initial benchmark suite now covers archive write/read, corpus ingest/verify/reconcile, search, and local depot put/list/verify. The risks below are still directional until we add larger fixtures, CI trend capture, and pprof-backed optimization passes.
 
 ## Algorithmic complexity
 
@@ -53,15 +53,26 @@ Variables:
 | Depot verify | Local verify rehashes every bundle; R2 verify downloads every bundle. | Correct deep verification can be expensive and network-heavy. | Add quick vs deep verify modes; keep deep as explicit integrity audit. |
 | Status with depot | `status --depot` lists catalog refs; R2 listing performs network calls. | A nominal status command can become remote/costly when `--depot` is set. | Document this; add operation-count tests with fake R2. |
 
-## Benchmark plan
+## Benchmark and profiling plan
 
-Add benchmarks before optimizing:
+Run the initial benchmarks before optimizing:
 
 ```bash
-go test ./internal/archive -bench=Archive -benchmem
-go test ./internal/corpus -bench=Ingest -benchmem
-go test ./internal/search -bench=Search -benchmem
-go test ./internal/depot -bench=Depot -benchmem
+go test ./internal/archive ./internal/corpus ./internal/search ./internal/depot -run=^$ -bench=. -benchmem
+```
+
+For command-level profiles, opt in with either flags or environment variables:
+
+```bash
+aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --repo ~/.aha/corpus
+AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha refresh
+```
+
+Inspect with:
+
+```bash
+go tool pprof -http=:0 cpu.pprof
+go tool pprof -http=:0 heap.pprof
 ```
 
 Suggested scenarios:

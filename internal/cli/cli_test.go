@@ -65,6 +65,54 @@ func TestCLIDoctorReportsDepotSourceAndCorpusDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunMainWritesOptionalProfiles(t *testing.T) {
+	root := t.TempDir()
+	cpuProfile := filepath.Join(root, "cpu.pprof")
+	memProfile := filepath.Join(root, "heap.pprof")
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"version", "--cpuprofile", cpuProfile, "--memprofile=" + memProfile}, &out, &stderr)
+	if code != 0 {
+		t.Fatalf("RunMain code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(out.String(), "aha ") {
+		t.Fatalf("version output missing: %q", out.String())
+	}
+	for _, path := range []string{cpuProfile, memProfile} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("profile %s missing: %v", path, err)
+		}
+		if info.Size() == 0 {
+			t.Fatalf("profile %s is empty", path)
+		}
+	}
+}
+
+func TestRunMainUsesProfileEnvironment(t *testing.T) {
+	memProfile := filepath.Join(t.TempDir(), "env-heap.pprof")
+	t.Setenv("AHA_MEM_PROFILE", memProfile)
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"version"}, &out, &stderr)
+	if code != 0 {
+		t.Fatalf("RunMain code=%d stderr=%s", code, stderr.String())
+	}
+	info, err := os.Stat(memProfile)
+	if err != nil {
+		t.Fatalf("env profile missing: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("env profile is empty")
+	}
+}
+
+func TestRunMainRejectsProfileFlagWithoutPath(t *testing.T) {
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"--cpuprofile"}, &out, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--cpuprofile requires path") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestSubcommandHelpIsSuccessful(t *testing.T) {
 	for _, cmd := range cli.CommandNames() {
 		var out bytes.Buffer

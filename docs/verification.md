@@ -68,6 +68,17 @@ aha verify --repair-fts --json
 
 `verify` is read-only by default. `--repair-fts` rebuilds derived FTS rows from `messages` and `artifacts`; raw bundle/corpus rows remain the source of truth.
 
+## Optional profiling
+
+For performance investigations, opt in to local Go pprof profiles on any command:
+
+```bash
+aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --repo ~/.aha/corpus
+AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha refresh
+```
+
+Profiles are never written by default. Inspect them with `go tool pprof`.
+
 ## Mutation testing
 
 Mutation testing is intentionally not part of normal CI. Run it before release or after invariant-critical refactors:

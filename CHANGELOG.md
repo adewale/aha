@@ -25,13 +25,14 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
 - `aha verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
 - Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimization guardrails.
+- Optional command-level Go pprof output via `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, and `AHA_MEM_PROFILE`.
 
 ### Changed
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
 - Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
-- Generated command docs now include depot commands, depot-aware flags, and corpus verification.
+- Generated command docs now include depot commands, depot-aware flags, corpus verification, and global profiling guidance.
 
 ### Removed
 
