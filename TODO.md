@@ -36,10 +36,9 @@
 
 ## Code health and duplication watch list
 
-- Use `docs/audits/code-duplication-audit.md` as the current duplication baseline.
-- Fix depot backend duplication before the next R2/depot integrity change: known-bundle ref normalization, quick catalog-ref validation, catalog compact/repair shard rewriting, and R2 marker read/write helpers should be shared so local/R2 semantics cannot drift.
-- Extract shared snapshot/refresh flag registration before adding another snapshot option.
-- Defer search predicate-builder, FTS verify/repair predicate, and atomic temp-write helper consolidation until those areas are touched; current duplication is contained but documented.
+- Use `docs/audits/code-duplication-audit.md` and `docs/refactor-metrics-and-go-audit.md` as the current duplication/refactor baseline.
+- Completed the first duplication-refactor pass: depot known-ref prep, quick catalog verification, compact/repair shard rewriting, R2 marker helpers, snapshot/refresh flag registration, search predicate building, FTS verify/repair predicates, and atomic temp-write/copy helpers are shared.
+- Future code-health work should be evidence-driven: add another duplication audit only when changing depot/R2 integrity flows, search filters, FTS repair semantics, or blob-publish durability.
 
 ## Future adapters
 

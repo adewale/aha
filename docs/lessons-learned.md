@@ -121,6 +121,8 @@ Additional testing lessons:
 - When CPU lands mostly in SQLite and syscalls, prefer semantic changes over Go micro-optimizations. The latest ingest profile put nearly all CPU under SQLite statement execution and `pwrite`, so true multi-row inserts remain a possible constant-factor change, not an obvious correctness-preserving rewrite to do without stronger evidence.
 - Search profiles and query-plan tests answer different questions. Query-plan tests prove the indexed project/path-token filters are used; pprof showed broad common-term searches are still SQLite/FTS candidate work, so output caps reduce memory/user cost without promising broad-term ranking speedups.
 - Verify profiles can validate that a repaired algorithmic cliff stays repaired. Rowid-backed FTS verification now profiles as small SQLite count work rather than the former seconds-scale join path; extra stats counters are acceptable only because the benchmark remains millisecond-scale.
+- Refactor-only work still needs before/after metrics and a behavior audit. The duplication pass found that moving shared FTS predicates was not enough; schema triggers and migrations had to use the same expression or existing corpora would keep stale behavior.
+- Atomic write helpers must state their race semantics. “Existing OK” is not the same as no-replace unless the final publish step is atomic; returning whether this process actually created the file prevents misleading depot reports.
 
 ## Documentation lessons
 

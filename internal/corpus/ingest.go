@@ -676,77 +676,11 @@ func (w corpusWriter) ingestAsset(source, sessionKey, entryID string, asset mode
 }
 
 func writeImageBlobFromPathAtomic(root, relPath, srcPath string) error {
-	finalPath := filepath.Join(root, relPath)
-	if _, err := os.Stat(finalPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	tmp, err := os.CreateTemp(filepath.Dir(finalPath), "image-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	_, copyErr := io.Copy(tmp, in)
-	closeErr := tmp.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmpPath)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeErr
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fileutil.AtomicCopyFile(filepath.Join(root, relPath), srcPath, fileutil.AtomicOptions{TempPattern: "image-*.tmp", ExistingOK: true})
 }
 
 func writeImageBlobAtomic(root, relPath string, data []byte) error {
-	finalPath := filepath.Join(root, relPath)
-	if _, err := os.Stat(finalPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(finalPath), "image-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fileutil.AtomicWriteBytes(filepath.Join(root, relPath), data, fileutil.AtomicOptions{TempPattern: "image-*.tmp", ExistingOK: true})
 }
 
 func readArtifactText(path string) (string, string, error) {
@@ -894,58 +828,27 @@ func spoolEntry(root string, r io.Reader) (string, string, int64, error) {
 }
 
 func storeFileBlobFromPath(root, sha, path string) error {
-	dir := filepath.Join(root, "blobs", "files")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	finalPath := filepath.Join(dir, sha+".zst")
-	if _, err := os.Stat(finalPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	in, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.CreateTemp(dir, sha+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := out.Name()
-	enc, err := pooledZstdWriter(out)
-	if err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	_, copyErr := io.Copy(enc, in)
-	closeEncErr := enc.Close()
-	if closeEncErr == nil {
-		putZstdWriter(enc)
-	}
-	closeOutErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmpPath)
-		return copyErr
-	}
-	if closeEncErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeEncErr
-	}
-	if closeOutErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeOutErr
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			return nil
+	finalPath := filepath.Join(root, "blobs", "files", sha+".zst")
+	return fileutil.AtomicWrite(finalPath, fileutil.AtomicOptions{TempPattern: sha + "-*.tmp", ExistingOK: true}, func(out *os.File) error {
+		in, err := os.Open(path)
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	return nil
+		defer in.Close()
+		enc, err := pooledZstdWriter(out)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(enc, in)
+		closeEncErr := enc.Close()
+		if closeEncErr == nil {
+			putZstdWriter(enc)
+		}
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeEncErr
+	})
 }
 
 func pooledZstdWriter(w io.Writer) (*zstd.Encoder, error) {

@@ -71,3 +71,36 @@ func TestFTSTriggersPopulateSearchTables(t *testing.T) {
 		t.Fatalf("fts messages rows=%d want 1", n)
 	}
 }
+
+func TestArtifactFTSTriggerFallsBackFromEmptyBodyToPreview(t *testing.T) {
+	store, err := corpus.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values('b','` + strings.Repeat("b", 64) + `','m','2026','2026','{}')`); err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,raw_path,relative_path,text_preview,text_body) values(?,'pi','m','b','artifact','raw','rel','preview text','')`, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := store.DB.QueryRow(`select text from fts_artifacts where rowid=?`, artifactID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "preview text" {
+		t.Fatalf("fts artifact text=%q want preview fallback", got)
+	}
+	verify, err := corpus.Verify(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verify.HasProblem("missing_fts_artifacts") {
+		t.Fatalf("verify reports missing FTS artifact after trigger insert: %+v", verify.Problems)
+	}
+}

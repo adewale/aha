@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/adewale/aha/internal/archive"
 	ahaclock "github.com/adewale/aha/internal/clock"
+	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 )
@@ -99,6 +99,28 @@ func PutBundleKnown(ctx context.Context, d Driver, bundlePath string, ref Bundle
 		return kd.PutBundleKnown(ctx, bundlePath, ref)
 	}
 	return d.PutBundle(ctx, bundlePath)
+}
+
+func prepareKnownBundleRef(bundlePath string, ref BundleRef) (BundleRef, error) {
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Filename == "" {
+		ref.Filename = filepath.Base(bundlePath)
+	}
+	if err := ValidateKnownBundleRef(ref); err != nil {
+		return BundleRef{}, err
+	}
+	if ref.Bytes > 0 {
+		st, err := os.Stat(bundlePath)
+		if err != nil {
+			return BundleRef{}, err
+		}
+		if st.Size() != ref.Bytes {
+			return BundleRef{}, fmt.Errorf("known bundle size mismatch: ref=%d actual=%d", ref.Bytes, st.Size())
+		}
+	}
+	return ref, nil
 }
 
 func Compact(ctx context.Context, d Driver) (CompactReport, error) {
@@ -302,6 +324,94 @@ func MergeBundleRefs(refs []BundleRef) []BundleRef {
 	return out
 }
 
+func addShardRefsByMachine(byMachine map[string][]BundleRef, shard CatalogShard, report *CompactReport) {
+	if report != nil {
+		report.Catalogs++
+	}
+	for _, ref := range shard.Bundles {
+		machine := ref.MachineID
+		if machine == "" {
+			machine = shard.MachineID
+			ref.MachineID = machine
+		}
+		byMachine[machine] = append(byMachine[machine], ref)
+		if report != nil {
+			report.RefsBefore++
+		}
+	}
+}
+
+func refsByMachine(refs []BundleRef) map[string][]BundleRef {
+	byMachine := map[string][]BundleRef{}
+	for _, ref := range refs {
+		byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
+	}
+	return byMachine
+}
+
+func refsByMachineFromMap(refs map[string]BundleRef) map[string][]BundleRef {
+	byMachine := map[string][]BundleRef{}
+	for _, ref := range refs {
+		byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
+	}
+	return byMachine
+}
+
+func writeMergedCatalogShards(byMachine map[string][]BundleRef, report *CompactReport, write func(machine string, shard CatalogShard) error) error {
+	for machine, refs := range byMachine {
+		merged := MergeBundleRefs(refs)
+		if report != nil {
+			report.RefsAfter += len(merged)
+		}
+		if err := write(machine, CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: merged}); err != nil {
+			return err
+		}
+		if report != nil {
+			report.CatalogsWritten++
+		}
+	}
+	if report != nil && report.RefsBefore > report.RefsAfter {
+		report.DuplicateRefs = report.RefsBefore - report.RefsAfter
+	}
+	return nil
+}
+
+func verifyCatalogRefs(catalogRefs []BundleRef, exists func(key string) (bool, error)) (bundles int, problems []string, err error) {
+	seen := map[string]bool{}
+	for _, ref := range catalogRefs {
+		if ref.BundleSHA256 == "" {
+			problems = append(problems, "catalog reference missing bundle sha")
+			continue
+		}
+		if seen[ref.BundleSHA256] {
+			continue
+		}
+		seen[ref.BundleSHA256] = true
+		key := ref.Key
+		if key == "" {
+			key = BundleKey(ref.BundleSHA256)
+		}
+		if key != BundleKey(ref.BundleSHA256) {
+			problems = append(problems, "catalog key mismatch "+ref.BundleSHA256)
+			continue
+		}
+		if err := ValidateBundleKey(key); err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		ok, err := exists(key)
+		if err != nil {
+			return bundles, problems, err
+		}
+		if !ok {
+			problems = append(problems, "catalog references missing bundle "+ref.BundleSHA256)
+			continue
+		}
+		bundles++
+	}
+	return bundles, problems, nil
+}
+
 func mergeRef(old, new BundleRef) BundleRef {
 	if old.BundleID == "" {
 		old.BundleID = new.BundleID
@@ -343,68 +453,20 @@ func sortRefs(refs []BundleRef) {
 }
 
 func writeJSONAtomic(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*.json")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	_, writeErr := tmp.Write(b)
-	closeErr := tmp.Close()
-	if writeErr != nil {
-		_ = os.Remove(tmpPath)
-		return writeErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeErr
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return fileutil.AtomicWriteBytes(path, b, fileutil.AtomicOptions{TempPattern: ".tmp-*.json"})
 }
 
 func copyFile(dst, src string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.CreateTemp(filepath.Dir(dst), ".tmp-*.bundle")
-	if err != nil {
-		return err
-	}
-	tmp := out.Name()
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		if _, statErr := os.Stat(dst); statErr == nil {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fileutil.AtomicCopyFile(dst, src, fileutil.AtomicOptions{TempPattern: ".tmp-*.bundle"})
+}
+
+func copyFileIfAbsent(dst, src string) (bool, error) {
+	return fileutil.AtomicCopyFileCreated(dst, src, fileutil.AtomicOptions{TempPattern: ".tmp-*.bundle", ExistingOK: true})
 }
 
 func expandLocalRoot(root string) (string, error) {

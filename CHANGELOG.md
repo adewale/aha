@@ -36,6 +36,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Corpus maintenance commands: `aha corpus size`, `aha corpus vacuum`, and dry-run/forced `aha corpus prune-orphans`.
 - Depot catalog compaction via `aha depot compact`, plus map-backed `MergeBundleRefs` properties and local/R2 compaction tests.
 - Verify/status/depot-ingest cost counters for depot bytes read/downloaded, listed/unique depot refs, fetched pending bundles, corpus verify row counts, and FTS repair rows.
+- Duplication-refactor pass sharing depot local/R2 integrity helpers, snapshot flag registration, search predicates, FTS predicates, and atomic file-write helpers, with before/after metrics and Go best-practices audit.
 
 ### Changed
 
@@ -61,5 +62,5 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ### Documentation
 
-- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, verification guidance, a corrected correctness-by-construction spec, performance result captures, and docs/code-duplication audits.
+- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, verification guidance, a corrected correctness-by-construction spec, performance result captures, refactor metrics, and docs/code-duplication audits.
 - Added OpenCode research and evaluation docs.

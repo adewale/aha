@@ -3,15 +3,18 @@ package depot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/model"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 type R2Config struct {
@@ -61,6 +64,65 @@ func NewR2(bucket string, cfg R2Config) *R2 {
 
 func (d *R2) Address() Address { return Address{Type: "r2", Location: d.Bucket} }
 
+var errR2MarkerMissing = errors.New("missing depot marker")
+
+func (d *R2) readMarker(ctx context.Context) error {
+	obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")})
+	if err != nil {
+		if isS3NotFound(err) {
+			return fmt.Errorf("%w: %v", errR2MarkerMissing, err)
+		}
+		return err
+	}
+	defer obj.Body.Close()
+	var m marker
+	if err := json.NewDecoder(obj.Body).Decode(&m); err != nil {
+		return err
+	}
+	return validateMarker(m)
+}
+
+func markerProblem(err error) string {
+	if errors.Is(err, errR2MarkerMissing) {
+		return "missing depot marker"
+	}
+	return "invalid depot marker: " + err.Error()
+}
+
+func isS3NotFound(err error) bool {
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.ErrorCode() {
+	case "NoSuchKey", "NotFound", "404":
+		return true
+	default:
+		return false
+	}
+}
+
+func (d *R2) putJSON(ctx context.Context, key string, v any, apply func(*s3.PutObjectInput)) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	input := &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json")}
+	if apply != nil {
+		apply(input)
+	}
+	_, err = d.Client.PutObject(ctx, input)
+	return err
+}
+
+func (d *R2) putMarker(ctx context.Context, ifNoneMatch bool) error {
+	return d.putJSON(ctx, "depot.json", newMarker(), func(input *s3.PutObjectInput) {
+		if ifNoneMatch {
+			input.IfNoneMatch = aws.String("*")
+		}
+	})
+}
+
 func (d *R2) Init(ctx context.Context) error {
 	_, err := d.Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(d.Bucket)})
 	if err != nil {
@@ -68,22 +130,12 @@ func (d *R2) Init(ctx context.Context) error {
 			return createErr
 		}
 	}
-	existing, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")})
-	if err == nil {
-		var m marker
-		decodeErr := json.NewDecoder(existing.Body).Decode(&m)
-		_ = existing.Body.Close()
-		if decodeErr != nil {
-			return decodeErr
-		}
-		return validateMarker(m)
-	}
-	b, err := json.MarshalIndent(newMarker(), "", "  ")
-	if err != nil {
+	if err := d.readMarker(ctx); err == nil {
+		return nil
+	} else if !errors.Is(err, errR2MarkerMissing) {
 		return err
 	}
-	_, err = d.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json"), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json"), IfNoneMatch: aws.String("*")})
-	return err
+	return d.putMarker(ctx, true)
 }
 
 func (d *R2) PutBundle(ctx context.Context, bundlePath string) (BundleRef, bool, error) {
@@ -95,23 +147,9 @@ func (d *R2) PutBundle(ctx context.Context, bundlePath string) (BundleRef, bool,
 }
 
 func (d *R2) PutBundleKnown(ctx context.Context, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
-	if ref.Key == "" {
-		ref.Key = BundleKey(ref.BundleSHA256)
-	}
-	if ref.Filename == "" {
-		ref.Filename = filepath.Base(bundlePath)
-	}
-	if err := ValidateKnownBundleRef(ref); err != nil {
+	ref, err := prepareKnownBundleRef(bundlePath, ref)
+	if err != nil {
 		return BundleRef{}, false, err
-	}
-	if ref.Bytes > 0 {
-		st, err := os.Stat(bundlePath)
-		if err != nil {
-			return BundleRef{}, false, err
-		}
-		if st.Size() != ref.Bytes {
-			return BundleRef{}, false, fmt.Errorf("known bundle size mismatch: ref=%d actual=%d", ref.Bytes, st.Size())
-		}
 	}
 	created := false
 	_, headErr := d.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(ref.Key)})
@@ -152,17 +190,13 @@ func (d *R2) appendCatalog(ctx context.Context, ref BundleRef) error {
 		}
 		shard.Bundles = mergeBundleRef(shard.Bundles, ref)
 		sortRefs(shard.Bundles)
-		b, err := json.MarshalIndent(shard, "", "  ")
-		if err != nil {
-			return err
-		}
-		input := &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json")}
-		if etag == nil {
-			input.IfNoneMatch = aws.String("*")
-		} else {
-			input.IfMatch = etag
-		}
-		if _, err := d.Client.PutObject(ctx, input); err == nil {
+		if err := d.putJSON(ctx, key, shard, func(input *s3.PutObjectInput) {
+			if etag == nil {
+				input.IfNoneMatch = aws.String("*")
+			} else {
+				input.IfMatch = etag
+			}
+		}); err == nil {
 			return nil
 		}
 	}
@@ -240,108 +274,47 @@ func (d *R2) Compact(ctx context.Context) (CompactReport, error) {
 			if err != nil {
 				return report, err
 			}
-			report.Catalogs++
-			for _, ref := range shard.Bundles {
-				machine := ref.MachineID
-				if machine == "" {
-					machine = shard.MachineID
-					ref.MachineID = machine
-				}
-				byMachine[machine] = append(byMachine[machine], ref)
-				report.RefsBefore++
-			}
+			addShardRefsByMachine(byMachine, shard, &report)
 		}
 	}
-	for machine, refs := range byMachine {
-		merged := MergeBundleRefs(refs)
-		report.RefsAfter += len(merged)
-		shard := CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: merged}
-		b, err := json.MarshalIndent(shard, "", "  ")
-		if err != nil {
-			return report, err
-		}
-		_, err = d.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(CatalogKey(machine)), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json")})
-		if err != nil {
-			return report, err
-		}
-		report.CatalogsWritten++
-	}
-	if report.RefsBefore > report.RefsAfter {
-		report.DuplicateRefs = report.RefsBefore - report.RefsAfter
+	if err := writeMergedCatalogShards(byMachine, &report, func(machine string, shard CatalogShard) error {
+		return d.putJSON(ctx, CatalogKey(machine), shard, nil)
+	}); err != nil {
+		return report, err
 	}
 	return report, nil
 }
 
 func (d *R2) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	report := VerifyReport{Deep: false}
-	if obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")}); err == nil {
-		var m marker
-		decodeErr := json.NewDecoder(obj.Body).Decode(&m)
-		_ = obj.Body.Close()
-		if decodeErr != nil {
-			report.Problems = append(report.Problems, "invalid depot marker: "+decodeErr.Error())
-		} else if err := validateMarker(m); err != nil {
-			report.Problems = append(report.Problems, "invalid depot marker: "+err.Error())
-		}
-	} else {
-		report.Problems = append(report.Problems, "missing depot marker")
+	if err := d.readMarker(ctx); err != nil {
+		report.Problems = append(report.Problems, markerProblem(err))
 	}
 	catalogRefs, err := d.List(ctx)
 	if err != nil {
 		return report, err
 	}
 	report.Catalogs = len(catalogRefs)
-	seen := map[string]bool{}
-	for _, ref := range catalogRefs {
-		if ref.BundleSHA256 == "" {
-			report.Problems = append(report.Problems, "catalog reference missing bundle sha")
-			continue
-		}
-		if seen[ref.BundleSHA256] {
-			continue
-		}
-		seen[ref.BundleSHA256] = true
-		key := ref.Key
-		if key == "" {
-			key = BundleKey(ref.BundleSHA256)
-		}
-		if key != BundleKey(ref.BundleSHA256) {
-			report.Problems = append(report.Problems, "catalog key mismatch "+ref.BundleSHA256)
-			continue
-		}
-		if err := ValidateBundleKey(key); err != nil {
-			report.Problems = append(report.Problems, err.Error())
-			continue
-		}
+	bundles, problems, err := verifyCatalogRefs(catalogRefs, func(key string) (bool, error) {
 		if _, err := d.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key)}); err != nil {
-			report.Problems = append(report.Problems, "catalog references missing bundle "+ref.BundleSHA256)
-			continue
+			return false, nil
 		}
-		report.Bundles++
+		return true, nil
+	})
+	if err != nil {
+		return report, err
 	}
+	report.Bundles = bundles
+	report.Problems = append(report.Problems, problems...)
 	return report, nil
 }
 
 func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 	report := VerifyReport{Deep: true}
-	if obj, err := d.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json")}); err == nil {
-		var m marker
-		decodeErr := json.NewDecoder(obj.Body).Decode(&m)
-		_ = obj.Body.Close()
-		if decodeErr != nil {
-			report.Problems = append(report.Problems, "invalid depot marker: "+decodeErr.Error())
-		} else if err := validateMarker(m); err != nil {
-			report.Problems = append(report.Problems, "invalid depot marker: "+err.Error())
-		}
-	} else {
-		report.Problems = append(report.Problems, "missing depot marker")
-		if repair {
-			b, err := json.MarshalIndent(newMarker(), "", "  ")
-			if err != nil {
-				return report, err
-			}
-			_, err = d.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String("depot.json"), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json"), IfNoneMatch: aws.String("*")})
-			if err != nil {
+	if err := d.readMarker(ctx); err != nil {
+		report.Problems = append(report.Problems, markerProblem(err))
+		if repair && errors.Is(err, errR2MarkerMissing) {
+			if err := d.putMarker(ctx, true); err != nil {
 				return report, err
 			}
 		}
@@ -416,21 +389,11 @@ func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 		if err := d.deleteCatalogShards(ctx); err != nil {
 			return report, err
 		}
-		byMachine := map[string][]BundleRef{}
-		for _, ref := range bundleRefs {
-			byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
-		}
-		for machine, refs := range byMachine {
-			refs = MergeBundleRefs(refs)
-			shard := CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: refs}
-			b, err := json.MarshalIndent(shard, "", "  ")
-			if err != nil {
-				return report, err
-			}
-			_, err = d.Client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(CatalogKey(machine)), Body: strings.NewReader(string(append(b, '\n'))), ContentType: aws.String("application/json")})
-			if err != nil {
-				return report, err
-			}
+		byMachine := refsByMachine(bundleRefs)
+		if err := writeMergedCatalogShards(byMachine, nil, func(machine string, shard CatalogShard) error {
+			return d.putJSON(ctx, CatalogKey(machine), shard, nil)
+		}); err != nil {
+			return report, err
 		}
 		report.Repaired = true
 	}
@@ -461,27 +424,7 @@ func writeReaderToFile(dst string, r interface{ Read([]byte) (int, error) }) err
 }
 
 func copyFromReader(dst string, r interface{ Read([]byte) (int, error) }) error {
-	if err := os.MkdirAll(dirOf(dst), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	_, copyErr := f.ReadFrom(r)
-	closeErr := f.Close()
-	if copyErr != nil {
-		_ = os.Remove(dst)
-		return copyErr
-	}
-	return closeErr
-}
-
-func dirOf(path string) string {
-	if i := strings.LastIndex(path, string(os.PathSeparator)); i >= 0 {
-		return path[:i]
-	}
-	return "."
+	return fileutil.AtomicCopyReader(dst, r, fileutil.AtomicOptions{TempPattern: ".tmp-*.bundle"})
 }
 
 func firstEnv(a, b, fallback string) string {

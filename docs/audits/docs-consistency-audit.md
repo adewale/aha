@@ -35,6 +35,7 @@ A fresh consistency audit after the performance/profiling work found and fixed t
 - `README.md` now matches no-op refresh behavior by documenting unchanged depot-bundle reuse via `state_sha256` metadata.
 - `docs/performance-audit.md` now distinguishes original audit date from the latest update date.
 - `docs/lessons-learned.md` now records the profiling lessons from the latest ingest/search/verify pprof run.
+- `docs/refactor-metrics-and-go-audit.md` captures the duplication-refactor before/after metrics, profiling artifacts, regression verification, and Go best-practices audit.
 
 ## Validation
 

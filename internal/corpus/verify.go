@@ -64,9 +64,9 @@ func Verify(store *Store) (VerifyReport, error) {
 		{"orphan_entry_assets", "entry_assets without backing entries", `select count(*) from entry_assets a left join entries e on e.session_key=a.session_key and e.entry_id=a.entry_id where e.session_key is null`},
 		{"orphan_artifacts", "artifacts without backing bundles", `select count(*) from artifacts a left join bundles b on b.bundle_id=a.bundle_id where b.bundle_id is null`},
 		{"orphan_fts_messages", "fts_messages rows without backing messages", `select count(*) from fts_messages f left join messages m on m.rowid=f.rowid where m.rowid is null`},
-		{"missing_fts_messages", "messages without fts_messages rows", `select count(*) from messages m left join fts_messages f on f.rowid=m.rowid where trim(coalesce(m.text,''))<>'' and f.rowid is null`},
+		{"missing_fts_messages", "messages without fts_messages rows", missingFTSMessagesQuery},
 		{"orphan_fts_artifacts", "fts_artifacts rows without backing artifacts", `select count(*) from fts_artifacts f left join artifacts a on a.artifact_id=f.rowid where a.artifact_id is null`},
-		{"missing_fts_artifacts", "artifacts without fts_artifacts rows", `select count(*) from artifacts a left join fts_artifacts f on f.rowid=a.artifact_id where trim(coalesce(nullif(a.text_body,''),a.text_preview,''))<>'' and f.rowid is null`},
+		{"missing_fts_artifacts", "artifacts without fts_artifacts rows", missingFTSArtifactsQuery},
 	}
 	for _, check := range checks {
 		count, err := verifyCount(store.DB, check.query)

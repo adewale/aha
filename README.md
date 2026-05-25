@@ -258,6 +258,7 @@ For coding agents using `aha`:
 - `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.
 - `docs/performance-scalability-plan.md` — pathological benchmark results, profiling lessons, and scalability/longevity roadmap.
 - `docs/performance-results.md` — latest benchmark capture, success metrics, regressions, and deferred performance work.
+- `docs/refactor-metrics-and-go-audit.md` — before/after metrics, profiling, regression verification, and Go best-practices audit for the duplication-refactor pass.
 - `docs/verification.md` — local/CI verification profiles, fuzzing, static guardrails, and mutation testing.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
