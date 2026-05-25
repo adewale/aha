@@ -529,17 +529,21 @@ messages(session_key, entry_id, role, text, tool_name, command, files_json, mode
 artifacts(artifact_id, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body)
 images(image_sha256, source_name, mime_type, bytes, width, height, ext, blob_path)
 entry_assets(session_key, entry_id, asset_sha256, asset_kind, content_index, prompt_order, raw_ref, mime_type, metadata_json)
+session_path_tokens(session_key, token)
+artifact_path_tokens(artifact_id, token)
 conflicts(conflict_id, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json)
 ```
 
-Search table:
+Search/path derived tables:
 
 ```sql
-fts_messages(session_key, entry_id, text)
-fts_artifacts(artifact_id, text)
+fts_messages(rowid = messages.rowid, session_key, entry_id, text)
+fts_artifacts(rowid = artifacts.artifact_id, artifact_id, text)
+session_path_tokens(session_key, token)         -- indexed exact segment tokens
+artifact_path_tokens(artifact_id, token)       -- indexed exact segment tokens
 ```
 
-For v1, store raw source entries and normalized fields. Derived columns can be regenerated. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts.
+For v1, store raw source entries and normalized fields. Derived columns can be regenerated. FTS rows are trigger-maintained and repairable with `aha verify --repair-fts`; verifier queries use rowid identity to avoid unindexed FTS key scans. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts. `project_key` is an exact indexed project filter; `--path-token` uses the token tables; `--path` remains a convenience contains filter.
 
 ## Search command
 
@@ -548,8 +552,9 @@ Examples:
 ```bash
 aha search "loadable ephemeral context"
 aha search "dynamic workflows" --machine ade-mbp --after 2026-05-01
-aha search "xampler/workflows.py" --source pi
-aha read --session 019e0d47-ae0f --entry a1b2c3d4 --before 3 --after 5
+aha search "xampler workflows" --source pi --project aha
+aha search "workflow" --path-token workflows.py
+aha read msg:v1:... --before 3 --after 5
 aha status
 aha verify
 aha conflicts
@@ -564,7 +569,10 @@ Minimum search features:
 | Machine filter | `--machine ade-mbp` |
 | Date filter | `--after 2026-05-01 --before 2026-05-18` |
 | Role filter | `--role user` |
-| File/path filter | `--path xampler/workflows.py` |
+| Project filter | `--project aha` exact indexed `sessions.project_key` |
+| Indexed path-token filter | `--path-token workflows.py` exact indexed path segment token |
+| Convenience path contains filter | `--path xampler/workflows.py` non-indexed contains match |
+| Limit guardrail | `--limit N`, capped at 200 with a CLI warning |
 | JSON output | `--json` |
 | Session read | bounded context around matching entries |
 
@@ -581,7 +589,7 @@ score timestamp source machine project role snippet ref_text session_key entry_i
 V1 ranking:
 
 - SQLite FTS5 BM25;
-- ordinary SQLite indexes for source, machine, role, project, path, and date filters;
+- ordinary SQLite indexes for source, machine, role, exact `project_key`, path tokens, and date filters;
 - SQL joins for provenance and read-context lookups;
 - no semantic embeddings;
 - no custom search engine;
@@ -667,7 +675,8 @@ aha read
 aha status
 aha verify
 aha conflicts
-aha depot
+aha corpus <size|vacuum|prune-orphans>
+aha depot <init|ls|verify|compact>
 aha doctor
 ```
 
@@ -675,13 +684,13 @@ Implementation preferences:
 
 | Concern | Preference |
 |---|---|
-| CLI framework | `cobra` or standard library; decide during implementation |
+| CLI framework | Standard library `flag` with a tested command registry |
 | Compression | pure-Go Zstandard |
 | Archive | Go stdlib `archive/tar` |
 | SQLite | SQLite + FTS5 as the query engine; prefer pure-Go driver if FTS5/JSON support is reliable |
 | Config | JSONC in platform-native config dir |
 | Output | human table by default, `--json` for scripts |
-| Testing | Go stdlib `testing`, table-driven tests, `testdata/` fixtures, property/fuzz tests for parsers, golden-file tests for manifests/search output |
+| Testing | Go stdlib `testing`, real temp dirs/SQLite/tar.zst/fake-S3, `testdata/` fixtures, property/fuzz tests, query-plan tests, golden-file tests, and pathological benchmarks |
 
 ## Thin slice
 
@@ -723,11 +732,13 @@ read output with surrounding entries
 - `search` returns matches across Pi and Claude Code sessions from multiple machines.
 - `read` shows bounded context around a result.
 - Conflicting same-entry IDs with different hashes are quarantined, not overwritten.
-- `status` reports machines, bundles, sources, sessions, entries, artifacts, images, index size, and conflicts.
+- `status` reports machines, bundles, sources, sessions, entries, artifacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--depot` is explicit.
+- `corpus size|vacuum|prune-orphans` exposes explicit local maintenance; `prune-orphans` is dry-run unless `--force`.
+- `depot verify` is quick by default, `--deep`/`--repair` are explicit byte-reading integrity operations, and `depot compact` deduplicates catalog metadata without touching bundle bytes.
 - README states that v1 does not redact secrets.
 - Test suite includes realistic Pi and Claude Code fixtures, including `agent-*.jsonl` and image-bearing prompts.
-- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, and search/read coherence.
-- CI runs `go test ./...`, `go test -race ./...`, `go vet ./...`, parser fuzz/property tests, deterministic archive tests, and documentation-code sync checks.
+- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, search/read coherence, FTS verifier query shape, indexed search filters, depot operation budgets, and maintenance dry-run safety.
+- CI/local verification runs `go test ./...`, `go test -race ./...`, `go vet ./...`, bounded fuzz/property tests, deterministic archive tests, documentation-code sync checks, and build verification through `scripts/verify.sh full`.
 
 ## Testing strategy
 
@@ -772,7 +783,7 @@ Use Go's standard testing stack first:
 | Regression | Every bug gets a named test first; record the Windows Claude project discovery issue from `claude-history-explorer#8` as a v2 fixture, not a v1 support promise. |
 | Documentation sync | README command list, flags, config keys, and privacy warning stay in sync with the actual CLI registry/config structs. |
 | Race/concurrency | Active-file copy retry behavior and parallel ingest/search safety pass `go test -race`. |
-| Performance | Large-session parser benchmarks catch obvious O(n²) or whole-file-loading regressions. |
+| Performance | Pathological package benchmarks plus cheap invariants/query-plan tests catch obvious O(n²), extra network fetch/downloads, unindexed FTS/path plans, duplicate catalog work, and repeated blob recompression. |
 
 ### Core properties to test
 
@@ -1047,6 +1058,30 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources, then ingest the just-created bundle into the configured corpus. It supports `--session` and `--max-sessions` for one-to-all local-session scope. |
 | Repo alias | Corpus path flags also accept `--repo` where users are thinking in terms of an aggregation repo. |
 
+### Performance/scalability implementation lessons
+
+- Performance claims need executable guardrails at the cheapest layer: query-plan tests for SQLite shape, fake-driver counters for R2/network cost, property tests for duplicate/catalog cardinality, and benchmarks for magnitude.
+- Routine commands should avoid historical-byte work. Deep integrity remains available, but `status`, no-op `refresh`, quick depot verify, and ordinary search should scale with metadata, indexed rows, or bounded output.
+- Search output is an agent cost center, not only a latency concern. High `--limit` values produce large JSON/ref payloads, so v1 caps requested limits at 200 and asks users/agents to refine with `--source`, `--machine`, `--project`, or `--path-token`.
+- Exact project and path-segment workflows need indexed filters. Arbitrary contains matching remains useful but must be documented as a convenience slow path.
+- Disk growth is a product behavior. Because raw preservation is the trust default, deletion is explicit: show size, allow SQLite vacuum, dry-run orphan pruning by default, and leave broader retention/export policies as future product choices.
+- Remote/R2 operation cost is part of correctness. Quick verification and status must not download bundles; deep/repair paths must be explicit and report bytes read/downloaded.
+
+### Additional locked decisions from performance/scalability work
+
+| Area | Decision |
+|---|---|
+| Verify complexity | FTS verification uses rowid-backed identity and query-plan guards; repair remains a full derived-index rebuild. |
+| Ingest SQL | Use transaction-scoped prepared statements and prefetch same-session/cross-machine conflict state per session before per-entry inserts. |
+| Known blobs | If a content-addressed file blob row/path already exists, ingest must not recompress or rewrite that blob. |
+| Search filters | `--project` is exact/indexed; `--path-token` is exact/indexed over derived path-token tables; `--path` is contains/non-indexed. |
+| Search limit | Requested search limits above 200 are capped with a user-visible warning. |
+| Depot catalog merge | Repair and compaction use map-backed dedupe by `bundle_sha256`, preserving first non-empty metadata. |
+| Depot verification cost | Quick/default verify uses metadata/head/existence checks; `--deep` and `--repair` are the byte-reading modes and report byte counters. |
+| Corpus maintenance | `aha corpus size`, `vacuum`, and dry-run/forced `prune-orphans` are the v1 local maintenance surface. |
+| Depot maintenance | `aha depot compact` deduplicates catalog refs without reading bundle bytes. |
+| License | The project is MIT-licensed. |
+
 ## Validation plan
 
 ### Canonical examples
@@ -1070,6 +1105,18 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 5. **Second machine**
    - Input: bundle from another `machine_id`.
    - Expected: same corpus searches across both machines and can filter by machine.
+
+6. **Indexed search filters**
+   - Input: corpus with several project keys and path-token segments.
+   - Expected: `aha search --project KEY` and `aha search --path-token TOKEN` return readable refs and query-plan tests show the intended indexes are available to the actual SQL.
+
+7. **Depot cost modes**
+   - Input: fake-R2 depot with catalog refs and bundle objects.
+   - Expected: `depot verify` quick uses list/head metadata and downloads zero bundle bytes; `--deep`/`--repair` download bundle bytes and report that cost; `depot compact` rewrites catalog metadata without touching bundle bytes.
+
+8. **Local maintenance**
+   - Input: corpus with database, blobs, and an orphan blob file.
+   - Expected: `corpus size` classifies database/blob bytes; `corpus vacuum` preserves data; `corpus prune-orphans` dry-run reports without deleting and `--force` deletes only unreferenced blobs.
 
 ### Edge cases
 
@@ -1118,9 +1165,10 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 
 ### Post-v1 release hardening, not implementation blockers
 
-- Validate performance against large real corpora.
+- Validate perception and constants against large real corpora; package-level pathological benchmarks and query-plan/operation-count guards already cover the algorithmic risks.
 - Add more anonymized real-world Claude Code fixtures, especially image/attachment representations and active append-only files.
-- Prepare release notes that repeat the v1 privacy warning and limitations.
+- Run real R2 integration against a scratch bucket before any R2-focused release announcement.
+- Prepare release notes that repeat the v1 privacy warning, local/R2 cost modes, and accepted limitations.
 
 ### V2 or later
 
@@ -1130,6 +1178,9 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 - Opt-in tool-output indexing.
 - Source-native branch/thread reconstruction in `read`.
 - Conflict display/search policy refinements.
+- True multi-row ingest insert batching if benchmarks show SQLite step overhead dominates after prepared statements/prefetching.
+- Depot catalog summary files or local stale status caches if raw catalog scans become a real bottleneck after compaction.
+- Retention/export/delete policies beyond explicit orphan pruning.
 - OCR/captioning for image content.
 
 ## Relationship to adjacent tools

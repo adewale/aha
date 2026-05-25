@@ -32,8 +32,8 @@ func TestCorpusSizeAndVacuumCommands(t *testing.T) {
 	if err := cli.Run([]string{"corpus", "size", "--config", cfgPath, "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"total_bytes"`) {
-		t.Fatalf("size JSON missing total_bytes: %s", out.String())
+	if !strings.Contains(out.String(), `"total_bytes"`) || !strings.Contains(out.String(), `"database_bytes"`) || strings.Contains(out.String(), `"database_bytes": 0`) {
+		t.Fatalf("size JSON missing/nonzero database_bytes: %s", out.String())
 	}
 	out.Reset()
 	if err := cli.Run([]string{"corpus", "vacuum", "--config", cfgPath, "--json"}, &out, io.Discard); err != nil {

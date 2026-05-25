@@ -53,7 +53,7 @@ func Size(store *Store) (SizeReport, error) {
 		rel, _ := filepath.Rel(store.Root, path)
 		rel = filepath.ToSlash(rel)
 		switch {
-		case strings.HasSuffix(rel, "corpus.sqlite") || strings.HasPrefix(rel, "corpus.sqlite-"):
+		case rel == "corpus.db" || strings.HasPrefix(rel, "corpus.db-"):
 			report.DatabaseBytes += size
 		case strings.HasPrefix(rel, "blobs/bundles/"):
 			report.BundleBlobBytes += size
