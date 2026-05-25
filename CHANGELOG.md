@@ -15,17 +15,35 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - R2 support through the AWS SDK S3 client with Cloudflare endpoint/region handling.
 - Fake-S3 R2 tests plus a real-R2 integration test behind the `integration` build tag.
 - Depot-specific fuzz targets for address parsing and bundle-key validation.
+- Unified verification entrypoints via `scripts/verify.sh` and Make targets, including bounded fuzz and optional mutation profiles.
+- `rapid` property-based testing dependency plus shared test generators for shrinkable invariant tests.
+- Static correctness-debt inventory tests for ambient time, raw identity concatenation, manual FTS writes, and direct append-only table mutations.
+- Correctness-by-construction guardrails and implementation hardening: typed identity/ref primitives, sealed canonical-only ref variants/parsing/formatting, corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, exact canonical read/human resolution split, clock/sleeper/backoff/source-capability seams, corpus verifier/reconciler queries, v2-only bundle schema validation, v2-only session-key construction, targeted SQLite foreign keys/checks, append-only/quarantine triggers, and trigger-maintained FTS rows.
 - `status --depot` behind-bundle reporting.
 - `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.
 - Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
+- `aha verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
+- Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimization guardrails.
+- Optional command-level Go pprof output via `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, and `AHA_MEM_PROFILE`.
+- Pathological performance benchmarks for many tiny archive files, large ingest/verify/search/status corpora, and large local depot catalogs.
+- Performance scalability/longevity plan tying benchmark/profiling findings to concrete optimization phases.
+- Rowid-based FTS verification with query-plan guard, reducing pathological 5k-message verify from seconds to milliseconds.
+- Known bundle identity handoffs: `archive.WriteWithInfo`, catalog `state_sha256`/`manifest_sha256`, depot known-SHA publish, and expected-SHA ingest staging.
+- Quick/default depot verification with `--deep` for byte/manifests checks; fake-R2 coverage ensures quick verify does not download bundles.
+- Ingest performance contracts: prepared statement lifecycle, session-local duplicate/conflict prefetch, covering conflict-query index, known file-blob no-recompression, duplicate-bundle parse-skip guard, and file-blob zstd encoder pooling.
+- Indexed search filters: `--project` exact filter, `--path-token` path-segment filter for sessions/artifacts, actual query-plan guards, artifact coverage, and high-limit capping/warnings.
+- Corpus maintenance commands: `aha corpus size`, `aha corpus vacuum`, and dry-run/forced `aha corpus prune-orphans`.
+- Depot catalog compaction via `aha depot compact`, plus map-backed `MergeBundleRefs` properties and local/R2 compaction tests.
+- Verify/status/depot-ingest cost counters for depot bytes read/downloaded, listed/unique depot refs, fetched pending bundles, corpus verify row counts, and FTS repair rows.
+- Duplication-refactor pass sharing depot local/R2 integrity helpers, snapshot flag registration, search predicates, FTS predicates, and atomic file-write helpers, with before/after metrics and Go best-practices audit.
 
 ### Changed
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
 - Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
-- Generated command docs now include depot commands and depot-aware flags.
+- Generated command docs now include depot commands, depot-aware flags, corpus verification/maintenance, indexed search filters, global profiling guidance, depot quick/deep verification flags, and depot compaction.
 
 ### Removed
 
@@ -38,11 +56,11 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Depot ingest verifies catalog SHA/key against actual bundle bytes before corpus ingest.
 - Local depot catalog updates use locking plus atomic writes.
 - R2 catalog updates use conditional writes and retry-on-conflict behavior.
-- `depot verify` validates marker schema/layout and catalog/object agreement.
+- `depot verify` is quick by default and validates marker/catalog/object-existence metadata; `depot verify --deep` validates bundle bytes/manifests and catalog/object agreement.
 - Local depot paths and catalog-derived bundle keys are validated against traversal and malformed-key attacks.
 - Network imports are restricted to `internal/depot` by static tests.
 
 ### Documentation
 
-- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, and a docs consistency audit.
+- Added architecture docs with aggregation/deduplication walkthroughs, generated command docs, trust documentation updates, R2 bucket-settings guidance, R2 snapshot aggregation spec updates, verification guidance, a corrected correctness-by-construction spec, performance result captures, refactor metrics, and docs/code-duplication audits.
 - Added OpenCode research and evaluation docs.

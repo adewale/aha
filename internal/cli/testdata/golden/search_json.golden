@@ -7,14 +7,14 @@
     "project": "/Users/ade/projects/aha",
     "role": "assistant",
     "snippet": "fixed [needle] in parser",
-    "session_key": "claude-code:work-mac:abc123",
+    "session_key": "sk1_64cff22ab557fa7878680013323c548b1383e6e2b9d4dcd9ad1921bc0b9a3ef5",
     "entry_id": "entry-7",
     "ref": {
       "kind": "message",
-      "session_key": "claude-code:work-mac:abc123",
+      "session_key": "sk1_64cff22ab557fa7878680013323c548b1383e6e2b9d4dcd9ad1921bc0b9a3ef5",
       "entry_id": "entry-7"
     },
-    "ref_text": "claude-code:work-mac:abc123#entry-7"
+    "ref_text": "msg:v1:c2sxXzY0Y2ZmMjJhYjU1N2ZhNzg3ODY4MDAxMzMyM2M1NDhiMTM4M2U2ZTJiOWQ0ZGNkOWFkMTkyMWJjMGI5YTNlZjU:ZW50cnktNw"
   },
   {
     "score": 0.25,
@@ -24,14 +24,12 @@
     "project": "notes.txt",
     "role": "artifact",
     "snippet": "artifact [needle] tail",
-    "session_key": "artifact:abcdef012345",
-    "entry_id": "abcdef012345",
+    "session_key": "",
+    "entry_id": "abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd",
     "ref": {
       "kind": "artifact",
-      "session_key": "artifact:abcdef012345",
-      "entry_id": "abcdef012345",
-      "artifact_sha256": "abcdef012345"
+      "artifact_sha256": "abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd"
     },
-    "ref_text": "artifact:abcdef012345#abcdef012345"
+    "ref_text": "artifact:v1:abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd"
   }
 ]

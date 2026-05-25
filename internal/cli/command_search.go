@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -30,7 +31,10 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	results, err := search.Query(store.DB, strings.Join(pf.Args(), " "), search.Filters{Source: pf.String("source"), Machine: pf.String("machine"), Role: pf.String("role"), After: pf.String("after"), Before: pf.String("before"), Path: pf.String("path"), Limit: pf.Int("limit")})
+	if limit := pf.Int("limit"); limit > search.MaxLimit {
+		fmt.Fprintf(stderr, "warning: --limit capped at %d; refine with --source/--project/--path-token for broader searches\n", search.MaxLimit)
+	}
+	results, err := search.Query(store.DB, strings.Join(pf.Args(), " "), search.Filters{Source: pf.String("source"), Machine: pf.String("machine"), Role: pf.String("role"), After: pf.String("after"), Before: pf.String("before"), Path: pf.String("path"), PathToken: pf.String("path-token"), Project: pf.String("project"), Limit: pf.Int("limit")})
 	if err != nil {
 		return err
 	}

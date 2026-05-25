@@ -12,6 +12,18 @@ import (
 )
 
 func TestRenderSearchGolden(t *testing.T) {
+	sessionKey, err := model.NewSessionKey("claude-code", "work-mac", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryID, err := model.NewEntryID("entry-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactSHA, err := model.ParseSHA256Hex("abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	results := []search.Result{
 		{
 			Score:      0.125,
@@ -21,23 +33,22 @@ func TestRenderSearchGolden(t *testing.T) {
 			Project:    "/Users/ade/projects/aha",
 			Role:       "assistant",
 			Snippet:    "fixed [needle] in parser",
-			SessionKey: "claude-code:work-mac:abc123",
-			EntryID:    "entry-7",
-			RefText:    "claude-code:work-mac:abc123#entry-7",
-			Ref:        model.HitRef{Kind: model.HitKindMessage, SessionKey: "claude-code:work-mac:abc123", EntryID: "entry-7"},
+			SessionKey: sessionKey.String(),
+			EntryID:    entryID.String(),
+			RefText:    model.FormatRef(model.MessageRef{Session: sessionKey, Entry: entryID}),
+			Ref:        model.MessageRef{Session: sessionKey, Entry: entryID},
 		},
 		{
-			Score:      0.25,
-			Timestamp:  "2026-01-04T00:00:00Z",
-			Source:     "pi",
-			Machine:    "work-mac",
-			Project:    "notes.txt",
-			Role:       "artifact",
-			Snippet:    "artifact [needle] tail",
-			SessionKey: "artifact:abcdef012345",
-			EntryID:    "abcdef012345",
-			RefText:    "artifact:abcdef012345#abcdef012345",
-			Ref:        model.HitRef{Kind: model.HitKindArtifact, SessionKey: "artifact:abcdef012345", EntryID: "abcdef012345", ArtifactSHA: "abcdef012345"},
+			Score:     0.25,
+			Timestamp: "2026-01-04T00:00:00Z",
+			Source:    "pi",
+			Machine:   "work-mac",
+			Project:   "notes.txt",
+			Role:      "artifact",
+			Snippet:   "artifact [needle] tail",
+			EntryID:   artifactSHA.String(),
+			RefText:   model.FormatRef(model.ArtifactRef{SHA: artifactSHA}),
+			Ref:       model.ArtifactRef{SHA: artifactSHA},
 		},
 	}
 	cases := map[string]renderMode{

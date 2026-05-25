@@ -16,49 +16,73 @@ type ReadEntry struct {
 	RawJSON   string `json:"raw_json"`
 }
 
-func ReadRef(db *sql.DB, ref model.HitRef, before, after int) ([]ReadEntry, error) {
-	if ref.Kind == model.HitKindArtifact {
-		sha := firstNonEmpty(ref.ArtifactSHA, ref.EntryID)
-		sessionKey := ref.SessionKey
-		if _, ok := model.ParseArtifactSessionKey(sessionKey); ok {
-			sessionKey = ""
-		}
-		artifact, err := readArtifactHit(db, sessionKey, sha)
-		if err != nil {
-			return nil, err
-		}
-		return []ReadEntry{artifact}, nil
-	}
-	return ReadContext(db, ref.SessionKey, ref.EntryID, before, after)
+func ReadRef(db *sql.DB, ref model.Ref, before, after int) ([]ReadEntry, error) {
+	return ReadCanonical(db, ref, before, after)
 }
 
-func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEntry, error) {
-	if parsedSHA, ok := model.ParseArtifactSessionKey(session); ok {
-		sha := parsedSHA
-		if entry != "" {
-			sha = entry
-		}
-		artifact, err := readArtifactHit(db, "", sha)
+func ReadCanonical(db *sql.DB, ref model.Ref, before, after int) ([]ReadEntry, error) {
+	if ref == nil || !ref.Valid() {
+		return nil, fmt.Errorf("invalid ref")
+	}
+	switch r := ref.(type) {
+	case model.ArtifactRef:
+		artifact, err := readArtifactHit(db, "", r.SHA.String())
 		if err != nil {
 			return nil, err
 		}
 		return []ReadEntry{artifact}, nil
+	case model.SessionRef:
+		if err := requireSession(db, r.Session.String()); err != nil {
+			return nil, err
+		}
+		return readWindow(db, r.Session.String(), 1, before, after)
+	case model.MessageRef:
+		center := 1
+		if err := db.QueryRow(`select line_no from entries where session_key=? and entry_id=?`, r.Session.String(), r.Entry.String()).Scan(&center); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, NotFoundError{Kind: "entry", Value: r.Entry.String()}
+			}
+			return nil, err
+		}
+		return readWindow(db, r.Session.String(), center, before, after)
+	default:
+		return nil, fmt.Errorf("unsupported ref variant")
 	}
+}
+
+func ResolveHuman(db *sql.DB, session, entry string) (model.Ref, error) {
 	sk, err := resolveSession(db, session)
 	if err != nil {
 		return nil, err
 	}
-	center := 1
-	if entry != "" {
-		center, err = resolveEntryLine(db, sk, entry)
-		if err != nil {
-			if artifact, artifactErr := readArtifactHit(db, sk, entry); artifactErr == nil {
-				return []ReadEntry{artifact}, nil
-			}
-			return nil, err
-		}
+	sessionKey, err := model.ParseSessionKey(sk)
+	if err != nil {
+		return nil, err
 	}
-	rows, err := db.Query(`select e.line_no,e.entry_id,e.timestamp,e.role,coalesce(m.text,''),e.raw_json from entries e left join messages m on m.session_key=e.session_key and m.entry_id=e.entry_id where e.session_key=? and e.line_no between ? and ? order by e.line_no`, sk, center-before, center+after)
+	if entry == "" {
+		return model.SessionRef{Session: sessionKey}, nil
+	}
+	entryID, err := resolveEntryID(db, sk, entry)
+	if err != nil {
+		return nil, err
+	}
+	parsedEntry, err := model.NewEntryID(entryID)
+	if err != nil {
+		return nil, err
+	}
+	return model.MessageRef{Session: sessionKey, Entry: parsedEntry}, nil
+}
+
+func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEntry, error) {
+	ref, err := ResolveHuman(db, session, entry)
+	if err != nil {
+		return nil, err
+	}
+	return ReadCanonical(db, ref, before, after)
+}
+
+func readWindow(db *sql.DB, sessionKey string, center, before, after int) ([]ReadEntry, error) {
+	rows, err := db.Query(`select e.line_no,e.entry_id,e.timestamp,e.role,coalesce(m.text,''),e.raw_json from entries e left join messages m on m.session_key=e.session_key and m.entry_id=e.entry_id where e.session_key=? and e.line_no between ? and ? order by e.line_no`, sessionKey, center-before, center+after)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +98,17 @@ func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEn
 	return out, rows.Err()
 }
 
+func requireSession(db *sql.DB, sessionKey string) error {
+	var found string
+	if err := db.QueryRow(`select session_key from sessions where session_key=?`, sessionKey).Scan(&found); err != nil {
+		if err == sql.ErrNoRows {
+			return NotFoundError{Kind: "session", Value: sessionKey}
+		}
+		return err
+	}
+	return nil
+}
+
 func resolveSession(db *sql.DB, q string) (string, error) {
 	rows, err := db.Query(`select session_key from sessions where session_key=? or source_session_id=?`, q, q)
 	if err != nil {
@@ -87,7 +122,7 @@ func resolveSession(db *sql.DB, q string) (string, error) {
 		return matches[0], nil
 	}
 	if len(matches) > 1 {
-		return "", fmt.Errorf("ambiguous session %q", q)
+		return "", AmbiguousError{Kind: "session", Value: q}
 	}
 	prefix := likePrefix(q)
 	rows, err = db.Query(`select session_key from sessions where session_key like ? escape '\' or source_session_id like ? escape '\'`, prefix, prefix)
@@ -102,45 +137,60 @@ func resolveSession(db *sql.DB, q string) (string, error) {
 		return matches[0], nil
 	}
 	if len(matches) > 1 {
-		return "", fmt.Errorf("ambiguous session %q", q)
+		return "", AmbiguousError{Kind: "session", Value: q}
 	}
-	return "", fmt.Errorf("session not found: %s", q)
+	return "", NotFoundError{Kind: "session", Value: q}
 }
 
-func resolveEntryLine(db *sql.DB, sessionKey, q string) (int, error) {
+func resolveEntryLine(db *sql.DB, sessionKey, entry string) (int, error) {
+	entryID, err := resolveEntryID(db, sessionKey, entry)
+	if err != nil {
+		return 0, err
+	}
+	var line int
+	if err := db.QueryRow(`select line_no from entries where session_key=? and entry_id=?`, sessionKey, entryID).Scan(&line); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, NotFoundError{Kind: "entry", Value: entry}
+		}
+		return 0, err
+	}
+	return line, nil
+}
+
+func resolveEntryID(db *sql.DB, sessionKey, q string) (string, error) {
 	for _, like := range []bool{false, true} {
 		arg := q
-		sqlq := `select line_no from entries where session_key=? and entry_id=?`
+		sqlq := `select entry_id from entries where session_key=? and entry_id=?`
 		if like {
 			arg = likePrefix(q)
-			sqlq = `select line_no from entries where session_key=? and entry_id like ? escape '\'`
+			sqlq = `select entry_id from entries where session_key=? and entry_id like ? escape '\'`
 		}
 		rows, err := db.Query(sqlq, sessionKey, arg)
 		if err != nil {
-			return 0, err
+			return "", err
 		}
-		var matches []int
+		var matches []string
 		for rows.Next() {
-			var n int
-			if err := rows.Scan(&n); err != nil {
+			var id string
+			if err := rows.Scan(&id); err != nil {
 				rows.Close()
-				return 0, err
+				return "", err
 			}
-			matches = append(matches, n)
+			matches = append(matches, id)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 		if len(matches) == 1 {
 			return matches[0], nil
 		}
 		if len(matches) > 1 {
-			return 0, fmt.Errorf("ambiguous entry %q", q)
+			return "", AmbiguousError{Kind: "entry", Value: q}
 		}
 	}
-	return 0, fmt.Errorf("entry not found: %s", q)
+	return "", NotFoundError{Kind: "entry", Value: q}
 }
 
 func likePrefix(q string) string {
@@ -166,6 +216,9 @@ func readArtifactHit(db *sql.DB, sessionKey, artifactSHA string) (ReadEntry, err
 		err = db.QueryRow(`select coalesce(nullif(text_body,''), text_preview),raw_path from artifacts where parent_session_key=? and artifact_sha256=? order by artifact_id limit 1`, sessionKey, artifactSHA).Scan(&text, &rawPath)
 	}
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return ReadEntry{}, NotFoundError{Kind: "artifact", Value: artifactSHA}
+		}
 		return ReadEntry{}, err
 	}
 	return ReadEntry{LineNo: 0, EntryID: artifactSHA, Role: "artifact", Text: text, RawJSON: rawPath}, nil

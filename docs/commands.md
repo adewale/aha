@@ -2,6 +2,12 @@
 
 This file is generated from CLI command metadata. Update command metadata, then regenerate this file.
 
+## Global profiling
+
+Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.
+
+Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.
+
 ## JSON errors
 
 When a command is invoked with `--json`, failures are written to stderr as:
@@ -38,17 +44,42 @@ aha conflicts [--repo DIR] [--json]
 
 **JSON contract:** `array<object{id,session_key,entry_id,first,second,created_at}>`
 
-## aha depot
+## aha corpus
 
-initialize, list, or verify a bundle depot
+inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs
 
 ```txt
-aha depot <init|ls|verify> [DEPOT] [--json]
+aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 ```
 
 **Flags:**
 
 - `--config`
+- `--corpus`
+- `--force`
+- `--json`
+- `--repo`
+
+**Examples:**
+
+- `aha corpus size --json`
+- `aha corpus vacuum`
+- `aha corpus prune-orphans --json`
+
+**JSON contract:** `object{root,total_bytes,database_bytes,bundle_blob_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}`
+
+## aha depot
+
+initialize, list, verify, or compact a bundle depot
+
+```txt
+aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
+```
+
+**Flags:**
+
+- `--config`
+- `--deep`
 - `--json`
 - `--repair`
 
@@ -56,6 +87,9 @@ aha depot <init|ls|verify> [DEPOT] [--json]
 
 - `aha depot init local:~/.aha/depot`
 - `aha depot ls --json`
+- `aha depot verify --deep`
+- `aha depot verify --repair`
+- `aha depot compact --json`
 
 **JSON contract:** `object|array`
 
@@ -102,7 +136,7 @@ aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 - `aha ingest --repo ./aha-repo`
 - `aha ingest --depot local:~/.aha/depot`
 
-**JSON contract:** `array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>`
+**JSON contract:** `array<object{bundle,sha256?,bytes?,fetched?,sessions,entries,messages,images,artifacts,duplicate}>`
 
 ## aha init
 
@@ -146,14 +180,14 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 **Examples:**
 
-- `aha read <session>#<entry> --json`
+- `aha read <ref_text> --json`
 - `aha read --session <session> --entry <entry> --json`
 
 **JSON contract:** `array<object{line_no,entry_id,timestamp,role,text,raw_json}>`
 
 ## aha refresh
 
-snapshot configured sources to the depot and ingest new bundles
+snapshot configured source state or reuse unchanged depot state, then ingest pending/new depot bundles
 
 ```txt
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
@@ -186,7 +220,7 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT
 find relevant messages/artifacts; use read on returned refs before answering
 
 ```txt
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
 ```
 
 **Flags:**
@@ -201,6 +235,8 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `--machine`
 - `--md`
 - `--path`
+- `--path-token`
+- `--project`
 - `--refs`
 - `--repo`
 - `--role`
@@ -261,5 +297,28 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 - `aha status --json`
 - `aha status --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}`
+**JSON contract:** `object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}`
+
+## aha verify
+
+verify corpus invariants and optionally repair derived FTS rows
+
+```txt
+aha verify [--repo DIR] [--repair-fts] [--json]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--json`
+- `--repair-fts`
+- `--repo`
+
+**Examples:**
+
+- `aha verify --json`
+- `aha verify --repair-fts`
+
+**JSON contract:** `object{root,stats,problems,repaired_fts,fts_repair?}`
 

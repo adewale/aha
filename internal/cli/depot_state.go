@@ -23,6 +23,12 @@ func findDepotBundleWithSameState(ctx context.Context, drv depot.Driver, manifes
 		if err != nil {
 			return depot.BundleRef{}, false, err
 		}
+		if ref.StateSHA256 != "" {
+			if ref.StateSHA256 == want {
+				return ref, true, nil
+			}
+			continue
+		}
 		path := localDepotBundlePath(drv, ref)
 		if path == "" {
 			path = filepath.Join(tmpDir, "state-"+ref.BundleSHA256+".tar.zst")

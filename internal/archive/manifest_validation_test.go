@@ -19,6 +19,7 @@ func TestWriteRejectsSemanticallyInvalidManifest(t *testing.T) {
 		edit func(*model.Manifest)
 	}{
 		{"schema", func(m *model.Manifest) { m.Schema = "" }},
+		{"pre-release v1 schema", func(m *model.Manifest) { m.Schema = "agent-session-snapshot-bundle/v1" }},
 		{"bundle", func(m *model.Manifest) { m.BundleID = "" }},
 		{"machine", func(m *model.Manifest) { m.MachineID = "" }},
 		{"captured", func(m *model.Manifest) { m.CapturedAt = "" }},

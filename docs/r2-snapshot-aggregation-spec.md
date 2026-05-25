@@ -67,7 +67,7 @@ client-side encryption is deliberately **out of scope for this feature**.
 Confidentiality is handled by a private bucket, TLS, scoped tokens, and R2's
 at-rest encryption — defenses that cannot make bundles unrecoverable.
 
-## Backwards compatibility
+## Pre-release contract cutoff
 
 `aha` has **no users yet** — a one-time luxury. We therefore **lock the public
 contracts now** (the `bundles/v1/` key layout, the `aha-depot/v1` marker, the
@@ -277,6 +277,8 @@ Example shard:
   "bundles": [
     { "bundle_sha256": "3f9a…", "bundle_id": "01J…",
       "captured_at": "2026-05-23T09:14:02Z", "bytes": 734512, "sessions": 41,
+      "key": "bundles/v1/3f9a….tar.zst",
+      "manifest_sha256": "8d12…", "state_sha256": "41ab…",
       "filename": "aha-sessions-ade-mbp-2026-05-23T09-14-02Z-3f9a.tar.zst" }
   ]
 }
@@ -359,10 +361,12 @@ once); any depot-touching command can override it for one invocation with
 | `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
 | `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |
 | `aha depot ls` | read catalog | — | yes (r2) | lists what is in the shared pool |
-| `aha depot verify` | read | — | yes (r2) | integrity: re-hash objects, catalog↔bucket agree; `--repair` rebuilds catalog from bundles |
+| `aha depot verify` | read | — | yes (r2) | quick/default: marker/catalog/object-existence metadata; `--deep` re-hashes/downloads objects and checks catalog↔bucket agreement; `--repair` rebuilds catalog from bundles; JSON reports bytes read/downloaded |
+| `aha depot compact` | read/write catalog | — | yes (r2) | deduplicates repairable catalog refs by bundle SHA without downloading bundle bytes |
 | `aha search` | — | read | **no** | queries your local corpus |
 | `aha read` | — | read | **no** | retrieves full context/blob from your local corpus |
-| `aha status` | optional | read | no by default | local corpus health; `--depot` adds a "behind by N bundles" line |
+| `aha status` | optional | read | no by default | local corpus health; `--depot` adds behind/listed/unique-ref metadata and still fetches zero bundles |
+| `aha verify` | — | read / repair derived index | **no** | checks corpus invariants; `--repair-fts` rebuilds derived FTS rows |
 | `aha conflicts` | — | read | **no** | lists quarantined merge conflicts in your corpus |
 | `aha doctor` | check | check | yes (r2) | diagnostics incl. depot reachability + credentials |
 
@@ -376,9 +380,13 @@ Notable behaviors:
   command is unchanged, but the depot is where conflicting bundles arrive from.
 - **`status` stays local-and-fast by default;** `--depot` cheaply diffs your
   corpus's known bundle set against the catalog and reports how far behind you
-  are.
+  are, how many refs were listed, how many were unique, and that zero bundle
+  fetches were performed.
 - **`depot ls` vs `status`** are the two halves: what is in the shared pool vs.
   what is in your local corpus; the gap is what the next `refresh` pulls.
+- **`depot compact` is metadata maintenance, not integrity verification.** It
+  rewrites catalog shards after map-backed dedupe by `bundle_sha256`; it does not
+  read/download bundle objects.
 - **`--depot` is inert for `search`/`read`/`conflicts`** (nothing remote to point
   at); `status --depot` is the one analytical command that uses it.
 
@@ -515,11 +523,13 @@ and per-op costs low.
   implementations. The R2 driver uses a mature S3-compatible client; `aha` does
   **not** hand-roll request signing or other S3 authentication details.
 - `depot` config block (`type` + `location`, with remote/R2 off by default) plus
-  optional non-secret R2 account/endpoint fields; `aha depot init/ls/verify`; and
+  optional non-secret R2 account/endpoint fields; `aha depot init/ls/verify/compact`; and
   `--depot` on the depot-touching commands.
 - Per-machine catalog shard reader/writer; content-addressed `bundles/v1/<sha>`
-  keys; `depot verify --repair` to rebuild catalog entries from bundle objects
-  when shards are missing or corrupt.
+  keys; catalog refs carrying `manifest_sha256` and `state_sha256`; `depot verify
+  --repair` to rebuild catalog entries from bundle objects when shards are missing
+  or corrupt; `depot compact` to dedupe repairable catalog metadata without
+  touching bundle bytes.
 - Credential loading from env / OS keychain / `0600` file — never committed,
   never written into manifests, catalog shards, JSON output, or logs.
 
@@ -543,7 +553,7 @@ and per-op costs low.
   selected depot driver.
 - Relocate the default bundle store from `~/agent-session-bundles`
   (`bundle_out_dir`) to the local depot `~/.aha/depot` and remove `--out` (see
-  Backwards compatibility).
+  Pre-release contract cutoff).
 
 ### Remove / explicitly avoid
 
@@ -581,9 +591,10 @@ cannot orphan data.
   Keep bundles aggregating many session files into one object; never fan out to
   per-session objects.
 - **Avoid full-bucket `LIST` on every refresh/ingest.** Per-machine catalog shards make
-  update cost proportional to **machines**, not total bundles; full `LIST` is a
-  repair path only. `depot verify --repair` uses that path to rebuild catalog
-  shards from bundle objects and embedded manifests.
+  update cost proportional to **machines**, not total bundles; full bundle `LIST`
+  is a repair/deep path only. `depot verify --repair` uses that path to rebuild
+  catalog shards from bundle objects and embedded manifests. `depot compact` lists
+  and rewrites catalog shards only; it does not download bundle objects.
 - **Pull is N round trips.** Parallelize downloads with bounded concurrency and
   stream into the existing staging path; the SQLite write
   (`db.SetMaxOpenConns(1)`) is the serialization point, so overlap network with
@@ -673,14 +684,14 @@ network in the default suite**.
 | Smoke | `aha depot --help`, `aha depot init/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
 | Contract / differential | One suite asserts **identical** observable behavior for the `local` driver, the S3 fake, and (tagged) real R2. |
 | Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, pending-ingest delta computation. |
-| Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
+| Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output, and canonical bundle bytes for the current bundle schema. |
 | Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
 | Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
 | Security (both directions) | credentials authenticate **and** never appear in any manifest, catalog, `--json`, config, or log output; the depot is private by default. |
 | Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; same-machine catalog update conflicts merge/retry; passes `go test -race`. |
 | Throttling | the S3 fake returns HTTP 429 → bounded exponential backoff with an injected clock. |
 | Doc-sync | new commands/flags/config keys match the registry and config struct (extends `docs_test.go`, `flag_metadata_sync_test.go`). |
-| No-regression | the remote-depot-off path is byte-identical except for the intentional v2 local-depot default/`--depot` rename and `--out` removal; the reworked no-network test; the full v1 suite green. |
+| No-regression | the remote-depot-off path is unchanged except for the intentional local-depot default/`--depot` rename, `--out` removal, current bundle-schema cutoff, and reworked no-network test; the full suite is green. |
 
 ### Core properties and invariants
 
@@ -752,8 +763,8 @@ internal become de facto contracts:
   migration before any change.
 - **Bundle filename, manifest schema, catalog schema.** Directly fetchable
   bundles mean external tools parse them; `omitempty`/"internal" fields will be
-  depended on. Treat the bundle schema (`agent-session-snapshot-bundle/v1`) and
-  catalog schema as real versioned contracts.
+  depended on. Treat the current bundle schema (`agent-session-snapshot-bundle/v2`) and
+  catalog schema (`aha-depot-catalog/v1`) as real versioned contracts.
 - **The content hash is a contract.** Determinism + content addressing means
   consumers pin and dedup on `bundle_sha256`; any change to zstd level, tar
   metadata, or manifest field order breaks dedup and external pins. The existing
@@ -778,9 +789,11 @@ additions.
 **Where it holds (strong):**
 
 - **One mental model, generalized — not a bolted-on mode.** The feature adds
-  nouns (depot, catalog) but **no new verbs**: `snapshot` still makes a bundle,
-  `ingest` still builds the corpus, now location-aware via `--depot`. The tool
-  reads as "the same `aha`, with the depot able to live in R2."
+  nouns (depot, catalog) while keeping the main pipeline verbs unchanged:
+  `snapshot` still makes a bundle, `ingest` still builds the corpus, now
+  location-aware via `--depot`. The only added verb-like surface is the explicit
+  `depot compact` maintenance subcommand for repairable catalog metadata. The
+  tool reads as "the same `aha`, with the depot able to live in R2."
 - **One name per entity.** Earlier drafts carried dual names; this revision fixed
   them: **bundle**, **depot** (the single noun for the store, its address, and
   the default role — the separate "destination" noun was collapsed in), **corpus** (with "index"

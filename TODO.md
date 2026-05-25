@@ -6,13 +6,13 @@
 - Add explicit agent documentation/skill for `aha`:
   - teach the required `search -> read -> answer` workflow;
   - state that snippets are leads, not evidence;
-  - list read-only commands (`search`, `read`, `status`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `depot init/verify --repair`);
-  - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, and JSON error envelopes;
+  - list read-only commands (`search`, `read`, `status`, `verify`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `depot init`, `depot verify --repair`);
+  - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, `verify --json`, and JSON error envelopes;
   - explain privacy caveats: v1 does not redact secrets, R2 is opt-in upload, and bundles/corpora are private;
   - show how an agent should cite/quote refs in its own notes;
-  - include failure handling: if search returns nothing, broaden query; if read fails, report the stale ref and run `aha status --json`/`aha doctor --json`;
+  - include failure handling: if search returns nothing, broaden query; if read fails, report the stale ref and run `aha status --json`/`aha verify --json`/`aha doctor --json`;
   - include config/depot caveats: use `--repo` for alternate corpora and do not pass `--depot` to search/read.
-- Continue improving `HitRef` as first-class CLI input/output. Search JSON now includes structured `ref` plus copy-pastable `ref_text`; next steps are multi-read and MCP resource mapping.
+- Continue improving canonical refs as first-class CLI input/output. Search JSON now includes structured `ref` plus copy-pastable `ref_text`; next steps are multi-read and MCP resource mapping.
 - Keep qmd-inspired output modes for agent retrieval (`--refs`, `--files`, and `--md`) stable and documented.
 - Keep command metadata as the source of truth for generated command docs, docs sync tests, examples, JSON schema notes, and future MCP tool schemas; eventually remove remaining manual flag-definition duplication.
 - Add an agent skill/guide for aha, similar to qmd's skill: search for leads, retrieve full source context, then answer with citations/refs.
@@ -23,6 +23,22 @@
 - Consider an MCP interface exposing `search`, `read`, `status`, and `conflicts` as tools/resources before adding any long-running daemon.
 - Continue improving `doctor`: source, corpus, depot, and common R2 misconfiguration diagnostics exist; remaining depth includes schema migration details, bundle blob-store checks, adapter fixture/version drift checks, and optional R2 bucket setting verification where Cloudflare exposes it.
 - Add multi-read or batch-read for agent workflows that need to retrieve several hits from one search. A likely syntax is `aha read --refs-file refs.txt --json` or `aha read <ref1> <ref2> ... --json`, returning grouped context per ref.
+
+## Performance work
+
+- Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
+- Continue tracking `aha verify` with pathological benchmarks; the rowid/query-plan fix removed the first superlinear cliff, but future FTS changes must keep the cheap query-plan guard green.
+- Continue tracking byte/call counters for archive/depot/ingest known-SHA handoffs; depot verify/status/ingest counters, verify/FTS repair counters, and known-blob tests now exist. Add SQL row-insert counters only if agent workflows need them.
+- Expand `state_sha256` refresh PBT only if duplicate/many-machine catalog shapes regress; zero-fetch state metadata coverage exists.
+- Consider true multi-row ingest inserts if benchmarks show SQLite step overhead dominating after prepared statements/prefetch/zstd pooling.
+- Prefer indexed `--project`/`--path-token`; keep `--path` contains as convenience and monitor broad-term FTS costs.
+- Add catalog summaries/local stale status cache only if raw catalog scans become a real depot bottleneck; `depot compact` and map-backed repair exist.
+
+## Code health and duplication watch list
+
+- Use `docs/audits/code-duplication-audit.md` and `docs/refactor-metrics-and-go-audit.md` as the current duplication/refactor baseline.
+- Completed the first duplication-refactor pass: depot known-ref prep, quick catalog verification, compact/repair shard rewriting, R2 marker helpers, snapshot/refresh flag registration, search predicate building, FTS verify/repair predicates, and atomic temp-write/copy helpers are shared.
+- Future code-health work should be evidence-driven: add another duplication audit only when changing depot/R2 integrity flows, search filters, FTS repair semantics, or blob-publish durability.
 
 ## Future adapters
 

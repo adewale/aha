@@ -13,7 +13,7 @@ Inputs:
 - Added machine-readable CLI error contracts and regression tests for flag parse errors.
 - Added generated `docs/commands.md` from command metadata and a sync test.
 - Added golden tests for human/JSON/refs/files/Markdown rendering.
-- Added public HitRef parse/format round-trip tests and fuzzing.
+- Added public canonical ref parse/format round-trip tests and fuzzing.
 - Added archive walk/write property tests and unsafe archive path rejection.
 - Added status schema error reporting instead of silently returning zero counts.
 - Added direct `internal/search` tests for filters, artifacts, and FTS query escaping.
@@ -74,7 +74,7 @@ A later TDD pass addressed additional reviewer findings:
 - Archive writing is deterministic independent of caller file ordering; `Write` sorts a copy of manifest and captured files.
 - Archive read/write/stream/walk now validate semantic manifest fields: schema, bundle ID, machine ID, capture timestamp, file source, supported kind, and source/kind path consistency.
 - `search` and `read` now reject mutually exclusive output mode combinations instead of silently picking one.
-- Artifact `ref_text` now formats as `artifact:<sha>` so parsing preserves artifact kind.
+- Artifact `ref_text` now formats as canonical `artifact:v1:<sha>` so parsing preserves artifact kind.
 
 A fresh reviewer pass found no P0/P1 regressions after these changes.
 

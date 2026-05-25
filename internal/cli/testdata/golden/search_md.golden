@@ -1,2 +1,2 @@
-- `claude-code:work-mac:abc123#entry-7` **assistant** `claude-code` score=0.1250 — fixed [needle] in parser
-- `artifact:abcdef012345#abcdef012345` **artifact** `pi` score=0.2500 — artifact [needle] tail
+- `msg:v1:c2sxXzY0Y2ZmMjJhYjU1N2ZhNzg3ODY4MDAxMzMyM2M1NDhiMTM4M2U2ZTJiOWQ0ZGNkOWFkMTkyMWJjMGI5YTNlZjU:ZW50cnktNw` **assistant** `claude-code` score=0.1250 — fixed [needle] in parser
+- `artifact:v1:abcdef012345abcdef012345abcdef012345abcdef012345abcdef012345abcd` **artifact** `pi` score=0.2500 — artifact [needle] tail

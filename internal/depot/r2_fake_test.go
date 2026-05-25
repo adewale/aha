@@ -84,6 +84,144 @@ func TestR2DepotPutListFetchVerifyRepairWithFakeS3(t *testing.T) {
 	}
 }
 
+func TestR2VerifyQuickDeepAndRepairOperationBudgets(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := writeDepotTestBundle(t, filepath.Join(t.TempDir(), "src"))
+	ref, _, err := d.PutBundle(t.Context(), bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.resetCounts()
+	report, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Deep {
+		t.Fatalf("quick verify reported deep: %+v", report)
+	}
+	if len(report.Problems) != 0 {
+		t.Fatalf("quick verify problems: %+v", report.Problems)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 0 {
+		t.Fatalf("quick verify downloaded bundle %s %d times", ref.Key, got)
+	}
+	if got := fake.byteCount(http.MethodGet, ref.Key); got != 0 {
+		t.Fatalf("quick verify downloaded bundle bytes=%d", got)
+	}
+	if got := fake.count(http.MethodHead, ref.Key); got != 1 {
+		t.Fatalf("quick verify head bundle count=%d, want 1", got)
+	}
+	if got := fake.count("LIST", "catalog/v1/"); got != 1 {
+		t.Fatalf("quick verify catalog list count=%d, want 1", got)
+	}
+	fake.resetCounts()
+	report, err = depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{Deep: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Deep {
+		t.Fatalf("deep verify did not report deep: %+v", report)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 1 {
+		t.Fatalf("deep verify bundle GET count=%d, want 1", got)
+	}
+	if got := fake.byteCount(http.MethodGet, ref.Key); got == 0 {
+		t.Fatalf("deep verify did not download bundle bytes")
+	}
+	if got := fake.count("LIST", "bundles/v1/"); got != 1 {
+		t.Fatalf("deep verify bundle list count=%d, want 1", got)
+	}
+	fake.resetCounts()
+	report, err = depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{Repair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Deep || !report.Repaired {
+		t.Fatalf("repair did not report deep+repaired: %+v", report)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 1 {
+		t.Fatalf("repair bundle GET count=%d, want 1", got)
+	}
+	if got := fake.byteCount(http.MethodGet, ref.Key); got == 0 {
+		t.Fatalf("repair did not download bundle bytes")
+	}
+	if got := fake.count("LIST", "catalog/v1/"); got < 2 {
+		t.Fatalf("repair catalog list count=%d, want at least verify+delete listings", got)
+	}
+	if got := fake.count(http.MethodDelete, "catalog/v1/m1.json"); got != 1 {
+		t.Fatalf("repair catalog delete count=%d, want 1", got)
+	}
+	if got := fake.count(http.MethodPut, "catalog/v1/m1.json"); got != 1 {
+		t.Fatalf("repair catalog put count=%d, want 1", got)
+	}
+}
+
+func TestR2ListOperationBudgetDoesNotTouchBundles(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := writeDepotTestBundle(t, filepath.Join(t.TempDir(), "src"))
+	ref, _, err := d.PutBundle(t.Context(), bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.resetCounts()
+	refs, err := d.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("refs=%d, want 1", len(refs))
+	}
+	if got := fake.count("LIST", "catalog/v1/"); got != 1 {
+		t.Fatalf("list catalog LIST count=%d, want 1", got)
+	}
+	if got := fake.count(http.MethodGet, "catalog/v1/m1.json"); got != 1 {
+		t.Fatalf("list catalog GET count=%d, want 1", got)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 0 {
+		t.Fatalf("list downloaded bundle count=%d, want 0", got)
+	}
+}
+
+func TestR2CompactOperationBudgetAndDedupe(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("c", 64)
+	shard := depot.CatalogShard{Schema: depot.CatalogSchema, MachineID: "m1", Bundles: []depot.BundleRef{{BundleSHA256: sha, MachineID: "m1", Key: depot.BundleKey(sha)}, {BundleSHA256: sha, MachineID: "m1", Key: depot.BundleKey(sha)}}}
+	b, _ := json.Marshal(shard)
+	fake.put("catalog/v1/m1.json", b)
+	fake.resetCounts()
+	report, err := depot.Compact(t.Context(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.RefsBefore != 2 || report.RefsAfter != 1 || report.DuplicateRefs != 1 {
+		t.Fatalf("compact report: %+v", report)
+	}
+	if got := fake.count("LIST", "catalog/v1/"); got != 1 {
+		t.Fatalf("compact catalog LIST count=%d, want 1", got)
+	}
+	if got := fake.count(http.MethodPut, "catalog/v1/m1.json"); got != 1 {
+		t.Fatalf("compact catalog PUT count=%d, want 1", got)
+	}
+	if got := fake.count(http.MethodGet, depot.BundleKey(sha)); got != 0 {
+		t.Fatalf("compact touched bundle bytes: GET count=%d", got)
+	}
+}
+
 func TestR2InitRejectsInvalidMarkerWithFakeS3(t *testing.T) {
 	fake := newFakeS3(t)
 	defer fake.Close()
@@ -94,16 +232,18 @@ func TestR2InitRejectsInvalidMarkerWithFakeS3(t *testing.T) {
 }
 
 type fakeS3 struct {
-	t       *testing.T
-	server  *httptest.Server
-	mu      sync.Mutex
-	objects map[string][]byte
-	etags   map[string]string
+	t          *testing.T
+	server     *httptest.Server
+	mu         sync.Mutex
+	objects    map[string][]byte
+	etags      map[string]string
+	counts     map[string]int
+	byteCounts map[string]int64
 }
 
 func newFakeS3(t *testing.T) *fakeS3 {
 	t.Helper()
-	f := &fakeS3{t: t, objects: map[string][]byte{}, etags: map[string]string{}}
+	f := &fakeS3{t: t, objects: map[string][]byte{}, etags: map[string]string{}, counts: map[string]int{}, byteCounts: map[string]int64{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.handle))
 	return f
 }
@@ -128,6 +268,30 @@ func (f *fakeS3) get(key string) []byte {
 	return append([]byte(nil), f.objects[key]...)
 }
 
+func (f *fakeS3) resetCounts() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts = map[string]int{}
+	f.byteCounts = map[string]int64{}
+}
+
+func (f *fakeS3) count(method, key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[method+" "+key]
+}
+
+func (f *fakeS3) byteCount(method, key string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.byteCounts[method+" "+key]
+}
+
+func (f *fakeS3) record(method, key string, n int64) {
+	f.counts[method+" "+key]++
+	f.byteCounts[method+" "+key] += n
+}
+
 func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/")
 	parts := strings.SplitN(trimmed, "/", 2)
@@ -148,10 +312,15 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet && key == "" && r.URL.Query().Get("list-type") == "2" {
-		f.writeList(w, r.URL.Query().Get("prefix"))
+		prefix := r.URL.Query().Get("prefix")
+		f.mu.Lock()
+		f.record("LIST", prefix, 0)
+		f.mu.Unlock()
+		f.writeList(w, prefix)
 		return
 	}
 	f.mu.Lock()
+	f.record(r.Method, key, 0)
 	defer f.mu.Unlock()
 	switch r.Method {
 	case http.MethodHead:
@@ -167,6 +336,7 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		f.byteCounts[r.Method+" "+key] += int64(len(b))
 		w.Header().Set("ETag", f.etags[key])
 		_, _ = w.Write(b)
 	case http.MethodPut:
@@ -185,6 +355,7 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		f.byteCounts[r.Method+" "+key] += int64(len(b))
 		f.objects[key] = b
 		f.etags[key] = etag(b)
 		w.Header().Set("ETag", f.etags[key])

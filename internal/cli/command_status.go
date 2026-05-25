@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
 )
 
@@ -32,11 +33,14 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if *depotAddr != "" {
-		behind, err := depotBehindCount(store, cfg, *depotAddr)
+		report, err := depotBehindReportForConfig(store, cfg, *depotAddr)
 		if err != nil {
 			return err
 		}
-		stats["depot_behind_bundles"] = behind
+		stats["depot_behind_bundles"] = report.Behind
+		stats["depot_catalog_refs_listed"] = report.CatalogRefs
+		stats["depot_unique_refs_listed"] = report.UniqueCatalogRefs
+		stats["depot_fetches"] = 0
 	}
 	stats["next"] = statusNext(stats)
 	if *jsonOut {
@@ -45,26 +49,65 @@ func cmdStatus(args []string, stdout, stderr io.Writer) error {
 	return renderMap(stdout, stats)
 }
 
+type depotBehindReport struct {
+	Behind            int
+	CatalogRefs       int
+	UniqueCatalogRefs int
+}
+
 func depotBehindCount(store *corpus.Store, cfg model.Config, depotAddr string) (int, error) {
+	report, err := depotBehindReportForConfig(store, cfg, depotAddr)
+	return report.Behind, err
+}
+
+func depotBehindReportForConfig(store *corpus.Store, cfg model.Config, depotAddr string) (depotBehindReport, error) {
 	drv, err := depotDriverForConfig(cfg, depotAddr)
 	if err != nil {
-		return 0, err
+		return depotBehindReport{}, err
 	}
+	return depotBehindReportFromDriver(store, drv)
+}
+
+func depotBehindCountFromDriver(store *corpus.Store, drv depot.Driver) (int, error) {
+	report, err := depotBehindReportFromDriver(store, drv)
+	return report.Behind, err
+}
+
+func depotBehindReportFromDriver(store *corpus.Store, drv depot.Driver) (depotBehindReport, error) {
 	refs, err := drv.List(context.Background())
 	if err != nil {
-		return 0, err
+		return depotBehindReport{}, err
 	}
 	ingested, err := corpus.BundleSHAs(store.DB)
 	if err != nil {
-		return 0, err
+		return depotBehindReport{}, err
 	}
-	behind := 0
+	return depotBehindReport{Behind: depotBehindFromRefs(refs, ingested), CatalogRefs: len(refs), UniqueCatalogRefs: uniqueDepotRefs(refs)}, nil
+}
+
+func uniqueDepotRefs(refs []depot.BundleRef) int {
+	seen := map[string]bool{}
 	for _, ref := range refs {
-		if !ingested[ref.BundleSHA256] {
-			behind++
+		if ref.BundleSHA256 == "" || seen[ref.BundleSHA256] {
+			continue
 		}
+		seen[ref.BundleSHA256] = true
 	}
-	return behind, nil
+	return len(seen)
+}
+
+func depotBehindFromRefs(refs []depot.BundleRef, ingested map[string]bool) int {
+	behind := 0
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		sha := ref.BundleSHA256
+		if sha == "" || seen[sha] || ingested[sha] {
+			continue
+		}
+		seen[sha] = true
+		behind++
+	}
+	return behind
 }
 
 func statusNext(stats map[string]any) []string {

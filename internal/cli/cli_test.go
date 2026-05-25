@@ -11,6 +11,7 @@ import (
 
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/config"
+	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/testutil"
 )
 
@@ -64,6 +65,54 @@ func TestCLIDoctorReportsDepotSourceAndCorpusDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunMainWritesOptionalProfiles(t *testing.T) {
+	root := t.TempDir()
+	cpuProfile := filepath.Join(root, "cpu.pprof")
+	memProfile := filepath.Join(root, "heap.pprof")
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"version", "--cpuprofile", cpuProfile, "--memprofile=" + memProfile}, &out, &stderr)
+	if code != 0 {
+		t.Fatalf("RunMain code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(out.String(), "aha ") {
+		t.Fatalf("version output missing: %q", out.String())
+	}
+	for _, path := range []string{cpuProfile, memProfile} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("profile %s missing: %v", path, err)
+		}
+		if info.Size() == 0 {
+			t.Fatalf("profile %s is empty", path)
+		}
+	}
+}
+
+func TestRunMainUsesProfileEnvironment(t *testing.T) {
+	memProfile := filepath.Join(t.TempDir(), "env-heap.pprof")
+	t.Setenv("AHA_MEM_PROFILE", memProfile)
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"version"}, &out, &stderr)
+	if code != 0 {
+		t.Fatalf("RunMain code=%d stderr=%s", code, stderr.String())
+	}
+	info, err := os.Stat(memProfile)
+	if err != nil {
+		t.Fatalf("env profile missing: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("env profile is empty")
+	}
+}
+
+func TestRunMainRejectsProfileFlagWithoutPath(t *testing.T) {
+	var out, stderr bytes.Buffer
+	code := cli.RunMain([]string{"--cpuprofile"}, &out, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "--cpuprofile requires path") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestSubcommandHelpIsSuccessful(t *testing.T) {
 	for _, cmd := range cli.CommandNames() {
 		var out bytes.Buffer
@@ -73,6 +122,18 @@ func TestSubcommandHelpIsSuccessful(t *testing.T) {
 		if !strings.Contains(out.String(), "Usage of") {
 			t.Fatalf("%s --help missing usage: %s", cmd, out.String())
 		}
+	}
+}
+
+func TestReadRejectsLegacyRefsBeforeOpeningCorpus(t *testing.T) {
+	for _, ref := range []string{"pi:m:s#e", "artifact:abc123"} {
+		t.Run(ref, func(t *testing.T) {
+			var out bytes.Buffer
+			err := cli.Run([]string{"read", ref, "--json"}, &out, &out)
+			if err == nil || !strings.Contains(err.Error(), "unsupported ref format") {
+				t.Fatalf("read legacy ref err=%v output=%s", err, out.String())
+			}
+		})
 	}
 }
 
@@ -440,7 +501,7 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &searchJSON); err != nil {
 		t.Fatalf("search JSON did not decode: %v\n%s", err, out.String())
 	}
-	if len(searchJSON) == 0 || !strings.Contains(searchJSON[0].RefText, "#") || searchJSON[0].Ref.Kind == "" {
+	if len(searchJSON) == 0 || !strings.HasPrefix(searchJSON[0].RefText, "msg:v1:") || searchJSON[0].Ref.Kind == "" {
 		t.Fatalf("search JSON missing round-trippable refs: %+v", searchJSON)
 	}
 	out.Reset()
@@ -504,5 +565,28 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "index_size_bytes") {
 		t.Fatalf("bad status output: %s", out.String())
+	}
+	store, err := corpus.OpenExisting(corpusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.Exec(`delete from fts_messages`); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	store.Close()
+	out.Reset()
+	if err := cli.Run([]string{"verify", "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "missing_fts_messages") {
+		t.Fatalf("verify did not report seeded FTS drift: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"verify", "--corpus", corpusDir, "--repair-fts", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "missing_fts_messages") || !strings.Contains(out.String(), `"repaired_fts": true`) || !strings.Contains(out.String(), `"inserted_message_rows"`) || !strings.Contains(out.String(), `"stats"`) {
+		t.Fatalf("verify --repair-fts did not repair drift or emit counters: %s", out.String())
 	}
 }

@@ -27,16 +27,15 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	if err := requireAtMostOneOutputMode(pf.Bool("json"), pf.Bool("md")); err != nil {
 		return err
 	}
-	var ref model.HitRef
+	var ref model.Ref
 	useRef := false
-	if strings.Contains(session, "#") && entry == "" {
-		parsed, err := model.ParseHitRef(session)
+	if entry == "" && looksLikeRef(session) {
+		parsedRef, err := model.ParseRef(session)
 		if err != nil {
 			return err
 		}
-		ref = parsed
+		ref = parsedRef
 		useRef = true
-		session, entry = ref.SessionKey, ref.EntryID
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
@@ -49,7 +48,7 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	defer store.Close()
 	var entries []corpus.ReadEntry
 	if useRef {
-		entries, err = corpus.ReadRef(store.DB, ref, pf.Int("before"), pf.Int("after"))
+		entries, err = corpus.ReadCanonical(store.DB, ref, pf.Int("before"), pf.Int("after"))
 	} else {
 		entries, err = corpus.ReadContext(store.DB, session, entry, pf.Int("before"), pf.Int("after"))
 	}
@@ -63,6 +62,10 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 		mode = renderMD
 	}
 	return renderReadEntries(stdout, entries, mode)
+}
+
+func looksLikeRef(s string) bool {
+	return strings.HasPrefix(s, "msg:v1:") || strings.HasPrefix(s, "session:v1:") || strings.HasPrefix(s, "artifact:v1:") || strings.Contains(s, "#") || strings.HasPrefix(s, "artifact:")
 }
 
 func reorderReadArgs(args []string) []string {

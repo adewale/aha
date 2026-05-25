@@ -17,8 +17,10 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
@@ -58,15 +60,17 @@ type errorPayload struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--depot", "--machine", "--max-sessions", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured sources to the depot and ingest new bundles", Run: cmdRefresh},
+		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--depot", "--machine", "--max-sessions", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured source state or reuse unchanged depot state, then ingest pending/new depot bundles", Run: cmdRefresh},
 		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--depot", "--machine", "--max-sessions", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle and store it in a depot", Run: cmdSnapshot},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{bundle,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
-		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
-		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <session>#<entry> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
-		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}", Docs: "summarize corpus health", Run: cmdStatus},
+		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{bundle,sha256?,bytes?,fetched?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
+		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
+		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <ref_text> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
+		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}", Docs: "summarize corpus health", Run: cmdStatus},
+		"verify":    {Name: "verify", Usage: "aha verify [--repo DIR] [--repair-fts] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repair-fts", "--repo"}, Examples: []string{"aha verify --json", "aha verify --repair-fts"}, JSONSchema: "object{root,stats,problems,repaired_fts,fts_repair?}", Docs: "verify corpus invariants and optionally repair derived FTS rows", Run: cmdVerify},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
+		"corpus":    {Name: "corpus", Usage: "aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]", Flags: []string{"--config", "--corpus", "--force", "--json", "--repo"}, Examples: []string{"aha corpus size --json", "aha corpus vacuum", "aha corpus prune-orphans --json"}, JSONSchema: "object{root,total_bytes,database_bytes,bundle_blob_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}", Docs: "inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs", Run: cmdCorpus},
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,sources,corpus,depot,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
-		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify> [DEPOT] [--json]", Flags: []string{"--config", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json"}, JSONSchema: "object|array", Docs: "initialize, list, or verify a bundle depot", Run: cmdDepot},
+		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]", Flags: []string{"--config", "--deep", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json", "aha depot verify --deep", "aha depot verify --repair", "aha depot compact --json"}, JSONSchema: "object|array", Docs: "initialize, list, verify, or compact a bundle depot", Run: cmdDepot},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
 	}
 }
@@ -94,16 +98,25 @@ func Run(args []string, stdout, stderr io.Writer) error {
 }
 
 func RunMain(args []string, stdout, stderr io.Writer) int {
-	if wantsJSON(args) {
+	cleanArgs, profileOpts, profileErr := profileOptionsFromArgs(args)
+	if profileErr != nil {
+		if wantsJSON(args) {
+			_ = writeJSON(stderr, errorEnvelope{Error: machineError(profileErr, cleanArgs)})
+		} else {
+			fmt.Fprintln(stderr, "error:", profileErr)
+		}
+		return 1
+	}
+	if wantsJSON(cleanArgs) {
 		var commandStderr bytes.Buffer
-		if err := Run(args, stdout, &commandStderr); err != nil {
-			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, args)})
+		if err := runWithProfiling(profileOpts, func() error { return Run(cleanArgs, stdout, &commandStderr) }); err != nil {
+			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, cleanArgs)})
 			return 1
 		}
 		_, _ = stderr.Write(commandStderr.Bytes())
 		return 0
 	}
-	if err := Run(args, stdout, stderr); err != nil {
+	if err := runWithProfiling(profileOpts, func() error { return Run(cleanArgs, stdout, stderr) }); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -139,6 +152,22 @@ func machineError(err error, args []string) errorPayload {
 }
 
 func classifyError(err error) string {
+	var notFound corpus.NotFoundError
+	if errors.As(err, &notFound) {
+		return "not_found"
+	}
+	var ambiguous corpus.AmbiguousError
+	if errors.As(err, &ambiguous) {
+		return "ambiguous"
+	}
+	var unsupportedSchema archive.UnsupportedSchemaError
+	if errors.As(err, &unsupportedSchema) {
+		return "unsupported_schema"
+	}
+	var unsupportedRef model.UnsupportedRefError
+	if errors.As(err, &unsupportedRef) {
+		return "unsupported_ref"
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "flag provided but not defined") || strings.Contains(msg, "invalid value") || strings.Contains(msg, "flag needs an argument") {
 		return "flag_parse_error"
@@ -151,16 +180,21 @@ func classifyError(err error) string {
 
 func Usage(w io.Writer) {
 	fmt.Fprintf(w, "aha %s\n\nUsage:\n", model.Version)
+	fmt.Fprintln(w, "  aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]")
 	names := CommandNames()
 	for _, name := range names {
 		fmt.Fprintf(w, "  %s\n", Registry()[name].Usage)
 	}
+	fmt.Fprintln(w, "\nGlobal profiling flags may also be supplied after the subcommand, or via AHA_CPU_PROFILE/AHA_MEM_PROFILE.")
 }
 
 func GenerateCommandsMarkdown() string {
 	var b strings.Builder
 	b.WriteString("# aha commands\n\n")
 	b.WriteString("This file is generated from CLI command metadata. Update command metadata, then regenerate this file.\n\n")
+	b.WriteString("## Global profiling\n\n")
+	b.WriteString("Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.\n\n")
+	b.WriteString("Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.\n\n")
 	b.WriteString("## JSON errors\n\n")
 	b.WriteString("When a command is invoked with `--json`, failures are written to stderr as:\n\n")
 	b.WriteString("```json\n{\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor\"]\n  }\n}\n```\n\n")
@@ -243,11 +277,12 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	defer os.RemoveAll(tmpDir)
 	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID, SessionFilters: req.SessionFilters, MaxSessions: req.MaxSessions}
 	if opts.CapturedAt == "" {
-		opts.CapturedAt = time.Now().UTC().Format(time.RFC3339)
+		opts.CapturedAt = ahaclock.RealClock{}.Now().Format(time.RFC3339)
 	}
 	if opts.BundleID == "" {
 		opts.BundleID = hash.RandomID()
 	}
+	opts.Clock = ahaclock.RealClock{}
 	bundle, err := archive.Capture(context.Background(), req.Config, adapters.Builtins(), opts)
 	if err != nil {
 		return "", "", err
@@ -266,11 +301,12 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 		}
 	}
 	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
-	sha, err := archive.Write(tmpPath, bundle)
+	info, err := archive.WriteWithInfo(tmpPath, bundle)
 	if err != nil {
 		return "", "", err
 	}
-	ref, _, err := drv.PutBundle(context.Background(), tmpPath)
+	ref := depot.BundleRefFromWriteInfo(bundle.Manifest, info, filepath.Base(tmpPath))
+	ref, _, err = depot.PutBundleKnown(context.Background(), drv, tmpPath, ref)
 	if err != nil {
 		return "", "", err
 	}
@@ -278,7 +314,7 @@ func writeSnapshot(req snapshotRequest) (string, string, error) {
 	if path == "" {
 		path = ref.Key
 	}
-	return path, sha, nil
+	return path, info.BundleSHA256, nil
 }
 
 func reorderSearchArgs(args []string) []string {

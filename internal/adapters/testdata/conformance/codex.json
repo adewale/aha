@@ -1,0 +1,15 @@
+{
+  "name": "codex",
+  "adapter": "codex",
+  "fixture": "testdata/codex_realish.jsonl",
+  "session_file": { "source": "codex", "session_id": "codex-path" },
+  "want": {
+    "source": "codex",
+    "source_session_id": "codex-realish",
+    "cwd": "/Users/me/work",
+    "started_at": "2026-05-20T12:00:00Z",
+    "entries": 3,
+    "contains_text": "codex fixture needle",
+    "roles_by_index": { "1": "user", "2": "assistant" }
+  }
+}

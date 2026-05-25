@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	"github.com/adewale/aha/internal/archive"
+	ahaclock "github.com/adewale/aha/internal/clock"
+	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 )
@@ -31,14 +32,16 @@ type Address struct {
 }
 
 type BundleRef struct {
-	BundleSHA256 string `json:"bundle_sha256"`
-	BundleID     string `json:"bundle_id"`
-	MachineID    string `json:"machine_id"`
-	CapturedAt   string `json:"captured_at"`
-	Bytes        int64  `json:"bytes"`
-	Sessions     int    `json:"sessions"`
-	Filename     string `json:"filename"`
-	Key          string `json:"key"`
+	BundleSHA256   string `json:"bundle_sha256"`
+	BundleID       string `json:"bundle_id"`
+	MachineID      string `json:"machine_id"`
+	CapturedAt     string `json:"captured_at"`
+	Bytes          int64  `json:"bytes"`
+	Sessions       int    `json:"sessions"`
+	Filename       string `json:"filename"`
+	Key            string `json:"key"`
+	ManifestSHA256 string `json:"manifest_sha256,omitempty"`
+	StateSHA256    string `json:"state_sha256,omitempty"`
 }
 
 type CatalogShard struct {
@@ -48,10 +51,21 @@ type CatalogShard struct {
 }
 
 type VerifyReport struct {
-	Bundles  int      `json:"bundles"`
-	Catalogs int      `json:"catalogs"`
-	Repaired bool     `json:"repaired"`
-	Problems []string `json:"problems,omitempty"`
+	Bundles         int      `json:"bundles"`
+	Catalogs        int      `json:"catalogs"`
+	Repaired        bool     `json:"repaired"`
+	Deep            bool     `json:"deep"`
+	BytesRead       int64    `json:"bytes_read"`
+	BytesDownloaded int64    `json:"bytes_downloaded"`
+	Problems        []string `json:"problems,omitempty"`
+}
+
+type CompactReport struct {
+	Catalogs        int `json:"catalogs"`
+	RefsBefore      int `json:"refs_before"`
+	RefsAfter       int `json:"refs_after"`
+	DuplicateRefs   int `json:"duplicate_refs"`
+	CatalogsWritten int `json:"catalogs_written"`
 }
 
 type Driver interface {
@@ -61,6 +75,68 @@ type Driver interface {
 	List(ctx context.Context) ([]BundleRef, error)
 	Fetch(ctx context.Context, ref BundleRef, dst string) error
 	Verify(ctx context.Context, repair bool) (VerifyReport, error)
+}
+
+type KnownBundleDriver interface {
+	PutBundleKnown(ctx context.Context, bundlePath string, ref BundleRef) (BundleRef, bool, error)
+}
+
+type VerifyOptions struct {
+	Repair bool
+	Deep   bool
+}
+
+type OptionsVerifier interface {
+	VerifyWithOptions(ctx context.Context, opts VerifyOptions) (VerifyReport, error)
+}
+
+type Compactor interface {
+	Compact(ctx context.Context) (CompactReport, error)
+}
+
+func PutBundleKnown(ctx context.Context, d Driver, bundlePath string, ref BundleRef) (BundleRef, bool, error) {
+	if kd, ok := d.(KnownBundleDriver); ok {
+		return kd.PutBundleKnown(ctx, bundlePath, ref)
+	}
+	return d.PutBundle(ctx, bundlePath)
+}
+
+func prepareKnownBundleRef(bundlePath string, ref BundleRef) (BundleRef, error) {
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Filename == "" {
+		ref.Filename = filepath.Base(bundlePath)
+	}
+	if err := ValidateKnownBundleRef(ref); err != nil {
+		return BundleRef{}, err
+	}
+	if ref.Bytes > 0 {
+		st, err := os.Stat(bundlePath)
+		if err != nil {
+			return BundleRef{}, err
+		}
+		if st.Size() != ref.Bytes {
+			return BundleRef{}, fmt.Errorf("known bundle size mismatch: ref=%d actual=%d", ref.Bytes, st.Size())
+		}
+	}
+	return ref, nil
+}
+
+func Compact(ctx context.Context, d Driver) (CompactReport, error) {
+	if c, ok := d.(Compactor); ok {
+		return c.Compact(ctx)
+	}
+	return CompactReport{}, fmt.Errorf("depot %s does not support compaction", d.Address().Type)
+}
+
+func VerifyWithOptions(ctx context.Context, d Driver, opts VerifyOptions) (VerifyReport, error) {
+	if v, ok := d.(OptionsVerifier); ok {
+		return v.VerifyWithOptions(ctx, opts)
+	}
+	report, err := d.Verify(ctx, opts.Repair)
+	report.Deep = true
+	return report, err
 }
 
 func ParseAddress(s string) (Address, error) {
@@ -106,6 +182,34 @@ func ConfigFromAddress(addr Address) model.DepotConfig {
 
 func BundleKey(sha string) string {
 	return filepath.ToSlash(filepath.Join("bundles", "v1", sha+".tar.zst"))
+}
+
+func ValidateKnownBundleRef(ref BundleRef) error {
+	if ref.BundleSHA256 == "" {
+		return fmt.Errorf("bundle sha required")
+	}
+	if ref.Key == "" {
+		ref.Key = BundleKey(ref.BundleSHA256)
+	}
+	if ref.Key != BundleKey(ref.BundleSHA256) {
+		return fmt.Errorf("bundle key %q does not match sha %s", ref.Key, ref.BundleSHA256)
+	}
+	if err := ValidateBundleKey(ref.Key); err != nil {
+		return err
+	}
+	if ref.BundleID == "" {
+		return fmt.Errorf("bundle id required")
+	}
+	if ref.MachineID == "" {
+		return fmt.Errorf("machine id required")
+	}
+	if ref.CapturedAt == "" {
+		return fmt.Errorf("captured_at required")
+	}
+	if ref.Bytes < 0 {
+		return fmt.Errorf("bundle bytes must be non-negative")
+	}
+	return nil
 }
 
 func CatalogKey(machine string) string {
@@ -174,7 +278,20 @@ func BundleRefFromPath(bundlePath string) (BundleRef, error) {
 	if err != nil {
 		return BundleRef{}, err
 	}
-	return BundleRef{BundleSHA256: sha, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: st.Size(), Sessions: manifest.Counts.SessionFiles, Filename: filepath.Base(bundlePath), Key: BundleKey(sha)}, nil
+	mb, err := archive.CanonicalManifest(manifest)
+	if err != nil {
+		return BundleRef{}, err
+	}
+	return BundleRef{BundleSHA256: sha, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: st.Size(), Sessions: manifest.Counts.SessionFiles, Filename: filepath.Base(bundlePath), Key: BundleKey(sha), ManifestSHA256: hashBytes(mb), StateSHA256: archive.ManifestStateSHA256(manifest)}, nil
+}
+
+func BundleRefFromWriteInfo(manifest model.Manifest, info archive.WriteInfo, filename string) BundleRef {
+	return BundleRef{BundleSHA256: info.BundleSHA256, BundleID: manifest.BundleID, MachineID: manifest.MachineID, CapturedAt: manifest.CapturedAt, Bytes: info.SizeBytes, Sessions: manifest.Counts.SessionFiles, Filename: filename, Key: BundleKey(info.BundleSHA256), ManifestSHA256: info.ManifestSHA256, StateSHA256: info.StateSHA256}
+}
+
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func mergeBundleRef(list []BundleRef, ref BundleRef) []BundleRef {
@@ -185,6 +302,114 @@ func mergeBundleRef(list []BundleRef, ref BundleRef) []BundleRef {
 		}
 	}
 	return append(list, ref)
+}
+
+func MergeBundleRefs(refs []BundleRef) []BundleRef {
+	bySHA := make(map[string]BundleRef, len(refs))
+	for _, ref := range refs {
+		if ref.BundleSHA256 == "" {
+			continue
+		}
+		if old, ok := bySHA[ref.BundleSHA256]; ok {
+			bySHA[ref.BundleSHA256] = mergeRef(old, ref)
+		} else {
+			bySHA[ref.BundleSHA256] = ref
+		}
+	}
+	out := make([]BundleRef, 0, len(bySHA))
+	for _, ref := range bySHA {
+		out = append(out, ref)
+	}
+	sortRefs(out)
+	return out
+}
+
+func addShardRefsByMachine(byMachine map[string][]BundleRef, shard CatalogShard, report *CompactReport) {
+	if report != nil {
+		report.Catalogs++
+	}
+	for _, ref := range shard.Bundles {
+		machine := ref.MachineID
+		if machine == "" {
+			machine = shard.MachineID
+			ref.MachineID = machine
+		}
+		byMachine[machine] = append(byMachine[machine], ref)
+		if report != nil {
+			report.RefsBefore++
+		}
+	}
+}
+
+func refsByMachine(refs []BundleRef) map[string][]BundleRef {
+	byMachine := map[string][]BundleRef{}
+	for _, ref := range refs {
+		byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
+	}
+	return byMachine
+}
+
+func refsByMachineFromMap(refs map[string]BundleRef) map[string][]BundleRef {
+	byMachine := map[string][]BundleRef{}
+	for _, ref := range refs {
+		byMachine[ref.MachineID] = append(byMachine[ref.MachineID], ref)
+	}
+	return byMachine
+}
+
+func writeMergedCatalogShards(byMachine map[string][]BundleRef, report *CompactReport, write func(machine string, shard CatalogShard) error) error {
+	for machine, refs := range byMachine {
+		merged := MergeBundleRefs(refs)
+		if report != nil {
+			report.RefsAfter += len(merged)
+		}
+		if err := write(machine, CatalogShard{Schema: CatalogSchema, MachineID: machine, Bundles: merged}); err != nil {
+			return err
+		}
+		if report != nil {
+			report.CatalogsWritten++
+		}
+	}
+	if report != nil && report.RefsBefore > report.RefsAfter {
+		report.DuplicateRefs = report.RefsBefore - report.RefsAfter
+	}
+	return nil
+}
+
+func verifyCatalogRefs(catalogRefs []BundleRef, exists func(key string) (bool, error)) (bundles int, problems []string, err error) {
+	seen := map[string]bool{}
+	for _, ref := range catalogRefs {
+		if ref.BundleSHA256 == "" {
+			problems = append(problems, "catalog reference missing bundle sha")
+			continue
+		}
+		if seen[ref.BundleSHA256] {
+			continue
+		}
+		seen[ref.BundleSHA256] = true
+		key := ref.Key
+		if key == "" {
+			key = BundleKey(ref.BundleSHA256)
+		}
+		if key != BundleKey(ref.BundleSHA256) {
+			problems = append(problems, "catalog key mismatch "+ref.BundleSHA256)
+			continue
+		}
+		if err := ValidateBundleKey(key); err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		ok, err := exists(key)
+		if err != nil {
+			return bundles, problems, err
+		}
+		if !ok {
+			problems = append(problems, "catalog references missing bundle "+ref.BundleSHA256)
+			continue
+		}
+		bundles++
+	}
+	return bundles, problems, nil
 }
 
 func mergeRef(old, new BundleRef) BundleRef {
@@ -209,6 +434,12 @@ func mergeRef(old, new BundleRef) BundleRef {
 	if old.Key == "" {
 		old.Key = new.Key
 	}
+	if old.ManifestSHA256 == "" {
+		old.ManifestSHA256 = new.ManifestSHA256
+	}
+	if old.StateSHA256 == "" {
+		old.StateSHA256 = new.StateSHA256
+	}
 	return old
 }
 
@@ -222,68 +453,20 @@ func sortRefs(refs []BundleRef) {
 }
 
 func writeJSONAtomic(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*.json")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	_, writeErr := tmp.Write(b)
-	closeErr := tmp.Close()
-	if writeErr != nil {
-		_ = os.Remove(tmpPath)
-		return writeErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeErr
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return fileutil.AtomicWriteBytes(path, b, fileutil.AtomicOptions{TempPattern: ".tmp-*.json"})
 }
 
 func copyFile(dst, src string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.CreateTemp(filepath.Dir(dst), ".tmp-*.bundle")
-	if err != nil {
-		return err
-	}
-	tmp := out.Name()
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		if _, statErr := os.Stat(dst); statErr == nil {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fileutil.AtomicCopyFile(dst, src, fileutil.AtomicOptions{TempPattern: ".tmp-*.bundle"})
+}
+
+func copyFileIfAbsent(dst, src string) (bool, error) {
+	return fileutil.AtomicCopyFileCreated(dst, src, fileutil.AtomicOptions{TempPattern: ".tmp-*.bundle", ExistingOK: true})
 }
 
 func expandLocalRoot(root string) (string, error) {
@@ -302,7 +485,8 @@ type marker struct {
 }
 
 func newMarker() marker {
-	return marker{Schema: MarkerSchema, DepotID: fmt.Sprintf("depot-%d", time.Now().UTC().UnixNano()), Layout: LayoutVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339), CreatedBy: "aha " + model.Version}
+	now := ahaclock.RealClock{}.Now()
+	return marker{Schema: MarkerSchema, DepotID: fmt.Sprintf("depot-%d", now.UnixNano()), Layout: LayoutVersion, CreatedAt: now.Format(time.RFC3339), CreatedBy: "aha " + model.Version}
 }
 
 func validateMarkerBytes(b []byte) error {

@@ -1,0 +1,15 @@
+{
+  "name": "pi",
+  "adapter": "pi",
+  "fixture": "testdata/pi_realish.jsonl",
+  "session_file": { "source": "pi", "session_id": "path-fallback" },
+  "want": {
+    "source": "pi",
+    "source_session_id": "pi-realish",
+    "entries": 3,
+    "contains_text": "search needle from pi fixture",
+    "roles_by_entry_id": { "tool1": "toolResult" },
+    "tool_by_entry_id": { "tool1": "bash" },
+    "parent_by_entry_id": { "a1": "tool1" }
+  }
+}

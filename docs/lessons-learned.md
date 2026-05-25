@@ -66,11 +66,25 @@ Current counts after cycle 10:
 ## Post-audit hardening lessons
 
 - `--help` is behavior, not incidental flag-parser output; every subcommand help path should exit successfully.
-- Privacy flags must affect all image preservation paths, including file artifacts and legacy bundles, not only embedded prompt images or the `images` table.
+- Privacy flags must affect all image preservation paths, including file artifacts, not only embedded prompt images or the `images` table.
 - Skipped data still needs integrity validation. If an image artifact is ignored because `include_images=false`, ingest must still hash/read the tar entry before accepting the bundle.
 - Symlink safety needs defense in depth: discovery skips symlinks, snapshot copy rejects non-regular files, and output/repo paths are checked both lexically and through existing symlink resolution.
 - Archive validation must bound compressed size, manifest size, file count, per-entry size, and total declared uncompressed bytes before spooling untrusted bundle content.
 - Trust-doc commands are contracts; test names and docs must stay synchronized.
+
+## Correctness-by-construction preparation lessons
+
+- Prior art agrees with the `aha` architecture: immutable raw evidence first, normalized records second, derived indexes third, stable refs and verification on top.
+- “Correct by construction” in Go/SQLite must be honest: some states can be made unconstructible, while others can only be encapsulated, statically guarded, detected, and repaired.
+- Phase-0 guardrails are not busywork. Static debt inventories, state-machine skeletons, adapter conformance fixtures, schema introspection helpers, named seams, verifier queries, and mutation dry-runs make later refactors smaller and safer.
+- Verification should be one workflow, not a wiki list of commands. CI and local development need the same scriptable profiles for quick checks, full checks, fuzzing, and mutation dry-runs.
+- Mutation dry-runs are useful before trusting a new test net: they show uncovered critical code before a refactor removes duplicate runtime checks.
+- Because `aha` is pre-user/pre-release, the CbC phases should delete transitional compatibility bridges: emit and parse canonical refs only, use v2 session keys only, and reject unsupported bundle schemas instead of carrying aliases.
+- SQLite construction is strongest when paired with repair: targeted `CHECK`/`FOREIGN KEY` constraints and triggers block true invalid states, while verifier/reconciler queries remain necessary for direct SQL drift and recovery.
+- Sealed canonical refs paid off more than compatibility shims. Removing optional ref DTOs and old ref syntax made search/read contracts simpler and made malformed states easier to reject at the boundary.
+- Verification needs to be user-facing, not only test-facing. `aha verify --json` and `aha verify --repair-fts` turn corpus drift detection into an operational recovery path for humans and agents.
+- Lightweight formal sketches are not useful unless they are executable or checked. Prefer Go state machines/properties already run by CI over standalone model notes that can drift.
+- Open-world agent data should not get strict enum `CHECK` constraints too early. Typed role helpers can centralize decisions without rejecting future roles from raw histories.
 
 ## Testing lessons
 
@@ -93,6 +107,22 @@ Additional testing lessons:
 - Real-history smoke tests are necessary before release: they caught that real Pi entries use top-level `type:"message"` plus nested `message.role`, while early fixtures had top-level roles.
 - Tests should assert specific fields and negative cases, not just non-empty output.
 - Documentation examples are tests: if README shows `aha search query --json`, the CLI must support that form.
+
+## Performance testing lessons
+
+- Pathological does not always mean large. Years of trivial bundles, duplicate catalog refs, or repeated no-op refreshes can be a worse scalability shape than one huge archive.
+- Test performance claims at the cheapest layer that can falsify them: pure/model PBT for cardinality and idempotence, fake-driver counters for network/fetch/byte-read claims, tiny SQLite query-plan tests for indexing claims, package benchmarks for constants, and CLI pprof only for end-to-end confirmation.
+- Prefer deterministic performance invariants over wall-clock assertions in unit tests. Assert unique work units, fetch counts, bytes read, output cardinality, query plans, and idempotent state transitions.
+- Benchmarks and pprof answer different questions than PBT. Benchmarks show cost; profiles show where cost lands; PBT says what must not grow with duplicates, stale refs, old trivial bundles, or catalog ordering.
+- Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimize from the smallest benchmark that reproduces the issue.
+- Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalog rows. Distinguish metadata scanned from work performed.
+- A performance plan is incomplete without user-journey metrics. Each abstraction change needs a baseline, a scenario that should become measurably better, and a counter/benchmark/profile that proves the improvement happened.
+- Profile enough iterations to separate setup from the target path. The latest ingest/search/verify profiles were useful because ingest ran one ~1s operation, search ran 20 broad queries, and verify ran 100 checks; the allocation profiles still exposed benchmark setup, pprof startup, and package init noise that should not be mistaken for product hot paths.
+- When CPU lands mostly in SQLite and syscalls, prefer semantic changes over Go micro-optimizations. The latest ingest profile put nearly all CPU under SQLite statement execution and `pwrite`, so true multi-row inserts remain a possible constant-factor change, not an obvious correctness-preserving rewrite to do without stronger evidence.
+- Search profiles and query-plan tests answer different questions. Query-plan tests prove the indexed project/path-token filters are used; pprof showed broad common-term searches are still SQLite/FTS candidate work, so output caps reduce memory/user cost without promising broad-term ranking speedups.
+- Verify profiles can validate that a repaired algorithmic cliff stays repaired. Rowid-backed FTS verification now profiles as small SQLite count work rather than the former seconds-scale join path; extra stats counters are acceptable only because the benchmark remains millisecond-scale.
+- Refactor-only work still needs before/after metrics and a behavior audit. The duplication pass found that moving shared FTS predicates was not enough; schema triggers and migrations had to use the same expression or existing corpora would keep stale behavior.
+- Atomic write helpers must state their race semantics. “Existing OK” is not the same as no-replace unless the final publish step is atomic; returning whether this process actually created the file prevents misleading depot reports.
 
 ## Documentation lessons
 

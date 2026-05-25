@@ -219,7 +219,11 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err := store.DB.QueryRow(`select parent_session_key from artifacts where parent_session_key is not null`).Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
-	if parent != "pi:test-machine:pi-session" {
+	wantParent, err := model.NewSessionKey("pi", "test-machine", "pi-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent != wantParent.String() {
 		t.Fatalf("artifact parent=%q", parent)
 	}
 	var unlinked int
@@ -254,7 +258,11 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err := store.DB.QueryRow(`select artifact_sha256 from artifacts limit 1`).Scan(&artifactSHA); err != nil {
 		t.Fatal(err)
 	}
-	artifactCtx, err := corpus.ReadContext(store.DB, "pi-session", artifactSHA, 0, 0)
+	parsedArtifactSHA, err := model.ParseSHA256Hex(artifactSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactCtx, err := corpus.ReadCanonical(store.DB, model.ArtifactRef{SHA: parsedArtifactSHA}, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,10 +273,10 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(unlinkedResults) != 1 || !strings.HasPrefix(unlinkedResults[0].SessionKey, "artifact:") {
+	if len(unlinkedResults) != 1 || !strings.HasPrefix(unlinkedResults[0].RefText, "artifact:v1:") {
 		t.Fatalf("bad unlinked artifact search: %+v", unlinkedResults)
 	}
-	unlinkedCtx, err := corpus.ReadContext(store.DB, unlinkedResults[0].SessionKey, unlinkedResults[0].EntryID, 0, 0)
+	unlinkedCtx, err := corpus.ReadCanonical(store.DB, unlinkedResults[0].Ref, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +316,7 @@ func TestLaterBundleAppendOnlyMerge(t *testing.T) {
 	}
 	assertCount(t, store.DB, "sessions", 3)
 	var versions int
-	if err := store.DB.QueryRow(`select count(*) from session_versions where session_key='pi:test-machine:pi-session'`).Scan(&versions); err != nil {
+	if err := store.DB.QueryRow(`select count(*) from session_versions sv join sessions s on s.session_key=sv.session_key where s.source_name='pi' and s.machine_id='test-machine' and s.source_session_id='pi-session'`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
 	if versions != 2 {
@@ -393,7 +401,7 @@ func TestFullArtifactTailAndSummaryAreIndexed(t *testing.T) {
 	if len(artifactResults) == 0 {
 		t.Fatalf("tail artifact text was not indexed")
 	}
-	artifactCtx, err := corpus.ReadContext(store.DB, artifactResults[0].SessionKey, artifactResults[0].EntryID, 0, 0)
+	artifactCtx, err := corpus.ReadCanonical(store.DB, artifactResults[0].Ref, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

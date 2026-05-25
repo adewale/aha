@@ -9,13 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./...
-      - run: go vet ./...
-      - run: go test -race ./...
-      - run: go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime=2s
-      - run: go build -o /tmp/aha ./cmd/aha
-      - run: git diff --check
+      - run: scripts/verify.sh ci

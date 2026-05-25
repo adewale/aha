@@ -69,6 +69,50 @@ func TestRunMainJSONFlagParseErrorIsOnlyJSON(t *testing.T) {
 	}
 }
 
+func TestRunMainJSONUnsupportedRefError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cli.RunMain([]string{"read", "pi:m:s#e", "--json"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("RunMain unexpectedly succeeded")
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &payload); err != nil {
+		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr.String())
+	}
+	if payload.Error.Code != "unsupported_ref" {
+		t.Fatalf("bad typed ref error code: %+v stderr=%s", payload.Error, stderr.String())
+	}
+}
+
+func TestRunMainJSONTypedNotFoundError(t *testing.T) {
+	root := t.TempDir()
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	var stdout, stderr bytes.Buffer
+	code := cli.RunMain([]string{"read", "--session", "missing", "--corpus", root, "--json"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("RunMain unexpectedly succeeded")
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &payload); err != nil {
+		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr.String())
+	}
+	if payload.Error.Code != "not_found" {
+		t.Fatalf("bad typed error code: %+v stderr=%s", payload.Error, stderr.String())
+	}
+}
+
 func TestRefreshJSONUsesStableLowercaseReportKeys(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)

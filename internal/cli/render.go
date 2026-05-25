@@ -49,7 +49,7 @@ func renderSearchResults(w io.Writer, results []search.Result, mode renderMode) 
 		}
 	default:
 		for _, r := range results {
-			fmt.Fprintf(w, "%.4f %s %s %s %s %s %s %s %s\n", r.Score, r.Timestamp, r.Source, r.Machine, shortProject(r.Project), r.Role, r.Snippet, r.SessionKey, r.EntryID)
+			fmt.Fprintf(w, "%.4f %s %s %s %s %s %s %s\n", r.Score, r.Timestamp, r.Source, r.Machine, shortProject(r.Project), r.Role, r.Snippet, resultRef(r))
 		}
 	}
 	return nil
@@ -59,13 +59,10 @@ func resultRef(r search.Result) string {
 	if r.RefText != "" {
 		return r.RefText
 	}
-	if r.Ref.Kind != "" {
-		return model.FormatHitRef(r.Ref)
+	if r.Ref != nil {
+		return model.FormatRef(r.Ref)
 	}
-	if r.EntryID == "" {
-		return r.SessionKey
-	}
-	return fmt.Sprintf("%s#%s", r.SessionKey, r.EntryID)
+	return ""
 }
 
 func renderReadEntries(w io.Writer, entries []corpus.ReadEntry, mode renderMode) error {

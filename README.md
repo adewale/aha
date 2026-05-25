@@ -125,7 +125,7 @@ aha init --accept-secrets
 aha refresh
 ```
 
-`refresh` is the short path: snapshot configured sources and ingest the new bundle into the configured corpus.
+`refresh` is the short path: snapshot configured sources, reuse an unchanged depot bundle when state metadata proves nothing changed, then ingest pending/new bundles into the configured corpus.
 
 ### Routine update
 
@@ -152,30 +152,37 @@ More journey rationale: `docs/user-journeys.md`.
 ## Commands
 
 ```txt
+aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]
 aha init [--config PATH] [--accept-secrets] [--json]
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
 aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
 aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
+aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
 aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
 aha status [--repo DIR] [--depot DEPOT] [--json]
+aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha depot <init|ls|verify> [DEPOT] [--json]
+aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
+aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
 ```
 
 Command roles:
 
 - `init`: write starter JSONC config and optionally persist privacy acknowledgement.
-- `refresh`: common local update: `snapshot` then ingest the just-created bundle.
+- `refresh`: common local update: snapshot or reuse an unchanged depot bundle, then ingest pending/new bundles.
 - `snapshot`: create an immutable bundle and store it in the configured depot.
 - `ingest`: merge bundles from paths or a depot into a corpus/repo.
-- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts.
-- `read`: retrieve full context from `--session/--entry` or a `<session>#<entry>` ref.
+- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts. Prefer indexed `--project`/`--path-token` over contains-style `--path` for large corpora; requested limits above 200 are capped with a warning.
+- `read`: retrieve full context from `--session/--entry` or a canonical `ref_text` emitted by `search` (`msg:v1:...`, `session:v1:...`, or `artifact:v1:...`).
 - `status`: corpus counts and health.
+- `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `depot`: initialize, list, or verify a local/R2 bundle depot.
+- `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
+- `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
+
+Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
 
 ## Supported sources
 
@@ -246,13 +253,21 @@ For coding agents using `aha`:
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
+- `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
+- `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
+- `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.
+- `docs/performance-scalability-plan.md` — pathological benchmark results, profiling lessons, and scalability/longevity roadmap.
+- `docs/performance-results.md` — latest benchmark capture, success metrics, regressions, and deferred performance work.
+- `docs/refactor-metrics-and-go-audit.md` — before/after metrics, profiling, regression verification, and Go best-practices audit for the duplication-refactor pass.
+- `docs/verification.md` — local/CI verification profiles, fuzzing, static guardrails, and mutation testing.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.
 - `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
 - `docs/audits/docs-consistency-audit.md` — latest docs consistency audit.
+- `docs/audits/code-duplication-audit.md` — current production-code duplication baseline and refactor watch list.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 
 ## License
 
-No license file is currently included. Add one before broad external adoption.
+MIT; see `LICENSE`.
