@@ -45,6 +45,45 @@ go test ./internal/depot -run=^$ -bench='BenchmarkPathologicalCatalogMergeManyTr
 | Local depot append, growing catalog | ~`2.0ms` | `2.25ms`, `880KB`, `2.2k allocs` | Slightly slower; catalog JSON rewrite remains per-machine. |
 | Local depot deep verify, 250 refs | ~`24.9ms`, `20MB` | `28.2ms`, `21.6MB`, `34k allocs` | Slightly worse; deep verify is intentionally byte-linear and explicit. |
 
+## Profiling run
+
+Profile artifacts were written under `/tmp` during the run and intentionally not committed:
+
+- `/tmp/aha-ingest.cpu`, `/tmp/aha-ingest.mem`
+- `/tmp/aha-search.cpu`, `/tmp/aha-search.mem`
+- `/tmp/aha-verify.cpu`, `/tmp/aha-verify.mem`
+
+Commands:
+
+```bash
+go test ./internal/corpus -run=^$ -bench='BenchmarkPathologicalIngestManyTinyEntries/entries_10000$' -benchtime=1x -benchmem -cpuprofile=/tmp/aha-ingest.cpu -memprofile=/tmp/aha-ingest.mem
+go test ./internal/search -run=^$ -bench='BenchmarkPathologicalQueryBroadTermPathFilter/broad-term-limit-1000$' -benchtime=20x -benchmem -cpuprofile=/tmp/aha-search.cpu -memprofile=/tmp/aha-search.mem
+go test ./internal/corpus -run=^$ -bench='BenchmarkPathologicalVerifyFTSJoinScaling/messages_5000$' -benchtime=100x -benchmem -cpuprofile=/tmp/aha-verify.cpu -memprofile=/tmp/aha-verify.mem
+
+go tool pprof -top /tmp/aha-ingest.cpu
+go tool pprof -top -alloc_space /tmp/aha-ingest.mem
+go tool pprof -top /tmp/aha-search.cpu
+go tool pprof -top -alloc_space /tmp/aha-search.mem
+go tool pprof -top /tmp/aha-verify.cpu
+go tool pprof -top -alloc_space /tmp/aha-verify.mem
+```
+
+Profile-run benchmark outputs:
+
+| Profile target | Benchmark output |
+|---|---:|
+| Ingest 10k tiny entries | `1.135s/op`, `84.2MB/op`, `728k allocs/op` |
+| Search broad term, requested limit 1000 | `52.1ms/op`, `341KB/op`, `6.7k allocs/op` over `20x` |
+| Verify 5k messages | `14.9ms/op`, `6.4KB/op`, `179 allocs/op` over `100x` |
+
+Top findings:
+
+| Target | CPU profile | Allocation profile | Interpretation |
+|---|---|---|---|
+| Ingest | `syscall.rawsyscalln` `93%` flat; `corpusWriter.ingestEntry`/SQLite stmt exec `~93%` cumulative; `pwrite` `87%` cumulative | zstd decoder/encoder buffers (`~43MB` combined), `parseGenericJSONL` `18.9MB` cum, `ingestEntry` `21.6MB` cum, `database/sql` args `8.5MB` | Ingest is SQLite/write-syscall dominated after prepared statements. Multi-row inserts may reduce constants, but current 10k/50k/100k scaling is linear, so batching remains evidence-gated. |
+| Search | SQLite VDBE `98.5%` cumulative; `search.Query` `53%` cumulative; `pread`/`pwrite` dominate setup/query IO | `search.Query` `7.8MB` over `20x`; `columnText`, `FormatRef`/base64, SQL args visible | Broad-term search is SQLite/FTS candidate bound. The plan succeeded on bounded output/allocation, not broad-term ranking latency. |
+| Verify | `Verify`/`verifyCount` `58.7%` cumulative; SQLite VDBE `88.6%`; profile includes benchmark seed setup | verify itself is tiny; allocation profile is mostly benchmark setup/SQLite init, with `Verify` around `512KB` total over `100x` | Rowid verifier removed the seconds-scale cliff. Added stats counters explain the small alloc increase vs the earlier `119 allocs/op` measurement. |
+
 ## Correctness/performance guardrails added
 
 - Query-plan tests for rowid-backed FTS verification and actual search SQL using indexed project/path-token filters.
