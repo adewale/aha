@@ -1,8 +1,9 @@
 # Documentation Consistency Audit
 
 Date: 2026-05-19
+Updated: 2026-05-25
 
-Scope: README, changelog, command docs, trust docs, user journeys, architecture, R2 snapshot aggregation spec, correctness specs, performance audit, and the original aggregator spec.
+Scope: README, changelog, command docs, trust docs, user journeys, architecture, R2 snapshot aggregation spec, correctness specs, performance audit, performance results, lessons learned, and the original aggregator spec.
 
 ## Checks performed
 
@@ -23,6 +24,17 @@ Scope: README, changelog, command docs, trust docs, user journeys, architecture,
 - `CHANGELOG.md` mentions removed pre-release features (`--out`, `bundle_out_dir`, `.receipt.json`) because changelogs should record removals.
 - `docs/r2-snapshot-aggregation-spec.md` mentions old `bundle_out_dir`/`--out` only in the pre-release cutoff/removal rationale.
 - `docs/agent-history-aggregator-spec.md` still contains general no-live-sync context because that remains a non-goal.
+
+## 2026-05-25 performance-doc refresh
+
+A fresh consistency audit after the performance/profiling work found and fixed these doc drifts:
+
+- `docs/performance-results.md` now includes the required `AHA_PATHOLOGICAL_INGEST_LARGE` / `AHA_PATHOLOGICAL_INGEST_XL` env vars for 50k/100k ingest benchmark commands.
+- `docs/performance-scalability-plan.md` now labels the first pathological run as a historical baseline, aligns latest benchmark numbers with `docs/performance-results.md`, and describes rowid FTS verification as completed rather than pending.
+- `internal/cli` command metadata and generated `docs/commands.md` now describe `refresh` as snapshot-or-reuse plus pending/new ingest, and `status` JSON includes path-token tables plus depot listed/unique/fetch counters.
+- `README.md` now matches no-op refresh behavior by documenting unchanged depot-bundle reuse via `state_sha256` metadata.
+- `docs/performance-audit.md` now distinguishes original audit date from the latest update date.
+- `docs/lessons-learned.md` now records the profiling lessons from the latest ingest/search/verify pprof run.
 
 ## Validation
 

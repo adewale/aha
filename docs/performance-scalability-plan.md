@@ -88,14 +88,14 @@ go tool pprof -top /tmp/aha-verify.cpu
 go tool pprof -top -alloc_space /tmp/aha-ingest.mem
 ```
 
-## What the first pathological run showed
+## What the first pathological run showed (historical baseline)
 
-Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are directional, not release targets.
+Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are directional, not release targets. This section is preserved as the pre-plan baseline; current results are in the next section and in `docs/performance-results.md`.
 
 | Area | Pathological case | Observation | Interpretation |
 |---|---:|---:|---|
-| Corpus verify | 1k / 2k / 5k messages | `388ms` / `1.34s` / `7.68s` | Current FTS verification scales worse than linear; likely near quadratic for FTS key joins. |
-| FTS repair | 5k messages + artifacts | `43ms` | Full rebuild is much cheaper than the current verifier at this scale. |
+| Corpus verify | 1k / 2k / 5k messages | `388ms` / `1.34s` / `7.68s` | Baseline FTS verification scaled worse than linear due key joins; rowid-backed verification fixed this cliff. |
+| FTS repair | 5k messages + artifacts | `43ms` | In the baseline, full rebuild was cheaper than the old verifier; after rowid verification, repair remains an explicit maintenance path rather than the fast check. |
 | Ingest | 10k tiny entries | `1.23s`, `136MB`, `1.19M allocs` | Many small DB operations and transient parsing/SQL allocations dominate. |
 | Search | 10k broad-term messages | `51-57ms`; limit 1000 allocated `1.78MB` / `33k allocs` | Broad terms and high limits scale with candidate/result count; ref formatting and SQLite text extraction are visible. |
 | Search path filter | 10k broad-term messages + rare/no path match | `40-42ms` | Non-indexable contains filters still require broad candidate work. |
@@ -115,7 +115,7 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. The
 | Ingest | 10k tiny entries | `1.12s`, `84.1MB`, `728k allocs` | Memory down from `136MB`; time improved vs first `1.23s` run but regressed vs an intermediate `1.01s` run after adding path-token maintenance. |
 | Search | 10k broad term, limit requested 1000 | `50.6ms`, `344KB`, `6.7k allocs` | Output is capped at 200, reducing high-limit allocations from the original `1.78MB`/`33k allocs`; broad FTS time remains SQLite/candidate dominated. |
 | Search | 10k path-token rare match | `42.7ms`, `43KB`, `729 allocs` | Indexed token filter is available and guarded; broad common-term FTS still dominates this synthetic case. |
-| Search | 20×100 normal bench, path-token filter | `7.36ms`, `38.6KB`, `730 allocs` over `10x` | Similar to path/project filters with exact indexed semantics. |
+| Search | 20×100 normal bench, path-token filter | `7.17ms`, `38.6KB`, `730 allocs` over `10x` | Similar to path/project filters with exact indexed semantics. |
 | Depot merge | 1000 unique refs × 4 duplicates | `1.51ms`, `1.49MB`, `9.8k allocs` | Map-backed merge prevents quadratic duplicate behavior and is used by repair/compact. |
 | Local depot verify | 250 refs | `28.2ms`, `21.6MB` | Deep verify remains explicitly byte-linear. |
 | Status support | 5k messages + 5k bundles | counts `2.0ms`; `BundleSHAs` `1.66ms` / `1.25MB` | Status remains metadata-only; JSON exposes listed/unique depot refs and zero fetches. |
@@ -130,7 +130,7 @@ The plan should produce improvements we can point to. Treat these as scenario me
 | Routine no-op `aha refresh` with local/R2 depot | Old refs without state metadata still require fallback fetch; new refs carry state metadata. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | New catalog refs allow no-op refresh to list metadata but fetch `0` old bundles when a matching `state_sha256` exists. |
 | `aha ingest --depot` with pending bundles | Expected SHA is now checked during ingest staging instead of by a separate pre-hash. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
 | `aha snapshot` / `aha refresh` publish | `WriteWithInfo` now computes compressed bundle SHA while writing; known identity is handed to depot. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Snapshot/refresh publish avoids re-reading the just-written bundle for archive/depot identity. |
-| Many tiny entries in one ingest | First 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`; latest is `1.13s`, `88.9MB`, `728k allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared statements, duplicate/conflict prefetch, known-blob skip, and zstd pooling lower memory and SQL chatter while reports/conflicts remain identical. |
+| Many tiny entries in one ingest | First 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`; latest captured result is `1.12s`, `84.1MB`, `728k allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared statements, duplicate/conflict prefetch, known-blob skip, and zstd pooling lower memory and SQL chatter while reports/conflicts remain identical. |
 | Broad `aha search` / high `--limit` | First 10k broad-term high-limit search allocated `1.78MB`/`33k allocs`; latest capped high-limit search is `344KB`/`6.7k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce output/allocation cost for common agent workflows; broad FTS candidate work is still term-selectivity bound. |
 | `aha status --depot` on years of trivial bundles | Behind calculation and catalog parsing scale with raw catalog rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
 | `aha depot verify` on local/R2 depot | Quick/default verify now checks metadata/existence; `--deep`/`--repair` retains full object reads. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
@@ -178,16 +178,18 @@ This changes the roadmap: every optimization below should get both a benchmark a
 
 | Growth axis | Current behavior | Long-term risk |
 |---|---|---|
-| More messages | Ingest remains roughly linear in new entries, but verify can become superlinear due FTS key joins. | `aha verify` becomes too slow for routine use and agents stop running it. |
+| More messages | Ingest remains roughly linear in new entries; rowid-backed FTS verification removed the first superlinear verify cliff. | Future schema/FTS changes could reintroduce unindexed verifier work, so query-plan guards must stay green. |
 | More broad terms | FTS keeps search usable, but broad/common terms and high `--limit` increase SQL work and output allocations. | Search latency and JSON size grow; agent loops become slower and noisier. |
 | More paths/projects | `--path` uses contains matching over cwd/path columns. | Path filters stay non-indexable and degrade when combined with common terms. |
-| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference scan raw catalog/bundle rows; PBT guards that output/work units are deduped by SHA. | `status --depot` and depot ingest startup become increasingly expensive if catalogs grow without summary/compaction; bulk catalog merge needs map-based paths for very large trivial-bundle histories. |
-| More unchanged refreshes | Refresh can list refs and fetch/read prior same-machine bundles to compare state. | Unchanged daily refresh gets slower over time, especially with R2. |
+| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference scan raw catalog/bundle rows; PBT guards that output/work units are deduped by SHA, and map-backed merge/compact are in place. | `status --depot` and depot ingest startup can still grow with raw catalog metadata if real depots become much larger. |
+| More unchanged refreshes | New catalog refs carry `state_sha256`, so matching state metadata avoids fetching old bundles; refs missing state metadata still fall back to reads. | Unchanged daily refresh should stay metadata-only for new refs; fallback/repair paths remain explicit costs. |
 | More depot objects | Deep verify hashes/downloads every object. | Correct integrity audits become expensive and network-costly. |
 | More tiny files | Manifest/tar/header overhead scales with file count, not just bytes. | Many subagent artifacts or small sessions create high allocation/metadata overhead. |
 | More years of history | Corpus and bundle blobs are append-only by design. | Disk usage grows monotonically unless users get compaction/export/retention tools. |
 
-## Plan by hotspot
+## Historical implementation plan by hotspot
+
+The hotspot plan below is retained as a design record. The original actions have mostly landed; the current status and remaining watch list are summarized in the final priority section.
 
 ### 1. Repeated full-file/full-bundle hashing
 
@@ -276,7 +278,7 @@ Actions:
 4. Add `EXPLAIN QUERY PLAN` assertions for verifier queries so future changes do not reintroduce virtual-table scans.
 5. Keep `verify --repair-fts` as full rebuild; add scoped repair only after rowid-based verification is stable.
 
-Expected impact: this is the highest-priority performance fix. The benchmark already shows 5k messages taking ~7.7s; without this, routine verify will not survive normal long-term growth.
+Impact achieved: this was the highest-priority performance fix. The 5k pathological verifier dropped from about `7.7s` to about `15–16ms`, and query-plan tests now guard against returning to unindexed FTS joins.
 
 ### 7. Non-indexable path filters
 

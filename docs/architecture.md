@@ -137,8 +137,8 @@ Ingest builds the query corpus. It never rereads mutable source roots to decide 
 `refresh` is the daily path:
 
 ```text
-snapshot current local sources into depot
-then ingest pending depot bundles into local corpus
+snapshot current local sources into depot, or reuse matching state metadata
+then ingest pending/new depot bundles into local corpus
 ```
 
 If source state is unchanged and no deterministic metadata override was supplied, refresh reuses the equivalent existing depot bundle instead of creating a new one.
@@ -204,7 +204,7 @@ The catalog is not absolute truth. If shards are stale or corrupt, `aha depot ve
 |---|---|---|
 | Depot object store | `bundle_sha256` in `bundles/v1/<sha>.tar.zst` | Identical bundle bytes are stored once. |
 | Depot catalog merge | `bundle_sha256` | Re-adding the same bundle ref updates/keeps one ref instead of appending duplicates. |
-| Refresh source-state check | manifest state signature ignoring `bundle_id`/`captured_at` | Unchanged sources reuse an equivalent existing same-machine bundle instead of creating a new one. |
+| Refresh source-state check | catalog `state_sha256` / manifest state signature ignoring `bundle_id`/`captured_at` | Unchanged sources reuse an equivalent existing same-machine bundle without fetching old bundle bytes when state metadata is present. |
 | Ingest pending set | `catalog bundle_sha256 - corpus bundle_sha256` | No-argument ingest fetches/imports only bundles not already in the corpus. |
 | Corpus bundle table | unique `bundle_sha256` and `bundle_id` | Re-ingesting the same bundle is a duplicate no-op/audit attempt. |
 | Corpus file/blob table | file SHA-256 | Raw file/blob payloads are content-addressed and reused across ingested bundles. |
@@ -216,11 +216,11 @@ If two machines somehow produce byte-identical bundles, the depot object key is 
 - **Content-addressed writes:** local depot checks whether the target object exists; R2 checks object existence and uses conditional writes.
 - **Per-machine catalog shards:** publishing one machine's bundle only updates that machine's shard, reducing write contention.
 - **Delta ingest:** no-arg `ingest` computes `catalog - corpus` and skips already-ingested bundle SHAs.
-- **Idempotent refresh:** unchanged sources avoid creating another bundle unless deterministic metadata overrides are supplied.
+- **Idempotent refresh:** unchanged sources avoid creating another bundle unless deterministic metadata overrides are supplied; catalog `state_sha256` makes the common case metadata-only.
 - **Local query engine:** search/read never scan depot objects and never query R2; all analysis uses SQLite + FTS5 locally.
 - **Repair/deep verification is explicit:** expensive full object listing/rehashing is done by `depot verify --deep` or `depot verify --repair`, not on every search or refresh.
 
-Current note: the unchanged-source check compares against existing same-machine depot refs by reading bundle manifests. That is acceptable for small histories and keeps catalog schema simple; if it becomes costly, a future catalog schema can include a precomputed state signature to avoid fetching manifests for this check.
+Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so unchanged-source checks compare metadata first and fetch old bundles only as a repair/fallback path for refs missing state metadata.
 
 ## Trust boundaries
 

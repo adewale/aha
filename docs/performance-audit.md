@@ -1,6 +1,7 @@
 # Performance audit
 
-Date: 2026-05-19
+Original audit date: 2026-05-19
+Updated: 2026-05-25
 
 Scope: snapshot/archive, ingest, search, depot, status, verify, and refresh flows in the current Go/SQLite implementation.
 

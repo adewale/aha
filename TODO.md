@@ -34,6 +34,13 @@
 - Prefer indexed `--project`/`--path-token`; keep `--path` contains as convenience and monitor broad-term FTS costs.
 - Add catalog summaries/local stale status cache only if raw catalog scans become a real depot bottleneck; `depot compact` and map-backed repair exist.
 
+## Code health and duplication watch list
+
+- Use `docs/audits/code-duplication-audit.md` as the current duplication baseline.
+- Fix depot backend duplication before the next R2/depot integrity change: known-bundle ref normalization, quick catalog-ref validation, catalog compact/repair shard rewriting, and R2 marker read/write helpers should be shared so local/R2 semantics cannot drift.
+- Extract shared snapshot/refresh flag registration before adding another snapshot option.
+- Defer search predicate-builder, FTS verify/repair predicate, and atomic temp-write helper consolidation until those areas are touched; current duplication is contained but documented.
+
 ## Future adapters
 
 - Research and prototype adapters for local stores from Aider, Cline/Roo Code, Continue, Gemini CLI, Cursor, Windsurf/Codeium, Zed, and Goose.

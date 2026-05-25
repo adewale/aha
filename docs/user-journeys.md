@@ -24,7 +24,7 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `refresh` snapshots configured sources into the depot and ingests pending depot bundles into the local corpus.
+- `refresh` snapshots configured sources, reuses unchanged depot state when possible, and ingests pending depot bundles into the local corpus.
 - The user should not need to remember Pi/Claude/Codex paths for the standard layout.
 
 Defaults used:
@@ -117,7 +117,7 @@ Rationale:
 |---|---|
 | `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default local depot/corpus dirs, and privacy acknowledgement set to false. |
 | `aha init --accept-secrets` | Same as `init`, but records one-time privacy acknowledgement. |
-| `aha refresh` | Snapshot configured sources into the configured depot, then ingest depot bundles into configured corpus. Supports `--session` and `--max-sessions` for 1-to-all local-session scope. |
+| `aha refresh` | Snapshot configured sources or reuse an unchanged depot bundle when `state_sha256` metadata matches, then ingest pending/new depot bundles into configured corpus. Supports `--session` and `--max-sessions` for 1-to-all local-session scope. |
 | `aha snapshot` | Use config/default machine ID, sources, and depot. Supports `--session` and `--max-sessions`; requires prior privacy acknowledgement. |
 | `aha ingest` | Ingest explicit bundle paths, or ingest from the configured depot when no paths are given. `--repo` is an alias for the corpus directory. |
 | `aha search <query>` | Search configured corpus, limit 20. |

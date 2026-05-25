@@ -187,7 +187,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 ## aha refresh
 
-snapshot configured sources to the depot and ingest new bundles
+snapshot configured source state or reuse unchanged depot state, then ingest pending/new depot bundles
 
 ```txt
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
@@ -297,7 +297,7 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 - `aha status --json`
 - `aha status --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}`
+**JSON contract:** `object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}`
 
 ## aha verify
 

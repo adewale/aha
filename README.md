@@ -125,7 +125,7 @@ aha init --accept-secrets
 aha refresh
 ```
 
-`refresh` is the short path: snapshot configured sources and ingest the new bundle into the configured corpus.
+`refresh` is the short path: snapshot configured sources, reuse an unchanged depot bundle when state metadata proves nothing changed, then ingest pending/new bundles into the configured corpus.
 
 ### Routine update
 
@@ -170,7 +170,7 @@ aha doctor [--depot DEPOT] [--json]
 Command roles:
 
 - `init`: write starter JSONC config and optionally persist privacy acknowledgement.
-- `refresh`: common local update: `snapshot` then ingest the just-created bundle.
+- `refresh`: common local update: snapshot or reuse an unchanged depot bundle, then ingest pending/new bundles.
 - `snapshot`: create an immutable bundle and store it in the configured depot.
 - `ingest`: merge bundles from paths or a depot into a corpus/repo.
 - `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts. Prefer indexed `--project`/`--path-token` over contains-style `--path` for large corpora; requested limits above 200 are capped with a warning.
@@ -263,6 +263,7 @@ For coding agents using `aha`:
 - `docs/eval-results.md` — latest basic eval results.
 - `docs/audits/testing-and-abstractions-audit.md` — latest TDD/testing/abstraction audit.
 - `docs/audits/docs-consistency-audit.md` — latest docs consistency audit.
+- `docs/audits/code-duplication-audit.md` — current production-code duplication baseline and refactor watch list.
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 

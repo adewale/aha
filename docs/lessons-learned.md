@@ -117,6 +117,10 @@ Additional testing lessons:
 - Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimize from the smallest benchmark that reproduces the issue.
 - Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalog rows. Distinguish metadata scanned from work performed.
 - A performance plan is incomplete without user-journey metrics. Each abstraction change needs a baseline, a scenario that should become measurably better, and a counter/benchmark/profile that proves the improvement happened.
+- Profile enough iterations to separate setup from the target path. The latest ingest/search/verify profiles were useful because ingest ran one ~1s operation, search ran 20 broad queries, and verify ran 100 checks; the allocation profiles still exposed benchmark setup, pprof startup, and package init noise that should not be mistaken for product hot paths.
+- When CPU lands mostly in SQLite and syscalls, prefer semantic changes over Go micro-optimizations. The latest ingest profile put nearly all CPU under SQLite statement execution and `pwrite`, so true multi-row inserts remain a possible constant-factor change, not an obvious correctness-preserving rewrite to do without stronger evidence.
+- Search profiles and query-plan tests answer different questions. Query-plan tests prove the indexed project/path-token filters are used; pprof showed broad common-term searches are still SQLite/FTS candidate work, so output caps reduce memory/user cost without promising broad-term ranking speedups.
+- Verify profiles can validate that a repaired algorithmic cliff stays repaired. Rowid-backed FTS verification now profiles as small SQLite count work rather than the former seconds-scale join path; extra stats counters are acceptable only because the benchmark remains millisecond-scale.
 
 ## Documentation lessons
 
