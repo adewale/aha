@@ -21,7 +21,7 @@ func BenchmarkPathologicalLocalDepotLargeCatalog(b *testing.B) {
 			}
 		}
 	})
-	b.Run("put-after-large-catalog", func(b *testing.B) {
+	b.Run("append-growing-catalog", func(b *testing.B) {
 		d := seededLocalDepot(b, refs)
 		b.ReportAllocs()
 		b.ResetTimer()

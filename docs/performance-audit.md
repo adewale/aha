@@ -8,7 +8,7 @@ Scope: snapshot/archive, ingest, search, depot, status, verify, and refresh flow
 
 `aha` optimizes first for determinism, integrity, and repairability. That is the right tradeoff for a history archive, but it creates several predictable cost centers: repeated hashing, repeated archive reads, serial ingest SQL, full-scan verification, and depot operations that scale with catalog/bundle count.
 
-An initial benchmark suite now covers archive write/read, corpus ingest/verify/reconcile, search, and local depot put/list/verify. Pathological benchmarks, property-based performance invariants for many trivial bundles, and pprof notes are summarized in `docs/performance-scalability-plan.md`. The risks below are still directional until we add larger fixtures and CI trend capture.
+An initial benchmark suite now covers archive write/read, corpus ingest/verify/reconcile, search, and local depot put/list/verify. Pathological benchmarks, property-based performance invariants for many trivial bundles, cheapest-layer audit findings, and pprof notes are summarized in `docs/performance-scalability-plan.md`. The risks below are still directional until we add larger fixtures and CI trend capture.
 
 ## Algorithmic complexity
 

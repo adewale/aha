@@ -51,6 +51,10 @@ func depotBehindCount(store *corpus.Store, cfg model.Config, depotAddr string) (
 	if err != nil {
 		return 0, err
 	}
+	return depotBehindCountFromDriver(store, drv)
+}
+
+func depotBehindCountFromDriver(store *corpus.Store, drv depot.Driver) (int, error) {
 	refs, err := drv.List(context.Background())
 	if err != nil {
 		return 0, err

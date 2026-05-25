@@ -13,6 +13,20 @@ Pathological performance testing now has two layers:
 
 The second layer is especially important for depot/status/refresh behavior because the failure mode is often not a 100MiB object; it is years of tiny no-op snapshots and duplicate catalog refs.
 
+## Cheapest-layer audit results
+
+| Risk | Cheapest effective layer | Current status | Next cheapest guard |
+|---|---|---|---|
+| FTS verify superlinear behavior | Schema/query-plan tests over tiny corpora; package benchmark only for magnitude/profile | Benchmarks/profile identify the issue; no cheap guard yet | After the rowid/shadow-key fix, add `EXPLAIN QUERY PLAN` assertions so regressions fail without 5k-row benchmarks. |
+| Many trivial depot bundles / duplicate refs | Pure set-model PBT and in-memory catalog merge benchmark | `pendingDepotRefs` and `depotBehindFromRefs` now have PBT; `BenchmarkPathologicalCatalogMergeManyTrivialRefs` measures merge/sort without bundle files | Add map-based bulk catalog merge and PBT/benchmarks for many machines/shards. |
+| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches | Add fake-R2 operation budgets once quick/deep status modes exist. |
+| Unchanged refresh should not fetch old bundles | Fake-driver/PBT over refs with `state_sha256` metadata | Not implemented because catalog refs do not yet carry state metadata | Add the operation-count PBT with the catalog schema change. |
+| Depot ingest duplicate/pre-hash behavior | Pending-set PBT plus expected-SHA ingest seam tests | Pending-set PBT exists; byte-read invariant waits for `IngestBundleWithExpectedSHA` | Test that catalog-validated ingest performs one staging hash and no pre-hash. |
+| Archive repeated hashing | Unit/golden test for `WriteWithInfo` SHA handoff | Current coverage is at archive/depot benchmark layer | Add single-pass SHA equality tests before optimizing. |
+| Ingest per-entry SQL chatter | Package benchmark plus small-model duplicate/idempotence PBT | Benchmarks expose cost; PBT for duplicate trivial bundles is still pending | Add session-local duplicate/conflict model tests before prepared-statement refactor. |
+| Search path/filter cost | Query-plan tests and `search.Query` benchmarks | Benchmarks exist; exact project/path query-plan guard pending | Add indexed `--project`/path-token plan tests with tiny data. |
+| Profiling | Package-level pprof first; CLI pprof only for end-to-end confirmation | Optional CLI profiling exists; benchmark profiles were more useful for root cause | Keep CLI pprof opt-in; prefer package benchmark profiles for optimization loops. |
+
 ## Pathological benchmark suite
 
 New benchmarks deliberately stress worst-case shapes rather than average fixtures:
@@ -57,7 +71,8 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | Search path filter | 10k broad-term messages + rare/no path match | `40-42ms` | Non-indexable contains filters still require broad candidate work. |
 | Archive | 5000 tiny files | write `39.6ms`, stream `36.9ms`, `190k+ allocs` | Manifest JSON, tar headers, PAX handling, and per-file hashing dominate tiny-file bundles. |
 | Archive | one 32MiB compressible file | `25ms`, `52MB allocs` | Large-file path is throughput-oriented; memory comes mostly from zstd buffers/test data. |
-| Local depot | 250 refs | list `0.7ms`; put after large catalog `2.0ms`; verify `24.9ms` / `20MB` | Local catalog costs are linear and fine at 250 refs, but deep verify scales with object count/bytes. |
+| Local depot | 250 refs | list `0.7ms`; append to growing catalog `2.0ms`; verify `24.9ms` / `20MB` | Local catalog costs are acceptable at 250 refs, but deep verify scales with object count/bytes. |
+| In-memory catalog merge | 1000 unique trivial refs × 4 duplicates | single-digit milliseconds, `1.24MB` | Cheapest-layer benchmark shows bulk merge is linear-scan based and should become map-based before very large catalogs. |
 | Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --depot` set-difference memory grows with ingested bundle count. |
 
 ## Property-based performance invariants
@@ -90,7 +105,7 @@ This changes the roadmap: every optimization below should get both a benchmark a
 | More messages | Ingest remains roughly linear in new entries, but verify can become superlinear due FTS key joins. | `aha verify` becomes too slow for routine use and agents stop running it. |
 | More broad terms | FTS keeps search usable, but broad/common terms and high `--limit` increase SQL work and output allocations. | Search latency and JSON size grow; agent loops become slower and noisier. |
 | More paths/projects | `--path` uses contains matching over cwd/path columns. | Path filters stay non-indexable and degrade when combined with common terms. |
-| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference are linear in unique refs, with PBT guarding duplicate-ref semantics. | `status --depot` and depot ingest startup become increasingly expensive if catalogs grow without summary/compaction. |
+| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference scan raw catalog/bundle rows; PBT guards that output/work units are deduped by SHA. | `status --depot` and depot ingest startup become increasingly expensive if catalogs grow without summary/compaction; bulk catalog merge needs map-based paths for very large trivial-bundle histories. |
 | More unchanged refreshes | Refresh can list refs and fetch/read prior same-machine bundles to compare state. | Unchanged daily refresh gets slower over time, especially with R2. |
 | More depot objects | Deep verify hashes/downloads every object. | Correct integrity audits become expensive and network-costly. |
 | More tiny files | Manifest/tar/header overhead scales with file count, not just bytes. | Many subagent artifacts or small sessions create high allocation/metadata overhead. |
@@ -215,6 +230,7 @@ Actions:
 3. Store/refuse inconsistent catalog fields (`bundle_sha256`, `key`, `size`, `manifest_sha256`, `state_sha256`).
 4. Add progress output and JSON counters for large depots.
 5. Add fake-R2 operation-budget tests for quick verify, deep verify, and repair.
+6. Replace linear-scan bulk catalog merging with map-backed merge for repair/compaction paths; keep append of one ref simple unless benchmarks show it dominates.
 
 Expected impact: users can run cheap health checks often and reserve deep audits for scheduled/manual integrity checks.
 
