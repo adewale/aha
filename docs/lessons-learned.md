@@ -66,7 +66,7 @@ Current counts after cycle 10:
 ## Post-audit hardening lessons
 
 - `--help` is behavior, not incidental flag-parser output; every subcommand help path should exit successfully.
-- Privacy flags must affect all image preservation paths, including file artifacts and legacy bundles, not only embedded prompt images or the `images` table.
+- Privacy flags must affect all image preservation paths, including file artifacts, not only embedded prompt images or the `images` table.
 - Skipped data still needs integrity validation. If an image artifact is ignored because `include_images=false`, ingest must still hash/read the tar entry before accepting the bundle.
 - Symlink safety needs defense in depth: discovery skips symlinks, snapshot copy rejects non-regular files, and output/repo paths are checked both lexically and through existing symlink resolution.
 - Archive validation must bound compressed size, manifest size, file count, per-entry size, and total declared uncompressed bytes before spooling untrusted bundle content.
@@ -79,8 +79,11 @@ Current counts after cycle 10:
 - Phase-0 guardrails are not busywork. Static debt inventories, state-machine skeletons, adapter conformance fixtures, schema introspection helpers, named seams, verifier queries, and mutation dry-runs make later refactors smaller and safer.
 - Verification should be one workflow, not a wiki list of commands. CI and local development need the same scriptable profiles for quick checks, full checks, fuzzing, and mutation dry-runs.
 - Mutation dry-runs are useful before trusting a new test net: they show uncovered critical code before a refactor removes duplicate runtime checks.
-- Completing the CbC phases pragmatically required compatibility bridges: new canonical refs and v2 session keys can coexist with legacy refs through exact aliases instead of breaking old `aha read` workflows.
-- SQLite construction is strongest when paired with repair: triggers now maintain normal-write FTS rows and reject append-only mutation, while verifier/reconciler queries remain necessary for direct SQL drift and recovery.
+- Because `aha` is pre-user/pre-release, the CbC phases should delete transitional compatibility bridges: emit and parse canonical refs only, use v2 session keys only, and reject unsupported bundle schemas instead of carrying aliases.
+- SQLite construction is strongest when paired with repair: targeted `CHECK`/`FOREIGN KEY` constraints and triggers block true invalid states, while verifier/reconciler queries remain necessary for direct SQL drift and recovery.
+- Sealed canonical refs paid off more than compatibility shims. Removing optional ref DTOs and old ref syntax made search/read contracts simpler and made malformed states easier to reject at the boundary.
+- Verification needs to be user-facing, not only test-facing. `aha verify --json` and `aha verify --repair-fts` turn corpus drift detection into an operational recovery path for humans and agents.
+- Lightweight formal sketches are not useful unless they are executable or checked. Prefer Go state machines/properties already run by CI over standalone model notes that can drift.
 - Open-world agent data should not get strict enum `CHECK` constraints too early. Typed role helpers can centralize decisions without rejecting future roles from raw histories.
 
 ## Testing lessons

@@ -61,7 +61,7 @@ quick() {
 }
 
 fuzz() {
-  run go test ./internal/model -run=^$ -fuzz=FuzzHitRefParseFormat -fuzztime="$FUZZTIME"
+  run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
   run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="$FUZZTIME"
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzParseAddress -fuzztime="$FUZZTIME"

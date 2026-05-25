@@ -2,13 +2,29 @@ package model
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
+type UnsupportedRefError struct {
+	Text string
+}
+
+func (e UnsupportedRefError) Error() string { return "unsupported ref format" }
+
+type RefKind string
+
+const (
+	RefKindMessage  RefKind = "message"
+	RefKindSession  RefKind = "session"
+	RefKindArtifact RefKind = "artifact"
+)
+
 type Ref interface {
 	refVariant()
-	AsHitRef() HitRef
+	Kind() RefKind
+	Valid() bool
 }
 
 type MessageRef struct {
@@ -24,41 +40,49 @@ func (MessageRef) refVariant()  {}
 func (SessionRef) refVariant()  {}
 func (ArtifactRef) refVariant() {}
 
-func (r MessageRef) AsHitRef() HitRef {
-	return HitRef{Kind: HitKindMessage, SessionKey: r.Session.String(), EntryID: r.Entry.String()}
-}
-func (r SessionRef) AsHitRef() HitRef {
-	return HitRef{Kind: HitKindMessage, SessionKey: r.Session.String()}
-}
-func (r ArtifactRef) AsHitRef() HitRef {
-	sha := r.SHA.String()
-	return HitRef{Kind: HitKindArtifact, SessionKey: ArtifactSessionKey(sha), EntryID: sha, ArtifactSHA: sha}
+func (MessageRef) Kind() RefKind  { return RefKindMessage }
+func (SessionRef) Kind() RefKind  { return RefKindSession }
+func (ArtifactRef) Kind() RefKind { return RefKindArtifact }
+
+func (r MessageRef) Valid() bool  { return r.Session.Valid() && r.Entry.Valid() }
+func (r SessionRef) Valid() bool  { return r.Session.Valid() }
+func (r ArtifactRef) Valid() bool { return r.SHA.Valid() }
+
+func (r MessageRef) MarshalJSON() ([]byte, error) {
+	if !r.Valid() {
+		return nil, fmt.Errorf("invalid message ref")
+	}
+	return json.Marshal(struct {
+		Kind       RefKind `json:"kind"`
+		SessionKey string  `json:"session_key"`
+		EntryID    string  `json:"entry_id"`
+	}{Kind: r.Kind(), SessionKey: r.Session.String(), EntryID: r.Entry.String()})
 }
 
-func HitRefToRef(hit HitRef) (Ref, error) {
-	if hit.Kind == HitKindArtifact {
-		sha := firstNonEmpty(hit.ArtifactSHA, hit.EntryID)
-		parsed, err := ParseSHA256Hex(sha)
-		if err != nil {
-			return nil, err
-		}
-		return ArtifactRef{SHA: parsed}, nil
+func (r SessionRef) MarshalJSON() ([]byte, error) {
+	if !r.Valid() {
+		return nil, fmt.Errorf("invalid session ref")
 	}
-	session, err := ParseSessionKey(hit.SessionKey)
-	if err != nil {
-		return nil, err
+	return json.Marshal(struct {
+		Kind       RefKind `json:"kind"`
+		SessionKey string  `json:"session_key"`
+	}{Kind: r.Kind(), SessionKey: r.Session.String()})
+}
+
+func (r ArtifactRef) MarshalJSON() ([]byte, error) {
+	if !r.Valid() {
+		return nil, fmt.Errorf("invalid artifact ref")
 	}
-	if hit.EntryID == "" {
-		return SessionRef{Session: session}, nil
-	}
-	entry, err := NewEntryID(hit.EntryID)
-	if err != nil {
-		return nil, err
-	}
-	return MessageRef{Session: session, Entry: entry}, nil
+	return json.Marshal(struct {
+		Kind        RefKind `json:"kind"`
+		ArtifactSHA string  `json:"artifact_sha256"`
+	}{Kind: r.Kind(), ArtifactSHA: r.SHA.String()})
 }
 
 func FormatRef(ref Ref) string {
+	if ref == nil || !ref.Valid() {
+		panic("invalid ref")
+	}
 	switch r := ref.(type) {
 	case MessageRef:
 		return "msg:v1:" + b64(r.Session.String()) + ":" + b64(r.Entry.String())
@@ -67,7 +91,7 @@ func FormatRef(ref Ref) string {
 	case ArtifactRef:
 		return "artifact:v1:" + r.SHA.String()
 	default:
-		return FormatHitRef(ref.AsHitRef())
+		panic("unknown ref variant")
 	}
 }
 
@@ -113,11 +137,7 @@ func ParseRef(s string) (Ref, error) {
 		}
 		return ArtifactRef{SHA: sha}, nil
 	}
-	legacy, err := ParseHitRef(s)
-	if err != nil {
-		return nil, err
-	}
-	return HitRefToRef(legacy)
+	return nil, UnsupportedRefError{Text: s}
 }
 
 func b64(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }

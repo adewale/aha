@@ -57,7 +57,7 @@
 | Depot | Bundle store addressed as `local:PATH` or `r2:BUCKET`. | Yes. Stores content-addressed bundle objects. |
 | Catalog shard | Repairable JSON listing of bundle refs for one machine. | No. It is rebuilt from bundle objects. |
 | Corpus | Local SQLite + FTS5 database and blob store derived from ingested bundles. | Rebuildable. It is the query engine, not truth. |
-| Ref | Stable search/read identifier such as `<session>#<entry>` or `artifact:<sha>`. | API contract for retrieval. |
+| Ref | Stable canonical search/read identifier: `msg:v1:<b64-session>:<b64-entry>`, `session:v1:<b64-session>`, or `artifact:v1:<sha256>`. | API contract for retrieval. |
 
 ## On-disk / object layouts
 
@@ -151,6 +151,16 @@ read <ref>   → corpus read APIs → transcript window or artifact body
 ```
 
 Search and read never contact the depot. They are local/offline corpus operations.
+
+### `aha verify --repair-fts`
+
+```text
+verify corpus rows/blobs/derived FTS state
+optionally rebuild FTS rows from messages/artifacts
+report machine-readable problems for agents and scripts
+```
+
+The corpus verifier checks rebuildable local state. It does not contact the depot; use `depot verify` for depot object/catalog integrity.
 
 ### `aha depot verify --repair`
 

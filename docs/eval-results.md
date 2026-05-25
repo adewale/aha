@@ -13,7 +13,7 @@ Scope: local working tree after audit/refactor/Codex changes.
 | Deterministic snapshots | 2 | Deterministic archive tests pass. |
 | Safe local IO | 2 | Read-only/no-network/symlink/path tests pass. |
 | Bounded ingest | 2 | Compressed, manifest, entry, checksum, and total budgets plus SHA checks. |
-| Agent retrieval loop | 2 | `HitRef` exists, `search --refs` emits copyable refs, and `read <session>#<entry>` works. |
+| Agent retrieval loop | 2 | `search --refs` emits copyable canonical refs, and `read <ref_text>` works for `msg:v1`, `session:v1`, and `artifact:v1` refs. |
 | Adapter extensibility | 2 | Codex added through the adapter interface with fixture tests. |
 | CLI composability | 2 | Commands are split per file, share corpus flags/renderers, and registry metadata captures flags/examples/schemas. |
 | Command metadata | 2 | Registry includes flags/examples/schema/docs and has a metadata test. |
@@ -21,9 +21,9 @@ Scope: local working tree after audit/refactor/Codex changes.
 | Docs-code sync | 1 | Command/docs tests exist but flag/config schema sync can be deeper. |
 | Test quality | 2 | Uses real files/SQLite, fuzz, race, doc-sync, sad paths, and static trust checks. |
 | Search quality | 1 | Deterministic FTS and filters exist; structured/semantic/hybrid search remains future work. |
-| Corpus accessibility | 1 | CLI status/doctor exist; richer doctor, MCP, and multi-read are TODO. |
+| Corpus accessibility | 2 | CLI status/doctor/verify exist, including `verify --repair-fts`; MCP and multi-read remain TODO. |
 
-Overall: 27 / 30 = 90%.
+Overall: 28 / 30 = 93%.
 
 ## Basic commands run
 

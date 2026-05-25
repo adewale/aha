@@ -14,17 +14,17 @@ type Filters struct {
 	Limit                                      int
 }
 type Result struct {
-	Score      float64      `json:"score"`
-	Timestamp  string       `json:"timestamp"`
-	Source     string       `json:"source"`
-	Machine    string       `json:"machine"`
-	Project    string       `json:"project"`
-	Role       string       `json:"role"`
-	Snippet    string       `json:"snippet"`
-	SessionKey string       `json:"session_key"`
-	EntryID    string       `json:"entry_id"`
-	Ref        model.HitRef `json:"ref"`
-	RefText    string       `json:"ref_text"`
+	Score      float64   `json:"score"`
+	Timestamp  string    `json:"timestamp"`
+	Source     string    `json:"source"`
+	Machine    string    `json:"machine"`
+	Project    string    `json:"project"`
+	Role       string    `json:"role"`
+	Snippet    string    `json:"snippet"`
+	SessionKey string    `json:"session_key"`
+	EntryID    string    `json:"entry_id"`
+	Ref        model.Ref `json:"ref"`
+	RefText    string    `json:"ref_text"`
 }
 
 func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
@@ -70,8 +70,12 @@ func Query(db *sql.DB, queryText string, f Filters) ([]Result, error) {
 		if err := rows.Scan(&r.Score, &r.Timestamp, &r.Source, &r.Machine, &r.Project, &r.Role, &r.Snippet, &r.SessionKey, &r.EntryID); err != nil {
 			return nil, err
 		}
-		r.Ref = model.HitRef{Kind: model.HitKindMessage, SessionKey: r.SessionKey, EntryID: r.EntryID}
-		r.RefText = refText(r.Ref)
+		ref, err := messageRef(r.SessionKey, r.EntryID)
+		if err != nil {
+			return nil, err
+		}
+		r.Ref = ref
+		r.RefText = model.FormatRef(ref)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -148,24 +152,30 @@ func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {
 		if err := rows.Scan(&r.Score, &r.Timestamp, &r.Source, &r.Machine, &r.Project, &r.Snippet, &parentSession, &artifactSHA); err != nil {
 			return nil, err
 		}
-		ref := model.HitRef{Kind: model.HitKindArtifact, SessionKey: parentSession, ArtifactSHA: artifactSHA, EntryID: artifactSHA}
-		if ref.SessionKey == "" {
-			ref.SessionKey = model.ArtifactSessionKey(ref.ArtifactSHA)
+		sha, err := model.ParseSHA256Hex(artifactSHA)
+		if err != nil {
+			return nil, err
 		}
+		ref := model.ArtifactRef{SHA: sha}
 		r.Ref = ref
-		r.RefText = refText(ref)
-		r.SessionKey, r.EntryID = ref.SessionKey, ref.EntryID
+		r.RefText = model.FormatRef(ref)
+		r.SessionKey, r.EntryID = parentSession, artifactSHA
 		r.Role = "artifact"
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-func refText(ref model.HitRef) string {
-	if typed, err := model.HitRefToRef(ref); err == nil {
-		return model.FormatRef(typed)
+func messageRef(sessionKey, entryID string) (model.MessageRef, error) {
+	session, err := model.ParseSessionKey(sessionKey)
+	if err != nil {
+		return model.MessageRef{}, err
 	}
-	return model.FormatHitRef(ref)
+	entry, err := model.NewEntryID(entryID)
+	if err != nil {
+		return model.MessageRef{}, err
+	}
+	return model.MessageRef{Session: session, Entry: entry}, nil
 }
 
 func likeContains(q string) string {

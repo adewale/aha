@@ -30,7 +30,15 @@ func TestCorpusStateMachineSkeleton(t *testing.T) {
 		rt.Cleanup(func() { _ = store.Close() })
 		ops := rapid.SliceOfN(rapid.SampledFrom([]string{"ingest", "duplicate", "search", "read", "status", "verify"}), 1, 12).Draw(rt, "ops")
 		ingested := false
-		ref := model.HitRef{Kind: model.HitKindMessage, SessionKey: "pi:sm-machine:sm-session", EntryID: "e1"}
+		key, err := model.NewSessionKey("pi", "sm-machine", "sm-session")
+		if err != nil {
+			rt.Fatal(err)
+		}
+		entry, err := model.NewEntryID("e1")
+		if err != nil {
+			rt.Fatal(err)
+		}
+		ref := model.MessageRef{Session: key, Entry: entry}
 		for _, op := range ops {
 			switch op {
 			case "ingest":

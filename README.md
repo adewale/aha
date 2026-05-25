@@ -159,8 +159,9 @@ aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--json|--refs|--files|--md]
 aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
 aha status [--repo DIR] [--depot DEPOT] [--json]
+aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha depot <init|ls|verify> [DEPOT] [--json]
+aha depot <init|ls|verify> [DEPOT] [--json] [--repair]
 aha doctor [--depot DEPOT] [--json]
 ```
 
@@ -171,8 +172,9 @@ Command roles:
 - `snapshot`: create an immutable bundle and store it in the configured depot.
 - `ingest`: merge bundles from paths or a depot into a corpus/repo.
 - `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts.
-- `read`: retrieve full context from `--session/--entry` or a `<session>#<entry>` ref.
+- `read`: retrieve full context from `--session/--entry` or a canonical `ref_text` emitted by `search` (`msg:v1:...`, `session:v1:...`, or `artifact:v1:...`).
 - `status`: corpus counts and health.
+- `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
 - `depot`: initialize, list, or verify a local/R2 bundle depot.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
@@ -247,6 +249,8 @@ For coding agents using `aha`:
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
+- `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
+- `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.
 - `docs/verification.md` — local/CI verification profiles, fuzzing, static guardrails, and mutation testing.
 - `docs/eval-rubric.md` — rubric for future evals.
 - `docs/eval-results.md` — latest basic eval results.

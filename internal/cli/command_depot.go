@@ -16,7 +16,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		return errors.New("depot requires subcommand: init, ls, verify")
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify> [DEPOT] [--json]")
+		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|ls|verify> [DEPOT] [--json] [--repair]")
 		return nil
 	}
 	sub := args[0]

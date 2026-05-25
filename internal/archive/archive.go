@@ -491,13 +491,17 @@ func normalizeBundleForWrite(b Bundle) Bundle {
 	return b
 }
 
-func supportedBundleSchema(schema string) bool {
-	return schema == model.BundleSchemaV1 || schema == model.BundleSchemaV2
+type UnsupportedSchemaError struct {
+	Schema string
+}
+
+func (e UnsupportedSchemaError) Error() string {
+	return fmt.Sprintf("unsupported schema %q", e.Schema)
 }
 
 func ValidateManifestSemantics(m model.Manifest) error {
-	if !supportedBundleSchema(m.Schema) {
-		return fmt.Errorf("invalid manifest: unsupported schema %q", m.Schema)
+	if m.Schema != model.BundleSchema {
+		return fmt.Errorf("invalid manifest: %w", UnsupportedSchemaError{Schema: m.Schema})
 	}
 	if strings.TrimSpace(m.BundleID) == "" {
 		return fmt.Errorf("invalid manifest: bundle_id required")
@@ -786,8 +790,8 @@ func readManifestOnly(path string) (model.Manifest, error) {
 	if err := json.Unmarshal(b, &manifest); err != nil {
 		return model.Manifest{}, err
 	}
-	if !supportedBundleSchema(manifest.Schema) {
-		return model.Manifest{}, fmt.Errorf("unsupported schema %q", manifest.Schema)
+	if manifest.Schema != model.BundleSchema {
+		return model.Manifest{}, UnsupportedSchemaError{Schema: manifest.Schema}
 	}
 	return manifest, nil
 }

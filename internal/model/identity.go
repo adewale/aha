@@ -44,31 +44,13 @@ func NewEntryID(s string) (EntryID, error) {
 }
 
 func ParseSessionKey(s string) (SessionKey, error) {
-	if strings.TrimSpace(s) == "" || strings.ContainsAny(s, "\x00\n\r") {
+	if strings.TrimSpace(s) == "" || strings.ContainsAny(s, "\x00\n\r") || !strings.HasPrefix(s, "sk1_") {
 		return SessionKey{}, fmt.Errorf("invalid session key")
 	}
+	if _, err := ParseSHA256Hex(strings.TrimPrefix(s, "sk1_")); err != nil {
+		return SessionKey{}, fmt.Errorf("invalid session key: %w", err)
+	}
 	return SessionKey{value: s}, nil
-}
-
-func NewLegacySessionKey(source, machine, sourceSession string) (SessionKey, error) {
-	if _, err := NewSourceName(source); err != nil {
-		return SessionKey{}, err
-	}
-	if _, err := NewMachineID(machine); err != nil {
-		return SessionKey{}, err
-	}
-	if _, err := NewSourceSessionID(sourceSession); err != nil {
-		return SessionKey{}, err
-	}
-	return SessionKey{value: strings.Join([]string{source, machine, sourceSession}, ":")}, nil
-}
-
-func MustLegacySessionKey(source, machine, sourceSession string) string {
-	key, err := NewLegacySessionKey(source, machine, sourceSession)
-	if err != nil {
-		panic(err)
-	}
-	return key.String()
 }
 
 func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
@@ -111,9 +93,23 @@ func (v SHA256Hex) String() string       { return v.value }
 func (v SourceName) Valid() bool      { return v.value != "" }
 func (v MachineID) Valid() bool       { return v.value != "" }
 func (v SourceSessionID) Valid() bool { return v.value != "" }
-func (v SessionKey) Valid() bool      { return v.value != "" }
-func (v EntryID) Valid() bool         { return v.value != "" }
-func (v SHA256Hex) Valid() bool       { return v.value != "" }
+func (v SessionKey) Valid() bool {
+	return len(v.value) == len("sk1_")+64 && strings.HasPrefix(v.value, "sk1_") && isLowerHex(v.value[len("sk1_"):])
+}
+func (v EntryID) Valid() bool { return v.value != "" && !strings.ContainsAny(v.value, "\x00\n\r") }
+func (v SHA256Hex) Valid() bool {
+	return len(v.value) == 64 && isLowerHex(v.value)
+}
+
+func isLowerHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('0' <= c && c <= '9') && !('a' <= c && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 func writeLengthPrefixed(h interface{ Write([]byte) (int, error) }, s string) {
 	var buf [8]byte

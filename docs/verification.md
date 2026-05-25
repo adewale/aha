@@ -57,6 +57,17 @@ Current inventories include:
 
 When a refactor removes a debt item, update the static allowlist in the same commit. When all items in a category are removed, replace the inventory with a hard ban.
 
+## Runtime corpus verification
+
+Use the CLI verifier against a real corpus when diagnosing local drift:
+
+```bash
+aha verify --json
+aha verify --repair-fts --json
+```
+
+`verify` is read-only by default. `--repair-fts` rebuilds derived FTS rows from `messages` and `artifacts`; raw bundle/corpus rows remain the source of truth.
+
 ## Mutation testing
 
 Mutation testing is intentionally not part of normal CI. Run it before release or after invariant-critical refactors:

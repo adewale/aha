@@ -15,8 +15,8 @@ func TestSchemaIntrospectionHelpers(t *testing.T) {
 	if !schemaHasTable(t, store.DB, "entries") || !schemaHasColumn(t, store.DB, "entries", "entry_id") || !schemaHasIndex(t, store.DB, "idx_entries_session_line") {
 		t.Fatal("schema introspection helpers failed to find known table/column/index")
 	}
-	if schemaHasTrigger(t, store.DB, "append_only_entries") {
-		t.Fatal("future append-only trigger unexpectedly exists; update Phase 3 tests when it lands")
+	if !schemaHasTrigger(t, store.DB, "entries_no_update") || !schemaHasForeignKey(t, store.DB, "messages", "entries") || !schemaHasCheck(t, store.DB, "sessions", "sk1_") {
+		t.Fatal("schema introspection helpers failed to find known trigger/foreign key/check")
 	}
 }
 

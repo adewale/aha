@@ -23,11 +23,7 @@ func TestReconcileFTSRepairsMessageDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	resolved, err := corpus.ResolveHuman(store.DB, ref.SessionKey, ref.EntryID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.DB.QueryRow(`select count(*) from fts_messages where session_key=? and entry_id=?`, resolved.SessionKey, resolved.EntryID).Scan(&n); err != nil {
+	if err := store.DB.QueryRow(`select count(*) from fts_messages where session_key=? and entry_id=?`, ref.Session.String(), ref.Entry.String()).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {

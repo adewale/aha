@@ -276,7 +276,7 @@ Determinism rules:
 
 ```json
 {
-  "schema": "agent-session-snapshot-bundle/v1",
+  "schema": "agent-session-snapshot-bundle/v2",
   "bundle_id": "uuid-or-ulid",
   "machine_id": "ade-mbp",
   "machine_label": "Adewale MacBook Pro",
@@ -551,6 +551,7 @@ aha search "dynamic workflows" --machine ade-mbp --after 2026-05-01
 aha search "xampler/workflows.py" --source pi
 aha read --session 019e0d47-ae0f --entry a1b2c3d4 --before 3 --after 5
 aha status
+aha verify
 aha conflicts
 ```
 
@@ -572,7 +573,7 @@ Default search indexes user and assistant text, summaries, text artifacts, and s
 Default result fields:
 
 ```txt
-score timestamp source machine project role snippet session_key entry_id
+score timestamp source machine project role snippet ref_text session_key entry_id
 ```
 
 ## Ranking
@@ -664,6 +665,7 @@ aha ingest
 aha search
 aha read
 aha status
+aha verify
 aha conflicts
 aha depot
 aha doctor
@@ -862,7 +864,7 @@ A loop is not complete until spec and implementation agree. If implementation ma
 
 - Pi session identity must come from the Pi session header `id` when present, not from the filename. Filename-derived IDs are only a fallback.
 - Pi artifacts must be preserved even when parent linkage is uncertain. Link only when inferable; otherwise store as unlinked and keep it searchable.
-- Unlinked text artifacts need a read path. V1 uses synthetic read keys of the form `artifact:<sha256>` for unlinked artifact search results.
+- Unlinked text artifacts need a read path. Search emits canonical `artifact:v1:<sha256>` refs for unlinked artifact results.
 - Tool output indexing must be enforced at ingest, not just stated as policy. Only user/assistant/summaries are indexed by default; `toolResult` and `bashExecution` text require explicit opt-in.
 - Bundle duplicate semantics must distinguish exact duplicates from same `bundle_id` with different content. Same ID with different SHA is an error/quarantine condition, not a silent duplicate.
 - Search/read coherence applies to artifact hits too. Every search result must include enough identity to be readable.
@@ -877,7 +879,7 @@ A loop is not complete until spec and implementation agree. If implementation ma
 |---|---|
 | Pi session identity | Use header `id` as `source_session_id` when present. |
 | Artifact identity | Store artifact occurrences/provenance separately enough that identical bytes from different paths/bundles are not lost. |
-| Unlinked artifact read | Search returns `artifact:<sha256>` session keys for unlinked artifact hits; `read` accepts them. |
+| Unlinked artifact read | Search returns canonical `artifact:v1:<sha256>` refs for unlinked artifact hits; `read` accepts them. |
 | Artifact parent linkage | Link only with evidence; preserve and index unlinked artifacts. |
 | Tool output indexing | Enforce in ingest based on role and `index_tool_output`. |
 | Bundle duplicate conflict | Same `bundle_id` with different SHA is an error/conflict, not a no-op. |

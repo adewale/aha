@@ -386,23 +386,13 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 		ps.Metadata["diagnostics"] = ps.Diagnostics
 	}
 	sessionID := firstNonEmpty(ps.SourceSessionID, mf.SessionID, strings.TrimSuffix(filepath.Base(mf.RelativePath), filepath.Ext(mf.RelativePath)))
-	legacySessionKeyValue, err := model.NewLegacySessionKey(mf.Source, manifest.MachineID, sessionID)
-	if err != nil {
-		return IngestReport{}, err
-	}
 	sessionKeyValue, err := model.NewSessionKey(mf.Source, manifest.MachineID, sessionID)
 	if err != nil {
 		return IngestReport{}, err
 	}
 	sessionKey := sessionKeyValue.String()
-	legacySessionKey := legacySessionKeyValue.String()
 	if _, err := tx.Exec(`insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`, sessionKey, mf.Source, sessionID, manifest.MachineID, firstNonEmpty(ps.CWD, mf.CWD), projectKey(firstNonEmpty(ps.CWD, mf.CWD)), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
 		return IngestReport{}, err
-	}
-	for _, alias := range []string{sessionKey, legacySessionKey} {
-		if _, err := tx.Exec(`insert or ignore into session_key_aliases(alias,session_key) values(?,?)`, alias, sessionKey); err != nil {
-			return IngestReport{}, err
-		}
 	}
 	if _, err := tx.Exec(`insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`, sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
 		return IngestReport{}, err

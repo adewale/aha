@@ -27,16 +27,15 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	if err := requireAtMostOneOutputMode(pf.Bool("json"), pf.Bool("md")); err != nil {
 		return err
 	}
-	var ref model.HitRef
+	var ref model.Ref
 	useRef := false
 	if entry == "" && looksLikeRef(session) {
-		if parsedRef, err := model.ParseRef(session); err == nil {
-			ref = parsedRef.AsHitRef()
-			useRef = true
-			session, entry = ref.SessionKey, ref.EntryID
-		} else if strings.Contains(session, "#") {
+		parsedRef, err := model.ParseRef(session)
+		if err != nil {
 			return err
 		}
+		ref = parsedRef
+		useRef = true
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
@@ -66,7 +65,7 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 }
 
 func looksLikeRef(s string) bool {
-	return strings.Contains(s, "#") || strings.HasPrefix(s, "msg:v1:") || strings.HasPrefix(s, "session:v1:") || strings.HasPrefix(s, "artifact:v1:") || strings.HasPrefix(s, "artifact:")
+	return strings.HasPrefix(s, "msg:v1:") || strings.HasPrefix(s, "session:v1:") || strings.HasPrefix(s, "artifact:v1:") || strings.Contains(s, "#") || strings.HasPrefix(s, "artifact:")
 }
 
 func reorderReadArgs(args []string) []string {

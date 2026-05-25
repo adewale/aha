@@ -67,7 +67,7 @@ client-side encryption is deliberately **out of scope for this feature**.
 Confidentiality is handled by a private bucket, TLS, scoped tokens, and R2's
 at-rest encryption — defenses that cannot make bundles unrecoverable.
 
-## Backwards compatibility
+## Pre-release contract cutoff
 
 `aha` has **no users yet** — a one-time luxury. We therefore **lock the public
 contracts now** (the `bundles/v1/` key layout, the `aha-depot/v1` marker, the
@@ -363,6 +363,7 @@ once); any depot-touching command can override it for one invocation with
 | `aha search` | — | read | **no** | queries your local corpus |
 | `aha read` | — | read | **no** | retrieves full context/blob from your local corpus |
 | `aha status` | optional | read | no by default | local corpus health; `--depot` adds a "behind by N bundles" line |
+| `aha verify` | — | read / repair derived index | **no** | checks corpus invariants; `--repair-fts` rebuilds derived FTS rows |
 | `aha conflicts` | — | read | **no** | lists quarantined merge conflicts in your corpus |
 | `aha doctor` | check | check | yes (r2) | diagnostics incl. depot reachability + credentials |
 
@@ -543,7 +544,7 @@ and per-op costs low.
   selected depot driver.
 - Relocate the default bundle store from `~/agent-session-bundles`
   (`bundle_out_dir`) to the local depot `~/.aha/depot` and remove `--out` (see
-  Backwards compatibility).
+  Pre-release contract cutoff).
 
 ### Remove / explicitly avoid
 
@@ -673,14 +674,14 @@ network in the default suite**.
 | Smoke | `aha depot --help`, `aha depot init/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
 | Contract / differential | One suite asserts **identical** observable behavior for the `local` driver, the S3 fake, and (tagged) real R2. |
 | Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, pending-ingest delta computation. |
-| Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output; the manifest and bundle bytes stay **byte-identical** to v1. |
+| Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output, and canonical bundle bytes for the current bundle schema. |
 | Property / fuzz | `Get(Put(x)) == x`; push is idempotent; `pull set == catalog − corpus`; the address parser never panics on arbitrary input. |
 | Integrity / regression | a tampered or truncated object is rejected on SHA mismatch and never promoted (written test-first, red→green). |
 | Security (both directions) | credentials authenticate **and** never appear in any manifest, catalog, `--json`, config, or log output; the depot is private by default. |
 | Concurrency / race | parallel pushes of unique content-addressed keys; per-machine catalog shards show no write contention; same-machine catalog update conflicts merge/retry; passes `go test -race`. |
 | Throttling | the S3 fake returns HTTP 429 → bounded exponential backoff with an injected clock. |
 | Doc-sync | new commands/flags/config keys match the registry and config struct (extends `docs_test.go`, `flag_metadata_sync_test.go`). |
-| No-regression | the remote-depot-off path is byte-identical except for the intentional v2 local-depot default/`--depot` rename and `--out` removal; the reworked no-network test; the full v1 suite green. |
+| No-regression | the remote-depot-off path is unchanged except for the intentional local-depot default/`--depot` rename, `--out` removal, current bundle-schema cutoff, and reworked no-network test; the full suite is green. |
 
 ### Core properties and invariants
 
@@ -752,8 +753,8 @@ internal become de facto contracts:
   migration before any change.
 - **Bundle filename, manifest schema, catalog schema.** Directly fetchable
   bundles mean external tools parse them; `omitempty`/"internal" fields will be
-  depended on. Treat the bundle schema (`agent-session-snapshot-bundle/v1`) and
-  catalog schema as real versioned contracts.
+  depended on. Treat the current bundle schema (`agent-session-snapshot-bundle/v2`) and
+  catalog schema (`aha-depot-catalog/v1`) as real versioned contracts.
 - **The content hash is a contract.** Determinism + content addressing means
   consumers pin and dedup on `bundle_sha256`; any change to zstd level, tar
   metadata, or manifest field order breaks dedup and external pins. The existing

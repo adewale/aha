@@ -19,7 +19,7 @@ func TestQueryFiltersMessagesAndArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Source != "claude-code" || results[0].Role != "user" || results[0].RefText == "" || results[0].Ref.Kind != model.HitKindMessage {
+	if len(results) != 1 || results[0].Source != "claude-code" || results[0].Role != "user" || results[0].RefText == "" || results[0].Ref.Kind() != model.RefKindMessage {
 		t.Fatalf("unexpected filtered results: %+v", results)
 	}
 	artifacts, err := search.Query(store.DB, "artifact needle", search.Filters{Role: "artifact", Limit: 10})
@@ -30,7 +30,7 @@ func TestQueryFiltersMessagesAndArtifacts(t *testing.T) {
 		t.Fatalf("expected artifact results")
 	}
 	for _, result := range artifacts {
-		if result.Role != "artifact" || result.RefText == "" || result.Ref.Kind != model.HitKindArtifact {
+		if result.Role != "artifact" || result.RefText == "" || result.Ref.Kind() != model.RefKindArtifact {
 			t.Fatalf("bad artifact result: %+v", result)
 		}
 	}

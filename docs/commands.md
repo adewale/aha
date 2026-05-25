@@ -43,7 +43,7 @@ aha conflicts [--repo DIR] [--json]
 initialize, list, or verify a bundle depot
 
 ```txt
-aha depot <init|ls|verify> [DEPOT] [--json]
+aha depot <init|ls|verify> [DEPOT] [--json] [--repair]
 ```
 
 **Flags:**
@@ -56,6 +56,7 @@ aha depot <init|ls|verify> [DEPOT] [--json]
 
 - `aha depot init local:~/.aha/depot`
 - `aha depot ls --json`
+- `aha depot verify --repair`
 
 **JSON contract:** `object|array`
 
@@ -146,7 +147,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 **Examples:**
 
-- `aha read <session>#<entry> --json`
+- `aha read <ref_text> --json`
 - `aha read --session <session> --entry <entry> --json`
 
 **JSON contract:** `array<object{line_no,entry_id,timestamp,role,text,raw_json}>`
@@ -262,4 +263,27 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 - `aha status --depot local:~/.aha/depot --json`
 
 **JSON contract:** `object{corpus_dir,sessions,entries,messages,artifacts,images,bundles,conflicts,index_size_bytes,depot_behind_bundles,next}`
+
+## aha verify
+
+verify corpus invariants and optionally repair derived FTS rows
+
+```txt
+aha verify [--repo DIR] [--repair-fts] [--json]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--json`
+- `--repair-fts`
+- `--repo`
+
+**Examples:**
+
+- `aha verify --json`
+- `aha verify --repair-fts`
+
+**JSON contract:** `object{root,problems,repaired_fts}`
 

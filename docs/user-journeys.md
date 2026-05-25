@@ -122,7 +122,7 @@ Rationale:
 | `aha ingest` | Ingest explicit bundle paths, or ingest from the configured depot when no paths are given. `--repo` is an alias for the corpus directory. |
 | `aha search <query>` | Search configured corpus, limit 20. |
 | `aha read ...` | Read from configured corpus. |
-| `aha status` / `aha conflicts` | Inspect configured corpus. |
+| `aha status` / `aha verify` / `aha conflicts` | Inspect configured corpus; `verify --repair-fts` repairs derived FTS rows. |
 
 ## Why each command exists
 
@@ -134,6 +134,7 @@ Rationale:
 | `search` | Primary retrieval action. |
 | `read` | Context expansion around compact search results. |
 | `status` | Explain corpus health and counts. |
+| `verify` | Check corpus invariants and optionally repair derived FTS rows. |
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
 | `depot` | Initialize, list, and verify the durable bundle store. |
 | `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |

@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/model"
 )
 
 func TestReadContextPrefersExactSessionOverAmbiguousPrefix(t *testing.T) {
 	store := openReadResolutionStore(t)
-	insertReadSession(t, store, "pi:m:abc", "abc", "exact", 1)
-	insertReadSession(t, store, "pi:m:abc2", "abc2", "prefix", 1)
+	insertReadSession(t, store, "abc", "exact", 1)
+	insertReadSession(t, store, "abc2", "prefix", 1)
 
 	entries, err := corpus.ReadContext(store.DB, "abc", "", 0, 0)
 	if err != nil {
@@ -23,8 +24,8 @@ func TestReadContextPrefersExactSessionOverAmbiguousPrefix(t *testing.T) {
 
 func TestReadContextResolvesLiteralWildcardPrefix(t *testing.T) {
 	store := openReadResolutionStore(t)
-	insertReadSession(t, store, "pi:m:abc%literal", "abc%literal", "e1", 1)
-	insertReadSession(t, store, "pi:m:abc_plain", "abc_plain", "e1", 1)
+	insertReadSession(t, store, "abc%literal", "e1", 1)
+	insertReadSession(t, store, "abc_plain", "e1", 1)
 
 	entries, err := corpus.ReadContext(store.DB, "abc%", "", 0, 0)
 	if err != nil {
@@ -37,8 +38,8 @@ func TestReadContextResolvesLiteralWildcardPrefix(t *testing.T) {
 
 func TestReadContextEscapesSessionPrefixWildcards(t *testing.T) {
 	store := openReadResolutionStore(t)
-	insertReadSession(t, store, "pi:m:abc1", "abc1", "e1", 1)
-	insertReadSession(t, store, "pi:m:abc2", "abc2", "e1", 1)
+	insertReadSession(t, store, "abc1", "e1", 1)
+	insertReadSession(t, store, "abc2", "e1", 1)
 
 	_, err := corpus.ReadContext(store.DB, "abc%", "", 0, 0)
 	if err == nil || strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "session not found") {
@@ -48,8 +49,8 @@ func TestReadContextEscapesSessionPrefixWildcards(t *testing.T) {
 
 func TestReadContextResolvesLiteralEntryWildcardPrefix(t *testing.T) {
 	store := openReadResolutionStore(t)
-	insertReadSession(t, store, "pi:m:s1", "s1", "entry_1", 1)
-	insertReadEntry(t, store, "pi:m:s1", "entryA", 2)
+	sessionKey := insertReadSession(t, store, "s1", "entry_1", 1)
+	insertReadEntry(t, store, sessionKey, "entryA", 2)
 
 	entries, err := corpus.ReadContext(store.DB, "s1", "entry_", 0, 0)
 	if err != nil {
@@ -62,8 +63,8 @@ func TestReadContextResolvesLiteralEntryWildcardPrefix(t *testing.T) {
 
 func TestReadContextEscapesEntryPrefixWildcards(t *testing.T) {
 	store := openReadResolutionStore(t)
-	insertReadSession(t, store, "pi:m:s1", "s1", "entryA", 1)
-	insertReadEntry(t, store, "pi:m:s1", "entryB", 2)
+	sessionKey := insertReadSession(t, store, "s1", "entryA", 1)
+	insertReadEntry(t, store, sessionKey, "entryB", 2)
 
 	_, err := corpus.ReadContext(store.DB, "s1", "entry_", 0, 0)
 	if err == nil || strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "entry not found") {
@@ -81,12 +82,18 @@ func openReadResolutionStore(t *testing.T) *corpus.Store {
 	return store
 }
 
-func insertReadSession(t *testing.T, store *corpus.Store, sessionKey, sourceSessionID, entryID string, lineNo int) {
+func insertReadSession(t *testing.T, store *corpus.Store, sourceSessionID, entryID string, lineNo int) string {
 	t.Helper()
+	key, err := model.NewSessionKey("pi", "m", sourceSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionKey := key.String()
 	if _, err := store.DB.Exec(`insert into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json) values(?,?,?,?,?,?,?,?)`, sessionKey, "pi", sourceSessionID, "m", "/tmp", "tmp", "2026-01-01T00:00:00Z", `{}`); err != nil {
 		t.Fatal(err)
 	}
 	insertReadEntry(t, store, sessionKey, entryID, lineNo)
+	return sessionKey
 }
 
 func insertReadEntry(t *testing.T, store *corpus.Store, sessionKey, entryID string, lineNo int) {

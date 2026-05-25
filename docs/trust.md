@@ -94,6 +94,9 @@ go test -race ./...
 go test ./internal/cli -run 'NoNetworkImports|Readme'
 go test ./internal/adapters -run SourceAdaptersStayReadOnly
 
+# Corpus invariant/repair tooling
+go test ./internal/corpus -run 'Verify|ReconcileFTS'
+
 # End-to-end private smoke test; use temp dirs and delete them after inspection
 go build -o /tmp/aha ./cmd/aha
 AHA_ACCEPT_SECRETS=1 /tmp/aha snapshot \

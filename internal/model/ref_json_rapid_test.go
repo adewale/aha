@@ -8,16 +8,16 @@ import (
 	"pgregory.net/rapid"
 )
 
-func TestCanonicalRefRapidRoundTrip(t *testing.T) {
+func TestCanonicalRefRapidJSONRoundTrip(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		ref := testutil.GenRef().Draw(t, "ref")
 		text := model.FormatRef(ref)
 		parsed, err := model.ParseRef(text)
 		if err != nil {
-			t.Fatalf("ParseRef(%q): %v", text, err)
+			t.Fatalf("ParseRef(FormatRef(%+v)=%q): %v", ref, text, err)
 		}
 		if model.FormatRef(parsed) != text {
-			t.Fatalf("unstable canonical ref: %q -> %q", text, model.FormatRef(parsed))
+			t.Fatalf("round trip mismatch got=%q want=%q", model.FormatRef(parsed), text)
 		}
 	})
 }

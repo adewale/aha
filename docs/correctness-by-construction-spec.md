@@ -58,19 +58,18 @@ until the identity-format migration phase.
 
 The plan below is grounded in the current code shape:
 
-- `internal/model/model.go` has stringly `HitRef` fields and optional artifact
-  fallback behavior.
-- `internal/corpus/ingest.go` constructs session keys by string concatenation,
-  writes `fts_messages`/`fts_artifacts` manually, and reads wall-clock time in
-  ingest bookkeeping.
-- `internal/corpus/read.go` mixes canonical lookup and fuzzy human resolution,
-  so canonical refs can still encounter runtime “ambiguous” branches.
-- `internal/corpus/schema.go` has primary/unique keys but few foreign keys,
-  checks, or triggers.
+- `internal/model/ref.go` now uses sealed canonical ref variants (`MessageRef`,
+  `SessionRef`, `ArtifactRef`) with one versioned string codec.
+- `internal/corpus/ingest.go` constructs v2 `sk1_...` session keys through the
+  typed constructor and relies on trigger-maintained FTS for normal writes.
+- `internal/corpus/read.go` separates exact canonical reads from fallible fuzzy
+  human resolution.
+- `internal/corpus/schema.go` uses primary/unique keys, targeted foreign keys,
+  checks, append-only/conflict triggers, and trigger-maintained FTS.
 - malformed JSONL lines currently become diagnostics while the **source file**
   is preserved as a blob; there is no per-line malformed-entry row.
-- deterministic bundle coverage is currently repeat/shuffle byte equality, not
-  a committed golden byte fixture.
+- deterministic bundle coverage includes repeat/shuffle byte equality and a
+  committed canonical bundle SHA fixture.
 - fuzz targets exist for parser, refs, archive, and depot address/key parsing;
   `rapid` is now available for shrinkable PBT/stateful testing.
 
@@ -109,10 +108,10 @@ behavior.
 | Source reads are read-only | adapter convention + static grep | adapter/source capability exposes read/discover/open only; no write authority | compile-time interface + static mutation guard |
 | Source path safety | path containment checks | `SafePath`/`SourceRoot` constructed once; write destinations require corpus/depot roots | PBT path containment + Type B unsafe path tests |
 | Parser never drops raw source bytes | source file blob stored before parse | raw file always stored; optional malformed-line diagnostics table for per-line raw | fuzz postconditions + fixture conformance |
-| Parsed entry identity non-empty | fallback `line-%06d-hash` | `EntryID` constructor cannot return empty; zero value invalid at DB boundary | constructor PBT + DB `CHECK(entry_id <> '')` |
-| Session identity stable | `source + ':' + machine + ':' + id` | `SessionKey` from canonical length-prefixed tuple; tuple columns retained for audit | deterministic/collision-class PBT + migration tests |
+| Parsed entry identity non-empty | `EntryID` constructor + DB trigger/check | `EntryID` constructor cannot return empty; zero value invalid at DB boundary | constructor PBT + DB `CHECK(entry_id <> '')` |
+| Session identity stable | `SessionKey` constructor emits `sk1_` hash from length-prefixed tuple; DB rejects non-`sk1` keys | `SessionKey` from canonical length-prefixed tuple; tuple columns retained for audit | deterministic/collision-class PBT + schema Type B tests |
 | Identity collision handling | primary keys + conflict branch | collision-resistant key plus tuple uniqueness; hash collision becomes explicit conflict | Type B same-key/different-tuple attempt |
-| Refs round-trip | `HitRef` optional fields + parser | sealed ref variants: `MessageRef`, `ArtifactRef`; one versioned string codec | rapid PBT + fuzz + search/read property |
+| Refs round-trip | sealed `Ref` variants + canonical parser | sealed ref variants: `MessageRef`, `SessionRef`, `ArtifactRef`; one versioned string codec | rapid PBT + fuzz + search/read property |
 | Canonical read is total | `read` resolver may be ambiguous | `ReadCanonical(MessageRef|ArtifactRef)` exact lookup; `ResolveHuman` separate | state-machine: every emitted ref readable |
 | Human resolution is honest | ambiguous errors at runtime | fallible resolver returns typed `NotFound`/`Ambiguous` with candidates | table tests + PBT prefix escaping |
 | Bundle determinism | repeat/shuffle byte equality tests | canonical archive/manifest encoder with sorted input and pinned metadata | PBT shuffle invariance + committed golden fixture |
@@ -121,13 +120,13 @@ behavior.
 | Depot object truth | bundle object SHA + catalog refs | bundle objects are durable truth; catalog shards are repairable indexes | local/fake-R2 contract + repair state machine |
 | Catalog merge laws | merge helper + property tests | shard merge is idempotent, commutative, deterministic | rapid/quick algebra tests + concurrent fake-R2 tests |
 | Corpus ingest idempotent | bundle PK/unique + explicit skip + `insert or ignore` | bundle identity and row identity encoded as uniqueness; attempt log append-only | state-machine `ingest∘ingest = ingest` |
-| Entries append-only | no `DELETE`/`UPDATE` convention | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | Type B direct SQL update/delete tests |
+| Entries append-only | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | Type B direct SQL update/delete tests |
 | Same `(session,entry)` diff hash quarantined | select-then-branch in Go | `BEFORE INSERT` trigger or writable-view trigger writes `conflicts` and ignores overwrite | Type B conflict insertion + state machine |
 | Cross-machine conflicts preserved | Go query/branch | unique source tuple + conflict relation; no overwrite path | multi-machine model tests |
-| Message rows belong to entries | primary keys but no FK | FK `messages(session_key,entry_id) → entries` | Type B orphan insert rejected |
-| Asset rows belong to entries/images | primary key only | FKs from `entry_assets` to `entries`; image hash relation checked where possible | Type B orphan asset tests |
-| Artifact rows are searchable/readable | manual artifact FTS write | artifact row + FTS trigger/reconciler; artifact ref codec | search/read property includes artifacts |
-| FTS cannot drift through normal writes | manual dual-write | external-content FTS + insert/update/delete triggers for messages/artifacts | state machine + reconciliation query |
+| Message rows belong to entries | FK plus `messages_require_entry` trigger | FK `messages(session_key,entry_id) → entries` | Type B orphan insert rejected |
+| Asset rows belong to entries/images | FK from `entry_assets` to `entries`; image hash is optional for raw refs | FKs from `entry_assets` to `entries`; image hash relation checked where possible | Type B orphan asset tests |
+| Artifact rows are searchable/readable | artifact row + FTS trigger/reconciler; artifact ref codec | artifact row + FTS trigger/reconciler; artifact ref codec | search/read property includes artifacts |
+| FTS cannot drift through normal writes | trigger-maintained FTS rows | trigger-maintained FTS rows plus verifier/reconciler; raw tables remain truth | state machine + reconciliation query |
 | FTS direct writes are contained | not structurally blocked | repository encapsulation + static guard banning direct FTS writes outside schema/reconciler | static guard + Type B reconciliation test |
 | Blob rows match files | staging + hashes + rollback tests | blob publisher owns atomic write; corpus verifier checks row↔blob↔hash | failure-injection tests + `doctor`/verify tests |
 | Orphan blobs are benign/repairable | some cleanup on bundle promote failure | explicit orphan policy: allowed staging or repairable orphan, never missing committed blob | state-machine + repair tests |
@@ -149,7 +148,7 @@ Introduce opaque values in `internal/model` or focused subpackages:
 - `EntryID`
 - `BundleSHA256`
 - `ArtifactSHA256`
-- `Role`, `EntryKind`, `AssetKind`, `CopyState`, `HitKind`
+- `Role`, `EntryKind`, `AssetKind`, `CopyState`, `RefKind`
 - `CorpusRoot`, `DepotAddress`, `SafeRelPath`
 
 Each has one public constructor/parse function. The zero value is invalid; every
@@ -178,7 +177,7 @@ resistance plus tuple uniqueness.
 
 ### 3. Ref sum type and versioned codec
 
-Replace the optional-field `HitRef` shape with sealed variants:
+Use sealed variants for refs:
 
 ```go
 type Ref interface{ refVariant(); Valid() bool }
@@ -190,14 +189,14 @@ type ArtifactRef struct { SHA ArtifactSHA256 }
 The string codec should be versioned and delimiter-safe, e.g.:
 
 ```text
-msg:v1:<session-key>#<entry-id>
-session:v1:<session-key>
+msg:v1:<base64url-session-key>:<base64url-entry-id>
+session:v1:<base64url-session-key>
 artifact:v1:<sha256>
 ```
 
-Compatibility parser accepts v1 legacy refs during migration. Formatter emits
-only the new canonical form after the ref phase. `search` emits values accepted
-by `read` without fuzzy resolution.
+Because `aha` is pre-user/pre-release, there is no legacy ref migration path:
+the parser accepts only canonical refs, and the formatter emits only canonical
+refs. `search` emits values accepted by `read` without fuzzy resolution.
 
 ### 4. Parser boundary and diagnostics
 
@@ -255,10 +254,11 @@ Option 1 is simpler and should be tried first.
 
 ### 6. FTS without overclaiming
 
-FTS5 external-content tables plus triggers are the target for normal writes:
+Trigger-maintained FTS rows are the target for normal writes:
 
-- `messages ↔ fts_messages`
-- `artifacts ↔ fts_artifacts`
+- `messages_ai` insert trigger adds message text;
+- `artifacts_ai` insert trigger adds artifact text/body;
+- append-only update/delete triggers reject mutation.
 
 But SQLite virtual tables remain directly writable and cannot carry ordinary
 foreign keys. Therefore construction is layered:
@@ -292,8 +292,9 @@ artifacts             ↔ file/blob rows where applicable
 fts rows              ↔ source rows
 ```
 
-`doctor` can surface a fast subset; a heavier `verify` command can do full hash
-checks later.
+`doctor` can surface a fast subset; `aha verify` exposes corpus checks and
+repairable FTS drift directly. Deeper blob hash verification can be added as a
+future `verify --deep` mode.
 
 ### 8. Depot correctness
 
@@ -459,8 +460,8 @@ Keep and strengthen existing fuzz targets:
 
 - parser JSONL: no panic; raw file preserved; valid parsed entries have non-empty
   IDs; malformed lines produce diagnostics; no invalid UTF-8 crash.
-- hit ref codec: no panic; valid refs round-trip; formatting is stable; legacy
-  compatibility parser is total over old valid refs.
+- canonical ref codec: no panic; valid `msg:v1`, `session:v1`, and
+  `artifact:v1` refs round-trip; formatting is stable; legacy refs are rejected.
 - archive walk/write: manifest/data/checksum honesty; path safety; budget
   accounting.
 - depot address/key: valid-or-typed-error; normalized form stable.
@@ -469,14 +470,14 @@ Add structure-aware fuzzers when the constructors exist:
 
 - fuzz bundle → ingest → corpus invariant check;
 - fuzz manifest mutations → validation rejects or yields safe typed error;
-- differential fuzz old parser vs new typed parser during migration.
+- differential parser fuzzing only when replacing an active parser with another active parser; no legacy compatibility harness is required pre-release.
 
 ### Exhaustive checks
 
 Small finite spaces should be exhaustive, not sampled:
 
 - every `Role × index_tool_output` combination;
-- every `HitKind`/`AssetKind`/`CopyState` codec value;
+- every `RefKind`/`AssetKind`/`CopyState` codec value;
 - all ingest permutations for N ≤ 5 small disjoint bundles;
 - output mode mutual exclusions;
 - depot address forms (`local`, `local:`, `r2`, `r2:bucket`, bad schemes).
@@ -545,20 +546,20 @@ Exit criteria:
 - corpus/depot state-machine skeletons compile and can replay a minimal sequence;
 - adapter conformance fixture harness exists for all built-in adapters;
 - schema introspection helpers exist for future Type B tests;
-- `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read-capability seams exist, even if initially backed by legacy code;
+- `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read-capability seams exist;
 - corpus/depot verifier queries can detect at least one seeded inconsistency each;
 - new PBT/fuzz/state-machine tests can be added without bespoke setup.
 
-### Phase 1 — Typed primitives, same storage/wire format
+### Phase 1 — Typed primitives, current storage/wire format
 
 - Add `EntryID`, `SessionKey`, `Role`, `AssetKind`, `CopyState`, SHA types.
-- Keep DB/string wire representation unchanged.
+- Keep DB/string wire representation current, but reject pre-release legacy encodings rather than preserving them.
 - Parse at boundaries; internal code accepts typed values.
 - Add exhaustive role/index tests and constructor Type A/Type B tests.
 
 Exit criteria:
 
-- public behavior unchanged;
+- documented behavior unchanged except intentional pre-release cleanup;
 - no new string concatenation for keys;
 - constructors carry the invariant; downstream duplicate validation removed only
   when it defends the same non-adversarial failure mode.
@@ -568,7 +569,7 @@ Exit criteria:
 - Introduce ref sum type and versioned codec.
 - `search` emits canonical refs.
 - `read` path splits into `ReadCanonical` and `ResolveHuman`.
-- Legacy ref parser remains for compatibility until bundle/corpus v2.
+- Legacy ref syntax is removed pre-release; malformed or old refs fail fast.
 
 Exit criteria:
 
@@ -579,8 +580,8 @@ Exit criteria:
 ### Phase 3 — Storage invariants
 
 - Add FK/CHECK constraints and append-only/quarantine triggers via migrations.
-- Move FTS to trigger-maintained external-content tables or add a reconciler
-  first if migration risk is high.
+- Keep FTS trigger-maintained and maintain a reconciler so raw tables remain
+  the source of truth.
 - Add Type B direct-SQL tests for orphan rows, mutation attempts, and conflicts.
 
 Exit criteria:
@@ -603,17 +604,17 @@ Exit criteria:
 - retry tests use no real sleep;
 - source write authority is not available to adapters.
 
-### Phase 5 — Identity v2 and compatibility ingest
+### Phase 5 — Identity v2 and schema cutoff
 
 - Bump bundle/corpus identity schema when necessary.
-- Ingest v1 bundles by translating legacy keys into v2 typed identities.
-- Keep old refs readable or provide clear migration errors with next actions.
+- Reject unsupported bundle schemas at validation/read boundaries.
+- Store only v2 `sk1_...` session keys; do not create alias tables for old delimiter keys.
 
 Exit criteria:
 
-- existing v1 bundles remain ingestible;
-- new bundles use v2 identity;
-- migration is covered by fixture bundles and state-machine sequences.
+- unsupported bundles fail with clear errors;
+- new bundles use v2 identity only;
+- fixture bundles and state-machine sequences cover the cutoff behavior.
 
 ## What to do in advance to make implementation simpler and safer
 
@@ -623,7 +624,7 @@ These are Phase 0 tasks and can be done before production refactors. They are in
 2. **Add state-machine skeletons for corpus and depot before changing storage.** Create minimal `rapid` state-machine tests with model state, commands, invariant checks, and replay traces before schema changes. The first version may only execute `ingest duplicate`, `read`, `search`, `status`, `depot put/list/fetch/verify`, and seeded failure cases, but the structure must be present before adding FK/trigger/identity migrations.
 3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, and Codex behavior as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
 4. **Add schema introspection helpers before FK/trigger migrations.** Provide test helpers for `HasTable`, `HasColumn`, `HasIndex`, `HasForeignKey`, `HasCheck`, `HasTrigger`, and direct-SQL Type B attempts. Migration tests should assert both the structural object exists and the invalid operation is rejected.
-5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add no-op/legacy-backed wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behavior, and storage changes in one diff.
+5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add narrow wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behavior, and storage changes in one diff.
 6. **Add corpus/depot verifier queries before enforcing stricter constraints.** Implement lightweight queries that find orphan messages/assets/artifacts, FTS drift, missing blobs, wrong blob hashes where cheap, stale depot catalog refs, malformed depot keys, and missing catalog shards. The verifier should run against current stores and produce actionable diagnostics before migrations start rejecting these states.
 7. **Run mutation dry-runs periodically to find weak tests before relying on them.** Run `scripts/verify.sh mutation-dry` after each major guardrail and before deleting duplicate runtime checks. Track uncovered critical mutants as work items; do not use a new constructor/schema trigger as justification for deleting old checks until mutation dry-run and targeted Type A/Type B tests show the invariant is covered.
 
@@ -631,7 +632,7 @@ Additional advance work:
 
 8. **Use one verification entrypoint.** `scripts/verify.sh` and Make targets define quick/full/fuzz/mutation profiles so every phase runs the same checks locally and in CI.
 9. **Add shrinkable generators now.** Even small `rapid` generators for refs, catalog refs, manifests, sessions, and operation traces reduce bespoke property-test setup later.
-10. **Keep old and new paths side by side temporarily.** Differential tests compare legacy parser/ref/identity behavior to the new typed path until equivalence or intentional differences are documented.
+10. **Use side-by-side paths only for active formats.** Differential tests compare old and new implementations when both are intentionally supported; pre-release legacy refs/bundles should be deleted and covered by rejection tests instead of compatibility shims.
 
 ## Additional verification upgrades
 
@@ -665,7 +666,7 @@ Do not snapshot large opaque blobs unless the bytes are the contract.
 When fuzzing finds a bug, commit the minimized input under `testdata/fuzz` and add a named regression when the failure explains an invariant. Fuzz targets should graduate from “no panic” to postconditions:
 
 - parser: raw preserved, non-empty IDs for valid entries, diagnostics for malformed lines;
-- refs: canonical/legacy compatibility and stable formatting;
+- refs: canonical-only round trips, stable formatting, and rejection of legacy syntax;
 - archives: manifest/data/checksum/path/budget honesty;
 - depot: address/key valid-or-typed-error and stable normalization.
 
@@ -692,15 +693,15 @@ Keep extending hooks/fakes that can stop execution between durable steps:
 
 The oracle is not “no leftovers ever.” The oracle is “no committed row points at missing/wrong bytes; leftover staging/orphan blobs are detectable and repairable.”
 
-### Migration matrix tests
+### Version-cutoff matrix tests
 
 Every schema or bundle/corpus version bump needs a matrix:
 
 | Input | Operation | Expected |
 |---|---|---|
-| old empty corpus | open/migrate | current schema, no data loss |
-| old populated corpus | migrate/status/search/read | counts and refs preserved |
-| v1 bundle | ingest into current corpus | translated identity, readable refs |
+| empty corpus | open/migrate | current schema |
+| current populated corpus | reopen/status/search/read | counts and canonical refs preserved |
+| unsupported bundle schema | ingest/read manifest | clear typed error; no corpus mutation |
 | interrupted migration | reopen | either rolls forward or reports repairable error |
 
 Use real SQLite files and committed tiny fixtures.
@@ -736,7 +737,7 @@ Realish fixtures catch drift; minimal fixtures make failures easy to understand.
 
 ### Verify command as test oracle
 
-As corpus/depot verifier queries mature, tests should call the same verifier code that `doctor` or a future `aha verify` uses. This avoids a parallel “test-only validator” drifting away from the user-facing repair tool.
+As corpus/depot verifier queries mature, tests should call the same verifier code that `doctor`, `aha verify`, and `aha depot verify` use. This avoids a parallel “test-only validator” drifting away from the user-facing repair tool.
 
 ## Definition of done
 
@@ -753,14 +754,14 @@ As corpus/depot verifier queries mature, tests should call the same verifier cod
 - `gremlins` has no surviving mutants in identity/ref/archive/path/depot-key/
   conflict-quarantine critical paths, or surviving mutants are documented with
   justified equivalent-mutant rationale.
-- Bundle/corpus v2 ships with tested v1 ingest compatibility.
+- Bundle/corpus v2 ships with tested rejection of unsupported schemas and no legacy identity aliases.
 
 ## Highest-leverage order
 
 1. Freeze debt and unify verification commands.
 2. Ref sum type + canonical/human read split.
-3. Typed `EntryID`/`SessionKey` constructors with compatibility storage.
+3. Typed `EntryID`/`SessionKey` constructors with v2-only storage.
 4. Schema constraints/triggers for append-only, conflict quarantine, and FKs.
 5. FTS trigger/reconciler work for messages and artifacts.
 6. Clock/backoff/source capability seams.
-7. Identity v2 only after compatibility ingest is proven.
+7. Identity v2 cutoff with explicit unsupported-schema/ref rejection tests.

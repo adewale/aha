@@ -11,6 +11,7 @@ import (
 
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/config"
+	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/testutil"
 )
 
@@ -73,6 +74,18 @@ func TestSubcommandHelpIsSuccessful(t *testing.T) {
 		if !strings.Contains(out.String(), "Usage of") {
 			t.Fatalf("%s --help missing usage: %s", cmd, out.String())
 		}
+	}
+}
+
+func TestReadRejectsLegacyRefsBeforeOpeningCorpus(t *testing.T) {
+	for _, ref := range []string{"pi:m:s#e", "artifact:abc123"} {
+		t.Run(ref, func(t *testing.T) {
+			var out bytes.Buffer
+			err := cli.Run([]string{"read", ref, "--json"}, &out, &out)
+			if err == nil || !strings.Contains(err.Error(), "unsupported ref format") {
+				t.Fatalf("read legacy ref err=%v output=%s", err, out.String())
+			}
+		})
 	}
 }
 
@@ -504,5 +517,28 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "index_size_bytes") {
 		t.Fatalf("bad status output: %s", out.String())
+	}
+	store, err := corpus.OpenExisting(corpusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.Exec(`delete from fts_messages`); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	store.Close()
+	out.Reset()
+	if err := cli.Run([]string{"verify", "--corpus", corpusDir, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "missing_fts_messages") {
+		t.Fatalf("verify did not report seeded FTS drift: %s", out.String())
+	}
+	out.Reset()
+	if err := cli.Run([]string{"verify", "--corpus", corpusDir, "--repair-fts", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "missing_fts_messages") || !strings.Contains(out.String(), `"repaired_fts": true`) {
+		t.Fatalf("verify --repair-fts did not repair drift: %s", out.String())
 	}
 }

@@ -18,18 +18,20 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - Unified verification entrypoints via `scripts/verify.sh` and Make targets, including bounded fuzz and optional mutation profiles.
 - `rapid` property-based testing dependency plus shared test generators for shrinkable invariant tests.
 - Static correctness-debt inventory tests for ambient time, raw identity concatenation, manual FTS writes, and direct append-only table mutations.
-- Correctness-by-construction guardrails and implementation hardening: typed identity/ref primitives, canonical ref parsing/formatting, corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, exact canonical read/human resolution split, clock/sleeper/backoff/source-capability seams, corpus verifier/reconciler queries, v2 bundle schema acceptance/emission, v2 session-key construction with legacy aliases, append-only/quarantine triggers, and trigger-maintained FTS rows.
+- Correctness-by-construction guardrails and implementation hardening: typed identity/ref primitives, sealed canonical-only ref variants/parsing/formatting, corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, exact canonical read/human resolution split, clock/sleeper/backoff/source-capability seams, corpus verifier/reconciler queries, v2-only bundle schema validation, v2-only session-key construction, targeted SQLite foreign keys/checks, append-only/quarantine triggers, and trigger-maintained FTS rows.
 - `status --depot` behind-bundle reporting.
 - `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.
 - Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
+- `aha verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
+- Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimization guardrails.
 
 ### Changed
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
 - Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
-- Generated command docs now include depot commands and depot-aware flags.
+- Generated command docs now include depot commands, depot-aware flags, and corpus verification.
 
 ### Removed
 
