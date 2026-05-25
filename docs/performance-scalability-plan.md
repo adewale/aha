@@ -2,7 +2,16 @@
 
 Date: 2026-05-25
 
-This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic bundles, content-addressed identity, append-only ingest, or repairability.
+This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic bundles, content-addressed identity, append-only ingest, or repairability.
+
+## Revised testing strategy
+
+Pathological performance testing now has two layers:
+
+1. **Synthetic benchmarks for byte/row-heavy cases**: large message counts, broad FTS terms, many tiny archive files, and deep depot verification. These expose constant factors and give pprof data.
+2. **Property-based performance invariants for metadata-heavy cases**: many trivial bundles, duplicates, many machines, and many catalog shapes. These avoid storing huge datasets and assert complexity by operation/cardinality rather than wall-clock time.
+
+The second layer is especially important for depot/status/refresh behavior because the failure mode is often not a 100MiB object; it is years of tiny no-op snapshots and duplicate catalog refs.
 
 ## Pathological benchmark suite
 
@@ -51,6 +60,21 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | Local depot | 250 refs | list `0.7ms`; put after large catalog `2.0ms`; verify `24.9ms` / `20MB` | Local catalog costs are linear and fine at 250 refs, but deep verify scales with object count/bytes. |
 | Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --depot` set-difference memory grows with ingested bundle count. |
 
+## Property-based performance invariants
+
+For many-trivial-bundle scenarios, tests should generate compact catalog/corpus models and assert invariants such as:
+
+- **cardinality invariants**: pending/behind work is based on unique bundle SHA, not duplicate catalog refs;
+- **operation-count invariants**: status/list/state checks may list metadata but must not fetch bundle bytes unless a deep operation is explicitly requested;
+- **byte-read invariants**: unchanged refresh should compare catalog `state_sha256` and read `0` old bundle bytes when state metadata exists;
+- **bounded-output invariants**: query/status JSON should be bounded by requested limit or unique ref count, not raw duplicate count;
+- **idempotence invariants**: repeated trivial bundles do not increase pending ingest work after the first successful ingest;
+- **shape invariants**: many machines/shards and many duplicate refs produce the same answer as a set model.
+
+A first example is now covered by `TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty`: `status --depot` behind counts are computed as `unique(catalog_sha) - ingested_sha`, so duplicate refs from many trivial bundles do not inflate work/counts.
+
+This changes the roadmap: every optimization below should get both a benchmark and a small-model property test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT answers “what must not grow with duplicates, stale refs, or old trivial bundles?”
+
 ## Profiling lessons
 
 - `corpus.Verify` is the urgent hotspot. CPU profiles for 5k messages put about 90%+ of time under `corpus.Verify -> verifyCount -> sqlite VDBE`, with FTS5 cursor/column work visible. The verifier joins `messages` to `fts_messages` on unindexed FTS columns, so it does not behave like a normal b-tree join.
@@ -66,7 +90,7 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | More messages | Ingest remains roughly linear in new entries, but verify can become superlinear due FTS key joins. | `aha verify` becomes too slow for routine use and agents stop running it. |
 | More broad terms | FTS keeps search usable, but broad/common terms and high `--limit` increase SQL work and output allocations. | Search latency and JSON size grow; agent loops become slower and noisier. |
 | More paths/projects | `--path` uses contains matching over cwd/path columns. | Path filters stay non-indexable and degrade when combined with common terms. |
-| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference are linear in bundle refs. | `status --depot` and depot ingest startup become increasingly expensive. |
+| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference are linear in unique refs, with PBT guarding duplicate-ref semantics. | `status --depot` and depot ingest startup become increasingly expensive if catalogs grow without summary/compaction. |
 | More unchanged refreshes | Refresh can list refs and fetch/read prior same-machine bundles to compare state. | Unchanged daily refresh gets slower over time, especially with R2. |
 | More depot objects | Deep verify hashes/downloads every object. | Correct integrity audits become expensive and network-costly. |
 | More tiny files | Manifest/tar/header overhead scales with file count, not just bytes. | Many subagent artifacts or small sessions create high allocation/metadata overhead. |
@@ -98,7 +122,7 @@ Actions:
 2. Make `findDepotBundleWithSameState` compare catalog `state_sha256` first.
 3. Fetch/read an old bundle only if the catalog ref lacks state metadata or the catalog needs repair.
 4. Since this is pre-release, prefer a clean catalog schema bump or a tested additive field strategy over compatibility shims.
-5. Add fake-R2 operation-count tests: unchanged refresh must not call `Fetch` when catalog state metadata is present.
+5. Add fake-R2 operation-count and PBT model tests: unchanged refresh must not call `Fetch` when catalog state metadata is present, regardless of duplicate refs, machine distribution, or catalog ordering.
 
 Expected impact: repeated no-op refresh stops getting slower as depot history grows.
 
@@ -142,6 +166,7 @@ Actions:
 3. Add/index `sessions(source_name, source_session_id, machine_id)` plus `entries(session_key, entry_id, entry_sha256)` coverage for cross-machine checks if query plans show table walks.
 4. Batch insert messages where possible, letting triggers maintain FTS rows.
 5. Add ingest benchmarks at 10k/50k/100k entries and track `allocs/entry`.
+6. Add PBT small-model tests for many trivial bundles: repeated already-ingested bundle refs must not trigger parsing/fetching or increase pending work.
 
 Expected impact: keeps ingest predictable as sessions get large.
 
@@ -209,7 +234,7 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 
 ## Cross-cutting longevity work
 
-1. **Performance contracts in tests**: keep pathological benchmarks non-gating, but add query-plan/static tests for known algorithmic hazards: unindexed FTS verification, non-indexed exact project filters, accidental network calls in status, and repeated hash passes where APIs promise known SHA.
+1. **Performance contracts in tests**: keep pathological benchmarks non-gating, but add query-plan/static/PBT tests for known algorithmic hazards: unindexed FTS verification, non-indexed exact project filters, accidental network/fetch calls in status/refresh, repeated hash passes where APIs promise known SHA, and duplicate trivial bundles inflating work.
 2. **Telemetry-free local metrics**: add `--json` timing/counter fields for expensive commands: files scanned, bytes read, bytes written, bundles listed/fetched, SQL rows inserted, FTS rows repaired.
 3. **Disk-growth tools**: add `aha corpus size`, `aha corpus vacuum`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
 4. **Depot catalog compaction**: as refs grow, support compacted per-machine catalog snapshots or sharded-by-time catalogs while keeping bundle objects content-addressed.
@@ -219,11 +244,12 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 ## Priority order
 
 1. Fix FTS verification identity (`rowid`/indexed shadow keys). This removes the first observed superlinear cliff.
-2. Remove depot refresh old-bundle fetches by storing `state_sha256` in catalog refs.
-3. Remove duplicate bundle hashing across depot ingest and archive/depot publish.
-4. Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state.
-5. Add indexed project/path filtering and cap/warn high-limit broad searches.
-6. Split depot/status quick vs deep modes and add R2 operation-budget tests.
-7. Add disk-size/vacuum/retention tooling for multi-year longevity.
+2. Add PBT/operation-count invariants for many trivial bundles, duplicate catalog refs, and no-op depot/status/refresh paths.
+3. Remove depot refresh old-bundle fetches by storing `state_sha256` in catalog refs.
+4. Remove duplicate bundle hashing across depot ingest and archive/depot publish.
+5. Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state.
+6. Add indexed project/path filtering and cap/warn high-limit broad searches.
+7. Split depot/status quick vs deep modes and add R2 operation-budget tests.
+8. Add disk-size/vacuum/retention tooling for multi-year longevity.
 
 The principle: keep strict/deep integrity operations available, but make routine `refresh`, `search`, `status`, and `verify` scale with metadata or indexed row counts rather than historical bytes and unindexed virtual-table scans.

@@ -26,7 +26,7 @@
 
 ## Performance work
 
-- Use `docs/performance-scalability-plan.md` as the implementation order for performance work.
+- Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including PBT performance invariants for many trivial bundles/duplicate refs instead of relying only on large fixtures.
 - Optimize corpus `verify` query shape/indexing first; pathological benchmarks show current FTS-key verification becomes superlinear (`5k` messages took about `7.7s`).
 - Avoid redundant full-bundle hashing across archive write, depot put, and depot ingest while preserving a deep verification path.
 - Store source-state signatures in depot catalog refs so unchanged `refresh` does not fetch old bundles just to compare manifests.

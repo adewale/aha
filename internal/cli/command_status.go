@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
 )
 
@@ -58,13 +59,21 @@ func depotBehindCount(store *corpus.Store, cfg model.Config, depotAddr string) (
 	if err != nil {
 		return 0, err
 	}
+	return depotBehindFromRefs(refs, ingested), nil
+}
+
+func depotBehindFromRefs(refs []depot.BundleRef, ingested map[string]bool) int {
 	behind := 0
+	seen := map[string]bool{}
 	for _, ref := range refs {
-		if !ingested[ref.BundleSHA256] {
-			behind++
+		sha := ref.BundleSHA256
+		if sha == "" || seen[sha] || ingested[sha] {
+			continue
 		}
+		seen[sha] = true
+		behind++
 	}
-	return behind, nil
+	return behind
 }
 
 func statusNext(stats map[string]any) []string {
