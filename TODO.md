@@ -26,11 +26,12 @@
 
 ## Performance work
 
-- Expand the initial benchmarks from `docs/performance-audit.md` and capture pprof profiles before optimizing archive, ingest, search, depot, status, or verify paths.
-- Optimize corpus `verify` query shape/indexing first; the initial synthetic benchmark shows full FTS/left-join verification is the largest local maintenance hotspot.
+- Use `docs/performance-scalability-plan.md` as the implementation order for performance work.
+- Optimize corpus `verify` query shape/indexing first; pathological benchmarks show current FTS-key verification becomes superlinear (`5k` messages took about `7.7s`).
 - Avoid redundant full-bundle hashing across archive write, depot put, and depot ingest while preserving a deep verification path.
 - Store source-state signatures in depot catalog refs so unchanged `refresh` does not fetch old bundles just to compare manifests.
-- Consider quick/deep depot verify modes; keep current deep behavior available for integrity audits.
+- Prepare/batch ingest SQL and prefetch per-session duplicate/conflict state to reduce per-entry SQL chatter.
+- Consider quick/deep depot verify and status modes; keep current deep behavior available for integrity audits.
 
 ## Future adapters
 

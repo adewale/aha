@@ -8,7 +8,7 @@ Scope: snapshot/archive, ingest, search, depot, status, verify, and refresh flow
 
 `aha` optimizes first for determinism, integrity, and repairability. That is the right tradeoff for a history archive, but it creates several predictable cost centers: repeated hashing, repeated archive reads, serial ingest SQL, full-scan verification, and depot operations that scale with catalog/bundle count.
 
-An initial benchmark suite now covers archive write/read, corpus ingest/verify/reconcile, search, and local depot put/list/verify. The risks below are still directional until we add larger fixtures, CI trend capture, and pprof-backed optimization passes.
+An initial benchmark suite now covers archive write/read, corpus ingest/verify/reconcile, search, and local depot put/list/verify. Pathological benchmarks and pprof notes are summarized in `docs/performance-scalability-plan.md`. The risks below are still directional until we add larger fixtures and CI trend capture.
 
 ## Algorithmic complexity
 
@@ -55,10 +55,11 @@ Variables:
 
 ## Benchmark and profiling plan
 
-Run the initial benchmarks before optimizing:
+Run the initial and pathological benchmarks before optimizing:
 
 ```bash
 go test ./internal/archive ./internal/corpus ./internal/search ./internal/depot -run=^$ -bench=. -benchmem
+go test ./internal/archive ./internal/corpus ./internal/search ./internal/depot -run=^$ -bench=BenchmarkPathological -benchmem
 ```
 
 For command-level profiles, opt in with either flags or environment variables:

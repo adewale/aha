@@ -26,6 +26,8 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - `aha verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
 - Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimization guardrails.
 - Optional command-level Go pprof output via `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, and `AHA_MEM_PROFILE`.
+- Pathological performance benchmarks for many tiny archive files, large ingest/verify/search/status corpora, and large local depot catalogs.
+- Performance scalability/longevity plan tying benchmark/profiling findings to concrete optimization phases.
 
 ### Changed
 
