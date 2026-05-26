@@ -12,7 +12,21 @@
 
 ## Credentials and tokens
 
-Create R2 S3 API tokens in Cloudflare's **R2 object storage → API Tokens** UI. R2 tokens produce an **Access Key ID** and **Secret Access Key** for S3-compatible SDKs.
+`aha` uses Cloudflare R2's **S3-compatible API**, so it needs an R2 **Access Key ID** and **Secret Access Key**. A Wrangler login/OAuth token can list or create buckets with `wrangler`, but it is **not** the same thing as an S3 access key and is not read by `aha`.
+
+### Find or create an R2 access key
+
+In the Cloudflare dashboard:
+
+1. Open <https://dash.cloudflare.com> and select the account that owns the bucket.
+2. Go to **R2 Object Storage**.
+3. Open **Manage R2 API tokens** / **API tokens**.
+4. Create an **R2 API token** for S3-compatible access.
+5. Copy the generated values:
+   - **Access Key ID** → `AHA_R2_ACCESS_KEY_ID`
+   - **Secret Access Key** → `AHA_R2_SECRET_ACCESS_KEY`
+
+The **Secret Access Key is shown only once**. If it was not saved, create a new token and revoke the old one. The Access Key ID is an identifier, not the secret, but still avoid committing it.
 
 Recommended token shape:
 
@@ -35,6 +49,44 @@ export AHA_R2_REGION=auto
 ```
 
 `R2_*` aliases also work. `aha` intentionally ignores generic `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` so it does not accidentally use unrelated AWS credentials.
+
+Example setup:
+
+```bash
+export AHA_R2_ACCOUNT_ID=<account-id>
+export AHA_R2_ACCESS_KEY_ID=<r2-access-key-id>
+export AHA_R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
+aha doctor --depot r2:aha-depot --json
+aha snapshot --depot r2:aha-depot --accept-secrets --json
+aha depot verify r2:aha-depot --json
+```
+
+## Bucket and account discovery
+
+To list buckets with Wrangler, if already logged in:
+
+```bash
+npx wrangler r2 bucket list
+```
+
+To create a private bucket for `aha`:
+
+```bash
+npx wrangler r2 bucket create aha-depot
+```
+
+To find the account ID with Wrangler:
+
+```bash
+npx wrangler whoami
+```
+
+Or use the dashboard URL/account page. The account ID is the `<ACCOUNT_ID>` in:
+
+```text
+https://dash.cloudflare.com/<ACCOUNT_ID>/...
+https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+```
 
 ## Endpoint and region
 

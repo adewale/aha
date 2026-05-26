@@ -50,8 +50,22 @@ Requires Go from `go.mod` on macOS or Linux. Windows support is planned for v2.
 ```bash
 git clone https://github.com/adewale/aha.git
 cd aha
-go build -o aha ./cmd/aha
-./aha --version
+go install ./cmd/aha
+```
+
+If `aha` is not found, add Go's bin directory to your shell path:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
+command -v aha
+aha --version
+```
+
+Local build without installing:
+
+```bash
+go build -o /tmp/aha ./cmd/aha
+/tmp/aha --version
 ```
 
 Run tests:
@@ -62,23 +76,23 @@ go test ./...
 
 ## Quick start
 
-Create a config, acknowledge the privacy model, snapshot local histories, and ingest them:
+See `docs/onboarding.md` for the verifiable first-run checklist, including install/PATH checks and optional R2 setup.
+
+Local-first setup:
 
 ```bash
+aha doctor --json
 aha init --accept-secrets
-aha refresh
+aha refresh --max-sessions 1 --json
+aha refresh --json
+aha verify --json
 ```
 
-Search:
+Search and then read a returned ref:
 
 ```bash
-aha search "dynamic workflows"
-```
-
-Read full context around a hit:
-
-```bash
-aha read --session <session-key> --entry <entry-id> --before 3 --after 5
+aha search "dynamic workflows" --refs
+aha read '<paste-ref-from-search>' --md
 ```
 
 Agent-oriented flow:
@@ -86,10 +100,10 @@ Agent-oriented flow:
 ```bash
 aha search "migration bug" --json --limit 10
 aha search "migration bug" --refs
-aha read '<session-key>#<entry-id>' --json
+aha read '<paste-ref-from-search>' --json
 ```
 
-Expected result: `search` returns matching messages/artifacts; `read` returns surrounding transcript entries or artifact text.
+Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.
 
 ## Search functionality
 
@@ -250,6 +264,7 @@ For coding agents using `aha`:
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
+- `docs/onboarding.md` — verifiable local-first onboarding, troubleshooting, and optional R2 setup.
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
