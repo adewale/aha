@@ -88,19 +88,20 @@ aha refresh --json
 aha verify --json
 ```
 
-Search and then read a returned ref:
+Search and then read a returned ref. With `--refs`, copy the first field on a result line:
 
 ```bash
 aha search "dynamic workflows" --refs
-aha read '<paste-ref-from-search>' --md
+REF=$(aha search "dynamic workflows" --refs | awk 'NF { print $1; exit }')
+aha read "$REF" --md
 ```
 
 Agent-oriented flow:
 
 ```bash
 aha search "migration bug" --json --limit 10
-aha search "migration bug" --refs
-aha read '<paste-ref-from-search>' --json
+REF=$(aha search "migration bug" --refs | awk 'NF { print $1; exit }')
+aha read "$REF" --json
 ```
 
 Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.

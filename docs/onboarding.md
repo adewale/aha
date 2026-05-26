@@ -145,12 +145,13 @@ Search for something you remember discussing:
 aha search "migration" --refs
 ```
 
-Passes if it returns refs such as `msg:v1:...`, `session:v1:...`, or `artifact:v1:...`.
+Passes if it returns lines whose first field is a ref such as `msg:v1:...`, `session:v1:...`, or `artifact:v1:...`. Copy only the ref, not the explanatory text after it.
 
 Read a returned ref:
 
 ```bash
-aha read '<paste-ref-here>' --md
+REF=$(aha search "migration" --refs | awk 'NF { print $1; exit }')
+aha read "$REF" --md
 ```
 
 Passes if `read` returns surrounding transcript context or artifact text. Search results are leads; `read` is the evidence step.
@@ -159,7 +160,8 @@ Agent/script-friendly form:
 
 ```bash
 aha search "migration" --json --limit 10
-aha read '<paste-ref-here>' --json
+REF=$(aha search "migration" --refs | awk 'NF { print $1; exit }')
+aha read "$REF" --json
 ```
 
 ## 7. Routine use
@@ -297,7 +299,7 @@ Local onboarding is complete when all are true:
 - `aha refresh --json` runs.
 - `aha verify --json` reports no corpus problems.
 - `aha search "..." --refs` returns refs for a known topic.
-- `aha read '<ref>' --md` returns full context.
+- `aha read '<first-field-ref-from-search>' --md` returns full context.
 
 R2 onboarding is complete when all are true:
 
