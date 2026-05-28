@@ -102,9 +102,9 @@ func NewCorpusBackend(store *corpus.Store, cfg model.Config) *CorpusBackend {
 	return &CorpusBackend{store: store, cfg: cfg}
 }
 
-func (b *CorpusBackend) DB() *sql.DB         { return b.store.DB }
+func (b *CorpusBackend) DB() *sql.DB          { return b.store.DB }
 func (b *CorpusBackend) Store() *corpus.Store { return b.store }
-func (b *CorpusBackend) Root() string        { return b.store.Root }
+func (b *CorpusBackend) Root() string         { return b.store.Root }
 func (b *CorpusBackend) Config() model.Config { return b.cfg }
 
 // CallTool dispatches a tools/call to the matching read function, with strict
@@ -389,4 +389,3 @@ func HandleMessage(b Backend, msg Message) (*response, bool) {
 	}
 	return newError(msg.ID, codeMethodNotFound, "unknown method: "+msg.Method), true
 }
-

@@ -3,6 +3,19 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Cap rendered text per read entry so a multi-megabyte transcript message
+// cannot jank the page. The full content remains available via the API and
+// the CLI; this limit is display-only.
+const MAX_ENTRY_CHARS = 4000;
+
+function clampText(s) {
+  s = String(s || "");
+  if (s.length <= MAX_ENTRY_CHARS) return s;
+  return s.slice(0, MAX_ENTRY_CHARS) + `\n… [truncated ${s.length - MAX_ENTRY_CHARS} chars — use \`aha read\` for full context]`;
+}
+
+let lastHits = [];
+
 async function call(path, init) {
   const r = await fetch(path, init);
   const text = await r.text();
@@ -60,8 +73,10 @@ async function doSearch(ev) {
     });
     if (!hits.length) {
       ol.innerHTML = `<li class="muted">no hits</li>`;
+      lastHits = [];
       return;
     }
+    lastHits = hits;
     ol.innerHTML = hits.map((h, i) => `
       <li data-idx="${i}">
         <div class="meta">
@@ -73,18 +88,23 @@ async function doSearch(ev) {
         </div>
         <div class="snippet">${esc(h.snippet || "").slice(0, 600)}</div>
       </li>`).join("");
-    Array.from(ol.querySelectorAll("li")).forEach((li, i) => {
-      li.addEventListener("click", () => loadRead(hits[i].ref_text));
-    });
     if (hits[0] && hits[0].ref_text) loadRead(hits[0].ref_text);
   } catch (e) {
     ol.innerHTML = `<li class="muted">search error: ${esc(e.message)}</li>`;
   }
 }
 
-async function loadRead(refText) {
+// loadRead fetches surrounding context for a ref and renders it. Selecting a
+// result also writes the ref into the URL fragment so the view is reloadable
+// and shareable — refs are stable identifiers by design.
+async function loadRead(refText, updateHash = true) {
+  if (!refText) return;
   const pre = $("reader-body");
   pre.textContent = "loading…";
+  if (updateHash) {
+    const next = "#ref=" + encodeURIComponent(refText);
+    if (location.hash !== next) history.replaceState(null, "", next);
+  }
   try {
     const entries = await call("/api/read", {
       method: "POST",
@@ -92,15 +112,30 @@ async function loadRead(refText) {
       body: JSON.stringify({ ref: refText, before: 3, after: 10 }),
     });
     pre.textContent = entries.map((e) =>
-      `[${e.timestamp || ""}] ${e.role || ""}:\n${e.text || ""}\n`
+      `[${e.timestamp || ""}] ${e.role || ""}:\n${clampText(e.text)}\n`
     ).join("\n");
   } catch (e) {
     pre.textContent = `read error: ${e.message}`;
   }
 }
 
+function refFromHash() {
+  const m = location.hash.match(/^#ref=(.+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   $("search-form").addEventListener("submit", doSearch);
+  // Event delegation: one listener for the whole results list.
+  $("results").addEventListener("click", (ev) => {
+    const li = ev.target.closest("li[data-idx]");
+    if (!li) return;
+    const hit = lastHits[Number(li.dataset.idx)];
+    if (hit) loadRead(hit.ref_text);
+  });
   refreshStatus();
   refreshConflicts();
+  // Restore a deep-linked ref on load.
+  const ref = refFromHash();
+  if (ref) loadRead(ref, false);
 });

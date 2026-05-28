@@ -12,6 +12,7 @@ Modes:
   fuzz          run all bounded fuzz targets
   race          run race detector
   build         build cmd/aha into /tmp/aha
+  ts            typecheck + runtime-test the TypeScript client (skips if no toolchain)
   mutation-dry  inventory covered mutants with gremlins dry-run
   mutation      run gremlins against invariant-critical packages
 
@@ -66,6 +67,26 @@ fuzz() {
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzParseAddress -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzValidateBundleKey -fuzztime="$FUZZTIME"
+  run go test ./internal/mcp -run=^$ -fuzz=FuzzParseFrames -fuzztime="$FUZZTIME"
+  run go test ./internal/mcp -run=^$ -fuzz=FuzzEncodeParseRoundTrip -fuzztime="$FUZZTIME"
+}
+
+# ts typechecks the generated TypeScript client surface and runs its runtime
+# tests. It is optional: if a TypeScript toolchain is not installed the step
+# is skipped with a notice rather than failing, so Go-only environments and
+# CI without Node still pass `full`.
+ts() {
+  local dir="clients/typescript"
+  if ! command -v tsc >/dev/null 2>&1; then
+    printf '\n==> ts: skipped (tsc not found)\n' >&2
+    return 0
+  fi
+  run_shell "cd '$dir' && tsc --noEmit"
+  if command -v node >/dev/null 2>&1; then
+    run node --experimental-strip-types --test "$dir/test/stdio.test.ts"
+  else
+    printf '\n==> ts runtime tests: skipped (node not found)\n' >&2
+  fi
 }
 
 full() {
@@ -73,6 +94,7 @@ full() {
   run go vet ./...
   run go test -race ./...
   fuzz
+  ts
   run go build -o /tmp/aha ./cmd/aha
 }
 
@@ -100,6 +122,7 @@ case "$mode" in
   quick) quick ;;
   full|ci) full ;;
   fuzz) fuzz ;;
+  ts) ts ;;
   race) run go test -race ./... ;;
   build) run go build -o /tmp/aha ./cmd/aha ;;
   mutation-dry) mutation_dry ;;
