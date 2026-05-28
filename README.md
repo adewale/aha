@@ -1,20 +1,31 @@
 # aha — Agent History Aggregator
 
-`aha` is local search and retrieval for coding-agent history. It turns scattered Pi, Claude Code, and Codex transcripts into a private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and agent-friendly refs.
+`aha` is a local, cross-agent, cross-machine archive of your coding-agent history that helps you spot patterns in your own behaviour — and turn those patterns into better skills, prompts, and workflows.
 
-Use it when agent conversations are becoming project memory and you want one local archive across tools and machines.
+It captures Pi, Claude Code, and Codex sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot and propose new skills based on what you keep doing.
+
+Use it when you've accumulated enough coding-agent conversations that you want to understand and improve how you and your agents work — not just re-find snippets.
 
 ## Who is this for?
 
-`aha` is for developers who use coding agents heavily and want past agent conversations to become searchable project memory.
+`aha` is for developers who:
 
-It is especially useful if you:
-
-- use multiple tools such as Pi, Claude Code, and Codex;
-- work across multiple machines;
+- use multiple coding agents (Pi, Claude Code, Codex — more adapters later) and want one place to examine everything they've done;
+- work across multiple machines and want a portable, content-addressed history that follows them;
+- want to find patterns in their own prompts and agent behaviour — repeated questions, recurring failure modes, prompts they keep retyping — so they can write the skill or template once and move on;
+- want their agents to analyse the depot too, so "look at what I keep doing → write a skill that does it for me" becomes a loop the agents themselves can run;
 - need private local search over agent transcripts;
-- want agents/scripts to retrieve prior context with stable JSON and refs;
 - are currently using `rg`, ad hoc scripts, or tool-specific history search.
+
+## How it helps you improve
+
+`aha` turns scattered transcripts into something you can actually reflect on. The current building blocks:
+
+- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results and reading full session context, today; richer pattern views (recurring commands, retried prompts, costly loops) are on the roadmap.
+- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools, so an agent can analyse your depot the same way you would: "what did I struggle with last week?", "have I asked this before?", "which prompts do I keep repeating?".
+- **Typed TypeScript client** (`clients/typescript/`) — for code-mode agent runtimes that want to fan out (search → filter → read → synthesise) over the corpus in one round trip.
+
+The longer-term direction is to make those patterns first-class: skill-candidate detection, recurring-failure rollups, cross-machine "what was I doing last Tuesday across all my agents" — all built on the same indexed corpus.
 
 ## What does it replace?
 
@@ -30,18 +41,19 @@ Many users start with:
 
 ## Why use it?
 
-- **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
+- **One corpus for multiple agents on multiple machines**: Pi, Claude Code, and Codex today across every machine you work from; more adapters later.
+- **Built for pattern-finding**: a stable schema and a typed retrieval surface so you (or an agent on your behalf) can ask "what do I keep doing", "where did this go wrong before", "have I asked this already".
 - **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
-- **Portable history**: share a depot, copy a bundle from another machine, or `aha ingest` it.
-- **Better than snippets**: search finds leads; read retrieves full context so humans and agents do not answer from snippets alone.
-- **Agent-friendly retrieval**: JSON, refs, Markdown, and stable `search → read` workflows.
-- **Auditable trust claims**: read-only source access, local-by-default behavior, and network boundaries are tested.
+- **Portable history**: deterministic `tar.zst` bundles + a local-or-R2 depot; share a depot, copy a bundle from another machine, or `aha ingest` it.
+- **Better than snippets**: search finds leads; `read` retrieves full context so humans and agents do not answer from fragments.
+- **Agent-friendly retrieval**: JSON, refs, Markdown, a read-only MCP server, and a typed TypeScript client for code-mode runtimes.
+- **Auditable trust claims**: read-only source access, local-by-default behaviour, and network boundaries are tested.
 
 ## Privacy warning
 
 V1 does **not** redact secrets. Bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-See `docs/trust.md` for the trust model and verification commands.
+Redaction at ingest is the next planned change; see `docs/redaction-spec.md` for the design and `docs/trust.md` for the current trust model and verification commands.
 
 ## Install / build
 
@@ -273,6 +285,10 @@ For coding agents using `aha`:
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
+- `docs/redaction-spec.md` — secret-redaction design (v1.1, in design).
+- `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
+- `docs/research/openinference.md` — OpenInference semantic-convention reference.
+- `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
