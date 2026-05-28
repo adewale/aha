@@ -107,10 +107,11 @@ func (b *CorpusBackend) Store() *corpus.Store { return b.store }
 func (b *CorpusBackend) Root() string        { return b.store.Root }
 func (b *CorpusBackend) Config() model.Config { return b.cfg }
 
-// callTool dispatches a tools/call to the matching read function, with strict
-// argument validation. The returned value is what we put into the
-// `content[0].text` field of the JSON-RPC response.
-func callTool(b Backend, name string, raw json.RawMessage) (any, error) {
+// CallTool dispatches a tools/call to the matching read function, with strict
+// argument validation. The returned value is what the JSON-RPC response puts
+// into the `content[0].text` field. Exported so the HTTP server in
+// internal/server can reuse the same dispatch.
+func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 	spec := findTool(name)
 	if spec == nil {
 		return nil, fmt.Errorf("unknown tool: %s", name)
@@ -372,7 +373,7 @@ func HandleMessage(b Backend, msg Message) (*response, bool) {
 		if strings.TrimSpace(p.Name) == "" {
 			return newError(msg.ID, codeInvalidRequest, "tools/call requires name"), true
 		}
-		out, err := callTool(b, p.Name, p.Arguments)
+		out, err := CallTool(b, p.Name, p.Arguments)
 		if err != nil {
 			return newError(msg.ID, codeToolError, err.Error()), true
 		}

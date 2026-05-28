@@ -42,9 +42,10 @@ By default, `aha` uses a local depot at `~/.aha/depot` and a local corpus at `~/
 
 How this is enforced:
 
-- only `internal/depot` may import Go network client/server packages;
+- network imports are permitted only in `internal/depot` (outbound R2/S3 for the remote depot), `internal/server` (the read-only loopback dashboard served by `aha serve`), and the CLI wrapper `internal/cli/command_serve.go`;
 - all other command, archive, adapter, corpus, search, and read packages remain network-free;
-- CI runs a static no-network-import check for the core.
+- the dashboard binds to `127.0.0.1` by default and refuses non-loopback addresses unless `--allow-remote` (or `AHA_ALLOW_REMOTE=1`) is set, every route is read-only, and the server never initiates outbound traffic;
+- CI runs a static no-network-import check for the core that allowlists the paths above.
 
 Verify locally:
 

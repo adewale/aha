@@ -181,6 +181,7 @@ aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
 aha mcp [--config PATH] [--repo DIR]
+aha serve [--addr HOST:PORT] [--allow-remote] [--config PATH] [--repo DIR]
 ```
 
 Command roles:
@@ -198,6 +199,7 @@ Command roles:
 - `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 - `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. See `docs/mcp-spec.md`.
+- `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Pass `--allow-remote` (or set `AHA_ALLOW_REMOTE=1`) to bind elsewhere.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
 

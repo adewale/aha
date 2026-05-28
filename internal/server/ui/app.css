@@ -1,0 +1,63 @@
+:root {
+  --fg: #1a1a1a;
+  --muted: #6b6b6b;
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --accent: #2d6cdf;
+  --border: #e3e3e3;
+  --hit: #fff7d6;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+header h1 { margin: 0; font-size: 1.1rem; letter-spacing: 0.04em; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+main {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
+#search { grid-column: 1; grid-row: 1 / span 2; }
+#reader { grid-column: 2; grid-row: 1 / span 2; }
+#conflicts-section { grid-column: 1 / span 2; }
+form { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; }
+input, button { font: inherit; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
+button { background: var(--accent); color: white; border-color: var(--accent); cursor: pointer; }
+button:hover { filter: brightness(1.05); }
+ol#results { list-style: none; padding: 0; margin: 1rem 0 0 0; max-height: 60vh; overflow: auto; }
+ol#results li { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem; cursor: pointer; }
+ol#results li:hover { background: var(--hit); }
+ol#results .meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.2rem; }
+ol#results .snippet { white-space: pre-wrap; }
+ol#results mark { background: var(--hit); padding: 0 1px; }
+#reader pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f3f3f3;
+  padding: 0.75rem;
+  border-radius: 4px;
+  max-height: 60vh;
+  overflow: auto;
+}
+#conflicts { list-style: none; padding: 0; margin: 0; }
+#conflicts li { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85rem; }
+.kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: #efefef; padding: 0 4px; border-radius: 3px; font-size: 0.85em; }

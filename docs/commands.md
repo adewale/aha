@@ -269,6 +269,29 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 
 **JSON contract:** `array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>`
 
+## aha serve
+
+run a read-only local dashboard over the corpus on loopback
+
+```txt
+aha serve [--addr HOST:PORT] [--allow-remote] [--config PATH] [--repo DIR]
+```
+
+**Flags:**
+
+- `--addr`
+- `--allow-remote`
+- `--config`
+- `--corpus`
+- `--repo`
+
+**Examples:**
+
+- `aha serve`
+- `aha serve --addr 127.0.0.1:18428`
+
+**JSON contract:** `http://HOST:PORT/api/{search,read,status,verify,conflicts,corpus_size,doctor}`
+
 ## aha snapshot
 
 create an immutable local history bundle and store it in a depot

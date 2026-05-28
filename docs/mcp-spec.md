@@ -114,21 +114,68 @@ is duplicated. The MCP layer is purely:
 - The existing `internal/cli/json_contract_test.go` continues to guard the
   underlying shapes; if those change, both CLI and MCP move together.
 
-## Phase 2 — code-mode adapter
+## Phase 2 — code-mode adapter (shipped)
 
-Generate a TypeScript surface from `internal/cli/flag_specs.go` so a code-mode
-runtime (Cloudflare `@cloudflare/codemode`, Anthropic code-execution-with-MCP)
-can call the tools as typed functions. The refs already round-trip as JSON;
-they become opaque-but-typed identifiers in the TS surface
-(`type MessageRef = { kind: "message"; session_key: string; entry_id: string }`).
-This is purely additive: the MCP wire surface from phase 1 stays unchanged.
+`internal/mcp/codegen` reflects on the Go return types of each tool and emits
+a typed TypeScript surface at `clients/typescript/aha-mcp.ts`. Regenerate via
+`go run ./cmd/aha-gen-ts` after changing any of the Go shapes; a drift test in
+`internal/mcp/codegen/codegen_test.go` fails CI if the checked-in file is
+stale.
 
-## Phase 3 — dashboard
+The TS surface defines:
 
-Mount the same tool surface behind an HTTP handler (loopback only, embedded
-via `go:embed`) and serve a small React/Preact UI for cross-source browsing,
-the conflicts inbox, and the depot browser. The CLI, MCP, and HTTP/dashboard
-become three skins over one JSON contract.
+- `MessageRef | SessionRef | ArtifactRef` discriminated union mirroring the
+  `internal/model.Ref` JSON shapes.
+- One interface per Go struct (SearchResult, ReadEntry, VerifyReport, etc.)
+  with optional fields driven by Go's `omitempty` tags.
+- A `Transport` interface (`call(name, args): Promise<unknown>`) and an
+  `aha(transport)` factory that returns one typed async function per tool.
+
+This is transport-agnostic. A stdio MCP client, the phase-3 HTTP server, or a
+code-mode runtime (Cloudflare `@cloudflare/codemode`, Anthropic
+code-execution-with-MCP) can all plug a `Transport` in and write
+type-checked agent code such as:
+
+```ts
+const tools = aha(transport);
+const hits = await tools.search({ query: "migration", project: "billing", limit: 100 });
+const refs = hits.filter(h => h.role === "user").map(h => h.ref_text);
+const contexts = await Promise.all(refs.slice(0, 5).map(r =>
+  tools.read({ ref: r, after: 30 })
+));
+```
+
+## Phase 3 — dashboard (shipped)
+
+`aha serve` mounts the same tool surface behind an HTTP handler in
+`internal/server`, served with a minimal vanilla HTML+JS UI embedded via
+`go:embed`. No React, no Vite, no Node runtime on the host — the dashboard
+ships inside the same static Go binary as the rest of the CLI.
+
+Routes:
+
+| Method | Path                | Body / Output                          |
+| ------ | ------------------- | -------------------------------------- |
+| GET    | `/`                 | embedded `index.html`                  |
+| GET    | `/static/*`         | embedded `app.js`, `app.css`           |
+| GET    | `/api/status`       | corpus status JSON                     |
+| GET    | `/api/verify`       | corpus verify report                   |
+| GET    | `/api/conflicts`    | quarantined conflicts                  |
+| GET    | `/api/corpus_size`  | disk-usage report                      |
+| GET    | `/api/doctor`       | local diagnostics                      |
+| GET    | `/api/version`      | `{version}`                            |
+| GET    | `/api/tools`        | `{tools: [...]}` (advertised surface)  |
+| POST   | `/api/search`       | JSON args → `[]SearchResult`           |
+| POST   | `/api/read`         | JSON args → `[]ReadEntry`              |
+
+Security posture:
+
+- Loopback bind by default (`127.0.0.1:18428`). Non-loopback addresses are
+  refused unless `--allow-remote` (or `AHA_ALLOW_REMOTE=1`) is set.
+- Same dispatch as MCP (`mcp.CallTool`), so the same strict argument
+  validation applies. Unknown keys are rejected with a 400.
+- All routes are read-only. There is no write surface in phase 1.
+- No CORS headers; this is a single-origin local UI.
 
 ## Open questions
 
