@@ -223,6 +223,26 @@ host-provided tool proxy as the `Transport`. See
 | Dashboard returns 421 Misdirected Request     | Host header doesn't match the loopback allowlist; use `localhost`, `127.0.0.1`, or set `--allowed-hosts`. |
 | Dashboard returns 415 Unsupported Media Type  | POST body sent without `Content-Type: application/json`.        |
 
+## Deliberately deferred
+
+These were considered and consciously left out, with rationale, so the
+omission is a decision rather than an oversight:
+
+- **Mid-call context cancellation.** The MCP server does not thread a
+  `context.Context` into `search.Query`/`corpus.Read*`/etc., and does not
+  honor `notifications/cancelled`. Those functions take a `*sql.DB` and run
+  fast local SQLite queries; plumbing cancellation through stable, well-tested
+  query code buys little for the local workload and is not worth the churn
+  until a real long-running tool exists.
+- **`structuredContent` on `tools/call` results.** Newer MCP revisions let a
+  tool return machine-typed `structuredContent` alongside the text `content`.
+  It is a real improvement for hosts that support it, but it cannot be
+  verified against real hosts (Claude Desktop/Cursor/Continue) from this repo,
+  and shipping an unverifiable protocol change is exactly the risk this
+  project avoids. The universal text-blob form is used until it can be tested
+  against live hosts. The typed `clients/typescript` surface already gives
+  code-mode callers static types over the parsed payload.
+
 ## Open questions
 
 - Should `doctor` accept an opt-in `depot` arg in phase 1 or stay strictly
