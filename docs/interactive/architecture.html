@@ -14,8 +14,8 @@
   --line:        oklch(29% 0.015 80);
   --line-strong: oklch(38% 0.018 80);
   --ink:         oklch(94% 0.008 80);
-  --ink-2:       oklch(74% 0.014 80);
-  --ink-3:       oklch(58% 0.014 80);
+  --ink-2:       oklch(76% 0.014 80);
+  --ink-3:       oklch(66% 0.014 80);
 
   /* sage: archival, deliberate, canonical (175° green) */
   --sage:        oklch(78% 0.115 175);
@@ -35,15 +35,15 @@
   --accent: var(--sage);
   --accent-2: var(--sage-deep);  /* JS pipeline label color */
 
-  /* modular type scale, 1.333 */
-  --t-xs:     12.5px;
-  --t-sm:     13.5px;
-  --t-md:     15.5px;
-  --t-lg:     18px;
-  --t-xl:     22px;
-  --t-2xl:    29px;
-  --t-3xl:    39px;
-  --t-display: clamp(40px, 6vw, 72px);
+  /* modular type scale */
+  --t-xs:     13px;     /* labels, eyebrows */
+  --t-sm:     14px;     /* secondary, mono in chrome */
+  --t-md:     16px;     /* body */
+  --t-lg:     19px;     /* lead paragraphs, subheads */
+  --t-xl:     23px;     /* h3 / mech headings */
+  --t-2xl:    30px;     /* section-secondary h2 */
+  --t-3xl:    40px;     /* section h2 */
+  --t-display: clamp(56px, 9vw, 120px);  /* hero */
 
   /* spacing: 4pt grid */
   --s-1: 4px; --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 24px;
@@ -64,21 +64,23 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body {
-  font: 400 var(--t-md)/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI",
+  font: 400 var(--t-md)/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI",
         system-ui, "Helvetica Neue", Arial, sans-serif;
   font-feature-settings: "kern", "liga", "calt", "ss01";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+p { text-wrap: pretty; }
 .mono, code, pre, input.mono {
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   font-feature-settings: "tnum", "zero", "ss02";
+  font-variant-ligatures: none;
 }
 code {
   background: var(--surface-2);
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 92%;
+  font-size: 90%;
   color: oklch(86% 0.012 80);
 }
 pre {
@@ -87,15 +89,16 @@ pre {
   padding: var(--s-4) var(--s-5);
   border-radius: var(--radius-lg);
   overflow-x: auto;
-  font-size: var(--t-sm);
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.7;
 }
 pre code { background: none; padding: 0; color: var(--ink); font-size: inherit; }
 em { font-style: italic; color: var(--ink); }
-b, strong { font-weight: 600; }
+b, strong { font-weight: 600; color: var(--ink); }
 a { color: var(--sage); text-decoration: none; border-bottom: 1px solid var(--sage-line); transition: color .15s var(--ease), border-color .15s var(--ease); }
 a:hover { color: var(--sage-deep); border-bottom-color: var(--sage); }
 hr { border: 0; border-top: 1px solid var(--line); margin: var(--s-7) 0; }
+h1, h2, h3, h4 { text-wrap: balance; }
 
 /* numbers + hashes get tabular figures */
 .mono, code, pre, .nums { font-variant-numeric: tabular-nums; }
@@ -125,8 +128,8 @@ header.hero {
 }
 .hero .brand-line {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--t-sm);
-  color: var(--ink-3);
+  font-size: var(--t-md);
+  color: var(--ink-2);
   margin: var(--s-4) 0 var(--s-5);
 }
 .hero .stand {
@@ -139,12 +142,12 @@ header.hero {
 .hero .meta {
   display: flex;
   gap: var(--s-6);
-  margin-top: var(--s-6);
+  margin-top: var(--s-7);
   color: var(--ink-3);
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
   flex-wrap: wrap;
 }
-.hero .meta b { color: var(--ink-2); font-weight: 500; }
+.hero .meta b { color: var(--ink); font-weight: 600; }
 
 /* ---------- nav -------------------------------------------------------- */
 nav.tabs {
@@ -172,13 +175,12 @@ nav.tabs .inner {
 nav.tabs button {
   appearance: none;
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
   border: 0;
-  padding: var(--s-2) 0;
+  padding: var(--s-3) 0;
   font: inherit;
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
   cursor: pointer;
-  letter-spacing: 0.005em;
   border-bottom: 2px solid transparent;
   transition: color .18s var(--ease), border-color .18s var(--ease);
   white-space: nowrap;
@@ -227,24 +229,26 @@ section.active { display: block; animation: fadein .35s var(--ease); }
 .pkg-info {
   margin-top: var(--s-5);
   color: var(--ink-2);
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
+  line-height: 1.55;
   min-height: 1.6em;
   padding: var(--s-3) var(--s-4);
+  max-width: 75ch;
   border-left: 2px solid var(--sage-line);
   background: var(--sage-soft);
   border-radius: 0 var(--radius) var(--radius) 0;
   transition: background .18s var(--ease);
 }
-.pkg-info b { color: var(--sage); font-weight: 500; }
+.pkg-info b { color: var(--sage); font-weight: 600; }
 
 /* SVG shared styling */
 svg { display: block; max-width: 100%; height: auto; }
 svg text {
-  font: 12px ui-monospace, Menlo, monospace;
+  font: 13px ui-monospace, Menlo, monospace;
   fill: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
-svg text.title { fill: var(--ink); font-size: 13px; font-weight: 600; }
+svg text.title { fill: var(--ink); font-size: 14px; font-weight: 600; }
 svg text.lbl   { fill: var(--ink-3); }
 svg text.good  { fill: var(--sage); }
 svg text.warn  { fill: var(--sand); }
@@ -313,21 +317,24 @@ svg .grp:hover rect { stroke: var(--sage); }
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 0 0 var(--s-3);
-  line-height: 1.2;
+  line-height: 1.25;
 }
 .mech .side .where {
   color: var(--ink-3);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: var(--t-xs);
+  font-size: var(--t-sm);
+  line-height: 1.5;
 }
 .mech .body { min-width: 0; }
-.mech .body > p { margin: 0 0 var(--s-5); max-width: 70ch; color: var(--ink-2); }
+.mech .body > p { margin: 0 0 var(--s-5); max-width: 68ch; color: var(--ink-2); line-height: 1.65; }
 .mech .body > p:first-child { color: var(--ink); font-size: var(--t-lg); line-height: 1.55; }
 .mech .body > p.lead { color: var(--ink); }
+.mech .body ul { color: var(--ink-2); max-width: 68ch; line-height: 1.6; }
+.mech .body ul li { margin-bottom: var(--s-2); }
 .mech details { margin-top: var(--s-5); }
 .mech details summary {
   color: var(--sage); cursor: pointer; padding: var(--s-2) 0;
-  font-size: var(--t-sm); list-style: none;
+  font-size: var(--t-md); list-style: none;
 }
 .mech details summary::-webkit-details-marker { display: none; }
 .mech details summary::before {
@@ -353,11 +360,10 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .widget label {
   display: block;
-  font-size: var(--t-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
   margin-bottom: var(--s-2);
+  font-weight: 500;
 }
 .widget input[type=text] {
   width: 100%;
@@ -365,7 +371,7 @@ svg .grp:hover rect { stroke: var(--sage); }
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: var(--s-2) var(--s-3);
+  padding: var(--s-3) var(--s-3);
   font: inherit;
   font-family: ui-monospace, Menlo, monospace;
   font-size: var(--t-sm);
@@ -385,16 +391,16 @@ svg .grp:hover rect { stroke: var(--sage); }
   background: oklch(11% 0.011 80);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: var(--s-3) var(--s-4);
+  padding: var(--s-4) var(--s-4);
   font-family: ui-monospace, Menlo, monospace;
   font-size: var(--t-sm);
-  line-height: 1.7;
+  line-height: 1.85;
 }
 .widget .out .k { color: var(--ink-3); }
 .widget .out .v { color: var(--sage); word-break: break-all; font-variant-numeric: tabular-nums; }
 .widget .out .v.match { color: var(--sage); }
 .widget .out .v.miss  { color: var(--clay); }
-.widget .hint { font-size: var(--t-xs); color: var(--ink-3); margin-top: var(--s-2); }
+.widget .hint { font-size: var(--t-sm); color: var(--ink-3); margin-top: var(--s-3); line-height: 1.5; }
 
 /* ---------- hotspots --------------------------------------------------- */
 .hot-intro {
@@ -409,8 +415,9 @@ svg .grp:hover rect { stroke: var(--sage); }
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
   color: var(--ink-2);
+  line-height: 1.5;
 }
 .hot-intro .legend .dot {
   display: inline-block;
@@ -437,13 +444,11 @@ svg .grp:hover rect { stroke: var(--sage); }
 .scatter-host .quad.br { right: 0; bottom: 0; background: transparent; }
 .scatter-host .quad .qlabel {
   position: absolute;
-  font-size: var(--t-xs);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
   color: var(--ink-3);
-  opacity: 0.7;
   padding: var(--s-3) var(--s-4);
   font-weight: 500;
+  max-width: 26ch;
 }
 .scatter-host .midline-v {
   position: absolute; left: 50%; top: 0; bottom: 0;
@@ -455,9 +460,8 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .scatter-host .axis-x, .scatter-host .axis-y {
   position: absolute;
-  color: var(--ink-3);
-  font-size: var(--t-xs);
-  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
   z-index: 4;
 }
 .scatter-host .pt {
@@ -512,42 +516,43 @@ svg .grp:hover rect { stroke: var(--sage); }
   font-size: var(--t-xl);
   font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 .hot-detail .where {
   color: var(--ink-3);
-  font-size: var(--t-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--t-sm);
   margin-bottom: var(--s-4);
 }
 .hot-detail .doubt    { border-left: 2px solid var(--clay-line); padding-left: var(--s-4); }
 .hot-detail .grounded { border-left: 2px solid var(--sage-line); padding-left: var(--s-4); }
-.hot-detail p { margin: 0 0 var(--s-3); max-width: 70ch; color: var(--ink-2); }
-.hot-detail p b { color: var(--ink); font-weight: 500; }
+.hot-detail p { margin: 0 0 var(--s-3); max-width: 68ch; color: var(--ink-2); line-height: 1.6; }
+.hot-detail p:last-child { margin-bottom: 0; }
+.hot-detail p b { color: var(--ink); font-weight: 600; }
 
 .hot-list-head {
-  font-size: var(--t-xs);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  margin: var(--s-8) 0 var(--s-4);
-  padding-bottom: var(--s-2);
+  font-size: var(--t-md);
+  color: var(--ink);
+  font-weight: 600;
+  margin: var(--s-8) 0 var(--s-3);
+  padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--line);
 }
 #hotspot-cards .card {
   display: grid;
   grid-template-columns: 1fr;
-  padding: var(--s-5) 0;
+  padding: var(--s-5) var(--s-5) var(--s-5) 0;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   transition: background .18s var(--ease);
 }
-#hotspot-cards .card:hover { background: var(--surface); }
+#hotspot-cards .card:hover { background: var(--surface); padding-left: var(--s-4); padding-right: var(--s-4); }
 #hotspot-cards .card h3 {
   margin: 0 0 var(--s-2);
-  font-size: var(--t-lg);
+  font-size: var(--t-xl);
   font-weight: 600;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   display: flex;
   align-items: baseline;
   gap: var(--s-3);
@@ -555,30 +560,31 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 #hotspot-cards .card .why {
   color: var(--ink-3);
-  font-size: var(--t-xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--t-sm);
   margin-bottom: var(--s-3);
 }
 #hotspot-cards .card p {
-  margin: 0 0 var(--s-2);
-  max-width: 80ch;
+  margin: 0 0 var(--s-3);
+  max-width: 68ch;
   color: var(--ink-2);
+  line-height: 1.6;
 }
-#hotspot-cards .card p b { color: var(--ink); font-weight: 500; }
+#hotspot-cards .card p:last-child { margin-bottom: 0; }
+#hotspot-cards .card p b { color: var(--ink); font-weight: 600; }
 
 /* tag chips */
 .tag-chip {
   display: inline-block;
-  font-size: var(--t-xs);
-  padding: 1px 8px;
+  font-size: var(--t-sm);
+  padding: 2px 9px;
   border-radius: 999px;
-  letter-spacing: 0.04em;
   border: 1px solid var(--line);
-  color: var(--ink-3);
+  color: var(--ink-2);
   background: var(--surface);
   vertical-align: middle;
   font-weight: 500;
+  line-height: 1.5;
 }
 .tag-chip.novel { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
 .tag-chip.solid { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
@@ -595,7 +601,7 @@ svg .grp:hover rect { stroke: var(--sage); }
 @media (max-width: 880px) { .map-grid { grid-template-columns: 1fr; } }
 .tree {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
   line-height: 1.9;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -608,7 +614,7 @@ svg .grp:hover rect { stroke: var(--sage); }
 .tree a.pkg { color: var(--sage); border-bottom: none; }
 .tree a.pkg:hover { color: var(--sage-deep); border-bottom: 1px solid var(--sage-line); }
 .tree .lines {
-  color: var(--ink-3); font-size: var(--t-xs);
+  color: var(--ink-3); font-size: var(--t-sm);
   margin-left: var(--s-2); font-variant-numeric: tabular-nums;
 }
 .pkg-detail {
@@ -617,10 +623,10 @@ svg .grp:hover rect { stroke: var(--sage); }
   border-radius: var(--radius-lg);
   padding: var(--s-6) var(--s-7);
 }
-.pkg-detail h3 { margin: 0 0 var(--s-3); font-size: var(--t-xl); font-weight: 600; letter-spacing: -0.01em; }
-.pkg-detail .why { color: var(--ink-2); margin-bottom: var(--s-4); max-width: 60ch; }
-.pkg-detail ul { padding-left: var(--s-5); }
-.pkg-detail li { margin-bottom: var(--s-1); color: var(--ink-2); }
+.pkg-detail h3 { margin: 0 0 var(--s-3); font-size: var(--t-xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+.pkg-detail .why { color: var(--ink-2); margin-bottom: var(--s-4); max-width: 60ch; line-height: 1.6; }
+.pkg-detail ul { padding-left: var(--s-5); margin-top: var(--s-3); }
+.pkg-detail li { margin-bottom: var(--s-2); color: var(--ink-2); line-height: 1.55; }
 .pkg-detail code { font-size: var(--t-sm); }
 
 /* reading order list */
@@ -632,22 +638,25 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .reading-order li {
   counter-increment: step;
-  padding: var(--s-3) 0 var(--s-3) var(--s-7);
+  padding: var(--s-4) 0 var(--s-4) var(--s-7);
   border-top: 1px solid var(--line);
   position: relative;
   color: var(--ink-2);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  max-width: 75ch;
 }
 .reading-order li:first-child { border-top: 0; }
 .reading-order li::before {
   content: counter(step, decimal-leading-zero);
   position: absolute;
-  left: 0; top: var(--s-3);
+  left: 0; top: var(--s-4);
   font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-sm);
-  color: var(--sage);
+  font-size: var(--t-md);
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
-.reading-order li b { color: var(--ink); font-weight: 500; }
+.reading-order li b { color: var(--ink); font-weight: 600; }
 
 /* ---------- ingest pipeline diagram ----------------------------------- */
 .ingest-stages {
@@ -681,15 +690,17 @@ svg .grp:hover rect { stroke: var(--sage); }
   padding-left: var(--s-5);
   margin: 0 0 var(--s-3);
   color: var(--ink-2);
-  font-size: var(--t-sm);
+  font-size: var(--t-md);
+  line-height: 1.55;
 }
-.stage ol li { margin-bottom: var(--s-1); }
+.stage ol li { margin-bottom: var(--s-2); }
 .stage .end {
-  font-size: var(--t-xs);
+  font-size: var(--t-sm);
   margin-top: var(--s-3);
-  color: var(--ink-3);
+  color: var(--ink-2);
   padding-top: var(--s-3);
   border-top: 1px solid var(--line);
+  line-height: 1.5;
 }
 .stage .end.good { color: var(--sage); }
 .stage .end.warn { color: var(--sand); }
@@ -704,15 +715,16 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .hooks h4 {
   margin: 0 0 var(--s-3);
-  font-size: var(--t-md);
+  font-size: var(--t-lg);
   color: var(--ink);
   font-weight: 600;
 }
-.hooks p { color: var(--ink-2); margin: 0 0 var(--s-2); font-size: var(--t-sm); }
+.hooks p { color: var(--ink-2); margin: var(--s-3) 0 0; font-size: var(--t-md); max-width: 70ch; line-height: 1.6; }
 .hooks .pair {
   display: grid; grid-template-columns: 320px 1fr;
-  gap: var(--s-4); margin: var(--s-2) 0; align-items: baseline;
-  font-size: var(--t-sm);
+  gap: var(--s-4); margin: var(--s-3) 0; align-items: baseline;
+  font-size: var(--t-md);
+  line-height: 1.5;
 }
 .hooks .pair code { white-space: nowrap; }
 .hooks .pair span { color: var(--ink-2); }
@@ -740,8 +752,8 @@ svg .grp:hover rect { stroke: var(--sage); }
   font-weight: 600;
   letter-spacing: -0.005em;
 }
-.layer dl { margin: 0; display: grid; grid-template-columns: 70px 1fr; gap: var(--s-1) var(--s-3); font-size: var(--t-sm); }
-.layer dt { color: var(--ink-3); text-transform: uppercase; font-size: var(--t-xs); letter-spacing: 0.08em; padding-top: 2px; }
+.layer dl { margin: 0; display: grid; grid-template-columns: 70px 1fr; gap: var(--s-2) var(--s-4); font-size: var(--t-md); line-height: 1.5; }
+.layer dt { color: var(--ink-3); font-size: var(--t-sm); padding-top: 3px; font-weight: 500; }
 .layer dd { margin: 0; color: var(--ink-2); }
 .layer dd code { font-size: 90%; }
 
@@ -755,13 +767,16 @@ svg .grp:hover rect { stroke: var(--sage); }
 .extra-layers .layer { background: transparent; border-style: dashed; }
 
 .dedup-info {
-  margin-top: var(--s-4);
-  font-size: var(--t-sm);
-  color: var(--ink-3);
+  margin-top: var(--s-5);
+  font-size: var(--t-md);
+  color: var(--ink-2);
+  line-height: 1.55;
   min-height: 1.6em;
   padding: var(--s-3) var(--s-4);
-  border-left: 2px solid var(--line);
-  font-style: italic;
+  max-width: 75ch;
+  border-left: 2px solid var(--sage-line);
+  background: var(--sage-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 /* ---------- key-value helper ------------------------------------------ */
@@ -948,7 +963,6 @@ footer a:hover { color: var(--ink-2); }
   <!-- ----------------------------------- 1: SESSION KEY ----------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Session-key construction</h3>
       <div class="where">internal/model/identity.go</div>
     </div>
@@ -999,7 +1013,6 @@ func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
   <!-- ----------------------------------- 2: SEALED REFS ----------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Sealed canonical refs</h3>
       <div class="where">internal/model/ref.go</div>
     </div>
@@ -1060,7 +1073,6 @@ func FormatRef(r Ref) string {
   <!-- ----------------------------------- 3: STATE SIG ------------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>The manifest <em>state</em> signature</h3>
       <div class="where">internal/archive/archive.go</div>
     </div>
@@ -1119,7 +1131,6 @@ func FormatRef(r Ref) string {
   <!-- ----------------------------------- 4: APPEND-ONLY ----------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Append-only, with conflict-as-quarantine</h3>
       <div class="where">internal/corpus/schema.go</div>
     </div>
@@ -1165,7 +1176,6 @@ create trigger entries_no_update before update on entries
   <!-- ----------------------------------- 5: TRIGGER FTS ---------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Trigger-maintained FTS, with one shared predicate</h3>
       <div class="where">internal/corpus/fts_reconcile.go</div>
     </div>
@@ -1204,7 +1214,6 @@ create trigger messages_ai after insert on messages
   <!-- ----------------------------------- 6: KNOWN-SHA HANDOFF ---------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Known-SHA handoff: trust the bytes once</h3>
       <div class="where">internal/archive + depot + corpus</div>
     </div>
@@ -1234,7 +1243,6 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
   <!-- ----------------------------------- 7: SEARCH MERGE --------------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Search: two FTS tables, merged in Go</h3>
       <div class="where">internal/search/search.go</div>
     </div>
@@ -1270,7 +1278,6 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
   <!-- ----------------------------------- 8: PATH-TOKEN INDEX ----------- -->
   <div class="mech">
     <div class="side">
-      
       <h3>Hand-rolled inverted index for paths</h3>
       <div class="where">internal/corpus/path_tokens.go</div>
     </div>
@@ -1391,7 +1398,6 @@ create index idx_session_path_tokens_token_session
 
   <div class="mech" style="border-top: 1px solid var(--line); margin-top: var(--s-7); padding-top: var(--s-7)">
     <div class="side">
-      
       <h3>Read-visibility invariant</h3>
       <div class="where">corpus.IngestVisibility test</div>
     </div>
