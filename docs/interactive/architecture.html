@@ -116,28 +116,24 @@ header.hero {
   padding: var(--s-9) 0 var(--s-7);
   border-bottom: 1px solid var(--line);
 }
-.hero .kicker {
-  color: var(--sage);
-  font-size: var(--t-xs);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  margin-bottom: var(--s-4);
-  font-weight: 500;
-}
 .hero h1 {
-  font-size: var(--t-display);
-  line-height: 0.98;
-  letter-spacing: -0.025em;
+  font-size: clamp(56px, 9vw, 120px);
+  line-height: 0.92;
+  letter-spacing: -0.04em;
   font-weight: 700;
-  margin: 0 0 var(--s-5);
-  max-width: 18ch;
+  margin: 0;
 }
-.hero h1 .accent { color: var(--sage); }
+.hero .brand-line {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  margin: var(--s-4) 0 var(--s-5);
+}
 .hero .stand {
   font-size: var(--t-lg);
   color: var(--ink-2);
-  max-width: 56ch;
-  line-height: 1.5;
+  max-width: 62ch;
+  line-height: 1.55;
   margin: 0;
 }
 .hero .meta {
@@ -192,7 +188,6 @@ nav.tabs button.active {
   color: var(--ink);
   border-bottom-color: var(--sage);
 }
-nav.tabs .nums { color: var(--ink-3); margin-right: var(--s-2); font-size: var(--t-xs); }
 
 /* ---------- sections --------------------------------------------------- */
 main { padding-bottom: var(--s-10); }
@@ -203,29 +198,22 @@ section.active { display: block; animation: fadein .35s var(--ease); }
 .section-head {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--s-3);
+  gap: var(--s-4);
   margin-bottom: var(--s-7);
-  max-width: 56ch;
-}
-.section-head .kicker {
-  color: var(--sage);
-  font-size: var(--t-xs);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-weight: 500;
+  max-width: 62ch;
 }
 .section-head h2 {
   font-size: var(--t-3xl);
   letter-spacing: -0.015em;
   font-weight: 700;
   margin: 0;
-  line-height: 1.05;
+  line-height: 1.1;
 }
 .section-head p {
   color: var(--ink-2);
-  font-size: var(--t-lg);
-  line-height: 1.5;
-  margin: var(--s-2) 0 0;
+  font-size: var(--t-md);
+  line-height: 1.6;
+  margin: 0;
 }
 
 /* ---------- pipeline --------------------------------------------------- */
@@ -278,34 +266,32 @@ svg .grp { cursor: pointer; transition: opacity .18s var(--ease); }
 svg .grp:hover { opacity: 0.85; }
 svg .grp:hover rect { stroke: var(--sage); }
 
-/* ---------- key facts grid (right under pipeline) ---------------------- */
+/* ---------- key facts (typographic list, not card grid) ---------------- */
 .facts {
+  margin: var(--s-7) 0 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1px;
-  margin-top: var(--s-7);
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+  grid-template-columns: minmax(160px, 1fr) 3fr;
+  gap: var(--s-3) var(--s-6);
+  font-size: var(--t-md);
 }
-.facts .fact {
-  background: var(--bg);
-  padding: var(--s-4) var(--s-5);
+@media (max-width: 720px) {
+  .facts { grid-template-columns: 1fr; gap: var(--s-1); }
+  .facts dd { margin-bottom: var(--s-3); }
 }
-.facts .fact .label {
-  font-size: var(--t-xs);
+.facts dt {
   color: var(--ink-3);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: var(--s-2);
+  font-weight: 500;
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
 }
-.facts .fact .value {
-  font-size: var(--t-lg);
-  color: var(--ink);
-  line-height: 1.35;
+.facts dd {
+  margin: 0;
+  color: var(--ink-2);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+  max-width: 70ch;
 }
-.facts .fact .value .em { color: var(--sage); font-weight: 600; }
+@media (max-width: 720px) { .facts dd { border-top: 0; padding-top: 0; } }
 
 /* ---------- mechanisms ------------------------------------------------- */
 .mech {
@@ -322,28 +308,17 @@ svg .grp:hover rect { stroke: var(--sage); }
   top: 72px;
   align-self: start;
 }
-.mech .num {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-2xl);
-  color: var(--sage);
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
 .mech .side h3 {
   font-size: var(--t-xl);
   font-weight: 600;
   letter-spacing: -0.01em;
-  margin: var(--s-3) 0 var(--s-3);
+  margin: 0 0 var(--s-3);
   line-height: 1.2;
 }
 .mech .side .where {
   color: var(--ink-3);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: var(--t-xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-top: var(--s-3);
 }
 .mech .body { min-width: 0; }
 .mech .body > p { margin: 0 0 var(--s-5); max-width: 70ch; color: var(--ink-2); }
@@ -487,19 +462,20 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .scatter-host .pt {
   position: absolute;
-  width: 16px; height: 16px;
+  width: 14px; height: 14px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   cursor: pointer;
   z-index: 5;
-  transition: transform .2s var(--ease), box-shadow .2s var(--ease);
-  box-shadow: 0 0 0 3px oklch(14% 0.012 80 / 0.7);
+  border: 2px solid var(--bg);
+  transition: transform .2s var(--ease), border-color .2s var(--ease), width .2s var(--ease), height .2s var(--ease);
 }
-.scatter-host .pt:hover { transform: translate(-50%, -50%) scale(1.35); }
+.scatter-host .pt:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+}
 .scatter-host .pt.selected {
-  transform: translate(-50%, -50%) scale(1.25);
-  box-shadow: 0 0 0 3px oklch(14% 0.012 80 / 0.7),
-              0 0 0 7px var(--sage-line);
+  border-color: var(--ink);
+  width: 18px; height: 18px;
 }
 .scatter-host .pt.s-hot   { background: var(--clay); }
 .scatter-host .pt.s-warn  { background: var(--sand); }
@@ -690,14 +666,11 @@ svg .grp:hover rect { stroke: var(--sage); }
   padding: var(--s-5) var(--s-6);
   position: relative;
 }
-.stage .num {
-  font-family: ui-monospace, Menlo, monospace;
-  color: var(--sage);
+.stage .role {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--ink-3);
   font-size: var(--t-xs);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
   margin-bottom: var(--s-2);
-  font-weight: 500;
 }
 .stage h4 {
   margin: 0 0 var(--s-3);
@@ -758,23 +731,13 @@ svg .grp:hover rect { stroke: var(--sage); }
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: var(--s-5) var(--s-6);
-  position: relative;
   transition: border-color .18s var(--ease), background .18s var(--ease);
 }
 .layer:hover { border-color: var(--sage-line); }
-.layer .num {
-  position: absolute; top: var(--s-4); right: var(--s-5);
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-xs);
-  color: var(--ink-3);
-  letter-spacing: 0.12em;
-  font-weight: 500;
-}
 .layer h4 {
   margin: 0 0 var(--s-3);
   font-size: var(--t-lg);
   font-weight: 600;
-  padding-right: var(--s-5);
   letter-spacing: -0.005em;
 }
 .layer dl { margin: 0; display: grid; grid-template-columns: 70px 1fr; gap: var(--s-1) var(--s-3); font-size: var(--t-sm); }
@@ -830,8 +793,8 @@ footer a:hover { color: var(--ink-2); }
 
 <header class="hero">
   <div class="shell">
-    <div class="kicker">aha · architecture explorer</div>
-    <h1>A <span class="accent">small archive</span>, deliberate at every edge.</h1>
+    <h1>aha</h1>
+    <p class="brand-line">Agent History Aggregator</p>
     <p class="stand">
       Local search over Pi, Claude Code, and Codex transcripts. Deterministic
       <code>tar.zst</code> bundles, content-addressed in a depot, ingested into
@@ -848,12 +811,12 @@ footer a:hover { color: var(--ink-2); }
 
 <nav class="tabs" id="tabs" role="tablist">
   <div class="inner">
-    <button data-tab="pipeline" class="active" role="tab"><span class="nums">01</span>Pipeline</button>
-    <button data-tab="novel" role="tab"><span class="nums">02</span>Mechanisms</button>
-    <button data-tab="ingest" role="tab"><span class="nums">03</span>Ingest, step by step</button>
-    <button data-tab="dedup" role="tab"><span class="nums">04</span>Three layers of dedup</button>
-    <button data-tab="hotspots" role="tab"><span class="nums">05</span>What's still soft</button>
-    <button data-tab="map" role="tab"><span class="nums">06</span>The map</button>
+    <button data-tab="pipeline" class="active" role="tab">Pipeline</button>
+    <button data-tab="novel" role="tab">Mechanisms</button>
+    <button data-tab="ingest" role="tab">Ingest</button>
+    <button data-tab="dedup" role="tab">Deduplication</button>
+    <button data-tab="hotspots" role="tab">Hotspots</button>
+    <button data-tab="map" role="tab">Codebase</button>
   </div>
 </nav>
 
@@ -862,12 +825,11 @@ footer a:hover { color: var(--ink-2); }
 <!-- ===================================================== PIPELINE ====== -->
 <section id="pipeline" class="active">
   <div class="section-head">
-    <div class="kicker">01 · pipeline</div>
-    <h2>One arrow, end to end.</h2>
+    <h2>Pipeline</h2>
     <p>
-      Local histories become snapshot bundles, then a depot, then a corpus,
-      then refs you can search and read. Each box owns one thing.
-      Hover for the package; click for what it owns.
+      Local histories become snapshot bundles, which land in a depot, which an
+      ingest step compiles into a corpus, which search and read query. Each
+      box owns one thing; hover for the package, click for what it owns.
     </p>
   </div>
 
@@ -957,42 +919,36 @@ footer a:hover { color: var(--ink-2); }
     <div class="pkg-info" id="pkg-info">Hover a box to see what it owns.</div>
   </div>
 
-  <div class="facts">
-    <div class="fact">
-      <div class="label">trust boundary</div>
-      <div class="value">Only <span class="em">internal/depot</span> may import network packages. Static test guards it.</div>
-    </div>
-    <div class="fact">
-      <div class="label">durability</div>
-      <div class="value">Bundle bytes are <span class="em">truth</span>. Catalog shards and corpus are <span class="em">repairable</span>.</div>
-    </div>
-    <div class="fact">
-      <div class="label">identity</div>
-      <div class="value">SHA-256 from sealed types. No raw string concat at the boundary.</div>
-    </div>
-    <div class="fact">
-      <div class="label">determinism</div>
-      <div class="value">Sorted manifest, normalized tar, fixed zstd encoder. Repeat &amp; shuffle byte-equality property tests.</div>
-    </div>
-  </div>
+  <dl class="facts">
+    <dt>Trust boundary</dt>
+    <dd>Only <code>internal/depot</code> may import network packages. A static test guards it.</dd>
+
+    <dt>Durability</dt>
+    <dd>Bundle bytes are truth. Catalog shards and corpus are derived and repairable from those bytes.</dd>
+
+    <dt>Identity</dt>
+    <dd>SHA-256 over length-prefixed tuples, returned as opaque sealed types. No raw string concatenation at the boundary.</dd>
+
+    <dt>Determinism</dt>
+    <dd>Sorted manifest, normalized tar metadata, fixed zstd encoder. Repeat and shuffle byte-equality are property tests, not promises.</dd>
+  </dl>
 </section>
 
 <!-- ===================================================== MECHANISMS ==== -->
 <section id="novel">
   <div class="section-head">
-    <div class="kicker">02 · the cleverest bits</div>
-    <h2>Eight mechanisms worth slowing down for.</h2>
+    <h2>Mechanisms</h2>
     <p>
-      Most of <code>aha</code> is plumbing. These are the load-bearing ideas.
-      Each one is a place where a type, a SQL constraint, or a small algorithm
-      replaces what would otherwise be a comment and a wish.
+      Eight places in the codebase where a type, a SQL constraint, or a small
+      algorithm replaces what would otherwise be a comment and a runtime
+      check. Most of the rest of <code>aha</code> is plumbing around these.
     </p>
   </div>
 
   <!-- ----------------------------------- 1: SESSION KEY ----------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">01</div>
+      
       <h3>Session-key construction</h3>
       <div class="where">internal/model/identity.go</div>
     </div>
@@ -1043,18 +999,18 @@ func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
   <!-- ----------------------------------- 2: SEALED REFS ----------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">02</div>
+      
       <h3>Sealed canonical refs</h3>
       <div class="where">internal/model/ref.go</div>
     </div>
     <div class="body">
       <p>
-        The boundary between humans, agents, and the corpus is exactly one
-        type: <code>model.Ref</code>, a closed sum over three variants.
-        Refs round-trip: every search hit emits a <code>ref_text</code>;
-        every <code>read &lt;ref&gt;</code> parses it back. The
-        <code>refVariant()</code> method is unexported, so no outside package
-        can implement <code>Ref</code>. Closed sum, in Go.
+        The boundary between humans, agents, and the corpus is a single type
+        <code>model.Ref</code> with three variants. Search hits emit a
+        <code>ref_text</code>; <code>read &lt;ref&gt;</code> parses it back.
+        The <code>refVariant()</code> method is unexported, so no outside
+        package can implement the interface, which closes the sum at compile
+        time.
       </p>
 
       <div class="widget">
@@ -1104,7 +1060,7 @@ func FormatRef(r Ref) string {
   <!-- ----------------------------------- 3: STATE SIG ------------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">03</div>
+      
       <h3>The manifest <em>state</em> signature</h3>
       <div class="where">internal/archive/archive.go</div>
     </div>
@@ -1152,9 +1108,9 @@ func FormatRef(r Ref) string {
       <details>
         <summary>Why this is more interesting than it looks</summary>
         <ul>
-          <li><b>Zero-fetch refresh.</b> If the catalog has a ref with the same state hash, refresh doesn't even download the old bundle to confirm. Metadata alone proves equivalence.</li>
+          <li><b>Zero-fetch refresh.</b> If the catalog has a ref with the same state hash, refresh does not download the old bundle to confirm; metadata alone proves equivalence.</li>
           <li><b>Property tested.</b> Any change to volatile metadata must <em>not</em> change the state SHA; any change to content <em>must</em>.</li>
-          <li>Two hashes, two questions. Bundle SHA proves <em>byte</em> identity. State SHA proves <em>source-state</em> equivalence.</li>
+          <li>The bundle SHA establishes byte identity. The state SHA establishes source-state equivalence. They answer different questions on purpose.</li>
         </ul>
       </details>
     </div>
@@ -1163,7 +1119,7 @@ func FormatRef(r Ref) string {
   <!-- ----------------------------------- 4: APPEND-ONLY ----------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">04</div>
+      
       <h3>Append-only, with conflict-as-quarantine</h3>
       <div class="where">internal/corpus/schema.go</div>
     </div>
@@ -1197,10 +1153,11 @@ func FormatRef(r Ref) string {
 create trigger entries_no_update before update on entries
   begin select raise(abort,'entries are append-only'); end;</code></pre>
       <p>
-        Defense in depth: a static test under <code>internal/testquality</code>
-        fails CI if any production .go file tries to <code>UPDATE</code> or
-        <code>DELETE</code> these tables. Triggers catch runtime; static guards
-        catch compile-time.
+        Triggers catch runtime drift. A static test under
+        <code>internal/testquality</code> reads production .go files at CI
+        time and fails the build if any of them emits <code>UPDATE</code> or
+        <code>DELETE</code> against the append-only tables. Two independent
+        layers, two different adversaries.
       </p>
     </div>
   </div>
@@ -1208,7 +1165,7 @@ create trigger entries_no_update before update on entries
   <!-- ----------------------------------- 5: TRIGGER FTS ---------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">05</div>
+      
       <h3>Trigger-maintained FTS, with one shared predicate</h3>
       <div class="where">internal/corpus/fts_reconcile.go</div>
     </div>
@@ -1247,7 +1204,7 @@ create trigger messages_ai after insert on messages
   <!-- ----------------------------------- 6: KNOWN-SHA HANDOFF ---------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">06</div>
+      
       <h3>Known-SHA handoff: trust the bytes once</h3>
       <div class="where">internal/archive + depot + corpus</div>
     </div>
@@ -1277,18 +1234,18 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
   <!-- ----------------------------------- 7: SEARCH MERGE --------------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">07</div>
+      
       <h3>Search: two FTS tables, merged in Go</h3>
       <div class="where">internal/search/search.go</div>
     </div>
     <div class="body">
       <p>
         Messages and artifacts live in two separate FTS5 tables. A single
-        search runs <em>both</em> with the same filters, each capped at the
-        limit, then merges and re-sorts in Go by <code>bm25</code> score
-        (lower is better) with deterministic tiebreakers down to
-        <code>entry_id</code>. The result is capped once more. Ranking is a
-        tested contract, not "whatever SQLite returned".
+        search runs both with the same filters, each capped at the limit,
+        then merges and re-sorts in Go by <code>bm25</code> score (lower is
+        better) with deterministic tiebreakers down to <code>entry_id</code>,
+        and caps the merged result once more. The Go-side stable sort makes
+        ranking reproducible across runs, which is verified by golden tests.
       </p>
       <p>
         The other half is <code>ftsQuery</code>. Arbitrary human text is never
@@ -1313,16 +1270,16 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
   <!-- ----------------------------------- 8: PATH-TOKEN INDEX ----------- -->
   <div class="mech">
     <div class="side">
-      <div class="num">08</div>
+      
       <h3>Hand-rolled inverted index for paths</h3>
       <div class="where">internal/corpus/path_tokens.go</div>
     </div>
     <div class="body">
       <p>
-        The most interesting data structure in <code>aha</code> isn't B-trees
-        or hash maps (SQLite handles those). It's the inverted index built
-        <em>by hand inside SQLite</em> so the indexed <code>--path-token</code>
-        filter has a real query plan instead of <code>LIKE '%foo%'</code>.
+        SQLite handles the obvious data structures (B-trees, hash indexes).
+        The interesting one in <code>aha</code> is the inverted index built
+        by hand on top of SQLite so the <code>--path-token</code> filter has
+        a real query plan instead of <code>LIKE '%foo%'</code>.
       </p>
       <p>
         At ingest, each session's <code>raw_cwd</code> is tokenized:
@@ -1355,11 +1312,10 @@ create index idx_session_path_tokens_token_session
         <code>artifact_path_tokens</code> mirrors this for artifact raw paths.
       </p>
       <p>
-        It's a manually-maintained inverted index living inside a relational
-        database, with an indexed-only query plan, and a property test
-        confirming the planner actually picks the index. That's the kind of
-        DS-and-algorithms move <code>aha</code> reaches for: not exotic, but
-        deliberate.
+        The result is a hand-rolled inverted index inside a relational
+        store, with an indexed-only query plan, and a test that fails if
+        the planner stops using it. The algorithmic claim and the test that
+        defends it live in the same package.
       </p>
     </div>
   </div>
@@ -1370,19 +1326,20 @@ create index idx_session_path_tokens_token_session
 <!-- ===================================================== INGEST ======== -->
 <section id="ingest">
   <div class="section-head">
-    <div class="kicker">03 · ingest, step by step</div>
-    <h2>The only path that takes untrusted bytes into the corpus.</h2>
+    <h2>Ingest</h2>
     <p>
-      Three roles in strict order: <b>plan</b>, <b>write</b>, <b>publish</b>.
-      The load-bearing detail is that <code>tx.Commit()</code> happens
-      <em>after</em> the bundle blob is promoted into its content-addressed
-      location, not before.
+      Ingest is the only path that takes untrusted bytes into the corpus.
+      Three roles run in order: a planner stages and validates the bundle, a
+      writer holds an open transaction while inserting rows, and a publisher
+      atomically renames the bundle blob into place before
+      <code>tx.Commit()</code>. The commit-after-publish ordering is the
+      contract that prevents orphans on either side of a crash.
     </p>
   </div>
 
   <div class="ingest-stages">
     <div class="stage">
-      <div class="num">01 · bundlePlanner.Prepare</div>
+      <div class="role">bundlePlanner.Prepare</div>
       <h4>Plan</h4>
       <ol>
         <li>stage tar.zst into a temp file</li>
@@ -1395,7 +1352,7 @@ create index idx_session_path_tokens_token_session
       <div class="end good">on failure: nothing in corpus changes</div>
     </div>
     <div class="stage">
-      <div class="num">02 · corpusWriter</div>
+      <div class="role">corpusWriter</div>
       <h4>Write (one tx)</h4>
       <ol>
         <li>recordBundleAttempt; duplicate ⇒ skip + commit</li>
@@ -1408,7 +1365,7 @@ create index idx_session_path_tokens_token_session
       <div class="end warn">tx held open; not yet committed</div>
     </div>
     <div class="stage">
-      <div class="num">03 · blobPublisher.PromoteBundle</div>
+      <div class="role">blobPublisher.PromoteBundle</div>
       <h4>Publish, then commit</h4>
       <ol>
         <li>atomic rename staging → blobs/bundles/&lt;sha&gt;.tar.zst</li>
@@ -1434,7 +1391,7 @@ create index idx_session_path_tokens_token_session
 
   <div class="mech" style="border-top: 1px solid var(--line); margin-top: var(--s-7); padding-top: var(--s-7)">
     <div class="side">
-      <div class="num">·</div>
+      
       <h3>Read-visibility invariant</h3>
       <div class="where">corpus.IngestVisibility test</div>
     </div>
@@ -1455,17 +1412,18 @@ create index idx_session_path_tokens_token_session
 <!-- ===================================================== DEDUP ========= -->
 <section id="dedup">
   <div class="section-head">
-    <div class="kicker">04 · three layers of dedup</div>
-    <h2>Three keys, three blast radii, one outcome.</h2>
+    <h2>Deduplication</h2>
     <p>
-      Each layer dedups a different kind of duplication, and they compose.
-      Hover any layer for the context.
+      Three different keys catch three different kinds of duplication, and
+      the layers compose. Two additional set-shaped tricks below short-circuit
+      work that would otherwise look like duplication but cost a fetch.
+      Hover any layer for the operational detail.
     </p>
   </div>
 
   <div class="layers">
     <div class="layer grp" data-info="If two captures produce byte-identical tar.zst, the depot stores one object. Local checks the target path exists; R2 uses S3 object existence.">
-      <div class="num">L1</div>
+      
       <h4>Bundle object</h4>
       <dl>
         <dt>key</dt>      <dd><code>bundle_sha256</code></dd>
@@ -1475,7 +1433,7 @@ create index idx_session_path_tokens_token_session
       </dl>
     </div>
     <div class="layer grp" data-info="The corpus.bundles table has UNIQUE(bundle_sha256). Re-ingest of the same SHA records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
-      <div class="num">L2</div>
+      
       <h4>Corpus bundle row</h4>
       <dl>
         <dt>key</dt>      <dd><code>bundle_sha256</code> <code>UNIQUE</code></dd>
@@ -1485,7 +1443,7 @@ create index idx_session_path_tokens_token_session
       </dl>
     </div>
     <div class="layer grp" data-info="Different bundles often share file contents. When a Claude session file grew between two captures, the new version is one blob; the old shared blob is reused.">
-      <div class="num">L3</div>
+      
       <h4>File blob</h4>
       <dl>
         <dt>key</dt>      <dd><code>file_sha256</code></dd>
@@ -1524,13 +1482,12 @@ create index idx_session_path_tokens_token_session
 <!-- ===================================================== HOTSPOTS ====== -->
 <section id="hotspots">
   <div class="section-head">
-    <div class="kicker">05 · what's still soft</div>
-    <h2>Where the abstractions are still ungrounded.</h2>
+    <h2>Hotspots</h2>
     <p>
-      Each dot is a deliberate simplification we haven't validated against real
-      data, or a tradeoff the current test net doesn't actually prove out.
-      <em>x</em> is how grounded the design is. <em>y</em> is how much it
-      would hurt to be wrong.
+      Each dot is either a deliberate simplification we have not validated
+      against real data, or a tradeoff the current test net does not actually
+      prove out. The horizontal axis is how grounded the design is. The
+      vertical axis is how much it would hurt to be wrong.
     </p>
   </div>
 
@@ -1573,9 +1530,12 @@ create index idx_session_path_tokens_token_session
 <!-- ===================================================== MAP =========== -->
 <section id="map">
   <div class="section-head">
-    <div class="kicker">06 · the map</div>
-    <h2>Where the responsibility lives.</h2>
-    <p>Click a package on the left to see what it owns and what to read first.</p>
+    <h2>Codebase map</h2>
+    <p>
+      The production-code <code>internal/*</code> tree, sorted by approximate
+      line count. Click a package on the left to see what it owns and what to
+      read first.
+    </p>
   </div>
 
   <div class="map-grid">
@@ -1590,8 +1550,8 @@ create index idx_session_path_tokens_token_session
   </div>
 
   <div class="section-head" style="margin-top: var(--s-9)">
-    <div class="kicker">reading order</div>
-    <h2>The whole thing, in one sitting.</h2>
+    <h2 style="font-size: var(--t-2xl)">Reading order</h2>
+    <p>If you want to read the entire codebase in one sitting, in order:</p>
   </div>
   <ol class="reading-order">
     <li><code>cmd/aha/main.go</code> &middot; 11 lines. It just calls <code>cli.Run</code>.</li>
