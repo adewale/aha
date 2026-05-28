@@ -72,6 +72,7 @@ func Registry() map[string]Command {
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,sources,corpus,depot,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
 		"depot":     {Name: "depot", Usage: "aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]", Flags: []string{"--config", "--deep", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot ls --json", "aha depot verify --deep", "aha depot verify --repair", "aha depot compact --json"}, JSONSchema: "object|array", Docs: "initialize, list, verify, or compact a bundle depot", Run: cmdDepot},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
+		"mcp":       {Name: "mcp", Usage: "aha mcp [--config PATH] [--repo DIR]", Flags: []string{"--config", "--corpus", "--repo"}, Examples: []string{"aha mcp"}, JSONSchema: "jsonrpc:tools/list|tools/call (stdio MCP)", Docs: "run a read-only stdio MCP server over the corpus", Run: cmdMcp},
 	}
 }
 

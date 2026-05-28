@@ -180,6 +180,7 @@ aha conflicts [--repo DIR] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
+aha mcp [--config PATH] [--repo DIR]
 ```
 
 Command roles:
@@ -196,6 +197,7 @@ Command roles:
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
+- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. See `docs/mcp-spec.md`.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
 
@@ -268,7 +270,7 @@ For coding agents using `aha`:
 - `docs/onboarding.md` — verifiable local-first onboarding, troubleshooting, and optional R2 setup.
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
-- `docs/interactive/architecture.html` — single-file interactive explorer (open in any browser; no build). Major-abstractions overview, mechanism explorables, hotspots, schema ER, dependency layers. Source-grounded; drift-tested by `internal/cli/architecture_html_drift_test.go`.
+- `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.

@@ -158,6 +158,26 @@ aha init [--config PATH] [--accept-secrets] [--json]
 
 **JSON contract:** `object{config,accepted_secrets}`
 
+## aha mcp
+
+run a read-only stdio MCP server over the corpus
+
+```txt
+aha mcp [--config PATH] [--repo DIR]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--repo`
+
+**Examples:**
+
+- `aha mcp`
+
+**JSON contract:** `jsonrpc:tools/list|tools/call (stdio MCP)`
+
 ## aha read
 
 retrieve source context for a search result
