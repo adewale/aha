@@ -120,22 +120,39 @@
   .tree ul { padding-left: 18px; margin: 0; border-left: 1px solid var(--line); }
 
   /* hotspot scatter */
-  .scatter-host { position: relative; height: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-  .scatter-host .axis-x, .scatter-host .axis-y { position: absolute; color: var(--ink-dim); font-size: 11px; }
-  .scatter-host .pt {
-    position: absolute; width: 14px; height: 14px; border-radius: 50%;
-    transform: translate(-50%, -50%); cursor: pointer;
-    box-shadow: 0 0 0 3px rgba(0,0,0,.4); transition: transform .15s ease;
+  .scatter-host { position: relative; height: 480px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .scatter-host .axis-x, .scatter-host .axis-y { position: absolute; color: var(--ink-dim); font-size: 11px; z-index: 4; }
+  .scatter-host .quad {
+    position: absolute; width: 50%; height: 50%; box-sizing: border-box;
   }
-  .scatter-host .pt:hover { transform: translate(-50%, -50%) scale(1.4); }
+  .scatter-host .quad .qlabel {
+    position: absolute; font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--ink-dim); opacity: .55; padding: 8px 10px;
+  }
+  .scatter-host .quad.tl { left: 0; top: 0; background: rgba(255,166,87,.06); }     /* high stakes, ungrounded */
+  .scatter-host .quad.tr { right: 0; top: 0; background: rgba(86,211,100,.05); }     /* high stakes, grounded */
+  .scatter-host .quad.bl { left: 0; bottom: 0; background: rgba(227,179,65,.04); }   /* low stakes, ungrounded */
+  .scatter-host .quad.br { right: 0; bottom: 0; background: transparent; }
+  .scatter-host .midline-v { position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px dashed var(--line); }
+  .scatter-host .midline-h { position: absolute; top: 50%; left: 0; right: 0; border-top: 1px dashed var(--line); }
+  .scatter-host .pt {
+    position: absolute; width: 15px; height: 15px; border-radius: 50%;
+    transform: translate(-50%, -50%); cursor: pointer; z-index: 5;
+    box-shadow: 0 0 0 3px rgba(0,0,0,.45); transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .scatter-host .pt:hover { transform: translate(-50%, -50%) scale(1.45); }
+  .scatter-host .pt.selected { box-shadow: 0 0 0 3px rgba(0,0,0,.45), 0 0 0 7px rgba(121,192,255,.55); transform: translate(-50%, -50%) scale(1.3); }
   .scatter-host .pt.s-novel { background: var(--novel); }
   .scatter-host .pt.s-hot { background: var(--hot); }
   .scatter-host .pt.s-solid { background: var(--good); }
   .scatter-host .pt.s-warn { background: var(--warn); }
   .scatter-host .pt-label {
-    position: absolute; transform: translate(-50%, 8px); color: var(--ink-dim);
-    font-size: 10.5px; white-space: nowrap; pointer-events: none;
+    position: absolute; transform: translate(-50%, 9px); color: var(--ink);
+    background: rgba(11,15,20,.85); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-size: 10.5px; white-space: nowrap; pointer-events: none;
+    z-index: 6; opacity: 0; transition: opacity .12s ease;
   }
+  .scatter-host .pt-label.show { opacity: 1; }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-dim); margin: 8px 0 14px; flex-wrap: wrap; }
   .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
 
@@ -530,6 +547,37 @@ ref, created, _ := depot.PutBundleKnown(ctx, driver, path,
 rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.BundleSHA256)</code></pre>
   </div>
 
+  <!-- ============ SEARCH MERGE + FTS ESCAPING ============ -->
+  <div class="card">
+    <h3>7. Search = two FTS queries merged in Go + defensive escaping <span class="tag-chip novel">novel</span></h3>
+    <div class="why">
+      <b>Why it's clever:</b> messages and artifacts live in two separate FTS5 tables (<code>fts_messages</code>, <code>fts_artifacts</code>). A single search runs <em>both</em> with the same filters, each capped at the limit, then merges and re-sorts in Go by <code>bm25</code> score (lower is more relevant), with deterministic tiebreakers down to <code>entry_id</code>. The result is capped once more. So ranking is stable and reproducible — a tested contract, not whatever order SQLite happened to return.
+      <br><br>
+      The other half is <code>ftsQuery</code>: arbitrary human text is never handed to FTS5 raw. Each whitespace term is quoted (and embedded quotes doubled), which neutralizes FTS operators like <code>AND</code>, <code>NEAR</code>, <code>*</code>, and column filters. Type anything below and watch what actually reaches SQLite.
+    </div>
+    <div class="play" id="fts-play">
+      <label>your query</label>
+      <input id="fts-in" type="text" value='migration bug OR "drop table"'/>
+      <div class="out" style="margin-top:10px">
+        <div><span class="k">FTS5 MATCH string →</span> <span class="v" id="fts-out"></span></div>
+        <div style="margin-top:4px"><span class="k">terms →</span> <span class="v" id="fts-terms"></span></div>
+      </div>
+      <div style="font-size:12px;color:var(--ink-dim);margin-top:8px">
+        Try <code>foo AND bar</code>, <code>title:secret</code>, or <code>he said "hi"</code> — operators get quoted into literals.
+      </div>
+    </div>
+    <details style="margin-top:10px">
+      <summary>The merge + ranking, in code</summary>
+      <pre><code>// internal/search/search.go
+results := messages(...)                 // fts_messages, capped at limit
+if role == "" || role == "artifact" {
+    results = append(results, artifacts(...)...)  // fts_artifacts, capped
+}
+sort.SliceStable(results, byScoreThenTimeThenSourceThenKey)  // deterministic
+if len(results) > limit { results = results[:limit] }</code></pre>
+    </details>
+  </div>
+
 </section>
 
 <!-- ============================================================ INGEST FSM -->
@@ -689,14 +737,21 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
     <span><span class="dot" style="background:#ffa657"></span>doubt / ungrounded</span>
     <span><span class="dot" style="background:#e3b341"></span>known limit, accepted</span>
     <span><span class="dot" style="background:#56d364"></span>grounded by tests</span>
+    <span style="margin-left:auto">hover a dot for its name · click to pin details →</span>
   </div>
 
   <div class="grid-2">
     <div>
       <div class="scatter-host" id="scatter">
-        <div class="axis-y" style="left:8px; top:8px;">high stakes ↑</div>
-        <div class="axis-y" style="left:8px; bottom:8px;">low stakes ↓</div>
-        <div class="axis-x" style="bottom:8px; left:50%; transform:translateX(-50%);">← ungrounded · grounded →</div>
+        <div class="quad tl"><span class="qlabel" style="left:0;top:0">⚠ validate next — high stakes, ungrounded</span></div>
+        <div class="quad tr"><span class="qlabel" style="right:0;top:0;text-align:right">✓ load-bearing &amp; proven</span></div>
+        <div class="quad bl"><span class="qlabel" style="left:0;bottom:0">backlog — low stakes, ungrounded</span></div>
+        <div class="quad br"><span class="qlabel" style="right:0;bottom:0;text-align:right">fine as-is</span></div>
+        <div class="midline-v"></div>
+        <div class="midline-h"></div>
+        <div class="axis-y" style="left:8px; top:6px;">high stakes ↑</div>
+        <div class="axis-y" style="left:8px; bottom:6px;">low stakes ↓</div>
+        <div class="axis-x" style="bottom:6px; left:50%; transform:translateX(-50%);">← ungrounded · grounded →</div>
       </div>
     </div>
     <div class="hot-detail" id="hot-detail">
@@ -932,6 +987,31 @@ function updateRef() {
 updateRef();
 
 /* ============================================================
+   FTS query escaping playground — mirrors search.ftsQuery
+   ============================================================ */
+function ftsQuery(q) {
+  const fields = q.split(/\s+/).filter(Boolean);
+  if (fields.length === 0) return { out: q, terms: [] };
+  const out = [];
+  for (let f of fields) {
+    f = f.replaceAll('\\\\', ' ');   // backslash-pair → space
+    f = f.replaceAll('"', '""');     // double embedded quotes
+    f = f.trim();
+    if (f === '') continue;
+    out.push('"' + f + '"');
+  }
+  return { out: out.join(' '), terms: out };
+}
+function updateFTS() {
+  const q = document.getElementById('fts-in').value;
+  const r = ftsQuery(q);
+  document.getElementById('fts-out').textContent = r.out || '(empty)';
+  document.getElementById('fts-terms').textContent = r.terms.length ? r.terms.join('  ·  ') : '(none)';
+}
+document.getElementById('fts-in').addEventListener('input', updateFTS);
+updateFTS();
+
+/* ============================================================
    Hotspots data + scatter + cards
    ============================================================ */
 const HOTSPOTS = [
@@ -996,10 +1076,10 @@ const HOTSPOTS = [
     needs:'A read mode that walks parent links — the data is there. Likely smaller than it looks; deferred because no user has hit it.' },
 
   { id:'subagent', name:'subagent parent linkage',
-    severity:'warn', stakes:0.4, grounded:0.55,
-    where:'internal/adapters/claude.go (agent-*.jsonl)',
-    state:'Subagent files are ingested as sessions with parent_session_key only when evidence is strong. Heuristic linkage is intentionally avoided.',
-    needs:'A fixture showing a multi-agent run with confident parent inference. Right now we have "evidence-or-nothing" and no measure of the false-negative rate.' },
+    severity:'doubt', stakes:0.45, grounded:0.45,
+    where:'internal/adapters/claude.go:22 — CanLinkSubagents: false',
+    state:'`agent-*.jsonl` files are detected (is_subagent=true) and ingested as their own sessions, but the Claude adapter declares CanLinkSubagents=false — so parent_session_key is left null today. A subagent run is searchable but disconnected from the conversation that spawned it.',
+    needs:'A real multi-agent Claude fixture where the parent link is inferable, plus a measure of how often inference would be wrong. Until then "no link" is a safe default but a real gap in retrieval.' },
 
   { id:'windows', name:'Windows path / FS support',
     severity:'warn', stakes:0.3, grounded:0.5,
@@ -1021,27 +1101,40 @@ const HOTSPOTS = [
 ];
 
 const scatter = document.getElementById('scatter');
+const ptEls = {};
 function placeHotspot(h) {
   const pt = document.createElement('div');
   const stake = 1 - h.stakes; // invert: top = high
+  const x = (8 + h.grounded * 84);
+  const y = (8 + stake * 80);
   pt.className = 'pt s-' + (h.severity === 'doubt' ? 'hot' : h.severity === 'warn' ? 'warn' : h.severity === 'solid' ? 'solid' : 'novel');
-  pt.style.left = (8 + h.grounded * 88) + '%';
-  pt.style.top = (8 + stake * 80) + '%';
+  pt.style.left = x + '%';
+  pt.style.top = y + '%';
   pt.title = h.name;
-  pt.addEventListener('click', () => showHotspot(h.id));
   const label = document.createElement('div');
   label.className = 'pt-label';
-  label.style.left = (8 + h.grounded * 88) + '%';
-  label.style.top = (8 + stake * 80) + '%';
+  label.style.left = x + '%';
+  label.style.top = y + '%';
+  if (x > 60) label.style.transform = 'translate(-90%, 9px)';
   label.textContent = h.name;
+  pt.addEventListener('mouseenter', () => label.classList.add('show'));
+  pt.addEventListener('mouseleave', () => { if (!pt.classList.contains('selected')) label.classList.remove('show'); });
+  pt.addEventListener('click', () => showHotspot(h.id, true));
   scatter.appendChild(pt);
   scatter.appendChild(label);
+  ptEls[h.id] = { pt, label };
 }
 HOTSPOTS.forEach(placeHotspot);
 
-function showHotspot(id) {
+function showHotspot(id, scroll) {
   const h = HOTSPOTS.find(x => x.id === id);
   if (!h) return;
+  // selection state on dots
+  Object.entries(ptEls).forEach(([k, e]) => {
+    const on = k === id;
+    e.pt.classList.toggle('selected', on);
+    e.label.classList.toggle('show', on);
+  });
   const cls = h.severity === 'solid' ? 'grounded' : 'doubt';
   document.getElementById('hot-detail').innerHTML = `
     <h4>${h.name} <span class="tag-chip ${h.severity === 'solid' ? 'solid' : 'hot'}">${h.severity}</span></h4>
@@ -1050,17 +1143,21 @@ function showHotspot(id) {
       <p><b>What is the state?</b> ${h.state}</p>
       <p><b>What would change our mind?</b> ${h.needs}</p>
     </div>`;
-  document.getElementById(`card-${h.id}`)?.scrollIntoView({behavior:'smooth', block:'center'});
+  if (scroll) document.getElementById(`card-${h.id}`)?.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
 const cards = document.getElementById('hotspot-cards');
 cards.innerHTML = HOTSPOTS.map(h => `
-  <div class="card" id="card-${h.id}">
+  <div class="card" id="card-${h.id}" data-id="${h.id}" style="cursor:pointer">
     <h3>${h.name} <span class="tag-chip ${h.severity==='solid'?'solid':'hot'}">${h.severity}</span></h3>
     <div class="why">${h.where}</div>
     <p><b style="color:var(--ink-dim)">State:</b> ${h.state}</p>
     <p><b style="color:var(--ink-dim)">What would change our mind:</b> ${h.needs}</p>
   </div>`).join('');
+cards.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
+  showHotspot(c.dataset.id, false);
+  document.querySelector('#hotspots .scatter-host').scrollIntoView({behavior:'smooth', block:'center'});
+}));
 
 /* ============================================================
    Codebase map
