@@ -202,13 +202,29 @@ func TestSearchEndpointAcceptsJSONWithCharsetParam(t *testing.T) {
 
 func TestHostHeaderAllowlistRejectsForeignHosts(t *testing.T) {
 	srv := newTestServer(t)
-	for _, host := range []string{"evil.example.com", "evil.example.com:1234", "10.0.0.1", ""} {
+	// Borrowed from @hono/mcp's DNS-rebind protection test matrix: real
+	// rebinding attacks present hostnames that match no entry in our
+	// allowlist (public DNS that resolves to 127.0.0.1). Each must yield
+	// 421 with the pinned error code so downstream consumers can react.
+	cases := []string{
+		"evil.example.com",
+		"evil.example.com:1234",
+		"10.0.0.1",
+		"10.0.0.1:18428",
+		"192.168.1.50",
+		"169.254.169.254",        // IMDS — common SSRF target
+		"169.254.169.254:80",
+		"aha.attacker.example",    // CNAME-rebound name
+		"",                         // missing/empty Host header
+		"  ",                       // whitespace-only
+	}
+	for _, host := range cases {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != http.StatusMisdirectedRequest {
-			t.Fatalf("Host=%q expected 421, got %d", host, w.Code)
+			t.Fatalf("Host=%q expected 421, got %d body=%s", host, w.Code, w.Body.String())
 		}
 		assertErrorEnvelope(t, w.Body.Bytes(), "host_not_permitted")
 	}
@@ -382,9 +398,81 @@ func TestListenAllowsLoopbackByDefault(t *testing.T) {
 }
 
 func TestListenAllowsRemoteWithFlag(t *testing.T) {
-	l, err := server.Listen(server.Options{Addr: "0.0.0.0:0", AllowRemote: true})
+	l, err := server.Listen(server.Options{Addr: "0.0.0.0:0", AllowRemote: true, Token: "deadbeef"})
 	if err != nil {
 		t.Fatalf("listen with allow-remote: %v", err)
 	}
 	defer l.Close()
+}
+
+func TestListenRefusesRemoteWithoutToken(t *testing.T) {
+	_, err := server.Listen(server.Options{Addr: "0.0.0.0:0", AllowRemote: true})
+	if err == nil {
+		t.Fatal("expected error binding remote without token")
+	}
+	if !strings.Contains(err.Error(), "without --token") {
+		t.Fatalf("expected token-required error, got %v", err)
+	}
+}
+
+func TestTokenAuthAcceptsValidBearer(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req.Header.Set("Authorization", "Bearer s3cret")
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 with valid token, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestTokenAuthRejectsMissingHeader(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Header().Get("WWW-Authenticate"), "Bearer") {
+		t.Fatalf("missing WWW-Authenticate: %q", w.Header().Get("WWW-Authenticate"))
+	}
+	assertErrorEnvelope(t, w.Body.Bytes(), "unauthorized")
+}
+
+func TestTokenAuthRejectsWrongToken(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req.Header.Set("Authorization", "Bearer wrong")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestTokenAuthRejectsBasicAuth(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req.Header.Set("Authorization", "Basic c2VjcmV0OnNlY3JldA==")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for non-Bearer scheme, got %d", w.Code)
+	}
+}
+
+func TestTokenAuthDisabledWhenEmpty(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: ""})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 without token configured, got %d", w.Code)
+	}
 }

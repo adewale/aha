@@ -26,11 +26,15 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	allowRemote := fs.Bool("allow-remote", false, "allow non-loopback bind (off by default)")
 	allowedHosts := fs.String("allowed-hosts", "", "comma-separated Host header values to accept in addition to loopback (use with --allow-remote)")
 	timeout := fs.Duration("timeout", 30*time.Second, "per-request handler timeout")
+	token := fs.String("token", "", "require this bearer token on every request (REQUIRED with --allow-remote; AHA_DASHBOARD_TOKEN env var also honored)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !*allowRemote && os.Getenv("AHA_ALLOW_REMOTE") == "1" {
 		*allowRemote = true
+	}
+	if *token == "" {
+		*token = os.Getenv("AHA_DASHBOARD_TOKEN")
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
@@ -47,6 +51,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		Addr:         *addr,
 		AllowRemote:  *allowRemote,
 		AllowedHosts: splitCSV(*allowedHosts),
+		Token:        *token,
 	}
 	srv := server.NewWithOptions(backend, opts)
 	listener, err := server.Listen(opts)

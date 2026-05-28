@@ -90,28 +90,45 @@ ts() {
   fi
 }
 
-# mcp runs the bidirectional MCP conformance suite. Two scenarios:
-#   1. The official MCP Python SDK client drives `aha mcp` and asserts
-#      wire-level conformance (handshake, tools/list shape, structuredContent,
-#      readOnlyHint annotation, strict arg validation).
-#   2. Our TS stdio transport drives a tiny FastMCP reference server and
-#      round-trips three tool calls — proving the *client* speaks real MCP
-#      to a known-good server, not just to itself.
-# Skips gracefully when python3 or the `mcp` package isn't available.
+# mcp runs the cross-SDK conformance suite. Six legs across three SDKs
+# (Python `mcp`, TypeScript `@modelcontextprotocol/sdk`, Go
+# `github.com/modelcontextprotocol/go-sdk`):
+#
+#   server (aha mcp) is driven by ...
+#     1. Python SDK client      -> scripts/mcp-conformance/client_against_aha.py
+#     2. TypeScript SDK client  -> scripts/mcp-conformance/client_against_aha.ts
+#     3. Go SDK client          -> internal/mcp/conformance/go_sdk_test.go
+#
+#   our TS client is driven against ...
+#     4. Python SDK reference server (FastMCP)
+#     5. TypeScript SDK reference server (McpServer)
+#     6. Go SDK reference server (cmd/aha-ref-mcp)
+#
+# Each leg skips gracefully when its toolchain is missing, so this mode
+# still does *something* useful on a Python-only or Go-only box.
 mcp_conformance() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf '\n==> mcp conformance: skipped (python3 not found)\n' >&2
-    return 0
-  fi
-  if ! python3 -c "import mcp" 2>/dev/null; then
-    printf '\n==> mcp conformance: skipped (python3 -m pip install mcp[cli] to enable)\n' >&2
-    return 0
-  fi
-  # Build the binary if it isn't already there.
+  # The Go-SDK leg needs no external toolchain — it runs under `go test`.
+  # The Python and TS legs need their respective SDKs installed.
+  local have_python=0 have_node=0 have_tsc=0
+  command -v python3 >/dev/null 2>&1 && python3 -c "import mcp" 2>/dev/null && have_python=1
+  command -v node    >/dev/null 2>&1 && have_node=1
+  command -v tsc     >/dev/null 2>&1 && have_tsc=1
+
+  # Build aha + the Go-SDK reference server once.
   if [[ ! -x /tmp/aha ]]; then
     run go build -o /tmp/aha ./cmd/aha
   fi
-  # Phase 1: official Python SDK client → aha mcp
+  if [[ ! -x /tmp/aha-ref-mcp ]]; then
+    run go build -o /tmp/aha-ref-mcp ./cmd/aha-ref-mcp
+  fi
+
+  # Make sure the TS SDK + zod are installed in scripts/mcp-conformance/ if
+  # node is available. Skip the install if package-lock is fresh enough.
+  if (( have_node )) && [[ ! -d scripts/mcp-conformance/node_modules ]]; then
+    run_shell "cd scripts/mcp-conformance && npm install --silent --no-audit --no-fund"
+  fi
+
+  # Populate a fixture corpus the Python+TS+Go clients can drive against.
   local tmpdir; tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' RETURN
   local pi="$tmpdir/pi/--Users-me-proj--"
@@ -130,14 +147,38 @@ JSONL
 }
 JSONC
   run /tmp/aha refresh --config "$tmpdir/config.jsonc" --captured-at 2026-01-01T00:00:00Z --bundle-id conformance >/dev/null
-  AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
-    run python3 scripts/mcp-conformance/client_against_aha.py
-  # Phase 2: aha TS client → official Python SDK reference server
-  if command -v node >/dev/null 2>&1 && command -v tsc >/dev/null 2>&1; then
-    AHA_REF_SERVER="python3 $PWD/scripts/mcp-conformance/reference_server.py" \
-      run node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts
+
+  # ---- Server-under-test legs (drive aha mcp from a real SDK Client) ----
+
+  if (( have_python )); then
+    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
+      run python3 scripts/mcp-conformance/client_against_aha.py
   else
-    printf '\n==> mcp conformance phase 2: skipped (need node + tsc)\n' >&2
+    printf '\n==> mcp leg 1 (python client -> aha): skipped (python3 mcp not available)\n' >&2
+  fi
+
+  if (( have_node )); then
+    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
+      run_shell "cd scripts/mcp-conformance && node --experimental-strip-types client_against_aha.ts"
+  else
+    printf '\n==> mcp leg 2 (typescript client -> aha): skipped (node not available)\n' >&2
+  fi
+
+  AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
+    run go test -count=1 ./internal/mcp/conformance/...
+
+  # ---- Client-under-test legs (drive our TS Transport against real servers) ----
+
+  if (( have_node && have_tsc )); then
+    local ref_env=""
+    if (( have_python )); then
+      ref_env+=" AHA_REF_SERVER=\"python3 $PWD/scripts/mcp-conformance/reference_server.py\""
+    fi
+    ref_env+=" AHA_REF_SERVER_TS=\"node --experimental-strip-types $PWD/scripts/mcp-conformance/reference_server.ts\""
+    ref_env+=" AHA_REF_SERVER_GO=\"/tmp/aha-ref-mcp\""
+    run_shell "env $ref_env node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts"
+  else
+    printf '\n==> mcp legs 4-6 (aha client -> reference servers): skipped (need node + tsc)\n' >&2
   fi
 }
 

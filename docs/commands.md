@@ -274,7 +274,7 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 run a read-only local dashboard over the corpus on loopback
 
 ```txt
-aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--config PATH] [--repo DIR]
+aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
 ```
 
 **Flags:**
@@ -286,11 +286,13 @@ aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout
 - `--corpus`
 - `--repo`
 - `--timeout`
+- `--token`
 
 **Examples:**
 
 - `aha serve`
 - `aha serve --addr 127.0.0.1:18428`
+- `aha serve --allow-remote --token $(openssl rand -hex 32)`
 
 **JSON contract:** `http://HOST:PORT/api/{search,read,status,verify,conflicts,corpus_size,doctor}`
 

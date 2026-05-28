@@ -130,37 +130,57 @@ is duplicated. The MCP layer is purely:
 - The existing `internal/cli/json_contract_test.go` continues to guard the
   underlying shapes; if those change, both CLI and MCP move together.
 
-## Cross-implementation conformance (bidirectional)
+## Cross-implementation conformance (six legs, three SDKs)
 
-`scripts/verify.sh mcp` runs a two-direction validation against the official
-MCP Python SDK (`pip install mcp`):
+`scripts/verify.sh mcp` runs the full cross-SDK conformance matrix. Three
+official MCP SDKs (Python `mcp`, TypeScript `@modelcontextprotocol/sdk`, Go
+`github.com/modelcontextprotocol/go-sdk`) × two directions = six
+independent legs. Each leg skips gracefully when its toolchain isn't
+available, so the suite still does useful work on a Python-only, Node-only,
+or Go-only box.
 
-1. **Server validation** — `scripts/mcp-conformance/client_against_aha.py`
-   spawns `aha mcp` and drives it through `mcp.ClientSession` +
-   `mcp.client.stdio.stdio_client`. The SDK speaks real NDJSON; a green run
-   proves aha's server is wire-compliant. Assertions cover the handshake,
-   `tools/list` shape (exact tool set), `readOnlyHint: true` annotations on
-   every tool, `tools/call` round trips for object-returning and
-   list-returning tools, `structuredContent` matching the text payload when
-   present, empty-result serialization (`[]`, not `null`), and strict
-   argument validation (unknown arg rejected, unknown tool rejected).
+### Server-under-test (drive `aha mcp` from a real SDK Client)
 
-2. **Client validation** —
-   `clients/typescript/test/stdio.conformance.test.ts` spawns
-   `scripts/mcp-conformance/reference_server.py` (a tiny FastMCP server with
-   three tools) and drives it through our own `connectStdio` Transport.
-   Round-trips `echo`, `add`, and `fail` and proves the client speaks real
-   MCP to a known-good server, not just to itself.
+| Leg                 | Driver                                                            |
+| ------------------- | ----------------------------------------------------------------- |
+| Python SDK client   | `scripts/mcp-conformance/client_against_aha.py` (`mcp.ClientSession` + stdio_client) |
+| TypeScript SDK client | `scripts/mcp-conformance/client_against_aha.ts` (`Client` + `StdioClientTransport`) |
+| Go SDK client       | `internal/mcp/conformance/go_sdk_test.go` (`mcp.NewClient` + `CommandTransport`)     |
 
-Without both directions, the verification gap is real: testing the framer
-against itself proves nothing. Testing the server against the official SDK
-proves wire conformance. Testing the client against the official SDK proves
-the client doesn't have its own corner-case quirks.
+Each leg makes the same assertions:
 
-The skipped-gracefully posture (no Python or no `mcp` installed → step is a
-no-op) keeps `verify.sh full` running in CI environments without Python
-while still upgrading every Python-capable environment to the full
-validation.
+- handshake completes; `serverInfo.name == "aha"`;
+- `tools/list` returns the exact expected set;
+- every tool advertises `readOnlyHint: true`;
+- `tools/call status` returns an object payload; when `structuredContent`
+  is present it matches the text payload;
+- `tools/call search` round-trips a list-shaped payload;
+- empty results serialize as `[]`, not `null`;
+- unknown args and unknown tools surface as errors.
+
+### Client-under-test (drive our `connectStdio` against a real SDK server)
+
+| Leg                            | Reference server                                                     |
+| ------------------------------ | -------------------------------------------------------------------- |
+| Python FastMCP reference       | `scripts/mcp-conformance/reference_server.py` (FastMCP, 3 tools)     |
+| TypeScript McpServer reference | `scripts/mcp-conformance/reference_server.ts` (TS SDK McpServer)     |
+| Go SDK reference               | `cmd/aha-ref-mcp/main.go` (Go SDK NewServer, built as `aha-ref-mcp`) |
+
+Each reference exposes the same three tools (`echo`, `add`, `fail`) and the
+TS conformance suite at `clients/typescript/test/stdio.conformance.test.ts`
+round-trips all three against each reference, asserting payload equality
+and error propagation.
+
+### Why three SDKs
+
+Testing the framer against itself proves nothing. Testing the server
+against one SDK closes most of the gap. Testing across three SDKs catches
+implementation-specific assumptions the spec doesn't pin: the Python SDK's
+Pydantic types reject `structuredContent` arrays; the TS SDK accepts both
+parsed and string payloads through different code paths; the Go SDK
+exposes `Annotations.ReadOnlyHint` as a value where the TS SDK uses a
+nullable boolean. A bug visible to only one SDK is still a real bug; the
+matrix surfaces it.
 
 ## Phase 2 — code-mode adapter (shipped)
 

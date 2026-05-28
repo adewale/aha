@@ -1,0 +1,15 @@
+{
+  "name": "aha-mcp-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-implementation conformance tests for aha's MCP server and stdio transport, using the official @modelcontextprotocol/sdk.",
+  "type": "module",
+  "scripts": {
+    "client-against-aha": "node --experimental-strip-types client_against_aha.ts",
+    "reference-server": "node --experimental-strip-types reference_server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "zod": "^3.23.0"
+  }
+}

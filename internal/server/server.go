@@ -17,6 +17,7 @@ package server
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +34,17 @@ type Options struct {
 	Addr         string   // host:port; default "127.0.0.1:18428"
 	AllowRemote  bool     // allow non-loopback bind
 	AllowedHosts []string // additional Host header values to accept
+	// Token, when non-empty, requires every request to carry an
+	// `Authorization: Bearer <token>` header. Borrowed from the
+	// cloudflare-mcp pattern of per-request bearer verification (which
+	// they do against the upstream API; for a single-user local tool a
+	// shared-secret is sufficient). Constant-time compared on every
+	// request.
+	//
+	// REQUIRED when AllowRemote is true. Optional (but allowed) on
+	// loopback binds — useful when the loopback dashboard is shared with
+	// trusted local processes that want to authenticate.
+	Token string
 }
 
 // Server is the embedded HTTP handler. Tests can drive its ServeHTTP directly
@@ -42,6 +54,7 @@ type Server struct {
 	mux          *http.ServeMux
 	allowedHosts map[string]struct{}
 	staticHand   http.Handler
+	token        []byte // empty = auth disabled; non-empty = bearer required
 }
 
 // defaultAllowedHosts are the Host header values the dashboard accepts on
@@ -80,20 +93,44 @@ func NewWithOptions(backend mcp.Backend, opts Options) *Server {
 		mux:          http.NewServeMux(),
 		allowedHosts: hosts,
 		staticHand:   http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))),
+		token:        []byte(opts.Token),
 	}
 	s.routes()
 	return s
 }
 
 // ServeHTTP implements http.Handler. Every request first passes through the
-// Host validator; failing requests get 421 Misdirected Request rather than
-// silently serving the corpus to an attacker-controlled origin.
+// Host validator and (when configured) the bearer-token check; failing
+// requests get 421 Misdirected Request or 401 Unauthorized respectively
+// rather than silently serving the corpus to an unauthenticated or
+// attacker-controlled origin.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.hostAllowed(r.Host) {
 		writeError(w, http.StatusMisdirectedRequest, "host not permitted")
 		return
 	}
+	if !s.tokenAccepted(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="aha"`)
+		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		return
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// tokenAccepted returns true when the configured token (if any) matches the
+// presented Authorization header. Compared in constant time to avoid
+// timing leaks. When no token is configured, every request is accepted.
+func (s *Server) tokenAccepted(r *http.Request) bool {
+	if len(s.token) == 0 {
+		return true
+	}
+	auth := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(auth, prefix) {
+		return false
+	}
+	presented := []byte(auth[len(prefix):])
+	return subtle.ConstantTimeCompare(s.token, presented) == 1
 }
 
 func (s *Server) hostAllowed(host string) bool {
@@ -112,7 +149,11 @@ func (s *Server) hostAllowed(host string) bool {
 	return false
 }
 
-// Listen binds to opts.Addr, refusing non-loopback unless opts.AllowRemote.
+// Listen binds to opts.Addr, refusing non-loopback unless opts.AllowRemote,
+// and refusing remote binds without an authentication token. The latter
+// is the dashboard analogue of cloudflare-mcp's per-request bearer check:
+// once you opt off loopback, you must authenticate.
+//
 // Returns the net.Listener so tests can grab the chosen port via :0.
 func Listen(opts Options) (net.Listener, error) {
 	addr := opts.Addr
@@ -123,6 +164,8 @@ func Listen(opts Options) (net.Listener, error) {
 		if err := requireLoopback(addr); err != nil {
 			return nil, err
 		}
+	} else if opts.Token == "" {
+		return nil, fmt.Errorf("refusing remote bind %q without --token; non-loopback dashboards must require authentication", addr)
 	}
 	return net.Listen("tcp", addr)
 }
@@ -298,6 +341,8 @@ func errorCodeForStatus(status int) string {
 	switch status {
 	case http.StatusBadRequest:
 		return "bad_request"
+	case http.StatusUnauthorized:
+		return "unauthorized"
 	case http.StatusUnsupportedMediaType:
 		return "unsupported_media_type"
 	case http.StatusMethodNotAllowed:
