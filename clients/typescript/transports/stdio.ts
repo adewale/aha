@@ -1,8 +1,13 @@
 // Stdio Transport for the aha MCP server.
 //
 // Spawns `aha mcp` as a child process and speaks JSON-RPC 2.0 over its
-// stdin/stdout using LSP-style `Content-Length:` framing. Use this when you
-// want to call aha from a Node-based agent runtime or test.
+// stdin/stdout using the newline-delimited framing required by the MCP
+// stdio transport
+// (https://modelcontextprotocol.io/specification/2025-06-18/basic/transports):
+//
+//   "Messages are delimited by newlines, and MUST NOT contain embedded newlines."
+//
+// Use this when you want to call aha from a Node-based agent runtime or test.
 //
 // Example:
 //   import { spawn } from "node:child_process";
@@ -53,38 +58,44 @@ function concat(a: Bytes, b: Bytes): Bytes {
   return out;
 }
 
-// indexOfHeaderEnd returns the offset of the "\r\n\r\n" header terminator, or
-// -1 if it is not present in buf.
-function indexOfHeaderEnd(buf: Bytes): number {
-  for (let i = 0; i + 3 < buf.length; i++) {
-    if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) {
-      return i;
-    }
+// indexOfNewline returns the offset of the next '\n' in buf, or -1.
+function indexOfNewline(buf: Bytes): number {
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] === 10) return i;
   }
   return -1;
 }
 
+// encodeFrame produces a compact JSON encoding of `message` followed by a
+// single '\n'. JSON.stringify never emits literal newlines, so the
+// spec-mandated "MUST NOT contain embedded newlines" rule holds by
+// construction.
 function encodeFrame(message: unknown): Bytes {
-  const body = encoder.encode(JSON.stringify(message));
-  const header = encoder.encode(`Content-Length: ${body.length}\r\n\r\n`);
-  return concat(header, body);
+  const json = JSON.stringify(message);
+  if (json.includes("\n") || json.includes("\r")) {
+    throw new Error("encoded JSON contains a newline");
+  }
+  return encoder.encode(json + "\n");
 }
 
+// parseFrames splits the buffer on '\n' boundaries, decodes each non-empty
+// line as JSON, and returns the still-buffered tail (data after the last
+// newline). Tolerates '\r\n' line endings and skips blank lines, mirroring
+// the Go side.
 function parseFrames(buf: Bytes): { messages: unknown[]; rest: Bytes } {
   const messages: unknown[] = [];
   let rest = buf;
   for (;;) {
-    const sep = indexOfHeaderEnd(rest);
-    if (sep < 0) return { messages, rest };
-    const header = decoder.decode(rest.subarray(0, sep));
-    const match = header.match(/Content-Length:\s*(\d+)/i);
-    if (!match) throw new Error("missing Content-Length header");
-    const length = Number(match[1]);
-    const start = sep + 4;
-    const end = start + length;
-    if (rest.length < end) return { messages, rest };
-    messages.push(JSON.parse(decoder.decode(rest.subarray(start, end))));
-    rest = rest.subarray(end);
+    const nl = indexOfNewline(rest);
+    if (nl < 0) return { messages, rest };
+    let line = rest.subarray(0, nl);
+    if (line.length > 0 && line[line.length - 1] === 13) {
+      line = line.subarray(0, line.length - 1);
+    }
+    rest = rest.subarray(nl + 1);
+    const text = decoder.decode(line).trim();
+    if (text.length === 0) continue;
+    messages.push(JSON.parse(text));
   }
 }
 
@@ -158,12 +169,33 @@ export function connectStdio(
           async call(name, args) {
             const result = (await rawCall("tools/call", { name, arguments: args })) as {
               content?: { type: string; text: string }[];
+              structuredContent?: unknown;
+              isError?: boolean;
             };
+            if (result?.isError) {
+              const text = result?.content?.[0]?.text ?? "tool error";
+              throw new Error(text);
+            }
+            // Per the 2025-06-18 spec, a server that emits structuredContent
+            // SHOULD also emit the serialized form in content[].text. So
+            // text is the universal channel — every conformant server has
+            // it, and its shape is whatever the tool returned. We use that
+            // exclusively; structuredContent stays on the wire as
+            // informational metadata but isn't read here (different servers
+            // wrap primitives differently: FastMCP emits {result: ...},
+            // aha emits the value directly).
             const text = result?.content?.[0]?.text;
             if (typeof text !== "string") {
               throw new Error("tools/call returned no text content");
             }
-            return JSON.parse(text);
+            // Most servers JSON-encode the payload; FastMCP does too for
+            // primitives ('"hi"' rather than 'hi'). Try to parse; fall back
+            // to the raw string for the rare server that emits plain text.
+            try {
+              return JSON.parse(text);
+            } catch {
+              return text;
+            }
           },
         };
         resolve(transport);

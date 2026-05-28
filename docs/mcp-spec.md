@@ -48,9 +48,21 @@ and free of network calls.
 
 ## Protocol
 
-JSON-RPC 2.0 over stdio with LSP-style `Content-Length:` framing. This is the
-same wire format coding-agent hosts already speak to MCP servers and exactly
-matches the framing tracebase uses.
+JSON-RPC 2.0 over stdio with **newline-delimited JSON** framing, per the
+MCP stdio spec ([transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)):
+
+> *"Messages are delimited by newlines, and MUST NOT contain embedded newlines."*
+
+One JSON object per line, terminated by `\n`. `EncodeFrame` validates the
+encoded body contains no embedded newlines before emitting. `ParseFrames`
+tolerates `\r\n` line endings and blank padding lines on input. The wire is
+cross-validated against the official MCP Python SDK in
+`scripts/verify.sh mcp`.
+
+(Earlier revisions of this spec mistakenly described an LSP-style
+`Content-Length:` framing copied from tracebase. That format is **not**
+MCP-compliant; real clients send NDJSON and won't decode Content-Length
+frames. The history is preserved in the git log.)
 
 Supported methods:
 
@@ -104,15 +116,51 @@ is duplicated. The MCP layer is purely:
 ## Test strategy
 
 - Protocol tests: frame encode/decode roundtrip; truncated input;
-  multi-message buffer.
-- Dispatch tests: `tools/list` returns the expected tool set; `tools/call`
-  with unknown name returns `-32000`; unknown args rejected.
+  multi-message buffer; CRLF tolerance; blank-line skipping.
+- Dispatch tests: `tools/list` returns the expected tool set with
+  `readOnlyHint: true` annotations; `tools/call` with unknown name returns
+  `-32000`; unknown args rejected.
 - Integration: build a temporary corpus from a fixture, run `tools/call` for
   each tool against it, assert the JSON payload matches the corresponding
   `--json` CLI output. This reuses the same fixture loaders the CLI tests use
   and ensures the two surfaces stay in sync.
+- Fuzz: `FuzzParseFrames` (panic-safety + suffix invariant on rest) and
+  `FuzzEncodeParseRoundTrip` (every valid-UTF-8 method survives a round
+  trip). The body MUST contain only one terminating newline.
 - The existing `internal/cli/json_contract_test.go` continues to guard the
   underlying shapes; if those change, both CLI and MCP move together.
+
+## Cross-implementation conformance (bidirectional)
+
+`scripts/verify.sh mcp` runs a two-direction validation against the official
+MCP Python SDK (`pip install mcp`):
+
+1. **Server validation** — `scripts/mcp-conformance/client_against_aha.py`
+   spawns `aha mcp` and drives it through `mcp.ClientSession` +
+   `mcp.client.stdio.stdio_client`. The SDK speaks real NDJSON; a green run
+   proves aha's server is wire-compliant. Assertions cover the handshake,
+   `tools/list` shape (exact tool set), `readOnlyHint: true` annotations on
+   every tool, `tools/call` round trips for object-returning and
+   list-returning tools, `structuredContent` matching the text payload when
+   present, empty-result serialization (`[]`, not `null`), and strict
+   argument validation (unknown arg rejected, unknown tool rejected).
+
+2. **Client validation** —
+   `clients/typescript/test/stdio.conformance.test.ts` spawns
+   `scripts/mcp-conformance/reference_server.py` (a tiny FastMCP server with
+   three tools) and drives it through our own `connectStdio` Transport.
+   Round-trips `echo`, `add`, and `fail` and proves the client speaks real
+   MCP to a known-good server, not just to itself.
+
+Without both directions, the verification gap is real: testing the framer
+against itself proves nothing. Testing the server against the official SDK
+proves wire conformance. Testing the client against the official SDK proves
+the client doesn't have its own corner-case quirks.
+
+The skipped-gracefully posture (no Python or no `mcp` installed → step is a
+no-op) keeps `verify.sh full` running in CI environments without Python
+while still upgrading every Python-capable environment to the full
+validation.
 
 ## Phase 2 — code-mode adapter (shipped)
 
@@ -218,7 +266,7 @@ host-provided tool proxy as the `Transport`. See
 | Symptom                                       | Likely cause                                                    |
 | --------------------------------------------- | --------------------------------------------------------------- |
 | Server exits immediately with stat error      | Corpus has not been built; run `aha refresh` first.             |
-| `frame parse error: invalid Content-Length`   | Host is sending NDJSON; not supported in phase 1.                |
+| `invalid character … looking for value`        | Host is sending non-JSON (or a stale Content-Length framing); aha speaks NDJSON. |
 | `unknown tool: refresh` (or similar) over MCP | Write tools are intentionally not exposed; use the CLI directly. |
 | Dashboard returns 421 Misdirected Request     | Host header doesn't match the loopback allowlist; use `localhost`, `127.0.0.1`, or set `--allowed-hosts`. |
 | Dashboard returns 415 Unsupported Media Type  | POST body sent without `Content-Type: application/json`.        |

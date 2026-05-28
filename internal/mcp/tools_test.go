@@ -88,17 +88,20 @@ func callOne(t *testing.T, b mcp.Backend, req mcp.Message) *wireResponse {
 	return resp
 }
 
-// extractBodyBytes returns the JSON body of the first frame in buf, ignoring
-// the Content-Length header. Useful when we need the raw response to decode
-// fields the protocol's Message struct doesn't carry.
+// extractBodyBytes returns the JSON body of the first NDJSON frame in buf.
+// Useful when we need the raw response to decode fields the protocol's
+// Message struct doesn't carry (e.g. result, error).
 func extractBodyBytes(t *testing.T, buf []byte) []byte {
 	t.Helper()
-	sep := []byte("\r\n\r\n")
-	idx := bytes.Index(buf, sep)
+	idx := bytes.IndexByte(buf, '\n')
 	if idx < 0 {
-		t.Fatalf("frame missing header separator: %q", buf)
+		t.Fatalf("frame missing terminating newline: %q", buf)
 	}
-	return buf[idx+len(sep):]
+	line := buf[:idx]
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	return bytes.TrimSpace(line)
 }
 
 func contentText(t *testing.T, resp *wireResponse) string {

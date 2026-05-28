@@ -18,13 +18,11 @@ import { aha } from "../aha-mcp.ts";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+// NDJSON: one JSON object per line, terminated by '\n'. Matches the MCP
+// stdio transport spec ("Messages are delimited by newlines, and MUST NOT
+// contain embedded newlines.")
 function frame(obj: unknown): Uint8Array {
-  const body = encoder.encode(JSON.stringify(obj));
-  const header = encoder.encode(`Content-Length: ${body.length}\r\n\r\n`);
-  const out = new Uint8Array(header.length + body.length);
-  out.set(header, 0);
-  out.set(body, header.length);
-  return out;
+  return encoder.encode(JSON.stringify(obj) + "\n");
 }
 
 // parseFrames mirrors the wire format so the test can read what the client
@@ -33,19 +31,19 @@ function parseFrames(buf: Uint8Array): unknown[] {
   const messages: unknown[] = [];
   let rest = buf;
   for (;;) {
-    let sep = -1;
-    for (let i = 0; i + 3 < rest.length; i++) {
-      if (rest[i] === 13 && rest[i + 1] === 10 && rest[i + 2] === 13 && rest[i + 3] === 10) {
-        sep = i;
-        break;
-      }
+    let nl = -1;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === 10) { nl = i; break; }
     }
-    if (sep < 0) return messages;
-    const header = decoder.decode(rest.subarray(0, sep));
-    const len = Number(header.match(/Content-Length:\s*(\d+)/i)![1]);
-    const start = sep + 4;
-    messages.push(JSON.parse(decoder.decode(rest.subarray(start, start + len))));
-    rest = rest.subarray(start + len);
+    if (nl < 0) return messages;
+    let line = rest.subarray(0, nl);
+    if (line.length > 0 && line[line.length - 1] === 13) {
+      line = line.subarray(0, line.length - 1);
+    }
+    rest = rest.subarray(nl + 1);
+    const text = decoder.decode(line).trim();
+    if (text.length === 0) continue;
+    messages.push(JSON.parse(text));
   }
 }
 

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -14,13 +15,20 @@ import (
 	"github.com/adewale/aha/internal/search"
 )
 
-// toolSpec describes one MCP tool: name, description, and JSON-Schema for
-// arguments. Kept minimal — the underlying functions own validation beyond
-// the structural checks here.
+// toolSpec describes one MCP tool: name, description, JSON-Schema for
+// arguments, and tool annotations. Kept minimal — the underlying functions
+// own validation beyond the structural checks here.
+//
+// Annotations follow the 2025-06-18 spec
+// (https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
+// They are *hints* to the client and must be treated as untrusted unless the
+// server itself is trusted; aha's server is fully read-only so we set
+// readOnlyHint: true on every tool.
 type toolSpec struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	InputSchema map[string]any     `json:"inputSchema"`
+	Annotations map[string]any     `json:"annotations,omitempty"`
 }
 
 func tool(name, description string, properties map[string]any, required ...string) toolSpec {
@@ -38,6 +46,12 @@ func tool(name, description string, properties map[string]any, required ...strin
 			"properties":           properties,
 			"required":             required,
 			"additionalProperties": false,
+		},
+		Annotations: map[string]any{
+			"readOnlyHint":    true,
+			"destructiveHint": false,
+			"idempotentHint":  true,
+			"openWorldHint":   false,
 		},
 	}
 }
@@ -220,7 +234,29 @@ func asInt(v any) int {
 	return 0
 }
 
-// callSearch invokes search.Query with the documented filter set.
+// isJSONObject reports whether v marshals to a JSON object. Map types,
+// structs, and *struct pointers qualify; slices, arrays, scalars, and nil
+// do not. Used to decide whether structuredContent is safe to emit (the
+// official Python SDK rejects non-object structuredContent).
+func isJSONObject(v any) bool {
+	if v == nil {
+		return false
+	}
+	t := reflect.TypeOf(v)
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Map, reflect.Struct:
+		return true
+	}
+	return false
+}
+
+// callSearch invokes search.Query with the documented filter set. Returns
+// an empty slice (never nil) when no rows match, so JSON marshalling
+// produces [] rather than null. The CLI happily renders nil as "no
+// results"; MCP clients expect a list shape.
 func callSearch(b Backend, args map[string]any) (any, error) {
 	q := asString(args["query"])
 	if q == "" {
@@ -233,7 +269,7 @@ func callSearch(b Backend, args map[string]any) (any, error) {
 	if limit > search.MaxLimit {
 		limit = search.MaxLimit
 	}
-	return search.Query(b.DB(), q, search.Filters{
+	results, err := search.Query(b.DB(), q, search.Filters{
 		Source:    asString(args["source"]),
 		Machine:   asString(args["machine"]),
 		Role:      asString(args["role"]),
@@ -244,10 +280,18 @@ func callSearch(b Backend, args map[string]any) (any, error) {
 		Project:   asString(args["project"]),
 		Limit:     limit,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if results == nil {
+		results = []search.Result{}
+	}
+	return results, nil
 }
 
 // callRead resolves either a canonical ref text or a session+entry pair, then
 // pulls surrounding context via the same corpus functions the CLI uses.
+// Empty result → [] (never nil) so JSON marshalling produces a list.
 func callRead(b Backend, args map[string]any) (any, error) {
 	before := asInt(args["before"])
 	if _, ok := args["before"]; !ok {
@@ -257,19 +301,30 @@ func callRead(b Backend, args map[string]any) (any, error) {
 	if _, ok := args["after"]; !ok {
 		after = 5
 	}
+	var (
+		entries []corpus.ReadEntry
+		err     error
+	)
 	if refText := asString(args["ref"]); refText != "" {
-		ref, err := model.ParseRef(refText)
-		if err != nil {
-			return nil, fmt.Errorf("invalid ref: %w", err)
+		ref, perr := model.ParseRef(refText)
+		if perr != nil {
+			return nil, fmt.Errorf("invalid ref: %w", perr)
 		}
-		return corpus.ReadCanonical(b.DB(), ref, before, after)
+		entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
+	} else {
+		session := asString(args["session"])
+		if session == "" {
+			return nil, fmt.Errorf("read requires either ref or session")
+		}
+		entries, err = corpus.ReadContext(b.DB(), session, asString(args["entry"]), before, after)
 	}
-	session := asString(args["session"])
-	if session == "" {
-		return nil, fmt.Errorf("read requires either ref or session")
+	if err != nil {
+		return nil, err
 	}
-	entry := asString(args["entry"])
-	return corpus.ReadContext(b.DB(), session, entry, before, after)
+	if entries == nil {
+		entries = []corpus.ReadEntry{}
+	}
+	return entries, nil
 }
 
 func callStatus(b Backend) (any, error) {
@@ -281,7 +336,14 @@ func callVerify(b Backend) (any, error) {
 }
 
 func callConflicts(b Backend) (any, error) {
-	return corpus.Conflicts(b.DB())
+	rows, err := corpus.Conflicts(b.DB())
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []corpus.Conflict{}
+	}
+	return rows, nil
 }
 
 func callCorpusSize(b Backend) (any, error) {
@@ -381,11 +443,22 @@ func HandleMessage(b Backend, msg Message) (*response, bool) {
 		if err != nil {
 			return newError(msg.ID, codeToolError, err.Error()), true
 		}
-		return newResult(msg.ID, map[string]any{
+		// Per the 2025-06-18 spec: "For backwards compatibility, a tool that
+		// returns structured content SHOULD also return the serialized JSON
+		// in a TextContent block." We always emit the text content; we emit
+		// structuredContent *only* when the payload is a JSON object, which
+		// is what the official SDK accepts there (its Pydantic type is
+		// Dict[str, Any]). Arrays and scalars travel in the text field
+		// alone; the typed client surface JSON-parses that fallback.
+		result := map[string]any{
 			"content": []any{
 				map[string]any{"type": "text", "text": string(text)},
 			},
-		}), true
+		}
+		if isJSONObject(out) {
+			result["structuredContent"] = out
+		}
+		return newResult(msg.ID, result), true
 	}
 	return newError(msg.ID, codeMethodNotFound, "unknown method: "+msg.Method), true
 }
