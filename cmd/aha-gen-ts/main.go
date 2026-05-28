@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/adewale/aha/internal/mcp/codegen"
 )
@@ -14,7 +15,7 @@ import (
 func main() {
 	out := flag.String("out", "clients/typescript/aha-mcp.ts", "output path")
 	flag.Parse()
-	if err := os.MkdirAll(dir(*out), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -23,13 +24,4 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("wrote", *out)
-}
-
-func dir(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' || p[i] == '\\' {
-			return p[:i]
-		}
-	}
-	return "."
 }

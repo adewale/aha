@@ -177,6 +177,52 @@ Security posture:
 - All routes are read-only. There is no write surface in phase 1.
 - No CORS headers; this is a single-origin local UI.
 
+## Host integration
+
+`aha mcp` reads from stdin and writes to stdout, so any MCP host that can
+spawn a local subprocess can drive it.
+
+### Claude Desktop / Cursor / Continue / Codex
+
+Add an entry to the host's MCP config file (path varies per host; for Claude
+Desktop on macOS it's `~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```jsonc
+{
+  "mcpServers": {
+    "aha": {
+      "command": "aha",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Optional flags:
+
+- `["mcp", "--config", "/path/to/aha.jsonc"]` to pin a non-default config.
+- `["mcp", "--repo", "/path/to/corpus"]` to point at a specific corpus.
+
+The host reads tool descriptions via `tools/list` and invokes tools via
+`tools/call`. No further setup is required.
+
+### Code-mode hosts (Cloudflare codemode, Anthropic code-execution-with-MCP)
+
+Wire `aha mcp` as a stdio MCP server in the host's tool registry, then import
+the typed TS surface from `clients/typescript/aha-mcp.ts` and pass the
+host-provided tool proxy as the `Transport`. See
+`clients/typescript/README.md` for end-to-end examples.
+
+### Troubleshooting
+
+| Symptom                                       | Likely cause                                                    |
+| --------------------------------------------- | --------------------------------------------------------------- |
+| Server exits immediately with stat error      | Corpus has not been built; run `aha refresh` first.             |
+| `frame parse error: invalid Content-Length`   | Host is sending NDJSON; not supported in phase 1.                |
+| `unknown tool: refresh` (or similar) over MCP | Write tools are intentionally not exposed; use the CLI directly. |
+| Dashboard returns 421 Misdirected Request     | Host header doesn't match the loopback allowlist; use `localhost`, `127.0.0.1`, or set `--allowed-hosts`. |
+| Dashboard returns 415 Unsupported Media Type  | POST body sent without `Content-Type: application/json`.        |
+
 ## Open questions
 
 - Should `doctor` accept an opt-in `depot` arg in phase 1 or stay strictly

@@ -274,16 +274,18 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 run a read-only local dashboard over the corpus on loopback
 
 ```txt
-aha serve [--addr HOST:PORT] [--allow-remote] [--config PATH] [--repo DIR]
+aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--config PATH] [--repo DIR]
 ```
 
 **Flags:**
 
 - `--addr`
 - `--allow-remote`
+- `--allowed-hosts`
 - `--config`
 - `--corpus`
 - `--repo`
+- `--timeout`
 
 **Examples:**
 

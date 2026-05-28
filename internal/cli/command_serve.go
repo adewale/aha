@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/adewale/aha/internal/mcp"
@@ -24,6 +24,8 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	cf := registerCorpusFlags(fs)
 	addr := fs.String("addr", "127.0.0.1:18428", "listen address (loopback only unless --allow-remote)")
 	allowRemote := fs.Bool("allow-remote", false, "allow non-loopback bind (off by default)")
+	allowedHosts := fs.String("allowed-hosts", "", "comma-separated Host header values to accept in addition to loopback (use with --allow-remote)")
+	timeout := fs.Duration("timeout", 30*time.Second, "per-request handler timeout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -41,15 +43,25 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	defer store.Close()
 
 	backend := mcp.NewCorpusBackend(store, cfg)
-	srv := server.New(backend)
-	listener, err := server.Listen(server.Options{Addr: *addr, AllowRemote: *allowRemote})
+	opts := server.Options{
+		Addr:         *addr,
+		AllowRemote:  *allowRemote,
+		AllowedHosts: splitCSV(*allowedHosts),
+	}
+	srv := server.NewWithOptions(backend, opts)
+	listener, err := server.Listen(opts)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "aha dashboard listening on http://%s\n", listener.Addr().String())
 
-	httpSrv := &http.Server{Handler: srv, ReadHeaderTimeout: 5 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	handler := http.TimeoutHandler(srv, *timeout, `{"error":{"code":"timeout","message":"request timed out"}}`)
+	httpSrv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 	errCh := make(chan error, 1)
 	go func() {
@@ -67,4 +79,18 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 		}
 		return err
 	}
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
