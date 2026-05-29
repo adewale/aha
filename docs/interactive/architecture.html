@@ -418,6 +418,273 @@ svg .grp:hover .rule { stroke: var(--sage); }
   .mech .side { position: static; }
 }
 
+/* ---------- ingest scrubber (Bret Victor: time as a dimension) -------- */
+.scrubber {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+  margin: var(--s-4) 0 var(--s-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.scr-controls { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.scr-controls button {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px var(--s-3);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.scr-controls button:hover { background: var(--sage-soft); color: var(--ink); border-color: var(--sage-line); }
+.scr-controls button.primary { background: var(--sage-soft); color: var(--ink); border-color: var(--sage-line); }
+.scr-controls button.ghost { background: transparent; border-style: dashed; }
+.scr-stage { width: 100%; height: auto; }
+.scr-stage #scr-bundle { transition: transform .65s var(--ease), opacity .25s ease; }
+.scr-stage #scr-bundle rect { transition: fill .25s ease, stroke .25s ease; }
+.scr-stage #scr-bundle.fail rect { fill: var(--clay); }
+.scr-corpus {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-4);
+}
+@media (max-width: 720px) { .scr-corpus { grid-template-columns: 1fr; } }
+.scr-pane { min-width: 0; }
+.scr-rows {
+  background: oklch(11% 0.011 80);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-2);
+  min-height: 70px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scr-rows .scr-empty { color: var(--ink-3); font-style: italic; padding: 6px var(--s-2); }
+.scr-rows .item {
+  background: var(--surface-2);
+  padding: 3px var(--s-2);
+  border-radius: 3px;
+  border-left: 2px solid var(--sage);
+  animation: dbflash 1s var(--ease);
+}
+.scr-rows .item.tentative { border-left-color: var(--sand); opacity: .8; }
+.scr-rows .item.dropped { text-decoration: line-through; opacity: .4; border-left-color: var(--clay); }
+
+/* ---------- database simulator (Nicky Case style) --------------------- */
+.db-sim {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  gap: var(--s-3) var(--s-5);
+  margin: var(--s-5) 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+@media (max-width: 720px) { .db-sim { grid-template-columns: 1fr; } }
+.db-pane { min-width: 0; }
+.db-pane-h {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.db-meta {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.db-table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  background: oklch(11% 0.011 80);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-height: 100px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.db-table:empty::before {
+  content: "— empty —";
+  display: block;
+  color: var(--ink-3);
+  padding: var(--s-3);
+  font-style: italic;
+  font-size: var(--t-xs);
+}
+.db-table li {
+  padding: 4px var(--s-3);
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-3);
+  align-items: baseline;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+.db-table li:last-child { border-bottom: 0; }
+.db-table li.fresh {
+  animation: dbflash 1.2s var(--ease);
+}
+@keyframes dbflash {
+  0%   { background: oklch(74% 0.115 175 / 0.35); }
+  100% { background: transparent; }
+}
+.db-table li.conflict-row { color: var(--clay); }
+.db-table li .key   { color: var(--ink); }
+.db-table li .hash  { color: var(--ink-3); text-align: right; }
+.db-table li .role  { color: var(--sage); }
+.db-table li .note  { color: var(--ink-3); }
+
+.db-actions {
+  grid-column: 1 / span 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.db-actions button {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px var(--s-3);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.db-actions button:hover { background: var(--sage-soft); border-color: var(--sage-line); color: var(--ink); }
+.db-actions button.forbidden { border-color: var(--clay-line); color: var(--clay); }
+.db-actions button.forbidden:hover { background: var(--clay-soft); color: var(--clay); }
+.db-actions button.ghost { background: transparent; border-style: dashed; }
+
+.db-log {
+  grid-column: 1 / span 2;
+  background: oklch(11% 0.011 80);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.db-log p { margin: 0 0 4px; line-height: 1.55; }
+.db-log p.ok    { color: var(--sage); }
+.db-log p.warn  { color: var(--sand); }
+.db-log p.deny  { color: var(--clay); }
+.db-log p.sql   { color: var(--ink-3); }
+.db-log p.sql code { color: var(--ink-2); background: transparent; padding: 0; }
+.db-log-hint { color: var(--ink-3); font-style: italic; }
+.db-log .forbidden { color: var(--clay); }
+
+/* ---------- state-signature explorable -------------------------------- */
+.state-sig {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: var(--s-6);
+  margin: var(--s-5) 0 var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+@media (max-width: 720px) { .state-sig { grid-template-columns: 1fr; gap: var(--s-5); } }
+.ss-fields { display: flex; flex-direction: column; gap: var(--s-2); }
+.ss-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 70px;
+  gap: var(--s-3);
+  align-items: center;
+  font-size: var(--t-sm);
+}
+.ss-name { color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
+.ss-row input[type=text] {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: 13px ui-monospace, Menlo, monospace;
+  min-width: 0;
+  width: 100%;
+  transition: border-color .15s var(--ease);
+}
+.ss-row input[type=text]:focus { border-color: var(--sage); outline: none; }
+.ss-row[data-stable="1"] input { border-left: 2px solid var(--sage); }
+.ss-row[data-stable="0"] input { border-left: 2px solid var(--clay); }
+.ss-tag {
+  font-size: var(--t-xs);
+  text-align: right;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+}
+.ss-tag.stable   { color: var(--sage); }
+.ss-tag.volatile { color: var(--clay); }
+.ss-divider {
+  height: 1px; background: var(--line); margin: var(--s-2) 0;
+}
+.ss-output { display: flex; flex-direction: column; gap: var(--s-4); align-self: start; }
+.ss-hash { display: flex; flex-direction: column; gap: var(--s-1); }
+.ss-hash-label { font-size: var(--t-sm); color: var(--ink-2); font-weight: 500; }
+.ss-hash-help { color: var(--ink-3); font-weight: 400; margin-left: var(--s-2); font-size: var(--t-xs); }
+.ss-hash-value {
+  font-size: var(--t-xs);
+  word-break: break-all;
+  color: var(--sage);
+  background: oklch(11% 0.011 80);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  transition: border-color .35s var(--ease), background .35s var(--ease);
+}
+.ss-hash-value.flash {
+  border-color: var(--sage);
+  background: oklch(74% 0.115 175 / 0.12);
+}
+.ss-hash-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.ss-hash-bar > div {
+  position: absolute;
+  inset: 0;
+  background: var(--sage);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .35s var(--ease);
+}
+.ss-hint { font-size: var(--t-sm); color: var(--ink-3); line-height: 1.55; margin: 0; }
+.ss-hint b { color: var(--ink); }
+
 /* ---------- interactive widgets ---------------------------------------- */
 .widget {
   background: var(--surface);
@@ -1203,44 +1470,81 @@ func FormatRef(r Ref) string {
         <code>state_sha256</code>, <code>refresh</code> reuses it. Zero fetch.
       </p>
 
-      <svg viewBox="0 0 1100 220" role="img">
-        <g>
-          <rect class="box" x="20" y="20" width="280" height="180" rx="8"/>
-          <text x="160" y="48" class="title" text-anchor="middle">model.Manifest</text>
-          <text x="40" y="76" class="lbl">schema</text>
-          <text x="40" y="96" class="lbl">machine_id</text>
-          <text x="40" y="116" class="lbl">source / policy / adapters</text>
-          <text x="40" y="136" class="lbl">files[] (sorted, content-addressed)</text>
-          <text x="40" y="168" class="bad">─ bundle_id      (volatile)</text>
-          <text x="40" y="186" class="bad">─ captured_at    (volatile)</text>
-        </g>
-        <g color="oklch(58% 0.014 80)"><path class="arrow" d="M310,100 L380,100"/></g>
-        <text x="320" y="92" class="lbl">marshal JSON</text>
-        <text x="320" y="112" class="lbl">excluding volatile</text>
-        <g>
-          <rect class="box accent" x="395" y="40" width="220" height="140" rx="8"/>
-          <text x="505" y="68" class="title good" text-anchor="middle">state struct</text>
-          <text x="415" y="94" class="lbl">{schema, machine,</text>
-          <text x="415" y="112" class="lbl">  source, policy,</text>
-          <text x="415" y="130" class="lbl">  adapters, files}</text>
-          <text x="505" y="166" class="lbl" text-anchor="middle">sha256 →</text>
-        </g>
-        <g color="oklch(78% 0.115 175)"><path class="arrow thick" d="M620,110 L700,110"/></g>
-        <g>
-          <rect class="box" x="715" y="60" width="365" height="90" rx="8"/>
-          <text x="897" y="90" class="title" text-anchor="middle">BundleRef.state_sha256</text>
-          <text x="897" y="116" class="lbl" text-anchor="middle">written into every catalog ref</text>
-          <text x="897" y="136" class="good" text-anchor="middle">equal state_sha256 ⇒ reuse, no fetch</text>
-        </g>
-      </svg>
+      <div class="state-sig" id="state-sig">
+        <div class="ss-fields">
+          <div class="ss-row" data-field="schema" data-stable="1">
+            <span class="ss-name">schema</span>
+            <input type="text" data-key="schema" value="aha-manifest/v2"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="machine_id" data-stable="1">
+            <span class="ss-name">machine_id</span>
+            <input type="text" data-key="machine_id" value="ade-mbp"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="source" data-stable="1">
+            <span class="ss-name">source</span>
+            <input type="text" data-key="source" value="{pi,claude,codex}"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="policy" data-stable="1">
+            <span class="ss-name">policy</span>
+            <input type="text" data-key="policy" value="redact=none-v1"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="files" data-stable="1">
+            <span class="ss-name">files[3]</span>
+            <input type="text" data-key="files" value="[a1b2..,c3d4..,e5f6..]"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-divider"></div>
+          <div class="ss-row" data-field="bundle_id" data-stable="0">
+            <span class="ss-name">bundle_id</span>
+            <input type="text" data-key="bundle_id" value="bndl-2024-01-01T10:00:00-abc123"/>
+            <span class="ss-tag volatile">volatile</span>
+          </div>
+          <div class="ss-row" data-field="captured_at" data-stable="0">
+            <span class="ss-name">captured_at</span>
+            <input type="text" data-key="captured_at" value="2024-01-01T10:00:00Z"/>
+            <span class="ss-tag volatile">volatile</span>
+          </div>
+        </div>
+
+        <div class="ss-output">
+          <div class="ss-hash">
+            <div class="ss-hash-label">bundle_sha256 <span class="ss-hash-help">all fields</span></div>
+            <code class="ss-hash-value" id="ss-bundle-sha">computing...</code>
+            <div class="ss-hash-bar"><div id="ss-bundle-bar"></div></div>
+          </div>
+          <div class="ss-hash">
+            <div class="ss-hash-label">state_sha256 <span class="ss-hash-help">stable fields only</span></div>
+            <code class="ss-hash-value" id="ss-state-sha">computing...</code>
+            <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
+          </div>
+          <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> — that's the property <code>refresh</code> relies on to skip re-fetching.</p>
+        </div>
+      </div>
 
       <details>
-        <summary>Why this is more interesting than it looks</summary>
-        <ul>
-          <li><b>Zero-fetch refresh.</b> If the catalog has a ref with the same state hash, refresh does not download the old bundle to confirm; metadata alone proves equivalence.</li>
-          <li><b>Property tested.</b> Any change to volatile metadata must <em>not</em> change the state SHA; any change to content <em>must</em>.</li>
-          <li>The bundle SHA establishes byte identity. The state SHA establishes source-state equivalence. They answer different questions on purpose.</li>
-        </ul>
+        <summary>Where this lives in the code</summary>
+        <pre><code>// internal/archive/archive.go
+func ManifestStateSHA256(m model.Manifest) string {
+    state := struct {
+        Schema       string
+        MachineID    string
+        MachineLabel string
+        Source       model.ManifestSource
+        Policy       model.ManifestPolicy
+        Adapters     []model.ManifestAdapt
+        Files        []model.ManifestFile
+    }{
+        Schema: m.Schema, MachineID: m.MachineID, ...   // bundle_id and captured_at excluded
+        Files:  m.Files,
+    }
+    b, _ := json.Marshal(state)
+    sum := sha256.Sum256(b)
+    return hex.EncodeToString(sum[:])
+}</code></pre>
       </details>
     </div>
   </div>
@@ -1255,15 +1559,47 @@ func FormatRef(r Ref) string {
       <p>
         Two snapshots of the same Pi session can disagree on a previously
         written line (active JSONL files, edits, replays). A naïve UPSERT
-        loses evidence. The schema makes that impossible: triggers <em>abort</em>
-        every <code>UPDATE</code> and <code>DELETE</code> on <code>entries</code>,
-        <code>messages</code>, <code>artifacts</code>, and even
-        <code>conflicts</code>. A second trigger quietly inserts a
-        <code>conflicts</code> row when a duplicate <code>entry_id</code>
-        arrives with a different <code>entry_sha256</code>, then
-        <code>RAISE(IGNORE)</code> drops the new row.
+        loses evidence. The schema makes that impossible: triggers
+        <em>abort</em> every <code>UPDATE</code> and <code>DELETE</code> on
+        the append-only tables, and a conflict trigger quarantines duplicate
+        entry IDs with different hashes. Try it:
       </p>
-      <pre><code>create trigger entries_conflict_before_insert
+
+      <div class="db-sim" id="db-sim">
+        <div class="db-pane">
+          <h4 class="db-pane-h">entries <span class="db-meta" id="db-entries-count">0 rows</span></h4>
+          <ol class="db-table" id="db-entries"></ol>
+        </div>
+        <div class="db-pane">
+          <h4 class="db-pane-h">conflicts <span class="db-meta" id="db-conflicts-count">0 rows</span></h4>
+          <ol class="db-table" id="db-conflicts"></ol>
+          <h4 class="db-pane-h" style="margin-top: var(--s-4)">ingest_attempts <span class="db-meta" id="db-attempts-count">0 rows</span></h4>
+          <ol class="db-table" id="db-attempts"></ol>
+        </div>
+        <div class="db-actions">
+          <button data-action="insert-new">INSERT a new entry</button>
+          <button data-action="insert-dup-same">INSERT the same entry again (same hash)</button>
+          <button data-action="insert-dup-diff">INSERT entry-1 again with a <em>different</em> hash</button>
+          <button data-action="update" class="forbidden">UPDATE entries SET role=…</button>
+          <button data-action="delete" class="forbidden">DELETE FROM entries</button>
+          <button data-action="reset" class="ghost">↻ reset</button>
+        </div>
+        <div class="db-log" id="db-log">
+          <p class="db-log-hint">click a button. the database state above updates immediately. <span class="forbidden">red</span> buttons exercise the append-only triggers.</p>
+        </div>
+      </div>
+
+      <p style="margin-top: var(--s-5)">
+        Triggers catch runtime drift. A static test under
+        <code>internal/testquality</code> reads production .go files at CI
+        time and fails the build if any of them emits <code>UPDATE</code> or
+        <code>DELETE</code> against the append-only tables. Two independent
+        layers, two different adversaries.
+      </p>
+
+      <details>
+        <summary>The actual triggers</summary>
+        <pre><code>create trigger entries_conflict_before_insert
   before insert on entries
   when exists(select 1 from entries
               where session_key=new.session_key and entry_id=new.entry_id) begin
@@ -1279,14 +1615,10 @@ func FormatRef(r Ref) string {
   end;
 
 create trigger entries_no_update before update on entries
+  begin select raise(abort,'entries are append-only'); end;
+create trigger entries_no_delete before delete on entries
   begin select raise(abort,'entries are append-only'); end;</code></pre>
-      <p>
-        Triggers catch runtime drift. A static test under
-        <code>internal/testquality</code> reads production .go files at CI
-        time and fails the build if any of them emits <code>UPDATE</code> or
-        <code>DELETE</code> against the append-only tables. Two independent
-        layers, two different adversaries.
-      </p>
+      </details>
     </div>
   </div>
 
@@ -1461,6 +1793,56 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
+  <div class="scrubber" id="ingest-scrubber">
+    <div class="scr-controls">
+      <button data-act="play"  class="primary">▶  Play happy path</button>
+      <button data-act="fail-plan">💥  Fail during plan</button>
+      <button data-act="fail-write">💥  Fail after writes</button>
+      <button data-act="fail-promote">💥  Fail after blob promote</button>
+      <button data-act="reset" class="ghost">↻  reset</button>
+    </div>
+
+    <svg class="scr-stage" viewBox="0 0 720 200" role="img" aria-label="ingest stage scrubber">
+      <defs>
+        <marker id="scr-arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L7,4 L0,8 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+      <!-- spine -->
+      <line x1="80" y1="100" x2="640" y2="100" stroke="var(--line)" stroke-width="1" marker-end="url(#scr-arr)"/>
+      <!-- stage anchors -->
+      <g id="scr-anchors">
+        <g><circle cx="80"  cy="100" r="5" fill="var(--ink-3)"/><text x="80"  y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">staging</text></g>
+        <g><circle cx="260" cy="100" r="5" fill="var(--ink-3)"/><text x="260" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">plan</text></g>
+        <g><circle cx="420" cy="100" r="5" fill="var(--ink-3)"/><text x="420" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">write tx</text></g>
+        <g><circle cx="560" cy="100" r="5" fill="var(--ink-3)"/><text x="560" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">promote</text></g>
+        <g><circle cx="640" cy="100" r="5" fill="var(--ink-3)"/><text x="640" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">commit</text></g>
+      </g>
+      <!-- bundle traveler -->
+      <g id="scr-bundle" transform="translate(80,100)" opacity="0">
+        <rect x="-14" y="-10" width="28" height="20" rx="2" fill="var(--sage)" stroke="var(--ink)" stroke-width="0.5"/>
+        <text y="4" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace" fill="oklch(14% 0.012 80)">tar.zst</text>
+      </g>
+      <text x="80" y="40" id="scr-status" text-anchor="start" fill="var(--ink-2)" font-size="13" font-family="ui-monospace, monospace">click a button to begin</text>
+    </svg>
+
+    <div class="scr-corpus">
+      <div class="scr-pane">
+        <h4 class="db-pane-h">corpus rows <span class="db-meta" id="scr-rows-count">0</span></h4>
+        <div class="scr-rows" id="scr-rows"><div class="scr-empty">—</div></div>
+      </div>
+      <div class="scr-pane">
+        <h4 class="db-pane-h">blobs/bundles/ <span class="db-meta" id="scr-blob-count">0</span></h4>
+        <div class="scr-rows" id="scr-blobs"><div class="scr-empty">—</div></div>
+      </div>
+      <div class="scr-pane">
+        <h4 class="db-pane-h">ingest_attempts <span class="db-meta" id="scr-att-count">0</span></h4>
+        <div class="scr-rows" id="scr-att"><div class="scr-empty">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Stages, fully spelled out</h3>
   <div class="ingest-stages">
     <div class="stage">
       <div class="role">bundlePlanner.Prepare</div>
@@ -1877,6 +2259,356 @@ function updateRef() {
 }
 ['ref-sess','ref-entry','ref-sha'].forEach(id => document.getElementById(id).addEventListener('input', updateRef));
 updateRef();
+
+/* ============================================================
+   State-signature explorable.
+   Two hashes of the same manifest, computed from different field sets,
+   so editing a volatile field moves bundle_sha but NOT state_sha.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('state-sig');
+  if (!root) return;
+  const rows = [...root.querySelectorAll('.ss-row')];
+  const bundleEl = document.getElementById('ss-bundle-sha');
+  const stateEl  = document.getElementById('ss-state-sha');
+  const bundleBar = document.getElementById('ss-bundle-bar');
+  const stateBar  = document.getElementById('ss-state-bar');
+  let last = { bundle: '', state: '' };
+
+  function gather(stableOnly) {
+    const obj = {};
+    for (const row of rows) {
+      const stable = row.dataset.stable === '1';
+      if (stableOnly && !stable) continue;
+      const inp = row.querySelector('input');
+      obj[inp.dataset.key] = inp.value;
+    }
+    return JSON.stringify(obj);
+  }
+  // We re-use the page's sha256 implementation (defined earlier in this script).
+  function hash(s) {
+    const bytes = new TextEncoder().encode(s);
+    return sha256(bytes);
+  }
+  function flash(el) {
+    el.classList.remove('flash');
+    void el.offsetWidth;        // force reflow so the class re-applies
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 700);
+  }
+  function setBar(bar, hex) {
+    // map the first byte of the hash to a 0..1 fill so the bar visibly
+    // moves whenever the hash changes (cheap fingerprint visualization)
+    const v = parseInt(hex.slice(0,2), 16) / 255;
+    bar.style.transform = `scaleX(${v})`;
+  }
+  function update() {
+    const b = hash(gather(false));
+    const s = hash(gather(true));
+    bundleEl.textContent = b;
+    stateEl.textContent  = s;
+    setBar(bundleBar, b);
+    setBar(stateBar,  s);
+    if (b !== last.bundle) flash(bundleEl);
+    if (s !== last.state)  flash(stateEl);
+    last = { bundle: b, state: s };
+  }
+  for (const row of rows) {
+    row.querySelector('input').addEventListener('input', update);
+  }
+  update();
+})();
+
+/* ============================================================
+   Ingest pipeline scrubber.
+   Plays the planner / writer / publisher / commit flow visibly,
+   so the commit-AFTER-promote ordering and the rollback behavior
+   become a thing you can see, not a sentence you have to trust.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('ingest-scrubber');
+  if (!root) return;
+  const bundle = document.getElementById('scr-bundle');
+  const status = document.getElementById('scr-status');
+  const rowsEl = document.getElementById('scr-rows');
+  const blobsEl = document.getElementById('scr-blobs');
+  const attEl = document.getElementById('scr-att');
+  const rowsCt = document.getElementById('scr-rows-count');
+  const blobCt = document.getElementById('scr-blob-count');
+  const attCt = document.getElementById('scr-att-count');
+  const stages = { staging: 80, plan: 260, write: 420, promote: 560, commit: 640 };
+  let running = false;
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function moveTo(stage) {
+    bundle.setAttribute('transform', `translate(${stages[stage]},100)`);
+  }
+  function setStatus(t, cls) {
+    status.textContent = t;
+    status.setAttribute('fill', cls === 'good' ? 'var(--sage)' : cls === 'bad' ? 'var(--clay)' : cls === 'warn' ? 'var(--sand)' : 'var(--ink-2)');
+  }
+  function setRows(arr) {
+    rowsEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
+    for (const r of arr) {
+      const d = document.createElement('div');
+      d.className = 'item' + (r.tentative ? ' tentative' : '') + (r.dropped ? ' dropped' : '');
+      d.textContent = r.text;
+      rowsEl.appendChild(d);
+    }
+    rowsCt.textContent = arr.filter(x => !x.dropped).length;
+  }
+  function setBlobs(arr) {
+    blobsEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
+    for (const r of arr) {
+      const d = document.createElement('div');
+      d.className = 'item' + (r.dropped ? ' dropped' : '');
+      d.textContent = r.text;
+      blobsEl.appendChild(d);
+    }
+    blobCt.textContent = arr.filter(x => !x.dropped).length;
+  }
+  function setAtt(arr) {
+    attEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
+    for (const r of arr) {
+      const d = document.createElement('div');
+      d.className = 'item';
+      d.textContent = r.text;
+      attEl.appendChild(d);
+    }
+    attCt.textContent = arr.length;
+  }
+  let runToken = 0;
+  function reset() {
+    runToken++;          // any in-flight async play loop becomes stale
+    running = false;
+    bundle.style.opacity = '0';
+    moveTo('staging');
+    bundle.classList.remove('fail');
+    setRows([]); setBlobs([]); setAtt([]);
+    setStatus('click a button to begin', '');
+  }
+
+  async function play(failAt) {
+    if (running) reset();          // abort any in-flight loop
+    running = true;
+    const token = ++runToken;
+    const live = () => token === runToken;
+    await sleep(50);
+    if (!live()) return;
+    bundle.style.opacity = '1';
+
+    setStatus('staging tar.zst into a temp file…', '');
+    moveTo('staging');
+    await sleep(700); if (!live()) return;
+
+    setStatus('Planner: hashing, validating manifest, budget checks…', '');
+    moveTo('plan');
+    await sleep(900); if (!live()) return;
+    if (failAt === 'plan') {
+      bundle.classList.add('fail');
+      setStatus('plan failed (bad manifest). nothing in corpus changed.', 'bad');
+      await sleep(900); if (!live()) return;
+      bundle.style.opacity = '0';
+      running = false; return;
+    }
+
+    setStatus('Writer: BEGIN; inserting rows (uncommitted)…', 'warn');
+    moveTo('write');
+    const rows = [];
+    for (const r of ['bundles row', 'machines row', 'sessions row × 3', 'entries × 42', 'messages × 18', 'fts_messages × 18 (trigger)']) {
+      await sleep(180); if (!live()) return;
+      rows.push({ text: r, tentative: true });
+      setRows(rows);
+    }
+    if (failAt === 'write') {
+      bundle.classList.add('fail');
+      setStatus('crash after writes. ROLLBACK. all rows discarded; no blob written.', 'bad');
+      await sleep(500); if (!live()) return;
+      setRows(rows.map(r => ({ ...r, dropped: true, tentative: false })));
+      await sleep(1200); if (!live()) return;
+      bundle.style.opacity = '0';
+      running = false; return;
+    }
+
+    setStatus('Publisher: atomic rename staging → blobs/bundles/<sha>.tar.zst', '');
+    moveTo('promote');
+    await sleep(600); if (!live()) return;
+    const blobs = [{ text: 'b5ce6c…f47.tar.zst' }];
+    setBlobs(blobs);
+    if (failAt === 'promote') {
+      bundle.classList.add('fail');
+      setStatus('crash after promote, before commit. blob removed by defer; tx rolled back.', 'bad');
+      await sleep(700); if (!live()) return;
+      setBlobs(blobs.map(b => ({ ...b, dropped: true })));
+      setRows(rows.map(r => ({ ...r, dropped: true, tentative: false })));
+      await sleep(1200); if (!live()) return;
+      bundle.style.opacity = '0';
+      running = false; return;
+    }
+
+    setStatus('tx.Commit() — rows and blob become visible together.', 'good');
+    moveTo('commit');
+    setRows(rows.map(r => ({ text: r.text })));   // no longer tentative
+    setAtt([{ text: 'bundle b5ce6c… duplicate=0' }]);
+    await sleep(900); if (!live()) return;
+    setStatus('done. coherent: readers see all rows AND the blob, or neither.', 'good');
+    running = false;
+  }
+
+  reset();
+  root.querySelectorAll('.scr-controls button').forEach(b => {
+    b.addEventListener('click', () => {
+      const a = b.dataset.act;
+      if (a === 'reset') { reset(); return; }
+      if (a === 'play') play(null);
+      else play(a.replace('fail-', ''));
+    });
+  });
+})();
+
+/* ============================================================
+   Append-only + conflict-as-quarantine simulator.
+   Mirrors the schema triggers in internal/corpus/schema.go:
+     entries_conflict_before_insert  → quarantine on differing hash
+     entries_no_update / entries_no_delete → ABORT
+   plus the bundle-attempt duplicate-tracking in ingest.go.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('db-sim');
+  if (!root) return;
+  const entriesEl = document.getElementById('db-entries');
+  const conflictsEl = document.getElementById('db-conflicts');
+  const attemptsEl = document.getElementById('db-attempts');
+  const entriesCount = document.getElementById('db-entries-count');
+  const conflictsCount = document.getElementById('db-conflicts-count');
+  const attemptsCount = document.getElementById('db-attempts-count');
+  const log = document.getElementById('db-log');
+
+  let state = { entries: [], conflicts: [], attempts: [], nextId: 1 };
+  let nextEntryNum = 1;
+
+  function shortHash() {
+    const chars = '0123456789abcdef';
+    let s = '';
+    for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random()*16)];
+    return s;
+  }
+
+  function render() {
+    const rowKeys = new Set();
+    function rerender(el, rows, fmt) {
+      const existing = new Set([...el.children].map(c => c.dataset.k));
+      el.innerHTML = '';
+      for (const r of rows) {
+        const li = document.createElement('li');
+        li.dataset.k = r._k;
+        li.innerHTML = fmt(r);
+        if (r.conflict) li.classList.add('conflict-row');
+        if (!existing.has(r._k)) li.classList.add('fresh');
+        el.appendChild(li);
+      }
+    }
+    rerender(entriesEl, state.entries, r =>
+      `<span class="key">${r.entry_id}</span>` +
+      `<span class="role">role=${r.role}</span>` +
+      `<span class="hash">sha=${r.hash}</span>`
+    );
+    rerender(conflictsEl, state.conflicts, r =>
+      `<span class="key">${r.entry_id}</span>` +
+      `<span class="note">first=${r.first} vs second=${r.second}</span>` +
+      `<span class="hash">${r.note}</span>`
+    );
+    rerender(attemptsEl, state.attempts, r =>
+      `<span class="key">${r.bundle_id || r.entry_id}</span>` +
+      `<span class="note">${r.kind}</span>` +
+      `<span class="hash">${r.flag}</span>`
+    );
+    entriesCount.textContent = `${state.entries.length} row${state.entries.length===1?'':'s'}`;
+    conflictsCount.textContent = `${state.conflicts.length} row${state.conflicts.length===1?'':'s'}`;
+    attemptsCount.textContent = `${state.attempts.length} row${state.attempts.length===1?'':'s'}`;
+  }
+
+  function logLine(text, cls, sql) {
+    if (log.querySelector('.db-log-hint')) log.innerHTML = '';
+    if (sql) {
+      const p = document.createElement('p');
+      p.className = 'sql';
+      p.innerHTML = `<code>${sql}</code>`;
+      log.appendChild(p);
+    }
+    const p = document.createElement('p');
+    p.className = cls || '';
+    p.textContent = text;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function lastInsertedEntryId() {
+    // pick the most recent entry to demo duplicates against
+    return state.entries.length ? state.entries[state.entries.length-1].entry_id : null;
+  }
+
+  function action(name) {
+    if (name === 'insert-new') {
+      const id = `entry-${nextEntryNum++}`;
+      const h = shortHash();
+      state.entries.push({ _k: id+'/'+h, entry_id: id, role: 'user', hash: h });
+      logLine(`accepted: ${id} (sha=${h})`, 'ok',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${id}','user','${h}…');`);
+      render();
+      return;
+    }
+    if (name === 'insert-dup-same') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to duplicate; insert one first.', 'warn'); return; }
+      const orig = state.entries.find(e => e.entry_id === last);
+      const h = orig.hash;
+      // bundle-attempt-style duplicate tracking (mirrors recordBundleAttempt
+      // in corpus/ingest.go: existing SHA + same id ⇒ duplicate row, skip).
+      state.attempts.push({ _k: 'att-'+(state.attempts.length+1), entry_id: last, kind: `re-insert ${last}`, flag: 'duplicate=1' });
+      logLine(`silent dedup: ${last} already exists with hash ${h}; recorded as duplicate attempt.`, 'ok',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${last}','user','${h}…');`);
+      render();
+      return;
+    }
+    if (name === 'insert-dup-diff') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to conflict with; insert one first.', 'warn'); return; }
+      const orig = state.entries.find(e => e.entry_id === last);
+      const h2 = shortHash();
+      state.conflicts.push({ _k: 'c-'+(state.conflicts.length+1), entry_id: last, first: orig.hash, second: h2, note: 'same-session-trigger', conflict: true });
+      logLine(`conflict trigger fired: ${last} arrived with sha=${h2}, but ${orig.hash} is already there. original kept; conflict row added; RAISE(IGNORE) dropped the new row.`, 'warn',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${last}','assistant','${h2}…');`);
+      render();
+      return;
+    }
+    if (name === 'update') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to update; insert one first.', 'warn'); return; }
+      logLine(`DENIED by trigger entries_no_update: "entries are append-only". no rows changed.`, 'deny',
+        `UPDATE entries SET role='assistant' WHERE entry_id='${last}';`);
+      return;
+    }
+    if (name === 'delete') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to delete; insert one first.', 'warn'); return; }
+      logLine(`DENIED by trigger entries_no_delete: "entries are append-only". no rows changed.`, 'deny',
+        `DELETE FROM entries WHERE entry_id='${last}';`);
+      return;
+    }
+    if (name === 'reset') {
+      state = { entries: [], conflicts: [], attempts: [], nextId: 1 };
+      nextEntryNum = 1;
+      log.innerHTML = '<p class="db-log-hint">click a button. the database state above updates immediately. <span class="forbidden">red</span> buttons exercise the append-only triggers.</p>';
+      render();
+      return;
+    }
+  }
+
+  root.querySelectorAll('.db-actions button').forEach(b =>
+    b.addEventListener('click', () => action(b.dataset.action)));
+  render();
+})();
 
 /* ============================================================
    FTS query escaping playground; mirrors search.ftsQuery
