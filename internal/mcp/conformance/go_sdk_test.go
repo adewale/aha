@@ -130,7 +130,7 @@ func TestGoSDKAgainstAha(t *testing.T) {
 
 	// tools/call search — list-returning tool.
 	searchRes, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "search",
+		Name:      "search",
 		Arguments: map[string]any{"query": "hello", "limit": 5},
 	})
 	if err != nil {
@@ -146,7 +146,7 @@ func TestGoSDKAgainstAha(t *testing.T) {
 
 	// Empty result must marshal as [], not null.
 	emptyRes, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "search",
+		Name:      "search",
 		Arguments: map[string]any{"query": "definitelynotinthecorpus", "limit": 5},
 	})
 	if err != nil {

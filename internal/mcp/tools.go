@@ -51,10 +51,8 @@ func (b *CorpusBackend) Store() *corpus.Store { return b.store }
 func (b *CorpusBackend) Root() string         { return b.store.Root }
 func (b *CorpusBackend) Config() model.Config { return b.cfg }
 
-// ServerInfo is the implementation block we hand to NewServer. Exported so
-// tests can use the same value when constructing in-process server peers
-// via mcp.NewInMemoryTransports.
-var ServerInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
+// serverInfo is the implementation block we hand to NewServer.
+var serverInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 
 // ToolNames is the canonical, sorted list of tool names this server
 // registers. Exported so cross-language conformance tests (Python, TS, Go)
@@ -273,8 +271,8 @@ func rejectExtras[T any](req *mcp.CallToolRequest) *mcp.CallToolResult {
 // MCP surface is read-only by construction: there is no write tool to be
 // registered, and the SDK consults these hints when prompting the user.
 var readOnlyAnnotations = &mcp.ToolAnnotations{
-	ReadOnlyHint:   true,
-	IdempotentHint: true,
+	ReadOnlyHint:    true,
+	IdempotentHint:  true,
 	DestructiveHint: boolPtr(false),
 	OpenWorldHint:   boolPtr(false),
 }
@@ -287,7 +285,7 @@ func boolPtr(v bool) *bool { return &v }
 // mcp.NewInMemoryTransports + this constructor to build a complete
 // in-process MCP loop.
 func NewServer(backend Backend) *mcp.Server {
-	server := mcp.NewServer(ServerInfo, nil)
+	server := mcp.NewServer(serverInfo, nil)
 	registerTools(server, backend)
 	return server
 }

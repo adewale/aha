@@ -12,7 +12,6 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +29,6 @@ import (
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/testutil"
 )
-
 
 // expectedTools is sourced from the package's exported canonical list,
 // not duplicated. Tests that need to assert against the registered set
@@ -443,9 +441,6 @@ func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
 	}
 	return tb.Text
 }
-
-// Suppress unused import warnings for errors when test compilation drifts.
-var _ = errors.New
 
 // TestCanonicalToolListIsSorted guards a small invariant: ToolNames must be
 // in sorted order so cross-language reflections (Python sorted() in the

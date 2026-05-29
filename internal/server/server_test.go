@@ -212,11 +212,11 @@ func TestHostHeaderAllowlistRejectsForeignHosts(t *testing.T) {
 		"10.0.0.1",
 		"10.0.0.1:18428",
 		"192.168.1.50",
-		"169.254.169.254",        // IMDS — common SSRF target
+		"169.254.169.254", // IMDS — common SSRF target
 		"169.254.169.254:80",
-		"aha.attacker.example",    // CNAME-rebound name
-		"",                         // missing/empty Host header
-		"  ",                       // whitespace-only
+		"aha.attacker.example", // CNAME-rebound name
+		"",                     // missing/empty Host header
+		"  ",                   // whitespace-only
 	}
 	for _, host := range cases {
 		w := httptest.NewRecorder()
@@ -241,10 +241,10 @@ func TestHostHeaderAllowlistRejectsIDNHomographs(t *testing.T) {
 	// "lоcalhost" with a Cyrillic 'о' (U+043E). Mistaken for ASCII at a
 	// glance but a distinct codepoint; must not match "localhost".
 	for _, host := range []string{
-		"lоcalhost",                  // Cyrillic 'о'
-		"localhost​",             // trailing zero-width space
-		"localhоst",                   // mid-name Cyrillic 'о'
-		"xn--lcalhost-tdh",             // IDN punycode that doesn't match
+		"lоcalhost",        // Cyrillic 'о'
+		"localhost​",       // trailing zero-width space
+		"localhоst",        // mid-name Cyrillic 'о'
+		"xn--lcalhost-tdh", // IDN punycode that doesn't match
 	} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -262,11 +262,11 @@ func TestHostHeaderAllowlistRejectsIDNHomographs(t *testing.T) {
 func TestHostHeaderAllowlistRejectsMalformedBrackets(t *testing.T) {
 	srv := newTestServer(t)
 	for _, host := range []string{
-		"[::1:8080",            // missing closing bracket
-		"::1]:8080",            // missing opening bracket
-		"[::1]extra:8080",      // garbage after the IPv6 literal
-		"127.0.0.1:abc",        // non-numeric port
-		":18428",                // leading colon, missing host
+		"[::1:8080",       // missing closing bracket
+		"::1]:8080",       // missing opening bracket
+		"[::1]extra:8080", // garbage after the IPv6 literal
+		"127.0.0.1:abc",   // non-numeric port
+		":18428",          // leading colon, missing host
 	} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)

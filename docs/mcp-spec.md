@@ -124,18 +124,26 @@ The same `CallTool` dispatch is exported and reused by the HTTP dashboard
 
 ## Test strategy
 
-- Protocol tests: frame encode/decode roundtrip; truncated input;
-  multi-message buffer; CRLF tolerance; blank-line skipping.
-- Dispatch tests: `tools/list` returns the expected tool set with
-  `readOnlyHint: true` annotations; `tools/call` with unknown name returns
-  `-32000`; unknown args rejected.
-- Integration: build a temporary corpus from a fixture, run `tools/call` for
-  each tool against it, assert the JSON payload matches the corresponding
-  `--json` CLI output. This reuses the same fixture loaders the CLI tests use
-  and ensures the two surfaces stay in sync.
-- Fuzz: `FuzzParseFrames` (panic-safety + suffix invariant on rest) and
-  `FuzzEncodeParseRoundTrip` (every valid-UTF-8 method survives a round
-  trip). The body MUST contain only one terminating newline.
+- Wire format, framing, lifecycle, version negotiation, and structured
+  output are owned by the SDK and tested in its own
+  [conformance suite](https://github.com/modelcontextprotocol/go-sdk/tree/main/mcp).
+  aha does not duplicate those tests.
+- In-process dispatch tests (`internal/mcp/tools_test.go`) construct an
+  `NewInMemoryTransports` Client↔Server pair, run `tools/list` and assert
+  the canonical 7-tool set with `readOnlyHint: true` annotations,
+  round-trip `tools/call` for object-returning and list-returning tools,
+  and verify error paths fire as `isError` on `CallToolResult` rather than
+  JSON-RPC error codes (the spec-compliant behaviour).
+- HTTP↔MCP consistency (`TestHTTPAndMCPPathsAreConsistent`): the same
+  business calls dispatched through both paths against one shared backend
+  must produce semantically equal payloads. Future refactors that touch
+  one path silently break here.
+- Tool list drift (`TestCanonicalToolListReferencedByConformanceScripts`):
+  every cross-language conformance harness must reference each name in
+  `mcp.ToolNames`. Adding a tool without updating a script fails CI.
+- Generated TS surface drift (`internal/mcp/codegen/codegen_test.go`):
+  the checked-in `clients/typescript/aha-mcp.ts` is regenerated and
+  byte-compared.
 - The existing `internal/cli/json_contract_test.go` continues to guard the
   underlying shapes; if those change, both CLI and MCP move together.
 
