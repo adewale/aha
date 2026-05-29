@@ -15,7 +15,15 @@ call.
   `snapshot`, `ingest`, `verify --repair-fts`, `corpus vacuum`,
   `corpus prune-orphans --force`, `depot init/compact/repair`) are
   deliberately not exposed.
-- Ship as a single subcommand: `aha mcp`. No new binary, no new dependency.
+- Ship as a single user-facing subcommand: `aha mcp`.
+
+> The original goal also read "no new binary, no new dependency". Both were
+> later retracted with deliberate rationale: aha depends on
+> `github.com/modelcontextprotocol/go-sdk` v1.6.1 so the wire format is
+> someone else's problem (see "Protocol" below), and `cmd/aha-ref-mcp` is a
+> test-only Go-SDK reference server used by the cross-SDK conformance suite
+> (see "Client-under-test" below). Neither is reachable from the production
+> CLI surface.
 
 ## Non-goals
 
@@ -147,14 +155,16 @@ The same `CallTool` dispatch is exported and reused by the HTTP dashboard
 - The existing `internal/cli/json_contract_test.go` continues to guard the
   underlying shapes; if those change, both CLI and MCP move together.
 
-## Cross-implementation conformance (six legs, three SDKs)
+## Cross-implementation conformance (8 checks)
 
 `scripts/verify.sh mcp` runs the full cross-SDK conformance matrix. Three
 official MCP SDKs (Python `mcp`, TypeScript `@modelcontextprotocol/sdk`, Go
 `github.com/modelcontextprotocol/go-sdk`) × two directions = six
-independent legs. Each leg skips gracefully when its toolchain isn't
-available, so the suite still does useful work on a Python-only, Node-only,
-or Go-only box.
+independent legs, plus a Code Mode workflow leg that exercises the typed
+TS surface end-to-end and an in-process HTTP↔MCP consistency check that
+pins both internal paths to the same payload. Each leg skips gracefully
+when its toolchain isn't available, so the suite still does useful work
+on a Python-only, Node-only, or Go-only box.
 
 ### Server-under-test (drive `aha mcp` from a real SDK Client)
 
@@ -246,10 +256,10 @@ The TS surface defines:
 - A `Transport` interface (`call(name, args): Promise<unknown>`) and an
   `aha(transport)` factory that returns one typed async function per tool.
 
-This is transport-agnostic. A stdio MCP client, the phase-3 HTTP server, or a
-code-mode runtime (Cloudflare `@cloudflare/codemode`, Anthropic
-code-execution-with-MCP) can all plug a `Transport` in and write
-type-checked agent code such as:
+This is transport-agnostic. A stdio MCP client, the HTTP dashboard's REST
+surface at `aha serve`, or a code-mode runtime (Cloudflare
+`@cloudflare/codemode`, Anthropic code-execution-with-MCP) can all plug a
+`Transport` in and write type-checked agent code such as:
 
 ```ts
 const tools = aha(transport);
@@ -285,11 +295,36 @@ Routes:
 
 Security posture:
 
-- Loopback bind by default (`127.0.0.1:18428`). Non-loopback addresses are
-  refused unless `--allow-remote` (or `AHA_ALLOW_REMOTE=1`) is set.
-- Same dispatch as MCP (`mcp.CallTool`), so the same strict argument
-  validation applies. Unknown keys are rejected with a 400.
-- All routes are read-only. There is no write surface.
+- **Loopback bind by default** (`127.0.0.1:18428`). Non-loopback addresses
+  are refused at `Listen` time unless `--allow-remote` (or
+  `AHA_ALLOW_REMOTE=1`) is set.
+- **Bearer-token authentication required when remote.** `--token <TOKEN>`
+  (or `AHA_DASHBOARD_TOKEN`) is enforced on every request via constant-time
+  comparison; `WWW-Authenticate: Bearer realm="aha"` accompanies 401
+  responses. `Listen` itself refuses `--allow-remote` without `--token` so
+  a non-loopback dashboard cannot start unauthenticated.
+- **Host header allowlist.** Every request's `Host` header is validated
+  against the loopback set (`localhost`, `127.0.0.1`, `[::1]`, `::1`) plus
+  any entries supplied via `--allowed-hosts H1,H2`. Foreign hosts get
+  421 Misdirected Request. Numeric ports are required (`127.0.0.1:abc`
+  is rejected); IDN homographs are rejected; malformed IPv6 bracket
+  shapes are rejected. Defends against DNS-rebind attacks.
+- **JSON Content-Type enforcement.** POST routes return 415 unless
+  `Content-Type: application/json` (with optional charset parameter) is
+  present. Stops cross-origin "simple" form posts from reaching the
+  JSON dispatcher.
+- **Strict Content-Security-Policy** on the index:
+  `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`.
+  Plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
+- **Per-request timeout** via `http.TimeoutHandler` (`--timeout`, default
+  30s). `ReadHeaderTimeout: 5s` and `IdleTimeout: 60s` on the server.
+- **Same dispatch as MCP** (`mcp.CallTool`), so the strict argument
+  validation (`rejectExtras`) applies. Unknown keys are rejected with 400.
+- **All routes are read-only.** No write surface; no CSRF token needed.
+- **Pinned error envelope** (`{error: {code, message}}` with stable codes:
+  `bad_request`, `unauthorized`, `unsupported_media_type`,
+  `method_not_allowed`, `host_not_permitted`, `timeout`). Asserted by
+  `server_test.go::TestHTTPErrorEnvelopeIsPinned`.
 - No CORS headers; this is a single-origin local UI.
 
 ## Host integration
