@@ -4,6 +4,10 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Changed
+
+- Migrated the MCP server from a hand-rolled JSON-RPC implementation to the official `github.com/modelcontextprotocol/go-sdk` v1.6.1. Wire format, framing, lifecycle, schema derivation, structured-content emission, and tool annotations are now the SDK's responsibility; `internal/mcp` keeps only typed input structs (with `jsonschema` tags), the pure business functions, a `rejectExtras` strict-input guard that enforces `additionalProperties: false` semantics the auto-derived schema doesn't itself include, and the `CallTool` dispatch the HTTP dashboard reuses. Deletes `protocol.go`, `protocol_test.go`, `protocol_fuzz_test.go` (~350 LOC of test/source the SDK now owns); rewrites `tools_test.go` against `NewInMemoryTransports`. Six-leg conformance suite (Python / TS / Go SDKs × server / client) still green, plus the new Code Mode workflow conformance (`scripts/mcp-conformance/codemode_workflow.ts`) that drives the canonical search → filter → parallel-read fan-out via the typed `clients/typescript/aha-mcp.ts` surface.
+
 ### Added
 
 - `aha mcp`: a read-only stdio MCP (Model Context Protocol) server exposing `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools over the same `internal/corpus`/`internal/search` functions the CLI uses. Strict argument validation; write tools are intentionally not exposed. See `docs/mcp-spec.md`.

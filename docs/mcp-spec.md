@@ -48,33 +48,34 @@ and free of network calls.
 
 ## Protocol
 
-JSON-RPC 2.0 over stdio with **newline-delimited JSON** framing, per the
-MCP stdio spec ([transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)):
+aha runs the official [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk)
+Server (v1.6+). All wire-format details — JSON-RPC 2.0 framing, the
+newline-delimited stdio transport, version negotiation, lifecycle methods,
+`tools/list` shape, `tools/call` envelope, `structuredContent` vs
+`content[].text` decisions, ping, progress, cancellation, error
+propagation — are handled by the SDK. We register the seven read tools
+via `mcp.AddTool[In, Out]` with typed Go input structs and let the SDK
+generate JSON-Schema, marshal results, and emit conformant responses.
 
-> *"Messages are delimited by newlines, and MUST NOT contain embedded newlines."*
+The hand-rolled framer that lived in `internal/mcp/protocol.go` through
+late May 2026 was retired in this migration. It survived an NDJSON fix
+(the original Content-Length framing was a tracebase artefact that real
+MCP clients can't decode) and ~6 commits before the official Go SDK
+reached the maturity we wanted to lean on. Spec-version drift, structured
+output, output schemas, tool annotations, and the "what does the wire
+look like" maintenance are now somebody else's problem.
 
-One JSON object per line, terminated by `\n`. `EncodeFrame` validates the
-encoded body contains no embedded newlines before emitting. `ParseFrames`
-tolerates `\r\n` line endings and blank padding lines on input. The wire is
-cross-validated against the official MCP Python SDK in
-`scripts/verify.sh mcp`.
+Negotiated protocol version: whatever the SDK currently defaults to (as
+of v1.6.1, `2025-11-25`). Earlier revisions are still accepted via
+version negotiation.
 
-(Earlier revisions of this spec mistakenly described an LSP-style
-`Content-Length:` framing copied from tracebase. That format is **not**
-MCP-compliant; real clients send NDJSON and won't decode Content-Length
-frames. The history is preserved in the git log.)
+Supported methods (all SDK-provided):
 
-Supported methods:
-
-- `initialize` → returns `{protocolVersion, capabilities: {tools: {}}, serverInfo: {name: "aha", version}}`.
-- `notifications/initialized` → no response.
-- `ping` → returns `{}`.
-- `tools/list` → returns `{tools: [...]}` (the table above).
-- `tools/call` → returns `{content: [{type: "text", text: <json>}]}`.
-- `resources/list` → returns `{resources: []}` (none in phase 1).
-
-Errors use standard JSON-RPC error codes: `-32600` invalid request, `-32601`
-unknown method, `-32000` tool error.
+- `initialize` / `notifications/initialized` — handshake
+- `ping` — keepalive
+- `tools/list` / `tools/call` — tool surface
+- `resources/list` (empty) — capability advertisement; aha does not
+  expose MCP resources today.
 
 ## Process lifecycle
 
@@ -108,10 +109,17 @@ The MCP server calls the same `internal/corpus`, `internal/search`, and (for
 `doctor`) `internal/adapters` functions that the CLI calls. No business logic
 is duplicated. The MCP layer is purely:
 
-1. JSON-RPC framing and dispatch.
-2. Argument validation.
-3. Invocation of an existing read function.
-4. Marshalling the result to JSON.
+1. SDK-provided framing and dispatch.
+2. Typed input structs with `jsonschema` tags (the SDK derives JSON-Schema).
+3. A per-handler `rejectExtras[InputType]` strict-decode that enforces
+   `additionalProperties: false` semantics the auto-derived schema doesn't
+   itself include.
+4. Invocation of the pure `do<Tool>` business function.
+5. SDK `CallToolResult` construction — text content for list-typed
+   payloads, text + `structuredContent` for object-typed ones.
+
+The same `CallTool` dispatch is exported and reused by the HTTP dashboard
+(`internal/server`), which doesn't go through the MCP wire.
 
 ## Test strategy
 
@@ -181,6 +189,36 @@ parsed and string payloads through different code paths; the Go SDK
 exposes `Annotations.ReadOnlyHint` as a value where the TS SDK uses a
 nullable boolean. A bug visible to only one SDK is still a real bug; the
 matrix surfaces it.
+
+### Code Mode workflow conformance
+
+`scripts/mcp-conformance/codemode_workflow.ts` exercises the typed surface
+the way a code-mode runtime ([Cloudflare codemode][cf], [Anthropic
+code-execution-with-MCP][anth]) would:
+
+[cf]: https://blog.cloudflare.com/code-mode-mcp/
+[anth]: https://www.anthropic.com/engineering/code-execution-with-mcp
+
+```ts
+const tools = aha(transport);
+const hits = await tools.search({ query: "hello", limit: 20 });
+const refs = hits.filter(h => h.role === "user").map(h => h.ref_text);
+const contexts = await Promise.all(
+  refs.slice(0, 5).map(r => tools.read({ ref: r, before: 1, after: 3 }))
+);
+```
+
+A green run proves that:
+
+1. `cmd/aha-gen-ts` still generates a typed surface from the migrated
+   server's Go types.
+2. The typed surface compiles and runs against the SDK-backed server.
+3. The canonical fan-out + fan-in pattern (search → local filter →
+   parallel read) works end-to-end with no manual JSON handling on the
+   caller side.
+
+This is the load-bearing claim for code-mode runtime compatibility — a
+single round-trip for the agent's "search → read N" plan.
 
 ## Phase 2 — code-mode adapter (shipped)
 

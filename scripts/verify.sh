@@ -68,8 +68,10 @@ fuzz() {
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzParseAddress -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzValidateBundleKey -fuzztime="$FUZZTIME"
-  run go test ./internal/mcp -run=^$ -fuzz=FuzzParseFrames -fuzztime="$FUZZTIME"
-  run go test ./internal/mcp -run=^$ -fuzz=FuzzEncodeParseRoundTrip -fuzztime="$FUZZTIME"
+  # MCP framing fuzz targets were retired with the migration to
+  # github.com/modelcontextprotocol/go-sdk in 0fdd*** — the SDK owns the
+  # JSON-RPC wire format and ships its own framer tests in
+  # /root/go/pkg/mod/.../mcp/*_test.go.
 }
 
 # ts typechecks the generated TypeScript client surface and runs its runtime
@@ -166,6 +168,14 @@ JSONC
 
   AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
     run go test -count=1 ./internal/mcp/conformance/...
+
+  # ---- Code Mode workflow: typed surface drives search -> filter -> read ----
+  if (( have_node )); then
+    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
+      run_shell "cd scripts/mcp-conformance && node --experimental-strip-types codemode_workflow.ts"
+  else
+    printf '\n==> mcp code-mode workflow: skipped (node not available)\n' >&2
+  fi
 
   # ---- Client-under-test legs (drive our TS Transport against real servers) ----
 

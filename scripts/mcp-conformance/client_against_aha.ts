@@ -103,29 +103,33 @@ async function main() {
   }
   console.log("tools/call search empty-result OK: payload is []");
 
-  // Strict argument validation: unknown arg must error.
-  let threw = false;
-  try {
-    await client.callTool({ name: "search", arguments: { query: "x", bogus: 1 } as Record<string, unknown> });
-  } catch (e) {
-    const msg = (e as Error).message;
-    if (!msg.includes("unexpected argument") && !msg.includes("bogus")) {
-      throw new Error(`unexpected error message: ${msg}`);
+  // Strict argument validation: unknown arg must surface as isError on the
+  // result (the spec's reporting mechanism for tool-level failures).
+  {
+    const res = (await client.callTool({
+      name: "search",
+      arguments: { query: "x", bogus: 1 } as Record<string, unknown>,
+    })) as { isError?: boolean; content?: { text: string }[] };
+    if (!res.isError) throw new Error("unknown-arg search call was accepted (no isError)");
+    const err = res.content?.[0]?.text ?? "";
+    if (!err.includes("unexpected argument") && !err.includes("bogus")) {
+      throw new Error(`unexpected error message: ${err}`);
     }
-    threw = true;
+    console.log("tools/call unknown-arg rejection OK");
   }
-  if (!threw) throw new Error("unknown-arg search call was accepted");
-  console.log("tools/call unknown-arg rejection OK");
 
-  // Unknown tool must error.
-  threw = false;
-  try {
-    await client.callTool({ name: "refresh", arguments: {} });
-  } catch {
-    threw = true;
+  // Unknown tool: SDKs may raise OR return isError.
+  {
+    let detected = false;
+    try {
+      const res = (await client.callTool({ name: "refresh", arguments: {} })) as { isError?: boolean };
+      detected = !!res.isError;
+    } catch {
+      detected = true;
+    }
+    if (!detected) throw new Error("unknown tool call was accepted");
+    console.log("tools/call unknown-tool rejection OK");
   }
-  if (!threw) throw new Error("unknown tool call was accepted");
-  console.log("tools/call unknown-tool rejection OK");
 
   console.log("aha MCP server is conformant under the official TypeScript SDK client.");
 }

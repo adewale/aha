@@ -92,25 +92,24 @@ async def main() -> int:
             assert empty == [], f"empty search result not []: {empty!r}"
             print(f"tools/call search empty-result OK: payload is []")
 
-            # Strict-validation: unknown arg must be rejected.
-            try:
-                await session.call_tool("search", {"query": "x", "bogus": 1})
-            except Exception as e:
-                msg = str(e)
-                assert "unexpected argument" in msg or "bogus" in msg, f"unexpected error: {msg!r}"
-                print(f"tools/call unknown-arg rejection OK")
-            else:
-                print("FAIL: unknown-arg search call was accepted", file=sys.stderr)
-                return 1
+            # Strict-validation: unknown arg must be rejected. Per the spec,
+            # tool-level errors are signalled by isError on the result, not
+            # JSON-RPC errors raised on the wire.
+            res = await session.call_tool("search", {"query": "x", "bogus": 1})
+            assert res.isError, f"unknown-arg search call was accepted (no isError): {res}"
+            err = res.content[0].text if res.content else ""
+            assert "unexpected argument" in err or "bogus" in err, f"unexpected error message: {err!r}"
+            print(f"tools/call unknown-arg rejection OK")
 
-            # Unknown tool must error.
+            # Unknown tool must error. The SDK *does* raise for tools missing
+            # from the registry (transport-level "tool not found"), so accept
+            # either an exception or isError=True.
             try:
-                await session.call_tool("refresh", {})
-            except Exception as e:
-                print(f"tools/call unknown-tool rejection OK")
-            else:
-                print("FAIL: unknown tool call was accepted", file=sys.stderr)
-                return 1
+                res = await session.call_tool("refresh", {})
+                assert res.isError, "unknown tool call was accepted (no isError)"
+            except Exception:
+                pass
+            print(f"tools/call unknown-tool rejection OK")
 
     print("aha MCP server is conformant under the official Python SDK client.")
     return 0

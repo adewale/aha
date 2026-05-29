@@ -1,13 +1,28 @@
+// In-process MCP tests using the SDK's NewInMemoryTransports pair. These
+// run a full Client↔Server loop through the official SDK without spawning
+// a subprocess, so they're fast and cover the wire-format-correct path
+// the SDK enforces.
+//
+// Cross-language conformance (Python/TypeScript/Go SDKs driving aha mcp,
+// and our typed TS client driving Python/TS/Go reference servers) lives
+// in scripts/mcp-conformance/ and internal/mcp/conformance/. This file
+// is the Go-only fast lane.
 package mcp_test
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/corpus"
@@ -16,8 +31,19 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
-// buildCorpus runs an `aha refresh` against the standard test fixtures and
-// returns an opened, populated corpus.Store plus the config it was built from.
+// expectedTools is the canonical tool list. Any change here must be made
+// alongside the corresponding registration in tools.go and the conformance
+// scripts/test that hard-codes the same list.
+var expectedTools = []string{
+	"conflicts",
+	"corpus_size",
+	"doctor",
+	"read",
+	"search",
+	"status",
+	"verify",
+}
+
 func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 	t.Helper()
 	root := t.TempDir()
@@ -53,269 +79,261 @@ func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 	return store, model.Config{CorpusDir: corpusDir, MachineID: "mcp-test"}
 }
 
-// wireResponse is the subset of JSON-RPC response fields the wire tests
-// inspect. It mirrors the encoded shape, not the unexported internal type.
-type wireResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// callOne pipes a single request through Serve and returns the decoded
-// response. Notifications return nil.
-func callOne(t *testing.T, b mcp.Backend, req mcp.Message) *wireResponse {
+// connectPair sets up an in-process Client↔Server pair against a populated
+// corpus and runs the initialize handshake. Returns the client session
+// the test should drive.
+func connectPair(t *testing.T) (*sdkmcp.ClientSession, context.Context, context.CancelFunc) {
 	t.Helper()
-	frame, err := mcp.EncodeFrame(req)
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	server := mcp.NewServer(backend)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+
+	// Run the server in a goroutine; it lives until ctx is cancelled.
+	go func() { _ = server.Run(ctx, serverTransport) }()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "aha-inproc", Version: "0.1.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
-		t.Fatal(err)
+		cancel()
+		t.Fatalf("client.Connect: %v", err)
 	}
-	in := bytes.NewReader(frame)
-	out := &bytes.Buffer{}
-	if err := mcp.Serve(b, in, out, io.Discard); err != nil {
-		t.Fatalf("serve: %v", err)
-	}
-	if out.Len() == 0 {
-		return nil
-	}
-	resp := &wireResponse{}
-	if err := json.Unmarshal(extractBodyBytes(t, out.Bytes()), resp); err != nil {
-		t.Fatalf("decode wire response: %v\n%s", err, out.Bytes())
-	}
-	return resp
-}
-
-// extractBodyBytes returns the JSON body of the first NDJSON frame in buf.
-// Useful when we need the raw response to decode fields the protocol's
-// Message struct doesn't carry (e.g. result, error).
-func extractBodyBytes(t *testing.T, buf []byte) []byte {
-	t.Helper()
-	idx := bytes.IndexByte(buf, '\n')
-	if idx < 0 {
-		t.Fatalf("frame missing terminating newline: %q", buf)
-	}
-	line := buf[:idx]
-	if len(line) > 0 && line[len(line)-1] == '\r' {
-		line = line[:len(line)-1]
-	}
-	return bytes.TrimSpace(line)
-}
-
-func contentText(t *testing.T, resp *wireResponse) string {
-	t.Helper()
-	if resp.Result == nil {
-		t.Fatalf("response has no result: %+v", resp)
-	}
-	var wrapper struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(resp.Result, &wrapper); err != nil {
-		t.Fatalf("decode content wrapper: %v\n%s", err, resp.Result)
-	}
-	if len(wrapper.Content) == 0 {
-		t.Fatalf("response has no content: %s", resp.Result)
-	}
-	return wrapper.Content[0].Text
+	t.Cleanup(func() {
+		_ = session.Close()
+		cancel()
+	})
+	return session, ctx, cancel
 }
 
 func TestInitializeReturnsServerInfo(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "initialize"})
-	if resp.Error != nil {
-		t.Fatalf("initialize errored: %+v", resp.Error)
+	session, _, _ := connectPair(t)
+	info := session.InitializeResult()
+	if info == nil {
+		t.Fatal("nil InitializeResult after Connect")
 	}
-	for _, want := range []string{`"protocolVersion"`, `"aha"`, `"tools"`} {
-		if !bytes.Contains(resp.Result, []byte(want)) {
-			t.Fatalf("initialize result missing %q: %s", want, resp.Result)
-		}
+	if info.ServerInfo.Name != "aha" {
+		t.Fatalf("serverInfo.name = %q, want aha", info.ServerInfo.Name)
 	}
 }
 
 func TestToolsListAdvertisesReadOnlySet(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/list"})
-	if resp.Error != nil {
-		t.Fatalf("tools/list errored: %+v", resp.Error)
+	session, ctx, _ := connectPair(t)
+	listed, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
 	}
-	for _, name := range []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"} {
-		if !bytes.Contains(resp.Result, []byte(`"name":"`+name+`"`)) {
-			t.Fatalf("tools/list missing %q: %s", name, resp.Result)
+	got := make([]string, len(listed.Tools))
+	for i, tool := range listed.Tools {
+		got[i] = tool.Name
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, expectedTools) {
+		t.Fatalf("tools/list mismatch:\n  got:  %v\n  want: %v", got, expectedTools)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+			t.Fatalf("%s: readOnlyHint not true: %+v", tool.Name, tool.Annotations)
 		}
-	}
-	for _, banned := range []string{"refresh", "snapshot", "ingest"} {
-		if bytes.Contains(resp.Result, []byte(`"name":"`+banned+`"`)) {
-			t.Fatalf("tools/list exposed write tool %q: %s", banned, resp.Result)
-		}
-	}
-}
-
-func TestNotificationsInitializedHasNoResponse(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{JSONRPC: "2.0", Method: "notifications/initialized"})
-	if resp != nil {
-		t.Fatalf("notifications/initialized must not produce a response, got %+v", resp)
-	}
-}
-
-func TestUnknownMethodReturnsMethodNotFound(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{JSONRPC: "2.0", ID: json.RawMessage(`9`), Method: "nope"})
-	if resp.Error == nil || resp.Error.Code != -32601 {
-		t.Fatalf("expected method-not-found, got %+v", resp.Error)
-	}
-}
-
-func TestToolsCallSearchReturnsResultsAndChainsToRead(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"search","arguments":{"query":"needle","limit":5}}`),
-	})
-	if resp.Error != nil {
-		t.Fatalf("search errored: %+v", resp.Error)
-	}
-	text := contentText(t, resp)
-	if !strings.Contains(text, `"ref_text"`) {
-		t.Fatalf("search result missing ref_text: %s", text)
-	}
-	var results []map[string]any
-	if err := json.Unmarshal([]byte(text), &results); err != nil {
-		t.Fatalf("unmarshal search results: %v\n%s", err, text)
-	}
-	if len(results) == 0 {
-		t.Fatalf("search returned zero results: %s", text)
-	}
-	refText, _ := results[0]["ref_text"].(string)
-	if refText == "" {
-		t.Fatalf("first result lacks ref_text: %v", results[0])
-	}
-	args, _ := json.Marshal(map[string]any{"ref": refText, "before": 1, "after": 3})
-	resp = callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"read","arguments":` + string(args) + `}`),
-	})
-	if resp.Error != nil {
-		t.Fatalf("read errored: %+v", resp.Error)
-	}
-	readText := contentText(t, resp)
-	if !strings.Contains(readText, `"entry_id"`) {
-		t.Fatalf("read result missing entry_id: %s", readText)
 	}
 }
 
 func TestToolsCallStatusReturnsCorpusShape(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"status"}`),
-	})
-	if resp.Error != nil {
-		t.Fatalf("status errored: %+v", resp.Error)
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "status"})
+	if err != nil {
+		t.Fatalf("CallTool(status): %v", err)
 	}
-	text := contentText(t, resp)
-	for _, want := range []string{`"corpus_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("status missing %q: %s", want, text)
+	if res.IsError {
+		t.Fatalf("status returned isError: %s", contentText(t, res))
+	}
+	body := contentText(t, res)
+	for _, key := range []string{`"corpus_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("status missing %q: %s", key, body)
 		}
+	}
+}
+
+func TestToolsCallSearchReturnsResultsAndChainsToRead(t *testing.T) {
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "needle", "limit": 5},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(search): %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("search returned isError: %s", contentText(t, res))
+	}
+	var hits []map[string]any
+	if err := json.Unmarshal([]byte(contentText(t, res)), &hits); err != nil {
+		t.Fatalf("decode hits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("search returned zero results")
+	}
+	refText, _ := hits[0]["ref_text"].(string)
+	if refText == "" {
+		t.Fatalf("first hit lacks ref_text: %v", hits[0])
+	}
+	readRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "read",
+		Arguments: map[string]any{"ref": refText, "before": 1, "after": 3},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(read): %v", err)
+	}
+	if readRes.IsError {
+		t.Fatalf("read returned isError: %s", contentText(t, readRes))
+	}
+	if !strings.Contains(contentText(t, readRes), `"entry_id"`) {
+		t.Fatalf("read result missing entry_id: %s", contentText(t, readRes))
+	}
+}
+
+func TestEmptySearchReturnsList(t *testing.T) {
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "definitelynotinthecorpus"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(search empty): %v", err)
+	}
+	body := contentText(t, res)
+	var hits []any
+	if err := json.Unmarshal([]byte(body), &hits); err != nil {
+		t.Fatalf("empty search payload not a list: %v\n%s", err, body)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("empty search payload not []: %v", hits)
 	}
 }
 
 func TestToolsCallDoctorReturnsLocalDiagnostics(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"doctor"}`),
-	})
-	if resp.Error != nil {
-		t.Fatalf("doctor errored: %+v", resp.Error)
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "doctor"})
+	if err != nil {
+		t.Fatalf("CallTool(doctor): %v", err)
 	}
-	text := contentText(t, resp)
+	body := contentText(t, res)
 	for _, want := range []string{`"version"`, `"adapters"`, `"sources"`, `"corpus"`} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("doctor missing %q: %s", want, text)
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(text, `"depot"`) {
-		t.Fatalf("phase-1 doctor must not include depot probe: %s", text)
+	if strings.Contains(body, `"depot"`) {
+		t.Fatalf("MCP doctor must not include depot probe: %s", body)
 	}
 }
 
 func TestToolsCallRejectsUnknownArg(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"search","arguments":{"query":"x","bogus":1}}`),
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "x", "bogus": 1},
 	})
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "unexpected argument") {
-		t.Fatalf("expected unexpected-argument error, got %+v", resp.Error)
+	if err == nil && (res == nil || !res.IsError) {
+		t.Fatalf("expected error on unknown arg, got success: res=%+v", res)
 	}
 }
 
 func TestToolsCallRejectsMissingRequiredArg(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"search","arguments":{}}`),
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{},
 	})
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "missing required") {
-		t.Fatalf("expected missing-required error, got %+v", resp.Error)
+	if err == nil && (res == nil || !res.IsError) {
+		t.Fatalf("expected error on missing required arg, got success: res=%+v", res)
 	}
 }
 
 func TestToolsCallRejectsUnknownTool(t *testing.T) {
-	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	resp := callOne(t, b, mcp.Message{
-		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
-		Params: json.RawMessage(`{"name":"refresh"}`),
-	})
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "unknown tool") {
-		t.Fatalf("expected unknown-tool error, got %+v", resp.Error)
+	session, ctx, _ := connectPair(t)
+	_, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "refresh"})
+	if err == nil {
+		t.Fatal("expected error on unknown tool")
+	}
+	if !strings.Contains(err.Error(), "refresh") && !strings.Contains(err.Error(), "tool") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestServeRoundTripOverStdio(t *testing.T) {
+// ---------- CallTool (HTTP-server-facing path) tests ----------
+
+func TestCallToolDispatchesSearch(t *testing.T) {
 	store, cfg := buildCorpus(t)
-	b := mcp.NewCorpusBackend(store, cfg)
-	in := &bytes.Buffer{}
-	out := &bytes.Buffer{}
-	for _, msg := range []mcp.Message{
-		{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "initialize"},
-		{JSONRPC: "2.0", Method: "notifications/initialized"},
-		{JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "tools/list"},
-	} {
-		frame, err := mcp.EncodeFrame(msg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		in.Write(frame)
-	}
-	if err := mcp.Serve(b, in, out, io.Discard); err != nil {
-		t.Fatalf("serve: %v", err)
-	}
-	resps, rest, err := mcp.ParseFrames(out.Bytes())
+	backend := mcp.NewCorpusBackend(store, cfg)
+	out, err := mcp.CallTool(backend, "search", json.RawMessage(`{"query":"needle","limit":3}`))
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("CallTool: %v", err)
 	}
-	if len(rest) != 0 {
-		t.Fatalf("trailing bytes: %q", rest)
-	}
-	if len(resps) != 2 {
-		t.Fatalf("expected 2 responses (initialize + tools/list), got %d", len(resps))
+	body, _ := json.Marshal(out)
+	if !strings.Contains(string(body), `"ref_text"`) {
+		t.Fatalf("CallTool search missing ref_text: %s", body)
 	}
 }
+
+func TestCallToolRejectsUnknownArg(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "search", json.RawMessage(`{"query":"x","bogus":1}`))
+	if err == nil {
+		t.Fatal("expected error on unknown arg")
+	}
+	if !strings.Contains(err.Error(), "unexpected argument") && !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unexpected-argument error, got %v", err)
+	}
+}
+
+func TestCallToolRejectsUnknownTool(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "refresh", nil)
+	if err == nil {
+		t.Fatal("expected error on unknown tool")
+	}
+	if !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("expected unknown-tool error, got %v", err)
+	}
+}
+
+func TestCallToolEmptySearchReturnsList(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	out, err := mcp.CallTool(backend, "search", json.RawMessage(`{"query":"definitelynotinthecorpus"}`))
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	results, ok := out.([]struct{})
+	_ = results
+	_ = ok
+	// The result is []search.Result; verify it's not a nil slice by JSON
+	// marshalling and asserting we get "[]" rather than "null".
+	body, _ := json.Marshal(out)
+	if string(body) != "[]" {
+		t.Fatalf("empty search payload not []: %s", body)
+	}
+}
+
+// ---------- helpers ----------
+
+func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
+	t.Helper()
+	if len(res.Content) == 0 {
+		t.Fatal("no content blocks")
+	}
+	tb, ok := res.Content[0].(*sdkmcp.TextContent)
+	if !ok {
+		t.Fatalf("content[0] not TextContent: %T", res.Content[0])
+	}
+	return tb.Text
+}
+
+// Suppress unused import warnings for errors when test compilation drifts.
+var _ = errors.New

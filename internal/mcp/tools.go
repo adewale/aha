@@ -1,12 +1,24 @@
+// Package mcp wires aha's read-only tool surface into the official
+// github.com/modelcontextprotocol/go-sdk Server. The tools/* functions
+// previously hand-rolled here now live behind the SDK's typed
+// AddTool[In, Out] registration. The wire format, framing, schema
+// validation, structuredContent emission, annotations, ping, and
+// initialize negotiation are all the SDK's responsibility — we only
+// supply Go-typed input structs, the business logic that reads the
+// corpus, and a small dispatcher (CallTool) that the HTTP dashboard
+// reuses without going through the SDK.
 package mcp
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"reflect"
 	"sort"
-	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/config"
@@ -15,89 +27,7 @@ import (
 	"github.com/adewale/aha/internal/search"
 )
 
-// toolSpec describes one MCP tool: name, description, JSON-Schema for
-// arguments, and tool annotations. Kept minimal — the underlying functions
-// own validation beyond the structural checks here.
-//
-// Annotations follow the 2025-06-18 spec
-// (https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
-// They are *hints* to the client and must be treated as untrusted unless the
-// server itself is trusted; aha's server is fully read-only so we set
-// readOnlyHint: true on every tool.
-type toolSpec struct {
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	InputSchema map[string]any     `json:"inputSchema"`
-	Annotations map[string]any     `json:"annotations,omitempty"`
-}
-
-func tool(name, description string, properties map[string]any, required ...string) toolSpec {
-	if properties == nil {
-		properties = map[string]any{}
-	}
-	if required == nil {
-		required = []string{}
-	}
-	return toolSpec{
-		Name:        name,
-		Description: description,
-		InputSchema: map[string]any{
-			"type":                 "object",
-			"properties":           properties,
-			"required":             required,
-			"additionalProperties": false,
-		},
-		Annotations: map[string]any{
-			"readOnlyHint":    true,
-			"destructiveHint": false,
-			"idempotentHint":  true,
-			"openWorldHint":   false,
-		},
-	}
-}
-
-func str() map[string]any { return map[string]any{"type": "string"} }
-func num() map[string]any { return map[string]any{"type": "number"} }
-
-// readOnlyTools is the phase-1 tool list (see docs/mcp-spec.md). The order
-// here is the order returned by tools/list.
-var readOnlyTools = []toolSpec{
-	tool(
-		"search",
-		"Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-		map[string]any{
-			"query":      str(),
-			"source":     str(),
-			"machine":    str(),
-			"role":       str(),
-			"after":      str(),
-			"before":     str(),
-			"path":       str(),
-			"path_token": str(),
-			"project":    str(),
-			"limit":      num(),
-		},
-		"query",
-	),
-	tool(
-		"read",
-		"Retrieve full surrounding context for a search hit. Accepts either a canonical ref text (msg:v1:..., session:v1:..., artifact:v1:...) or session+entry coordinates.",
-		map[string]any{
-			"ref":     str(),
-			"session": str(),
-			"entry":   str(),
-			"before":  num(),
-			"after":   num(),
-		},
-	),
-	tool("status", "Return corpus health summary: counts and disk usage. Same shape as `aha status --json`.", nil),
-	tool("verify", "Run read-only corpus invariant checks (no repair). Same shape as `aha verify --json`.", nil),
-	tool("conflicts", "List quarantined merge conflicts. Same shape as `aha conflicts --json`.", nil),
-	tool("corpus_size", "Return corpus on-disk size breakdown. Same shape as `aha corpus size --json`.", nil),
-	tool("doctor", "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.", nil),
-}
-
-// Backend is the read surface the MCP server needs from the rest of aha.
+// Backend is the read surface the MCP tools need from the rest of aha.
 // Defined as an interface so tests can stub it.
 type Backend interface {
 	DB() *sql.DB
@@ -121,163 +51,67 @@ func (b *CorpusBackend) Store() *corpus.Store { return b.store }
 func (b *CorpusBackend) Root() string         { return b.store.Root }
 func (b *CorpusBackend) Config() model.Config { return b.cfg }
 
-// CallTool dispatches a tools/call to the matching read function, with strict
-// argument validation. The returned value is what the JSON-RPC response puts
-// into the `content[0].text` field. Exported so the HTTP server in
-// internal/server can reuse the same dispatch.
-func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
-	spec := findTool(name)
-	if spec == nil {
-		return nil, fmt.Errorf("unknown tool: %s", name)
-	}
-	args, err := decodeArgs(spec, raw)
-	if err != nil {
-		return nil, err
-	}
-	switch name {
-	case "search":
-		return callSearch(b, args)
-	case "read":
-		return callRead(b, args)
-	case "status":
-		return callStatus(b)
-	case "verify":
-		return callVerify(b)
-	case "conflicts":
-		return callConflicts(b)
-	case "corpus_size":
-		return callCorpusSize(b)
-	case "doctor":
-		return callDoctor(b)
-	}
-	return nil, fmt.Errorf("tool %q has no handler", name)
+// ServerInfo is the implementation block we hand to NewServer. Exported so
+// tests can use the same value when constructing in-process server peers
+// via mcp.NewInMemoryTransports.
+var ServerInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
+
+// ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
+
+// SearchInput names the documented filter set for the search tool. The
+// JSON-Schema this maps to is `additionalProperties: false` by virtue of
+// AddTool's strict-input behaviour, so MCP clients sending unknown fields
+// are rejected before the handler runs.
+type SearchInput struct {
+	Query     string `json:"query" jsonschema:"Full-text query passed to the corpus FTS index"`
+	Source    string `json:"source,omitempty" jsonschema:"Filter by source adapter name (pi, claude-code, codex)"`
+	Machine   string `json:"machine,omitempty" jsonschema:"Filter by machine id"`
+	Role      string `json:"role,omitempty" jsonschema:"Filter by message role (user, assistant, ...)"`
+	After     string `json:"after,omitempty" jsonschema:"RFC3339 lower bound on timestamps"`
+	Before    string `json:"before,omitempty" jsonschema:"RFC3339 upper bound on timestamps"`
+	Path      string `json:"path,omitempty" jsonschema:"Substring filter against session/artifact paths"`
+	PathToken string `json:"path_token,omitempty" jsonschema:"Indexed path-segment filter"`
+	Project   string `json:"project,omitempty" jsonschema:"Indexed project filter"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Cap on returned hits (default 20, max 200)"`
 }
 
-func findTool(name string) *toolSpec {
-	for i := range readOnlyTools {
-		if readOnlyTools[i].Name == name {
-			return &readOnlyTools[i]
-		}
-	}
-	return nil
+// ReadInput accepts either a canonical ref (preferred) or a session+entry
+// pair. Both modes resolve via the same corpus.Read* functions the CLI uses.
+type ReadInput struct {
+	Ref     string `json:"ref,omitempty" jsonschema:"Canonical ref text (msg:v1:..., session:v1:..., artifact:v1:...)"`
+	Session string `json:"session,omitempty" jsonschema:"Session key (used when ref is empty)"`
+	Entry   string `json:"entry,omitempty" jsonschema:"Entry id within the session (optional)"`
+	Before  int    `json:"before,omitempty" jsonschema:"Lines of context before the target entry (default 3)"`
+	After   int    `json:"after,omitempty" jsonschema:"Lines of context after the target entry (default 5)"`
 }
 
-// decodeArgs enforces the allow-list (rejecting unknown keys) and required
-// fields declared by the toolSpec. The map it returns has any extra
-// type-coercion (e.g. JSON numbers → ints) already applied.
-func decodeArgs(spec *toolSpec, raw json.RawMessage) (map[string]any, error) {
-	out := map[string]any{}
-	if len(raw) == 0 || string(raw) == "null" {
-		if len(requiredFromSchema(spec)) > 0 {
-			return nil, fmt.Errorf("missing arguments for %s", spec.Name)
-		}
-		return out, nil
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("invalid arguments for %s: %w", spec.Name, err)
-	}
-	allowed := map[string]bool{}
-	for k := range propertiesFromSchema(spec) {
-		allowed[k] = true
-	}
-	for k := range out {
-		if !allowed[k] {
-			return nil, fmt.Errorf("unexpected argument for %s: %s", spec.Name, k)
-		}
-	}
-	for _, req := range requiredFromSchema(spec) {
-		v, ok := out[req]
-		if !ok || isEmpty(v) {
-			return nil, fmt.Errorf("missing required argument for %s: %s", spec.Name, req)
-		}
-	}
-	return out, nil
-}
+// EmptyInput is used as the In parameter for tools that take no arguments.
+// Keeping it as a typed empty struct (rather than `any`) makes AddTool
+// reject extraneous arguments at the SDK boundary.
+type EmptyInput struct{}
 
-func propertiesFromSchema(spec *toolSpec) map[string]any {
-	if props, ok := spec.InputSchema["properties"].(map[string]any); ok {
-		return props
-	}
-	return nil
-}
+// ---------- Pure business logic (used by both the SDK handlers and CallTool) ----------
 
-func requiredFromSchema(spec *toolSpec) []string {
-	req, ok := spec.InputSchema["required"].([]string)
-	if !ok {
-		return nil
-	}
-	return req
-}
-
-func isEmpty(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return true
-	case string:
-		return x == ""
-	}
-	return false
-}
-
-func asString(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-func asInt(v any) int {
-	switch x := v.(type) {
-	case float64:
-		return int(x)
-	case int:
-		return x
-	}
-	return 0
-}
-
-// isJSONObject reports whether v marshals to a JSON object. Map types,
-// structs, and *struct pointers qualify; slices, arrays, scalars, and nil
-// do not. Used to decide whether structuredContent is safe to emit (the
-// official Python SDK rejects non-object structuredContent).
-func isJSONObject(v any) bool {
-	if v == nil {
-		return false
-	}
-	t := reflect.TypeOf(v)
-	for t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	switch t.Kind() {
-	case reflect.Map, reflect.Struct:
-		return true
-	}
-	return false
-}
-
-// callSearch invokes search.Query with the documented filter set. Returns
-// an empty slice (never nil) when no rows match, so JSON marshalling
-// produces [] rather than null. The CLI happily renders nil as "no
-// results"; MCP clients expect a list shape.
-func callSearch(b Backend, args map[string]any) (any, error) {
-	q := asString(args["query"])
-	if q == "" {
+func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
+	if in.Query == "" {
 		return nil, fmt.Errorf("missing required argument for search: query")
 	}
-	limit := asInt(args["limit"])
+	limit := in.Limit
 	if limit <= 0 {
 		limit = 20
 	}
 	if limit > search.MaxLimit {
 		limit = search.MaxLimit
 	}
-	results, err := search.Query(b.DB(), q, search.Filters{
-		Source:    asString(args["source"]),
-		Machine:   asString(args["machine"]),
-		Role:      asString(args["role"]),
-		After:     asString(args["after"]),
-		Before:    asString(args["before"]),
-		Path:      asString(args["path"]),
-		PathToken: asString(args["path_token"]),
-		Project:   asString(args["project"]),
+	results, err := search.Query(b.DB(), in.Query, search.Filters{
+		Source:    in.Source,
+		Machine:   in.Machine,
+		Role:      in.Role,
+		After:     in.After,
+		Before:    in.Before,
+		Path:      in.Path,
+		PathToken: in.PathToken,
+		Project:   in.Project,
 		Limit:     limit,
 	})
 	if err != nil {
@@ -289,34 +123,30 @@ func callSearch(b Backend, args map[string]any) (any, error) {
 	return results, nil
 }
 
-// callRead resolves either a canonical ref text or a session+entry pair, then
-// pulls surrounding context via the same corpus functions the CLI uses.
-// Empty result → [] (never nil) so JSON marshalling produces a list.
-func callRead(b Backend, args map[string]any) (any, error) {
-	before := asInt(args["before"])
-	if _, ok := args["before"]; !ok {
+func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
+	before := in.Before
+	if before == 0 {
 		before = 3
 	}
-	after := asInt(args["after"])
-	if _, ok := args["after"]; !ok {
+	after := in.After
+	if after == 0 {
 		after = 5
 	}
 	var (
 		entries []corpus.ReadEntry
 		err     error
 	)
-	if refText := asString(args["ref"]); refText != "" {
-		ref, perr := model.ParseRef(refText)
+	if in.Ref != "" {
+		ref, perr := model.ParseRef(in.Ref)
 		if perr != nil {
 			return nil, fmt.Errorf("invalid ref: %w", perr)
 		}
 		entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
 	} else {
-		session := asString(args["session"])
-		if session == "" {
+		if in.Session == "" {
 			return nil, fmt.Errorf("read requires either ref or session")
 		}
-		entries, err = corpus.ReadContext(b.DB(), session, asString(args["entry"]), before, after)
+		entries, err = corpus.ReadContext(b.DB(), in.Session, in.Entry, before, after)
 	}
 	if err != nil {
 		return nil, err
@@ -327,15 +157,15 @@ func callRead(b Backend, args map[string]any) (any, error) {
 	return entries, nil
 }
 
-func callStatus(b Backend) (any, error) {
+func doStatus(b Backend) (map[string]any, error) {
 	return corpus.Status(b.DB(), b.Root())
 }
 
-func callVerify(b Backend) (any, error) {
+func doVerify(b Backend) (corpus.VerifyReport, error) {
 	return corpus.Verify(b.Store())
 }
 
-func callConflicts(b Backend) (any, error) {
+func doConflicts(b Backend) ([]corpus.Conflict, error) {
 	rows, err := corpus.Conflicts(b.DB())
 	if err != nil {
 		return nil, err
@@ -346,13 +176,11 @@ func callConflicts(b Backend) (any, error) {
 	return rows, nil
 }
 
-func callCorpusSize(b Backend) (any, error) {
+func doCorpusSize(b Backend) (corpus.SizeReport, error) {
 	return corpus.Size(b.Store())
 }
 
-// callDoctor mirrors the CLI doctor JSON payload but skips the depot probe
-// to keep the MCP surface local-only and free of network calls in phase 1.
-func callDoctor(b Backend) (any, error) {
+func doDoctor(b Backend) (map[string]any, error) {
 	cfg := b.Config()
 	names := make([]string, 0, len(adapters.Builtins()))
 	for n := range adapters.Builtins() {
@@ -396,69 +224,286 @@ func callDoctor(b Backend) (any, error) {
 	}, nil
 }
 
-// tools/list payload uses the spec's exported field names.
-func toolsList() any {
-	return map[string]any{"tools": readOnlyTools}
+// rejectExtras strict-decodes the raw arguments into a fresh T using
+// DisallowUnknownFields and returns an isError CallToolResult if the
+// strict decode fails. Returns nil when the arguments are well-formed
+// (or absent). Wraps each tool handler to give us "additionalProperties:
+// false" semantics without having to hand-construct the input schema.
+//
+// AddTool already decoded the args into the typed In struct (silently
+// dropping unknown fields). We re-decode strictly here to surface the
+// rejection the JSON Schema doesn't itself enforce.
+func rejectExtras[T any](req *mcp.CallToolRequest) *mcp.CallToolResult {
+	raw := req.Params.Arguments
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var t T
+	if err := dec.Decode(&t); err != nil {
+		return errorResult(fmt.Errorf("unexpected argument: %w", err))
+	}
+	return nil
 }
 
-// HandleMessage routes one decoded JSON-RPC message and returns a response.
-// Returns (nil, false) for notifications (no reply on the wire).
-func HandleMessage(b Backend, msg Message) (*response, bool) {
-	if msg.JSONRPC != "" && msg.JSONRPC != jsonRPCVersion {
-		return newError(msg.ID, codeInvalidRequest, "unsupported jsonrpc version"), true
-	}
-	switch msg.Method {
-	case "initialize":
-		return newResult(msg.ID, map[string]any{
-			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": serverName, "version": model.Version},
-		}), true
-	case "notifications/initialized":
-		return nil, false
-	case "ping":
-		return newResult(msg.ID, map[string]any{}), true
-	case "tools/list":
-		return newResult(msg.ID, toolsList()), true
-	case "resources/list":
-		return newResult(msg.ID, map[string]any{"resources": []any{}}), true
-	case "tools/call":
-		var p struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
+// ---------- SDK registration ----------
+
+// readOnlyAnnotations is the ToolAnnotations applied to every tool. aha's
+// MCP surface is read-only by construction: there is no write tool to be
+// registered, and the SDK consults these hints when prompting the user.
+var readOnlyAnnotations = &mcp.ToolAnnotations{
+	ReadOnlyHint:   true,
+	IdempotentHint: true,
+	DestructiveHint: boolPtr(false),
+	OpenWorldHint:   boolPtr(false),
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// NewServer builds an MCP Server with every read tool registered. The
+// returned *mcp.Server is ready to be paired with any of the SDK's
+// transports (Stdio, Streamable HTTP, InMemory). Tests use
+// mcp.NewInMemoryTransports + this constructor to build a complete
+// in-process MCP loop.
+func NewServer(backend Backend) *mcp.Server {
+	server := mcp.NewServer(ServerInfo, nil)
+	registerTools(server, backend)
+	return server
+}
+
+func registerTools(server *mcp.Server, b Backend) {
+	// Tools whose Out type is a Go slice (search/read/conflicts) would
+	// produce an "array"-typed JSON schema, which the SDK refuses for
+	// output schemas (spec wants object). Those are registered with
+	// Out=any so the SDK skips output-schema derivation; the typed
+	// payload still travels in content[].text and is JSON-parseable
+	// client-side (which is exactly what the bidirectional conformance
+	// tests verify).
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "search",
+		Description: "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[SearchInput](req); r != nil {
+			return r, nil, nil
 		}
-		if len(msg.Params) > 0 {
-			if err := json.Unmarshal(msg.Params, &p); err != nil {
-				return newError(msg.ID, codeInvalidRequest, "invalid params: "+err.Error()), true
-			}
-		}
-		if strings.TrimSpace(p.Name) == "" {
-			return newError(msg.ID, codeInvalidRequest, "tools/call requires name"), true
-		}
-		out, err := CallTool(b, p.Name, p.Arguments)
+		out, err := doSearch(b, in)
 		if err != nil {
-			return newError(msg.ID, codeToolError, err.Error()), true
+			return errorResult(err), nil, nil
 		}
-		text, err := json.MarshalIndent(out, "", "  ")
+		return textOnlyResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "read",
+		Description: "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[ReadInput](req); r != nil {
+			return r, nil, nil
+		}
+		out, err := doRead(b, in)
 		if err != nil {
-			return newError(msg.ID, codeToolError, err.Error()), true
+			return errorResult(err), nil, nil
 		}
-		// Per the 2025-06-18 spec: "For backwards compatibility, a tool that
-		// returns structured content SHOULD also return the serialized JSON
-		// in a TextContent block." We always emit the text content; we emit
-		// structuredContent *only* when the payload is a JSON object, which
-		// is what the official SDK accepts there (its Pydantic type is
-		// Dict[str, Any]). Arrays and scalars travel in the text field
-		// alone; the typed client surface JSON-parses that fallback.
-		result := map[string]any{
-			"content": []any{
-				map[string]any{"type": "text", "text": string(text)},
-			},
+		return textOnlyResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "status",
+		Description: "Return corpus health summary: counts and disk usage.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[EmptyInput](req); r != nil {
+			return r, nil, nil
 		}
-		if isJSONObject(out) {
-			result["structuredContent"] = out
+		out, err := doStatus(b)
+		if err != nil {
+			return errorResult(err), nil, nil
 		}
-		return newResult(msg.ID, result), true
+		return objectResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "verify",
+		Description: "Run read-only corpus invariant checks (no repair).",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[EmptyInput](req); r != nil {
+			return r, nil, nil
+		}
+		out, err := doVerify(b)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return objectResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "conflicts",
+		Description: "List quarantined merge conflicts.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[EmptyInput](req); r != nil {
+			return r, nil, nil
+		}
+		out, err := doConflicts(b)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textOnlyResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "corpus_size",
+		Description: "Return corpus on-disk size breakdown.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[EmptyInput](req); r != nil {
+			return r, nil, nil
+		}
+		out, err := doCorpusSize(b)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return objectResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "doctor",
+		Description: "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
+		if r := rejectExtras[EmptyInput](req); r != nil {
+			return r, nil, nil
+		}
+		out, err := doDoctor(b)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return objectResult(out), nil, nil
+	})
+}
+
+// textOnlyResult builds a CallToolResult that carries the payload only as
+// JSON in content[].text. Used for list-shaped outputs, where structured
+// content (which the Python SDK requires to be a JSON object) doesn't fit.
+// The SDK fills structuredContent itself when the Out generic type is
+// non-nil; we use the zero-output overload by returning nil for Out via
+// the surrounding handler signature... except we can't, so we set
+// structuredContent: nil in CallToolResult to override.
+func textOnlyResult(v any) *mcp.CallToolResult {
+	text, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return errorResult(err)
 	}
-	return newError(msg.ID, codeMethodNotFound, "unknown method: "+msg.Method), true
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(text)}},
+		// Explicitly nil-overriding StructuredContent so the SDK doesn't
+		// emit a list under a "structuredContent" key that the official
+		// Python SDK Pydantic Dict type rejects.
+		StructuredContent: nil,
+	}
+}
+
+// objectResult builds a CallToolResult for object-typed outputs. Both
+// content[].text and StructuredContent carry the value.
+func objectResult(v any) *mcp.CallToolResult {
+	text, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return errorResult(err)
+	}
+	return &mcp.CallToolResult{
+		Content:           []mcp.Content{&mcp.TextContent{Text: string(text)}},
+		StructuredContent: v,
+	}
+}
+
+func errorResult(err error) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+	}
+}
+
+// ---------- CallTool: HTTP-server-facing dispatch (no SDK roundtrip) ----------
+
+// CallTool is the dispatch entrypoint used by the HTTP dashboard. It
+// parses the JSON arguments into the right Input struct (rejecting unknown
+// keys to mirror the SDK's strict input validation), runs the same
+// business-logic function the MCP handler runs, and returns the typed
+// result. The HTTP server doesn't speak MCP itself; this function is what
+// keeps `aha serve` independent of the MCP transport stack.
+func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
+	switch name {
+	case "search":
+		in, err := decodeInput[SearchInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doSearch(b, in)
+	case "read":
+		in, err := decodeInput[ReadInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doRead(b, in)
+	case "status":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doStatus(b)
+	case "verify":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doVerify(b)
+	case "conflicts":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doConflicts(b)
+	case "corpus_size":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doCorpusSize(b)
+	case "doctor":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doDoctor(b)
+	}
+	return nil, fmt.Errorf("unknown tool: %s", name)
+}
+
+// decodeInput strict-parses raw into a typed Input struct. Unknown fields
+// are rejected so HTTP callers get the same `unexpected argument` error
+// the MCP handler would produce.
+func decodeInput[T any](raw json.RawMessage, toolName string) (T, error) {
+	var zero T
+	if len(raw) == 0 || string(raw) == "null" {
+		return zero, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var out T
+	if err := dec.Decode(&out); err != nil {
+		// json's "unknown field" error message matches what tests look for;
+		// also tolerate the case where the body parses but errs midway.
+		if errors.Is(err, &json.UnmarshalTypeError{}) {
+			return zero, fmt.Errorf("invalid arguments for %s: %w", toolName, err)
+		}
+		return zero, fmt.Errorf("unexpected argument for %s: %w", toolName, err)
+	}
+	return out, nil
+}
+
+// rejectArgsIfPresent is the no-input equivalent of decodeInput: any
+// non-empty object causes a strict-parse failure into EmptyInput, which
+// has no fields and therefore rejects every key the caller sent.
+func rejectArgsIfPresent(raw json.RawMessage, toolName string) error {
+	_, err := decodeInput[EmptyInput](raw, toolName)
+	return err
 }

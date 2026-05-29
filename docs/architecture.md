@@ -245,7 +245,7 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | `internal/depot` | Local/R2 depot drivers, catalog merge/list/fetch/verify/repair. |
 | `internal/corpus` | SQLite schema, ingest transaction, read/status/conflict APIs. |
 | `internal/search` | FTS5 query construction and result mapping. |
-| `internal/mcp` | Read-only MCP server: JSON-RPC framing, tool registry/dispatch (`CallTool`), and `codegen` for the TypeScript surface. |
+| `internal/mcp` | Read-only MCP server. Wire format, lifecycle, tool registration, schema derivation, and result envelopes are owned by [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) v1.6+. This package holds the typed input structs, the pure `do<Tool>` business functions, a `rejectExtras` strict-input guard, the `CallTool` dispatch the HTTP server reuses, and `codegen/` for the TypeScript surface. |
 | `internal/server` | Read-only HTTP dashboard: routes the MCP tool surface plus a `go:embed` UI, with loopback/Host/Content-Type/CSP hardening. |
 | `internal/model` | Shared config, manifest, parsed-session, result/ref types. |
 | `internal/safety` | Path and source-root safety checks. |
