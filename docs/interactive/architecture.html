@@ -106,94 +106,155 @@ h1, h2, h3, h4 { text-wrap: balance; }
 ::selection { background: var(--sage-soft); color: var(--ink); }
 :focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; border-radius: 4px; }
 
-/* ---------- shell ------------------------------------------------------ */
-.shell {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 var(--s-7);
+/* ---------- layout: sidebar + main -------------------------------------- */
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
 }
-@media (max-width: 720px) { .shell { padding: 0 var(--s-5); } }
+@media (max-width: 880px) {
+  .layout { grid-template-columns: 1fr; }
+}
 
-/* ---------- header ----------------------------------------------------- */
-header.hero {
-  padding: var(--s-9) 0 var(--s-7);
-  border-bottom: 1px solid var(--line);
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--s-6) var(--s-5) var(--s-5);
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
 }
-.hero h1 {
-  font-size: clamp(56px, 9vw, 120px);
-  line-height: 0.92;
-  letter-spacing: -0.04em;
+@media (max-width: 880px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s-4);
+    padding: var(--s-3) var(--s-5);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    z-index: 30;
+    background: oklch(14% 0.012 80 / 0.95);
+    backdrop-filter: saturate(140%) blur(8px);
+    -webkit-backdrop-filter: saturate(140%) blur(8px);
+  }
+}
+
+.sidebar .brand h1 {
+  font-size: clamp(40px, 4vw, 48px);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
   font-weight: 700;
   margin: 0;
 }
-.hero .brand-line {
+.sidebar .brand .brand-line {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--t-md);
-  color: var(--ink-2);
-  margin: var(--s-4) 0 var(--s-5);
-}
-.hero .stand {
-  font-size: var(--t-lg);
-  color: var(--ink-2);
-  max-width: 62ch;
-  line-height: 1.55;
-  margin: 0;
-}
-.hero .meta {
-  display: flex;
-  gap: var(--s-6);
-  margin-top: var(--s-7);
+  font-size: var(--t-xs);
   color: var(--ink-3);
-  font-size: var(--t-md);
-  flex-wrap: wrap;
+  margin: var(--s-2) 0 0;
 }
-.hero .meta b { color: var(--ink); font-weight: 600; }
+@media (max-width: 880px) {
+  .sidebar .brand h1 { font-size: 26px; }
+  .sidebar .brand .brand-line { display: none; }
+}
 
-/* ---------- nav -------------------------------------------------------- */
-nav.tabs {
-  position: sticky;
-  top: 0;
-  z-index: 30;
+/* sidebar nav */
+.sidebar nav.tabs {
   display: flex;
-  gap: var(--s-6);
-  padding: var(--s-3) 0;
-  background: oklch(14% 0.012 80 / 0.92);
-  backdrop-filter: saturate(140%) blur(10px);
-  -webkit-backdrop-filter: saturate(140%) blur(10px);
-  border-bottom: 1px solid var(--line);
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-direction: column;
+  gap: var(--s-1);
 }
-nav.tabs::-webkit-scrollbar { display: none; }
-nav.tabs .inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 var(--s-7);
-  display: flex;
-  gap: var(--s-6);
-}
-nav.tabs button {
+.sidebar nav.tabs button {
   appearance: none;
   background: transparent;
   color: var(--ink-2);
   border: 0;
-  padding: var(--s-3) 0;
+  border-left: 2px solid transparent;
+  padding: var(--s-2) var(--s-3);
   font: inherit;
   font-size: var(--t-md);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color .18s var(--ease), border-color .18s var(--ease);
+  text-align: left;
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
   white-space: nowrap;
 }
-nav.tabs button:hover { color: var(--ink); }
+.sidebar nav.tabs button:hover { color: var(--ink); background: var(--surface); }
+.sidebar nav.tabs button.active {
+  color: var(--ink);
+  border-left-color: var(--sage);
+  background: var(--sage-soft);
+}
+@media (max-width: 880px) {
+  .sidebar nav.tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--s-3);
+    flex: 1 0 100%;
+    order: 3;
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--line);
+  }
+  .sidebar nav.tabs button {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    padding: var(--s-1) 0;
+    font-size: var(--t-sm);
+  }
+  .sidebar nav.tabs button.active {
+    background: transparent;
+    border-bottom-color: var(--sage);
+    border-left-color: transparent;
+  }
+}
+
+/* sidebar meta */
+.sidebar-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-1) var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-4);
+  margin-top: auto;
+}
+.sidebar-meta dt { color: var(--ink-3); }
+.sidebar-meta dd { margin: 0; color: var(--ink-2); }
+.sidebar-meta .num {
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+@media (max-width: 880px) {
+  .sidebar-meta { display: none; }
+}
+
+/* main content area */
+main.content {
+  padding: var(--s-7) var(--s-7) var(--s-10);
+  max-width: 1000px;
+  min-width: 0;
+}
+@media (max-width: 880px) {
+  main.content { padding: var(--s-6) var(--s-5) var(--s-9); max-width: 100%; }
+}
 nav.tabs button.active {
   color: var(--ink);
   border-bottom-color: var(--sage);
 }
 
 /* ---------- sections --------------------------------------------------- */
-main { padding-bottom: var(--s-10); }
-section { display: none; padding-top: var(--s-9); }
+section { display: none; }
 section.active { display: block; animation: fadein .35s var(--ease); }
 @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -218,14 +279,22 @@ section.active { display: block; animation: fadein .35s var(--ease); }
   margin: 0;
 }
 
-/* ---------- pipeline --------------------------------------------------- */
+/* ---------- pipeline (Tufte: minimal ink, no box chartjunk) ------------ */
 .pipeline-wrap {
-  margin: 0 calc(var(--s-7) * -0.5);
-  padding: var(--s-7) var(--s-5);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  margin: 0 0 var(--s-7);
+  padding: 0;
 }
+h3.sub {
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: var(--s-7) 0 var(--s-3);
+}
+.cli-line { margin: 0; color: var(--ink-2); line-height: 1.9; max-width: 80ch; }
+.cli-line code { background: transparent; padding: 0; color: var(--ink); }
+.cli-note { font-size: var(--t-sm); color: var(--ink-3); margin: var(--s-2) 0 0; max-width: 70ch; line-height: 1.55; }
 .pkg-info {
   margin-top: var(--s-5);
   color: var(--ink-2);
@@ -253,22 +322,21 @@ svg text.lbl   { fill: var(--ink-3); }
 svg text.good  { fill: var(--sage); }
 svg text.warn  { fill: var(--sand); }
 svg text.bad   { fill: var(--clay); }
-svg .box {
-  fill: var(--surface-2);
-  stroke: var(--line-strong);
-  stroke-width: 1;
-}
-svg .box.accent { stroke: var(--sage); }
+/* Tufte: erase the dreaded box (B5). Rect borders carried no data;
+   removed. Hairline rules at top/bottom of each block stand in. */
+svg .box { fill: none; stroke: none; }
+svg .rule { stroke: var(--line); stroke-width: 1; fill: none; }
+svg .rule.accent { stroke: var(--sage); stroke-width: 1.4; }
 svg .arrow {
   stroke: var(--ink-3);
-  stroke-width: 1.4;
+  stroke-width: 1.2;
   fill: none;
   marker-end: url(#arrow);
 }
-svg .arrow.thick { stroke: var(--sage); stroke-width: 2; }
-svg .grp { cursor: pointer; transition: opacity .18s var(--ease); }
-svg .grp:hover { opacity: 0.85; }
-svg .grp:hover rect { stroke: var(--sage); }
+svg .arrow.thick { stroke: var(--sage); stroke-width: 1.6; }
+svg .grp { cursor: pointer; transition: opacity .15s var(--ease); }
+svg .grp:hover { opacity: 0.8; }
+svg .grp:hover .rule { stroke: var(--sage); }
 
 /* ---------- key facts (typographic list, not card grid) ---------------- */
 .facts {
@@ -425,48 +493,79 @@ svg .grp:hover rect { stroke: var(--sage); }
   margin-right: var(--s-2); vertical-align: middle;
 }
 
+/* Tufte: erase the dreaded box; mute quadrant fills; hairline midlines. */
 .scatter-host {
   position: relative;
-  height: 540px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+  height: 520px;
+  overflow: visible;
+  margin: var(--s-3) var(--s-7) 0 var(--s-7);
 }
 .scatter-host .quad {
   position: absolute;
   width: 50%; height: 50%;
   box-sizing: border-box;
 }
-.scatter-host .quad.tl { left: 0; top: 0; background: var(--clay-soft); }
-.scatter-host .quad.tr { right: 0; top: 0; background: var(--sage-soft); }
-.scatter-host .quad.bl { left: 0; bottom: 0; background: oklch(82% 0.12 85 / 0.06); }
+/* very faint tints; encode quadrant meaning without competing with the data */
+.scatter-host .quad.tl { left: 0; top: 0; background: oklch(74% 0.14 40 / 0.05); }
+.scatter-host .quad.tr { right: 0; top: 0; background: oklch(78% 0.115 175 / 0.05); }
+.scatter-host .quad.bl { left: 0; bottom: 0; background: transparent; }
 .scatter-host .quad.br { right: 0; bottom: 0; background: transparent; }
 .scatter-host .quad .qlabel {
   position: absolute;
   font-size: var(--t-sm);
   color: var(--ink-3);
-  padding: var(--s-3) var(--s-4);
-  font-weight: 500;
+  padding: 6px var(--s-3);
   max-width: 26ch;
+  font-style: italic;
 }
 .scatter-host .midline-v {
   position: absolute; left: 50%; top: 0; bottom: 0;
-  border-left: 1px dashed var(--line-strong);
+  border-left: 1px solid var(--line);
 }
 .scatter-host .midline-h {
   position: absolute; top: 50%; left: 0; right: 0;
-  border-top: 1px dashed var(--line-strong);
+  border-top: 1px solid var(--line);
 }
-.scatter-host .axis-x {
+/* range-frame: axis lines exactly span data range */
+.scatter-host .frame-x {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  border-top: 1px solid var(--ink-3);
+}
+.scatter-host .frame-y {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-left: 1px solid var(--ink-3);
+}
+.scatter-host .tick-label {
   position: absolute;
-  color: var(--ink-2);
-  font-size: var(--t-sm);
-  z-index: 4;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
 }
-@media (max-width: 720px) {
-  /* on narrow screens the x-axis label collides with the bottom quadrant labels */
-  .scatter-host .axis-x { display: none; }
+.scatter-wrap {
+  margin-top: var(--s-3);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr auto;
+  gap: var(--s-2);
+}
+.scatter-wrap .scatter-host { grid-column: 2; grid-row: 1; margin: 0; }
+.axis-label {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+}
+.axis-label-y {
+  grid-column: 1; grid-row: 1;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  align-self: center;
+}
+.axis-label-x {
+  grid-column: 2; grid-row: 2;
+  text-align: center;
+  padding-top: var(--s-2);
 }
 .scatter-host .pt {
   position: absolute;
@@ -492,11 +591,8 @@ svg .grp:hover rect { stroke: var(--sage); }
 .scatter-host .pt-label {
   position: absolute;
   transform: translate(-50%, 10px);
-  color: var(--ink);
-  background: oklch(11% 0.011 80 / 0.95);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 2px 8px;
+  color: var(--ink-2);
+  padding: 2px 6px;
   font-size: var(--t-xs);
   white-space: nowrap;
   pointer-events: none;
@@ -505,7 +601,22 @@ svg .grp:hover rect { stroke: var(--sage); }
   transition: opacity .14s var(--ease);
   font-feature-settings: "tnum";
 }
-.scatter-host .pt-label.show { opacity: 1; }
+/* hover state: small tooltip-ish */
+.scatter-host .pt-label.show {
+  opacity: 1;
+  color: var(--ink);
+  background: oklch(11% 0.011 80 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+/* Tufte direct labels: anchor labels are always visible, no background */
+.scatter-host .pt-label.anchor {
+  opacity: 1;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-style: italic;
+}
 
 .hot-detail {
   background: var(--surface);
@@ -662,22 +773,19 @@ svg .grp:hover rect { stroke: var(--sage); }
 }
 .reading-order li b { color: var(--ink); font-weight: 600; }
 
-/* ---------- ingest pipeline diagram ----------------------------------- */
+/* ---------- ingest stages (Tufte: erase the box) ---------------------- */
 .ingest-stages {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--s-1);
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  margin-top: var(--s-3);
+  gap: var(--s-7);
+  margin-top: var(--s-4);
 }
-@media (max-width: 880px) { .ingest-stages { grid-template-columns: 1fr; } }
+@media (max-width: 880px) { .ingest-stages { grid-template-columns: 1fr; gap: var(--s-6); } }
 .stage {
-  background: var(--bg);
-  padding: var(--s-5) var(--s-6);
+  padding: 0;
   position: relative;
+  border-top: 1px solid var(--sage-line);
+  padding-top: var(--s-4);
 }
 .stage .role {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -734,41 +842,53 @@ svg .grp:hover rect { stroke: var(--sage); }
 .hooks .pair span { color: var(--ink-2); }
 @media (max-width: 720px) { .hooks .pair { grid-template-columns: 1fr; gap: var(--s-1); } }
 
-/* ---------- dedup layers ----------------------------------------------- */
-.layers {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--s-5);
+/* ---------- supertable (Tufte C6) -------------------------------------- */
+.supertable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
   margin-top: var(--s-3);
+  font-variant-numeric: tabular-nums;
 }
-@media (max-width: 880px) { .layers { grid-template-columns: 1fr; } }
-.layer {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: var(--s-5) var(--s-6);
-  transition: border-color .18s var(--ease), background .18s var(--ease);
+.supertable thead th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink-3);
+  padding: 0 var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-.layer:hover { border-color: var(--sage-line); }
-.layer h4 {
-  margin: 0 0 var(--s-3);
-  font-size: var(--t-lg);
-  font-weight: 600;
-  letter-spacing: -0.005em;
+.supertable tbody td, .supertable tbody th {
+  padding: var(--s-3);
+  vertical-align: top;
+  color: var(--ink-2);
+  text-align: left;
+  font-weight: 400;
+  line-height: 1.5;
 }
-.layer dl { margin: 0; display: grid; grid-template-columns: 70px 1fr; gap: var(--s-2) var(--s-4); font-size: var(--t-md); line-height: 1.5; }
-.layer dt { color: var(--ink-3); font-size: var(--t-sm); padding-top: 3px; font-weight: 500; }
-.layer dd { margin: 0; color: var(--ink-2); }
-.layer dd code { font-size: 90%; }
-
-.extra-layers {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s-5);
-  margin-top: var(--s-5);
+/* topical rules between groups (supertable convention, p.178) */
+.supertable tbody tr.topical th,
+.supertable tbody tr.topical td {
+  border-top: 1px solid var(--line);
 }
-@media (max-width: 880px) { .extra-layers { grid-template-columns: 1fr; } }
-.extra-layers .layer { background: transparent; border-style: dashed; }
+.supertable tbody tr {
+  transition: background .15s var(--ease);
+  cursor: pointer;
+}
+.supertable tbody tr:hover { background: var(--surface); }
+.supertable .row-num {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  width: 28px;
+}
+.supertable .row-name { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.supertable code { font-size: 92%; background: transparent; padding: 0; color: var(--ink); }
+@media (max-width: 880px) {
+  .supertable { display: block; overflow-x: auto; }
+  .supertable .row-name { white-space: normal; }
+}
 
 .dedup-info {
   margin-top: var(--s-5);
@@ -810,36 +930,33 @@ footer a:hover { color: var(--ink-2); }
 </head>
 <body>
 
-<header class="hero">
-  <div class="shell">
+<div class="layout">
+
+<aside class="sidebar">
+  <div class="brand">
     <h1>aha</h1>
     <p class="brand-line">Agent History Aggregator</p>
-    <p class="stand">
-      Local search over Pi, Claude Code, and Codex transcripts. Deterministic
-      <code>tar.zst</code> bundles, content-addressed in a depot, ingested into
-      a rebuildable SQLite + FTS5 corpus, queried by stable canonical refs.
-    </p>
-    <div class="meta">
-      <span><b>16K</b> lines of Go</span>
-      <span><b>15</b> internal packages</span>
-      <span><b>5</b> command surfaces with shared metadata</span>
-      <span><b>2</b> depot backends, <b>3</b> source adapters</span>
-    </div>
   </div>
-</header>
 
-<nav class="tabs" id="tabs" role="tablist">
-  <div class="inner">
+  <nav class="tabs" id="tabs" role="tablist">
     <button data-tab="pipeline" class="active" role="tab">Pipeline</button>
     <button data-tab="novel" role="tab">Mechanisms</button>
     <button data-tab="ingest" role="tab">Ingest</button>
     <button data-tab="dedup" role="tab">Deduplication</button>
     <button data-tab="hotspots" role="tab">Hotspots</button>
     <button data-tab="map" role="tab">Codebase</button>
-  </div>
-</nav>
+  </nav>
 
-<main class="shell">
+  <dl class="sidebar-meta">
+    <dt>Go</dt>     <dd><span class="num">16,172</span> lines</dd>
+    <dt>Packages</dt><dd><span class="num">15</span> in internal</dd>
+    <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
+    <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
+    <dt>Commands</dt><dd><span class="num">12</span></dd>
+  </dl>
+</aside>
+
+<main class="content">
 
 <!-- ===================================================== PIPELINE ====== -->
 <section id="pipeline" class="active">
@@ -853,91 +970,87 @@ footer a:hover { color: var(--ink-2); }
   </div>
 
   <div class="pipeline-wrap">
-    <svg viewBox="0 0 1180 360" role="img" aria-label="aha pipeline">
+    <svg viewBox="0 0 1180 240" role="img" aria-label="aha pipeline">
       <defs>
         <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
           <path d="M0,0 L9,5 L0,10 z" fill="currentColor"/>
         </marker>
       </defs>
 
+      <!-- single horizontal flow line (Tufte: the data-ink is the connection) -->
+      <g color="var(--ink-3)">
+        <path class="arrow" d="M115,170 L1100,170"/>
+      </g>
+
+      <!-- Stage 1: sources -->
       <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery and parse. Read-only. Source-specific behavior stays here; everything downstream is source-agnostic.">
-        <rect class="box" x="20" y="30" width="190" height="170" rx="8"/>
-        <text x="115" y="58" class="title" text-anchor="middle">local sources</text>
-        <text x="115" y="86" text-anchor="middle" class="lbl">~/.pi/agent/sessions</text>
-        <text x="115" y="106" text-anchor="middle" class="lbl">~/.claude/projects</text>
-        <text x="115" y="126" text-anchor="middle" class="lbl">~/.codex/sessions</text>
-        <text x="115" y="162" text-anchor="middle" class="good">read-only</text>
-        <text x="115" y="186" text-anchor="middle" class="lbl">internal/adapters</text>
+        <text x="115" y="40" class="title" text-anchor="middle">local sources</text>
+        <text x="115" y="62" text-anchor="middle" class="lbl">~/.pi/agent/sessions</text>
+        <text x="115" y="80" text-anchor="middle" class="lbl">~/.claude/projects</text>
+        <text x="115" y="98" text-anchor="middle" class="lbl">~/.codex/sessions</text>
+        <text x="115" y="124" text-anchor="middle" class="good">read-only</text>
+        <text x="115" y="160" text-anchor="middle" class="lbl">internal/adapters</text>
+        <circle cx="115" cy="170" r="3" fill="var(--ink-2)"/>
       </g>
 
+      <!-- Stage 2: snapshot bundle -->
       <g class="grp" data-pkg="internal/archive" data-info="Capture, then manifest.json plus copied raw files, then a deterministic tar.zst. Determinism rules: sorted manifest and files, normalized tar metadata, fixed zstd encoder, length-prefixed state signature.">
-        <rect class="box accent" x="260" y="30" width="220" height="170" rx="8"/>
-        <text x="370" y="58" class="title" text-anchor="middle">snapshot bundle</text>
-        <text x="370" y="86" text-anchor="middle" class="lbl">manifest.json</text>
-        <text x="370" y="106" text-anchor="middle" class="lbl">stable file copies</text>
-        <text x="370" y="126" text-anchor="middle" class="lbl">deterministic tar.zst</text>
-        <text x="370" y="162" text-anchor="middle" class="good">content-addressed</text>
-        <text x="370" y="186" text-anchor="middle" class="lbl">internal/archive</text>
+        <text x="370" y="40" class="title" text-anchor="middle">snapshot bundle</text>
+        <text x="370" y="62" text-anchor="middle" class="lbl">manifest.json</text>
+        <text x="370" y="80" text-anchor="middle" class="lbl">stable file copies</text>
+        <text x="370" y="98" text-anchor="middle" class="lbl">deterministic tar.zst</text>
+        <text x="370" y="124" text-anchor="middle" class="good">content-addressed</text>
+        <text x="370" y="160" text-anchor="middle" class="lbl">internal/archive</text>
+        <circle cx="370" cy="170" r="4" fill="var(--sage)"/>
       </g>
 
+      <!-- Stage 3: depot -->
       <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Bundle objects are durable truth; catalog shards are repairable.">
-        <rect class="box accent" x="530" y="30" width="220" height="170" rx="8"/>
-        <text x="640" y="58" class="title" text-anchor="middle">depot</text>
-        <text x="640" y="86" text-anchor="middle" class="lbl">bundles/v1/&lt;sha&gt;.tar.zst</text>
-        <text x="640" y="106" text-anchor="middle" class="lbl">catalog/v1/&lt;machine&gt;.json</text>
-        <text x="640" y="126" text-anchor="middle" class="lbl">depot.json (marker)</text>
-        <text x="640" y="162" text-anchor="middle" class="good">local by default</text>
-        <text x="640" y="186" text-anchor="middle" class="lbl">internal/depot</text>
+        <text x="640" y="40" class="title" text-anchor="middle">depot</text>
+        <text x="640" y="62" text-anchor="middle" class="lbl">bundles/v1/&lt;sha&gt;.tar.zst</text>
+        <text x="640" y="80" text-anchor="middle" class="lbl">catalog/v1/&lt;machine&gt;.json</text>
+        <text x="640" y="98" text-anchor="middle" class="lbl">depot.json (marker)</text>
+        <text x="640" y="124" text-anchor="middle" class="good">local by default</text>
+        <text x="640" y="160" text-anchor="middle" class="lbl">internal/depot</text>
+        <circle cx="640" cy="170" r="4" fill="var(--sage)"/>
       </g>
 
+      <!-- Stage 4: corpus -->
       <g class="grp" data-pkg="internal/corpus" data-info="Derived SQLite + FTS5 + blobs. Append-only ingest, trigger-maintained FTS. Rebuildable from depot.">
-        <rect class="box accent" x="800" y="30" width="220" height="170" rx="8"/>
-        <text x="910" y="58" class="title" text-anchor="middle">corpus</text>
-        <text x="910" y="86" text-anchor="middle" class="lbl">corpus.db (SQLite + FTS5)</text>
-        <text x="910" y="106" text-anchor="middle" class="lbl">blobs/ &nbsp; images/</text>
-        <text x="910" y="126" text-anchor="middle" class="lbl">append-only triggers</text>
-        <text x="910" y="162" text-anchor="middle" class="good">derived &amp; repairable</text>
-        <text x="910" y="186" text-anchor="middle" class="lbl">internal/corpus</text>
+        <text x="910" y="40" class="title" text-anchor="middle">corpus</text>
+        <text x="910" y="62" text-anchor="middle" class="lbl">corpus.db (SQLite + FTS5)</text>
+        <text x="910" y="80" text-anchor="middle" class="lbl">blobs/ &nbsp; images/</text>
+        <text x="910" y="98" text-anchor="middle" class="lbl">append-only triggers</text>
+        <text x="910" y="124" text-anchor="middle" class="good">derived &amp; repairable</text>
+        <text x="910" y="160" text-anchor="middle" class="lbl">internal/corpus</text>
+        <circle cx="910" cy="170" r="4" fill="var(--sage)"/>
       </g>
 
+      <!-- Stage 5: search + read forks -->
       <g class="grp" data-pkg="internal/search" data-info="Local FTS5 query construction, indexed --project and --path-token filters, capped limits. Search never contacts the depot.">
-        <rect class="box" x="1040" y="30" width="120" height="80" rx="8"/>
-        <text x="1100" y="58" class="title" text-anchor="middle">search</text>
-        <text x="1100" y="84" text-anchor="middle" class="lbl">FTS5</text>
+        <text x="1100" y="62" class="title" text-anchor="middle">search</text>
+        <text x="1100" y="80" text-anchor="middle" class="lbl">FTS5</text>
       </g>
       <g class="grp" data-pkg="corpus.ReadCanonical / ResolveHuman" data-info="ReadCanonical: exact lookup of msg:v1, session:v1, artifact:v1 refs. ResolveHuman: a separate fallible resolver for fuzzy human input.">
-        <rect class="box" x="1040" y="120" width="120" height="80" rx="8"/>
-        <text x="1100" y="148" class="title" text-anchor="middle">read</text>
-        <text x="1100" y="174" text-anchor="middle" class="lbl">canonical refs</text>
+        <text x="1100" y="118" class="title" text-anchor="middle">read</text>
+        <text x="1100" y="136" text-anchor="middle" class="lbl">canonical refs</text>
       </g>
+      <circle cx="1100" cy="170" r="3" fill="var(--ink-2)"/>
 
-      <g color="oklch(58% 0.014 80)">
-        <path class="arrow" d="M210,115 L260,115"/>
-      </g>
-      <g color="oklch(74% 0.115 175)">
-        <path class="arrow thick" d="M480,115 L530,115"/>
-        <path class="arrow thick" d="M750,115 L800,115"/>
-      </g>
-      <g color="oklch(58% 0.014 80)">
-        <path class="arrow" d="M1020,75 L1040,68"/>
-        <path class="arrow" d="M1020,145 L1040,152"/>
-      </g>
-
-      <text x="235" y="145" class="lbl" text-anchor="middle">discover / parse</text>
-      <text x="505" y="145" class="lbl" text-anchor="middle">PutBundle</text>
-      <text x="775" y="145" class="lbl" text-anchor="middle">ingest pending</text>
-
-      <g>
-        <rect class="box" x="20" y="240" width="1140" height="90" rx="8"/>
-        <text x="40" y="268" class="title">CLI surface</text>
-        <text x="40" y="294" class="lbl">snapshot &middot; refresh &middot; ingest &middot; search &middot; read &middot; status &middot; verify &middot; conflicts &middot; corpus &middot; depot &middot; doctor &middot; init</text>
-        <text x="40" y="318" class="lbl">every command emits <tspan class="good">--json</tspan>; refs round-trip; search emits copy-pastable <tspan class="good">ref_text</tspan>; read accepts <tspan class="good">msg:v1</tspan>, <tspan class="good">session:v1</tspan>, <tspan class="good">artifact:v1</tspan></text>
-      </g>
+      <!-- arrow labels (transition verbs) sit BELOW the spine -->
+      <text x="240" y="195" class="lbl" text-anchor="middle">discover / parse</text>
+      <text x="505" y="195" class="lbl" text-anchor="middle">PutBundle</text>
+      <text x="775" y="195" class="lbl" text-anchor="middle">ingest pending</text>
     </svg>
 
-    <div class="pkg-info" id="pkg-info">Hover a box to see what it owns.</div>
+    <div class="pkg-info" id="pkg-info">Hover a stage to see what it owns.</div>
   </div>
 
+  <h3 class="sub">CLI surface</h3>
+  <p class="cli-line"><code>snapshot</code> · <code>refresh</code> · <code>ingest</code> · <code>search</code> · <code>read</code> · <code>status</code> · <code>verify</code> · <code>conflicts</code> · <code>corpus</code> · <code>depot</code> · <code>doctor</code> · <code>init</code></p>
+  <p class="cli-note">Every command emits <code>--json</code>; refs round-trip; search emits copy-pastable <code>ref_text</code>; read accepts <code>msg:v1</code>, <code>session:v1</code>, <code>artifact:v1</code>.</p>
+
+  <h3 class="sub">Invariants</h3>
   <dl class="facts">
     <dt>Trust boundary</dt>
     <dd>Only <code>internal/depot</code> may import network packages. A static test guards it.</dd>
@@ -1431,61 +1544,58 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
-  <div class="layers">
-    <div class="layer grp" data-info="If two captures produce byte-identical tar.zst, the depot stores one object. Local checks the target path exists; R2 uses S3 object existence.">
-      
-      <h4>Bundle object</h4>
-      <dl>
-        <dt>key</dt>      <dd><code>bundle_sha256</code></dd>
-        <dt>where</dt>    <dd>depot <code>bundles/v1/&lt;sha&gt;.tar.zst</code></dd>
-        <dt>effect</dt>   <dd>identical bytes share one object</dd>
-        <dt>scope</dt>    <dd>cross-machine</dd>
-      </dl>
-    </div>
-    <div class="layer grp" data-info="The corpus.bundles table has UNIQUE(bundle_sha256). Re-ingest of the same SHA records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
-      
-      <h4>Corpus bundle row</h4>
-      <dl>
-        <dt>key</dt>      <dd><code>bundle_sha256</code> <code>UNIQUE</code></dd>
-        <dt>where</dt>    <dd>corpus <code>bundles</code> + <code>ingest_attempts</code></dd>
-        <dt>effect</dt>   <dd>duplicate ingest is recorded, not done</dd>
-        <dt>scope</dt>    <dd>per corpus</dd>
-      </dl>
-    </div>
-    <div class="layer grp" data-info="Different bundles often share file contents. When a Claude session file grew between two captures, the new version is one blob; the old shared blob is reused.">
-      
-      <h4>File blob</h4>
-      <dl>
-        <dt>key</dt>      <dd><code>file_sha256</code></dd>
-        <dt>where</dt>    <dd>corpus <code>blobs/&lt;sha&gt;</code></dd>
-        <dt>effect</dt>   <dd>raw bytes reused across bundles</dd>
-        <dt>scope</dt>    <dd>per corpus</dd>
-      </dl>
-    </div>
-  </div>
+  <!-- Tufte C6: one supertable. Rows ordered as a story: byte-identical at
+       the depot, identical SHA in the corpus, shared file blobs across
+       bundles, then the two cleverer set-shaped shortcuts. -->
+  <table class="supertable" id="dedup-table">
+    <thead>
+      <tr><th></th><th>Mechanism</th><th>Key</th><th>Where</th><th>Effect</th><th>Scope</th></tr>
+    </thead>
+    <tbody>
+      <tr class="topical" data-info="If two captures produce byte-identical tar.zst, the depot stores one object. Local checks the target path exists; R2 uses S3 object existence.">
+        <th class="row-num">1</th>
+        <td class="row-name">Bundle object</td>
+        <td><code>bundle_sha256</code></td>
+        <td>depot <code>bundles/v1/&lt;sha&gt;.tar.zst</code></td>
+        <td>identical bytes share one object</td>
+        <td>cross-machine</td>
+      </tr>
+      <tr data-info="The corpus.bundles table has UNIQUE(bundle_sha256). Re-ingest of the same SHA records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
+        <th class="row-num">2</th>
+        <td class="row-name">Corpus bundle row</td>
+        <td><code>bundle_sha256 UNIQUE</code></td>
+        <td>corpus <code>bundles</code>, <code>ingest_attempts</code></td>
+        <td>duplicate ingest is recorded, not done</td>
+        <td>per corpus</td>
+      </tr>
+      <tr data-info="Different bundles often share file contents. When a Claude session file grew between two captures, the new version is one blob; the old shared blob is reused.">
+        <th class="row-num">3</th>
+        <td class="row-name">File blob</td>
+        <td><code>file_sha256</code></td>
+        <td>corpus <code>blobs/&lt;sha&gt;</code></td>
+        <td>raw bytes reused across bundles</td>
+        <td>per corpus</td>
+      </tr>
+      <tr class="topical" data-info="Catalog refs carry state_sha256 which excludes the volatile bundle_id and captured_at fields. Equal state hash means unchanged source state.">
+        <th class="row-num">4</th>
+        <td class="row-name">State equivalence</td>
+        <td><code>state_sha256</code></td>
+        <td>catalog refs</td>
+        <td>unchanged source reuses a ref without fetch</td>
+        <td>per machine</td>
+      </tr>
+      <tr data-info="No-arg ingest computes the set difference between catalog and corpus.">
+        <th class="row-num">5</th>
+        <td class="row-name">Pending set</td>
+        <td><code>catalog − corpus</code></td>
+        <td><code>aha ingest</code> (no args)</td>
+        <td>fetches only new refs; scales by new bundles, not catalog size</td>
+        <td>per ingest</td>
+      </tr>
+    </tbody>
+  </table>
 
-  <div class="extra-layers">
-    <div class="layer">
-      <h4>State equivalence (not bytes)</h4>
-      <dl>
-        <dt>key</dt>    <dd><code>state_sha256</code></dd>
-        <dt>effect</dt> <dd>unchanged source state reuses an existing ref, even though a fresh capture would produce a new bundle SHA</dd>
-        <dt>why</dt>    <dd>avoid <em>doing</em> the work, not just storing it</dd>
-        <dt>test</dt>   <dd>zero-fetch + zero-write counter assertions</dd>
-      </dl>
-    </div>
-    <div class="layer">
-      <h4>Pending set = catalog − corpus</h4>
-      <dl>
-        <dt>key</dt>    <dd>set difference</dd>
-        <dt>effect</dt> <dd>no-arg <code>ingest</code> fetches only refs not yet in the corpus</dd>
-        <dt>why</dt>    <dd>scales by <em>new</em> bundles, not by catalog size</dd>
-        <dt>test</dt>   <dd>PBT: many trivial duplicates produce the same pending set</dd>
-      </dl>
-    </div>
-  </div>
-
-  <div class="dedup-info" id="dedup-info">Hover a layer above for context.</div>
+  <div class="dedup-info" id="dedup-info">Hover a row for the operational detail.</div>
 </section>
 
 
@@ -1512,14 +1622,24 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
-  <div class="scatter-host" id="scatter">
-    <div class="quad tl"><span class="qlabel" style="left:0;top:0">validate next: high stakes, ungrounded</span></div>
-    <div class="quad tr"><span class="qlabel" style="right:0;top:0;text-align:right">load-bearing &amp; proven</span></div>
-    <div class="quad bl"><span class="qlabel" style="left:0;bottom:0">backlog: low stakes, ungrounded</span></div>
-    <div class="quad br"><span class="qlabel" style="right:0;bottom:0;text-align:right">fine as-is</span></div>
-    <div class="midline-v"></div>
-    <div class="midline-h"></div>
-    <div class="axis-x" style="bottom:10px; left:50%; transform: translateX(-50%);">← ungrounded · grounded →</div>
+  <div class="scatter-wrap">
+    <div class="axis-label axis-label-y">stakes</div>
+    <div class="scatter-host" id="scatter">
+      <div class="quad tl"><span class="qlabel" style="left:0;top:0">validate next</span></div>
+      <div class="quad tr"><span class="qlabel" style="right:0;top:0;text-align:right">proven</span></div>
+      <div class="quad bl"><span class="qlabel" style="left:0;bottom:0">backlog</span></div>
+      <div class="quad br"><span class="qlabel" style="right:0;bottom:0;text-align:right">fine</span></div>
+      <div class="midline-v"></div>
+      <div class="midline-h"></div>
+      <!-- Tufte range-frame axes -->
+      <div class="frame-x"></div>
+      <div class="frame-y"></div>
+      <div class="tick-label" style="left:-10px; bottom:-18px;">0</div>
+      <div class="tick-label" style="right:-6px; bottom:-18px;">1</div>
+      <div class="tick-label" style="left:-18px; top:-6px;">1</div>
+      <div class="tick-label" style="left:-18px; bottom:-6px;">0</div>
+    </div>
+    <div class="axis-label axis-label-x">grounded ➞</div>
   </div>
 
   <div class="hot-detail" id="hot-detail">
@@ -1546,13 +1666,17 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
+  <h3 class="sub">Package sizes</h3>
+  <p class="cli-note" style="margin-bottom: var(--s-4)">Production-code lines per package (tests omitted). Sorted by size. Click a name to load its detail panel below.</p>
+  <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
+
+  <h3 class="sub" style="margin-top: var(--s-7)">Package detail</h3>
   <div class="map-grid">
     <div class="tree" id="tree"></div>
     <div class="pkg-detail" id="pkg-detail">
       <h3>Pick a package</h3>
       <p class="why">
-        The left column is the production-code <code>internal/*</code> tree by
-        approximate line count (production files only, tests omitted).
+        Click a package name in the chart above or the tree on the left.
       </p>
     </div>
   </div>
@@ -1579,6 +1703,7 @@ create index idx_session_path_tokens_token_session
 </section>
 
 </main>
+</div>
 
 <script>
 /* ============================================================
@@ -1608,7 +1733,7 @@ document.querySelectorAll('#pipeline .grp').forEach(g => {
   g.addEventListener('mouseenter', set);
   g.addEventListener('click', set);
 });
-document.querySelectorAll('#dedup .grp').forEach(g => {
+document.querySelectorAll('#dedup [data-info]').forEach(g => {
   const set = () => { document.getElementById('dedup-info').textContent = g.dataset.info; };
   g.addEventListener('mouseenter', set);
 });
@@ -1869,11 +1994,25 @@ const HOTSPOTS = [
 
 const scatter = document.getElementById('scatter');
 const ptEls = {};
+/* Tufte B4 (direct labels): permanently label the dots that anchor each
+   quadrant — the highest-stakes ungrounded item ("validate next"), the
+   most-grounded high-stakes item ("proven"), the lowest-stakes item,
+   and one item near the origin. Other dots reveal their name on hover. */
+function scoreCorner(h, gx, sy) {
+  // gx, sy are target grounded and stakes coordinates (0..1)
+  return -((h.grounded - gx) ** 2 + (h.stakes - sy) ** 2);
+}
+const anchors = new Set();
+const corners = [[0,1],[1,1],[0,0],[1,0]];
+for (const [gx, sy] of corners) {
+  const winner = HOTSPOTS.slice().sort((a,b) => scoreCorner(b,gx,sy) - scoreCorner(a,gx,sy))[0];
+  if (winner) anchors.add(winner.id);
+}
 function placeHotspot(h) {
   const pt = document.createElement('div');
   const stake = 1 - h.stakes;
-  const x = (8 + h.grounded * 84);
-  const y = (8 + stake * 80);
+  const x = (4 + h.grounded * 92);
+  const y = (4 + stake * 88);
   pt.className = 'pt s-' + (h.severity === 'doubt' ? 'hot' : h.severity === 'warn' ? 'warn' : h.severity === 'solid' ? 'solid' : 'novel');
   pt.style.left = x + '%';
   pt.style.top = y + '%';
@@ -1884,8 +2023,10 @@ function placeHotspot(h) {
   label.style.top = y + '%';
   if (x > 60) label.style.transform = 'translate(-90%, 10px)';
   label.textContent = h.name;
+  const anchor = anchors.has(h.id);
+  if (anchor) label.classList.add('show', 'anchor');
   pt.addEventListener('mouseenter', () => label.classList.add('show'));
-  pt.addEventListener('mouseleave', () => { if (!pt.classList.contains('selected')) label.classList.remove('show'); });
+  pt.addEventListener('mouseleave', () => { if (!pt.classList.contains('selected') && !anchor) label.classList.remove('show'); });
   pt.addEventListener('click', () => showHotspot(h.id, true));
   scatter.appendChild(pt);
   scatter.appendChild(label);
@@ -1953,15 +2094,65 @@ tree.innerHTML = '<div><b>aha</b></div><ul>' +
   PACKAGES.map(p => `<li><a href="#" class="pkg" data-pkg="${p.name}">${p.name.replace('internal/','')}</a> <span class="lines">${p.lines}</span></li>`).join('') +
   '</ul></li></ul>';
 
-tree.querySelectorAll('a.pkg').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault();
-  const p = PACKAGES.find(x => x.name === a.dataset.pkg);
+function loadPkg(name) {
+  const p = PACKAGES.find(x => x.name === name);
+  if (!p) return;
   document.getElementById('pkg-detail').innerHTML = `
     <h3>${p.name} <span class="tag-chip">${p.lines}</span></h3>
     <p class="why">${p.why}</p>
     <b style="color:var(--ink-3);font-size:var(--t-xs);letter-spacing:.08em;text-transform:uppercase">Read these first</b>
     <ul>${p.read.map(r => `<li><code>${r}</code></li>`).join('')}</ul>`;
+}
+tree.querySelectorAll('a.pkg').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  loadPkg(a.dataset.pkg);
 }));
+
+/* ============================================================
+   Cleveland dot plot of package sizes (Tufte B4 + B5)
+   ============================================================ */
+function renderPackageChart() {
+  const svg = document.getElementById('pkg-chart');
+  if (!svg) return;
+  const rows = PACKAGES.map(p => ({
+    name: p.name.replace('internal/',''),
+    full: p.name,
+    n: parseInt(String(p.lines).replace(/[^0-9]/g,''), 10),
+  })).sort((a,b) => b.n - a.n);
+  const W = 720, H = 380;
+  const padL = 130, padR = 80, padT = 16, padB = 24;
+  const xmax = Math.max(...rows.map(r => r.n));
+  const xmin = Math.min(...rows.map(r => r.n));
+  const rowH = (H - padT - padB) / rows.length;
+  const x = v => padL + ((v - 0) / xmax) * (W - padL - padR);
+  let out = '';
+  // range-frame x-axis: hairline from min to max value, end-labels only
+  const xAxisY = H - padB + 4;
+  out += `<line x1="${x(xmin)}" y1="${xAxisY}" x2="${x(xmax)}" y2="${xAxisY}" stroke="var(--ink-3)" stroke-width="1"/>`;
+  out += `<text x="${x(xmin)}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="start">${xmin.toLocaleString()}</text>`;
+  out += `<text x="${x(xmax)}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="end">${xmax.toLocaleString()}</text>`;
+  out += `<text x="${(x(xmin)+x(xmax))/2}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="middle">lines</text>`;
+  // rows
+  rows.forEach((r, i) => {
+    const cy = padT + rowH * (i + 0.5);
+    // direct label (left)
+    out += `<text x="${padL - 10}" y="${cy + 4}" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="var(--ink-2)" text-anchor="end" data-pkg="${r.full}" class="pkg-row">${r.name}</text>`;
+    // Tufte's dot-plot leader: subtle line from label to dot
+    out += `<line x1="${padL}" y1="${cy}" x2="${x(r.n)}" y2="${cy}" stroke="var(--line)" stroke-width="1"/>`;
+    // the dot itself (the data-ink)
+    out += `<circle cx="${x(r.n)}" cy="${cy}" r="3.5" fill="var(--sage)" data-pkg="${r.full}" class="pkg-row" style="cursor:pointer"/>`;
+    // value label (right of dot)
+    out += `<text x="${x(r.n) + 8}" y="${cy + 4}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)">${r.n.toLocaleString()}</text>`;
+  });
+  svg.innerHTML = out;
+  svg.style.height = H + 'px';
+  svg.querySelectorAll('.pkg-row').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => loadPkg(el.dataset.pkg));
+    el.addEventListener('mouseenter', () => loadPkg(el.dataset.pkg));
+  });
+}
+renderPackageChart();
 </script>
 </body>
 </html>
