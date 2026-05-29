@@ -68,10 +68,10 @@ fuzz() {
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzParseAddress -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzValidateBundleKey -fuzztime="$FUZZTIME"
-  # MCP framing fuzz targets were retired with the migration to
-  # github.com/modelcontextprotocol/go-sdk in 0fdd*** — the SDK owns the
-  # JSON-RPC wire format and ships its own framer tests in
-  # /root/go/pkg/mod/.../mcp/*_test.go.
+  # The MCP framer is owned by github.com/modelcontextprotocol/go-sdk and
+  # fuzzed in that repo's mcp/*_test.go. Wire-format regressions land in
+  # the conformance suite (`scripts/verify.sh mcp`) before they could
+  # ship.
 }
 
 # ts typechecks the generated TypeScript client surface and runs its runtime

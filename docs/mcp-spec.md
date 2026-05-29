@@ -13,19 +13,19 @@ call.
   functions the CLI already calls.
 - Stay read-only by default. State-changing operations (`init`, `refresh`,
   `snapshot`, `ingest`, `verify --repair-fts`, `corpus vacuum`,
-  `corpus prune-orphans --force`, `depot init/compact/repair`) are deliberately
-  not exposed in phase 1.
+  `corpus prune-orphans --force`, `depot init/compact/repair`) are
+  deliberately not exposed.
 - Ship as a single subcommand: `aha mcp`. No new binary, no new dependency.
 
-## Non-goals (phase 1)
+## Non-goals
 
-- HTTP transport, SSE, WebSocket. Stdio only.
 - Write tools. No ingest/snapshot/refresh.
-- Code-mode TypeScript surface generation. Tracked separately; see "Phase 2"
-  below.
-- Dashboard. Tracked separately; see "Phase 3" below.
-- Authentication. Same trust model as the CLI: whoever can run `aha mcp` can
-  read the configured corpus.
+- HTTP transport. The dashboard at `internal/server` is HTTP+REST, not
+  MCP-over-HTTP; the MCP surface is stdio only.
+- Authentication on the MCP transport. Same trust model as the CLI:
+  whoever can run `aha mcp` can read the configured corpus. The HTTP
+  dashboard has its own bearer-token model documented in
+  `internal/server/server.go`.
 
 ## Tool surface
 
@@ -43,8 +43,9 @@ output.
 | `corpus_size` | `aha corpus size`                    | none                                                                                                                                               | `corpus.SizeReport`                                   |
 | `doctor`      | `aha doctor` (local-only by default) | none                                                                                                                                               | `{version, config, adapters, sources, corpus, next}`  |
 
-`doctor` skips the depot probe in phase 1 to keep the MCP surface local-only
-and free of network calls.
+`doctor` skips the depot probe to keep the MCP surface local-only and free
+of network calls. This is a permanent design decision, not a deferral: the
+CLI's `aha doctor` retains `--depot` for the same surface, separately.
 
 ## Protocol
 
@@ -97,7 +98,7 @@ aha mcp [--config PATH] [--repo DIR]
   `corpus_size`, and `doctor` are reachable; write tools are not registered.
 - Same filesystem access as the CLI: whatever corpus and config the calling
   user can read.
-- No depot writes, no R2 calls, no remote network access in phase 1.
+- No depot writes, no R2 calls, no remote network access.
 - Strict argument validation: unknown keys are rejected; required keys are
   enforced before invoking the underlying function.
 - Output uses the same JSON shapes the CLI already emits, so the existing JSON
@@ -220,7 +221,7 @@ A green run proves that:
 This is the load-bearing claim for code-mode runtime compatibility — a
 single round-trip for the agent's "search → read N" plan.
 
-## Phase 2 — code-mode adapter (shipped)
+## Code-mode TypeScript adapter
 
 `internal/mcp/codegen` reflects on the Go return types of each tool and emits
 a typed TypeScript surface at `clients/typescript/aha-mcp.ts`. Regenerate via
@@ -251,7 +252,7 @@ const contexts = await Promise.all(refs.slice(0, 5).map(r =>
 ));
 ```
 
-## Phase 3 — dashboard (shipped)
+## HTTP dashboard
 
 `aha serve` mounts the same tool surface behind an HTTP handler in
 `internal/server`, served with a minimal vanilla HTML+JS UI embedded via
@@ -280,7 +281,7 @@ Security posture:
   refused unless `--allow-remote` (or `AHA_ALLOW_REMOTE=1`) is set.
 - Same dispatch as MCP (`mcp.CallTool`), so the same strict argument
   validation applies. Unknown keys are rejected with a 400.
-- All routes are read-only. There is no write surface in phase 1.
+- All routes are read-only. There is no write surface.
 - No CORS headers; this is a single-origin local UI.
 
 ## Host integration
@@ -340,21 +341,29 @@ omission is a decision rather than an oversight:
   fast local SQLite queries; plumbing cancellation through stable, well-tested
   query code buys little for the local workload and is not worth the churn
   until a real long-running tool exists.
-- **`structuredContent` on `tools/call` results.** Newer MCP revisions let a
-  tool return machine-typed `structuredContent` alongside the text `content`.
-  It is a real improvement for hosts that support it, but it cannot be
-  verified against real hosts (Claude Desktop/Cursor/Continue) from this repo,
-  and shipping an unverifiable protocol change is exactly the risk this
-  project avoids. The universal text-blob form is used until it can be tested
-  against live hosts. The typed `clients/typescript` surface already gives
-  code-mode callers static types over the parsed payload.
+- **`structuredContent` on `tools/call` results for list-typed tools.**
+  Object-typed tools (`status`, `verify`, `corpus_size`, `doctor`) emit
+  `structuredContent` alongside `content[].text` per the 2025-06-18 spec
+  — the six-leg conformance suite verifies the dict-form matches the
+  text payload across all three SDKs. List-typed tools (`search`, `read`,
+  `conflicts`) omit `structuredContent` because the official Python SDK
+  models the field as `Dict[str, Any]` and raises a Pydantic validation
+  error on arrays. The typed payload travels in `content[].text` for
+  those tools and the TS client surface JSON-parses it transparently.
 
 ## Open questions
 
-- Should `doctor` accept an opt-in `depot` arg in phase 1 or stay strictly
-  local? Default is "no" (local-only).
-- Should `read` accept an explicit `format` arg (`json` vs `md`)? Phase 1 only
-  returns the structured `[]ReadEntry`; markdown can be a phase 2 add.
-- Should `tools/list` advertise tool annotations (`readOnlyHint: true`) once
-  the spec stabilizes? Phase 1 declares read-only in the description string;
-  hint metadata is a phase 2 add.
+- Should `doctor` accept an opt-in `depot` arg, or stay strictly local?
+  Currently strictly local. The CLI's `aha doctor --depot` covers the
+  remote-probe case separately.
+- Should `read` accept an explicit `format` arg (`json` vs `md`)? Today
+  it returns the structured `[]ReadEntry` only; markdown can be added
+  additively.
+
+(Earlier revisions of this spec listed `structuredContent` and
+`readOnlyHint` annotations as deferred. Both shipped: every tool
+advertises the typed `ToolAnnotations{ReadOnlyHint: true, ...}` struct,
+and object-typed tools emit `structuredContent` alongside the text
+content. List-typed tools omit `structuredContent` because the official
+Python SDK rejects array structured content as a Pydantic type error;
+the typed payload travels in `content[].text` for those tools.)

@@ -466,6 +466,39 @@ func TestTokenAuthRejectsBasicAuth(t *testing.T) {
 	}
 }
 
+// The Authorization scheme name is technically case-insensitive per RFC
+// 7235, but every real MCP/coding-agent client emits "Bearer" with a
+// capital B. We enforce the canonical form strictly so a typo
+// (`bearer s3cret`) cannot accidentally authenticate.
+func TestTokenAuthRejectsLowercaseScheme(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req.Header.Set("Authorization", "bearer s3cret")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on lowercase scheme, got %d", w.Code)
+	}
+}
+
+// http.Header.Get returns only the first value. A client sending two
+// Authorization headers (rare, but seen with broken proxies) gets the
+// first read; we just need to confirm fail-closed when the first one
+// is wrong even if a later one happens to match.
+func TestTokenAuthOnlyHonoursFirstAuthorizationHeader(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req.Header.Add("Authorization", "Bearer wrong")
+	req.Header.Add("Authorization", "Bearer s3cret")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when first Authorization is wrong, got %d", w.Code)
+	}
+}
+
 func TestTokenAuthDisabledWhenEmpty(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: ""})

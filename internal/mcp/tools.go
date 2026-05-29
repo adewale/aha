@@ -56,6 +56,22 @@ func (b *CorpusBackend) Config() model.Config { return b.cfg }
 // via mcp.NewInMemoryTransports.
 var ServerInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 
+// ToolNames is the canonical, sorted list of tool names this server
+// registers. Exported so cross-language conformance tests (Python, TS, Go)
+// and the codegen drift test can assert against a single source of truth
+// rather than each hard-coding the same list. Update it alongside the
+// AddTool calls in registerTools and a test in tools_test.go will fail
+// loudly if the registered set drifts.
+var ToolNames = []string{
+	"conflicts",
+	"corpus_size",
+	"doctor",
+	"read",
+	"search",
+	"status",
+	"verify",
+}
+
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
 
 // SearchInput names the documented filter set for the search tool. The
@@ -233,6 +249,10 @@ func doDoctor(b Backend) (map[string]any, error) {
 // AddTool already decoded the args into the typed In struct (silently
 // dropping unknown fields). We re-decode strictly here to surface the
 // rejection the JSON Schema doesn't itself enforce.
+//
+// The error text mirrors the HTTP-side decodeInput phrasing
+// ("unexpected argument for <tool>: ...") so consumers can string-match
+// errors with one rule regardless of transport.
 func rejectExtras[T any](req *mcp.CallToolRequest) *mcp.CallToolResult {
 	raw := req.Params.Arguments
 	if len(raw) == 0 || string(raw) == "null" {
@@ -242,7 +262,7 @@ func rejectExtras[T any](req *mcp.CallToolRequest) *mcp.CallToolResult {
 	dec.DisallowUnknownFields()
 	var t T
 	if err := dec.Decode(&t); err != nil {
-		return errorResult(fmt.Errorf("unexpected argument: %w", err))
+		return errorResult(fmt.Errorf("unexpected argument for %s: %w", req.Params.Name, err))
 	}
 	return nil
 }

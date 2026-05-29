@@ -76,7 +76,34 @@ async function main() {
   }
   console.log(`read fan-out OK: ${contexts.length} contexts, ${contexts.reduce((n, c) => n + c.length, 0)} entries total`);
 
-  // ---- 5. status (no-arg tool) ----
+  // ---- 5. error-path: empty search must return [], not throw ----
+  // The canonical pattern relies on filter/map over the search result, so
+  // an empty list returned from a query that matches nothing has to be a
+  // typed empty array — not null, not an exception.
+  const noHits: SearchResult[] = await tools.search({ query: "definitelynotinthecorpus" });
+  if (!Array.isArray(noHits) || noHits.length !== 0) {
+    throw new Error(`empty search should return []: ${JSON.stringify(noHits).slice(0, 100)}`);
+  }
+  // Filter+map over the empty list must not throw — a real agent
+  // would write this composition unconditionally.
+  const filteredEmpty = noHits.filter((h) => h.role === "user").map((h) => h.ref_text);
+  if (filteredEmpty.length !== 0) throw new Error("filter+map over empty list produced entries");
+  console.log("empty-search composition OK: [] flows through filter+map without throwing");
+
+  // ---- 6. error-path: invalid ref propagates as a typed error ----
+  // Promise.all over reads must reject if any leg fails, so the agent's
+  // code can either catch it or surface it. A bad ref is the simplest
+  // way to force one leg to error.
+  let badRefThrew = false;
+  try {
+    await tools.read({ ref: "msg:v1:not-a-real-ref", before: 1, after: 1 });
+  } catch {
+    badRefThrew = true;
+  }
+  if (!badRefThrew) throw new Error("tools.read with invalid ref should have thrown");
+  console.log("invalid-ref read OK: typed surface propagates the error");
+
+  // ---- 7. status (no-arg tool) ----
   const status = await tools.status();
   if (typeof status !== "object" || status === null) {
     throw new Error(`status not an object: ${typeof status}`);

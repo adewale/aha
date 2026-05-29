@@ -31,18 +31,12 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
-// expectedTools is the canonical tool list. Any change here must be made
-// alongside the corresponding registration in tools.go and the conformance
-// scripts/test that hard-codes the same list.
-var expectedTools = []string{
-	"conflicts",
-	"corpus_size",
-	"doctor",
-	"read",
-	"search",
-	"status",
-	"verify",
-}
+
+// expectedTools is sourced from the package's exported canonical list,
+// not duplicated. Tests that need to assert against the registered set
+// reference this name; cross-language conformance scripts reference
+// mcp.ToolNames via the drift test below.
+var expectedTools = mcp.ToolNames
 
 func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 	t.Helper()
@@ -337,3 +331,43 @@ func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
 
 // Suppress unused import warnings for errors when test compilation drifts.
 var _ = errors.New
+
+// TestCanonicalToolListIsSorted guards a small invariant: ToolNames must be
+// in sorted order so cross-language reflections (Python sorted() in the
+// conformance scripts, TS .sort() in client_against_aha.ts) compare against
+// the same sequence. A drift elsewhere should be the loud failure.
+func TestCanonicalToolListIsSorted(t *testing.T) {
+	names := append([]string(nil), mcp.ToolNames...)
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, mcp.ToolNames) {
+		t.Fatalf("mcp.ToolNames must be sorted; got %v want %v", mcp.ToolNames, names)
+	}
+}
+
+// TestCanonicalToolListReferencedByConformanceScripts asserts that every
+// language harness that hard-codes the tool list (so it can be diffed
+// against the running server) references each tool name. The check is
+// substring-level on purpose — language syntax for "list of strings"
+// varies — but it catches the common drift mode of someone adding a tool
+// to tools.go and forgetting to update one of the harness arrays.
+func TestCanonicalToolListReferencedByConformanceScripts(t *testing.T) {
+	files := []string{
+		"../../scripts/mcp-conformance/client_against_aha.py",
+		"../../scripts/mcp-conformance/client_against_aha.ts",
+		"./conformance/go_sdk_test.go",
+	}
+	for _, file := range files {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			body, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+			text := string(body)
+			for _, name := range mcp.ToolNames {
+				if !strings.Contains(text, `"`+name+`"`) {
+					t.Fatalf("%s missing canonical tool %q (mcp.ToolNames source of truth)", file, name)
+				}
+			}
+		})
+	}
+}
