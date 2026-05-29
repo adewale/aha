@@ -458,11 +458,15 @@ svg .grp:hover rect { stroke: var(--sage); }
   position: absolute; top: 50%; left: 0; right: 0;
   border-top: 1px dashed var(--line-strong);
 }
-.scatter-host .axis-x, .scatter-host .axis-y {
+.scatter-host .axis-x {
   position: absolute;
   color: var(--ink-2);
   font-size: var(--t-sm);
   z-index: 4;
+}
+@media (max-width: 720px) {
+  /* on narrow screens the x-axis label collides with the bottom quadrant labels */
+  .scatter-host .axis-x { display: none; }
 }
 .scatter-host .pt {
   position: absolute;
@@ -919,9 +923,9 @@ footer a:hover { color: var(--ink-2); }
         <path class="arrow" d="M1020,145 L1040,152"/>
       </g>
 
-      <text x="235" y="107" class="lbl">discover / parse</text>
-      <text x="505" y="107" class="lbl">PutBundle</text>
-      <text x="775" y="107" class="lbl">ingest pending</text>
+      <text x="235" y="145" class="lbl" text-anchor="middle">discover / parse</text>
+      <text x="505" y="145" class="lbl" text-anchor="middle">PutBundle</text>
+      <text x="775" y="145" class="lbl" text-anchor="middle">ingest pending</text>
 
       <g>
         <rect class="box" x="20" y="240" width="1140" height="90" rx="8"/>
@@ -1515,8 +1519,6 @@ create index idx_session_path_tokens_token_session
     <div class="quad br"><span class="qlabel" style="right:0;bottom:0;text-align:right">fine as-is</span></div>
     <div class="midline-v"></div>
     <div class="midline-h"></div>
-    <div class="axis-y" style="left:10px; top:10px;">high stakes ↑</div>
-    <div class="axis-y" style="left:10px; bottom:10px;">low stakes ↓</div>
     <div class="axis-x" style="bottom:10px; left:50%; transform: translateX(-50%);">← ungrounded · grounded →</div>
   </div>
 
@@ -1801,7 +1803,7 @@ const HOTSPOTS = [
   { id:'readwindow', name:'read = file-order context, not branch/thread',
     severity:'warn', stakes:0.5, grounded:0.7,
     where:'internal/corpus/read.go',
-    state:'`aha read <ref> --before N --after N` returns linear file context. Agent transcripts are trees (parent_id), so the context can include sibling branches the user never saw.',
+    state:'`aha read &lt;ref&gt; --before N --after N` returns linear file context. Agent transcripts are trees (parent_id), so the context can include sibling branches the user never saw.',
     needs:'A user journey test showing branch reconstruction beats file order on a real Claude session. Until that exists, the simpler implementation wins.' },
 
   { id:'pi-shape', name:'Pi adapter: synthetic fixtures masked real shape',
