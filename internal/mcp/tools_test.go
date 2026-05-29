@@ -315,6 +315,121 @@ func TestCallToolEmptySearchReturnsList(t *testing.T) {
 	}
 }
 
+// TestHTTPAndMCPPathsAreConsistent guards against divergence between the
+// two CallTool entrypoints: the SDK-registered handlers used by `aha mcp`
+// and the direct CallTool used by the HTTP dashboard. For every tool +
+// args pair, the typed payload reachable through the MCP wire (decoded
+// from content[].text) must equal the value `mcp.CallTool` returns
+// directly (after a JSON marshal round-trip to normalize map vs struct
+// representation).
+//
+// The audit flagged the absence of this guard as a LOW-severity gap; the
+// two paths produce equivalent text today, but a future refactor on one
+// side without the other would silently break consumers that mix MCP
+// and HTTP. This test fails loudly on any such drift.
+func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
+	// Build a single corpus + backend and use it for BOTH paths so the
+	// comparison is over production code, not over test fixture setup.
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+
+	// Spin up an in-process MCP server pair against this backend.
+	server := mcp.NewServer(backend)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverTransport) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "aha-consistency", Version: "0.1.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	defer session.Close()
+
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"status", nil},
+		{"verify", nil},
+		{"conflicts", nil},
+		{"corpus_size", nil},
+		{"doctor", nil},
+		{"search", map[string]any{"query": "needle", "limit": 5}},
+		{"search", map[string]any{"query": "definitelynotinthecorpus"}},
+		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/"+argHash(tc.args), func(t *testing.T) {
+			// ---- Direct CallTool path (the HTTP server uses this) ----
+			var raw json.RawMessage
+			if tc.args != nil {
+				raw, _ = json.Marshal(tc.args)
+			}
+			httpOut, err := mcp.CallTool(backend, tc.name, raw)
+			if err != nil {
+				t.Fatalf("direct CallTool errored: %v", err)
+			}
+			httpJSON, err := json.Marshal(httpOut)
+			if err != nil {
+				t.Fatalf("direct CallTool result not marshallable: %v", err)
+			}
+
+			// ---- SDK-handler path (the `aha mcp` server uses this) ----
+			mcpRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+				Name:      tc.name,
+				Arguments: tc.args,
+			})
+			if err != nil {
+				t.Fatalf("MCP path errored: %v", err)
+			}
+			if mcpRes.IsError {
+				t.Fatalf("MCP path returned isError: %s", contentText(t, mcpRes))
+			}
+			mcpJSON := []byte(contentText(t, mcpRes))
+
+			// Normalize both through `any` so map key ordering and JSON
+			// indentation don't pollute the comparison; we're checking the
+			// semantic shape, not the byte-level output.
+			var httpDec, mcpDec any
+			if err := json.Unmarshal(httpJSON, &httpDec); err != nil {
+				t.Fatalf("decode direct-path payload: %v\n%s", err, httpJSON)
+			}
+			if err := json.Unmarshal(mcpJSON, &mcpDec); err != nil {
+				t.Fatalf("decode MCP-path payload: %v\n%s", err, mcpJSON)
+			}
+			if !reflect.DeepEqual(httpDec, mcpDec) {
+				t.Fatalf("HTTP and MCP payloads diverge for %s\n  direct: %s\n     MCP: %s",
+					tc.name, httpJSON, mcpJSON)
+			}
+		})
+	}
+}
+
+// argHash is a stable-ish key for table-driven subtest names so a failing
+// run identifies the args without dumping JSON in the name.
+func argHash(args map[string]any) string {
+	if len(args) == 0 {
+		return "noargs"
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+strings.ReplaceAll(strings.TrimSpace(string(jsonMustMarshal(args[k]))), `"`, ""))
+	}
+	return strings.Join(parts, ",")
+}
+
+func jsonMustMarshal(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
 // ---------- helpers ----------
 
 func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {

@@ -230,6 +230,54 @@ func TestHostHeaderAllowlistRejectsForeignHosts(t *testing.T) {
 	}
 }
 
+// IDN homograph hostnames (Cyrillic 'а' that *looks* like ASCII 'a', etc.)
+// are real-world DNS-rebind vectors. Go's `strings.ToLower` does not
+// fold them to ASCII, so the allowlist comparison correctly rejects
+// them — but the test documents that behaviour rather than leaving it
+// implicit. If a future refactor switches to `cases.Fold`/Unicode-aware
+// normalization, that change must update this test too.
+func TestHostHeaderAllowlistRejectsIDNHomographs(t *testing.T) {
+	srv := newTestServer(t)
+	// "lоcalhost" with a Cyrillic 'о' (U+043E). Mistaken for ASCII at a
+	// glance but a distinct codepoint; must not match "localhost".
+	for _, host := range []string{
+		"lоcalhost",                  // Cyrillic 'о'
+		"localhost​",             // trailing zero-width space
+		"localhоst",                   // mid-name Cyrillic 'о'
+		"xn--lcalhost-tdh",             // IDN punycode that doesn't match
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req.Host = host
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusMisdirectedRequest {
+			t.Fatalf("Host=%q (homograph) expected 421, got %d", host, w.Code)
+		}
+	}
+}
+
+// Malformed Host header shapes that look superficially loopback-ish must
+// still be rejected. Tests the rejection path of `net.SplitHostPort` on
+// invalid IPv6 brackets and missing brackets.
+func TestHostHeaderAllowlistRejectsMalformedBrackets(t *testing.T) {
+	srv := newTestServer(t)
+	for _, host := range []string{
+		"[::1:8080",            // missing closing bracket
+		"::1]:8080",            // missing opening bracket
+		"[::1]extra:8080",      // garbage after the IPv6 literal
+		"127.0.0.1:abc",        // non-numeric port
+		":18428",                // leading colon, missing host
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req.Host = host
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusMisdirectedRequest {
+			t.Fatalf("Host=%q (malformed) expected 421, got %d", host, w.Code)
+		}
+	}
+}
+
 func TestHostHeaderAllowlistAcceptsLoopbackVariants(t *testing.T) {
 	srv := newTestServer(t)
 	for _, host := range []string{"localhost", "localhost:18428", "127.0.0.1", "127.0.0.1:18428", "[::1]:18428"} {

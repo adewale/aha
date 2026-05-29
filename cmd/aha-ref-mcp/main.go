@@ -5,10 +5,11 @@
 // shapes interoperate with a third independent SDK implementation
 // alongside the Python FastMCP and TypeScript McpServer references.
 //
-// Three tools (matching the Python and TS reference servers):
-//   echo(text) -> echoes text back
-//   add(a, b)  -> returns a + b
-//   fail()     -> always errors, used to exercise error propagation
+// The exact tool surface (echo / add / fail) is pinned in
+// scripts/mcp-conformance/REFERENCE.md. The Python (reference_server.py)
+// and TypeScript (reference_server.ts) reference servers in this repo
+// must match this file's surface tool-for-tool — the cross-language
+// conformance harness relies on the equivalence.
 package main
 
 import (

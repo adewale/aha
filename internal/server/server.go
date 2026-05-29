@@ -141,12 +141,32 @@ func (s *Server) hostAllowed(host string) bool {
 	if _, ok := s.allowedHosts[host]; ok {
 		return true
 	}
-	if h, _, err := net.SplitHostPort(host); err == nil {
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		// SplitHostPort is lenient about the port string — anything
+		// after the last colon counts. Require a numeric port so that
+		// `127.0.0.1:abc` (and similar malformed shapes) fall through
+		// to the rejection branch rather than being granted access on
+		// the host-part alone.
+		if !portLooksNumeric(p) {
+			return false
+		}
 		if _, ok := s.allowedHosts[strings.ToLower(h)]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+func portLooksNumeric(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, r := range p {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Listen binds to opts.Addr, refusing non-loopback unless opts.AllowRemote,

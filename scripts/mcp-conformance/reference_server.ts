@@ -1,10 +1,15 @@
 // Reference MCP server (official TypeScript SDK) used to validate aha's
 // stdio Transport.
 //
-// Sibling of scripts/mcp-conformance/reference_server.py — same three-tool
-// surface (echo / add / fail), implemented with @modelcontextprotocol/sdk's
-// McpServer + StdioServerTransport so our connectStdio() can be tested
-// against a known-good TypeScript reference.
+// Sibling of scripts/mcp-conformance/reference_server.py and
+// cmd/aha-ref-mcp/main.go — same three-tool surface (echo / add / fail),
+// implemented with @modelcontextprotocol/sdk's McpServer +
+// StdioServerTransport so our connectStdio() can be tested against a
+// known-good TypeScript reference.
+//
+// The exact tool surface is pinned in
+// scripts/mcp-conformance/REFERENCE.md. All three reference servers must
+// match it tool-for-tool.
 //
 // Run directly:  node --experimental-strip-types reference_server.ts
 
