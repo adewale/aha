@@ -1109,6 +1109,156 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .hooks .pair span { color: var(--ink-2); }
 @media (max-width: 720px) { .hooks .pair { grid-template-columns: 1fr; gap: var(--s-1); } }
 
+/* ---------- copy buttons (Anthropic blog: export ↔ workflow link) ----- */
+.copy-btn {
+  appearance: none;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px var(--s-3);
+  font: inherit;
+  font-size: var(--t-xs);
+  font-family: ui-monospace, Menlo, monospace;
+  cursor: pointer;
+  margin-left: var(--s-2);
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+}
+.copy-btn:hover { color: var(--ink); border-color: var(--sage-line); background: var(--sage-soft); }
+.copy-btn.copied { color: var(--sage); border-color: var(--sage); }
+
+/* ---------- side-by-side comparison (Anthropic blog: alternatives) ---- */
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+  margin: var(--s-5) 0;
+}
+@media (max-width: 880px) { .compare { grid-template-columns: 1fr; } }
+.compare .pane {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+.compare .pane.bad   { border-left: 3px solid var(--clay); }
+.compare .pane.good  { border-left: 3px solid var(--sage); }
+.compare .pane h4 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-md);
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+.compare .pane h4 .tag {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.compare .pane.bad h4 .tag  { color: var(--clay); }
+.compare .pane.good h4 .tag { color: var(--sage); }
+.compare .pane pre { margin: var(--s-3) 0 var(--s-3); font-size: var(--t-xs); }
+.compare .outcome {
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0;
+}
+.compare .outcome b { color: var(--ink); }
+.compare .pane.bad  .outcome b { color: var(--clay); }
+.compare .pane.good .outcome b { color: var(--sage); }
+
+/* ---------- margin-annotated code (Willison: inline margin annotations) */
+.annotated-code {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 320px);
+  gap: var(--s-4);
+  margin: var(--s-5) 0;
+  align-items: start;
+}
+@media (max-width: 880px) { .annotated-code { grid-template-columns: 1fr; } }
+.annotated-code pre { margin: 0; }
+.annotated-code .annots { display: flex; flex-direction: column; gap: var(--s-2); }
+.annotated-code .annot {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  line-height: 1.55;
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--sage-line);
+  cursor: pointer;
+  transition: border-color .15s var(--ease), color .15s var(--ease);
+}
+.annotated-code .annot:hover { border-color: var(--sage); color: var(--ink); }
+.annotated-code .annot.active { border-color: var(--sage); color: var(--ink); }
+.annotated-code .annot .line-no {
+  display: inline-block;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--sage);
+  margin-right: var(--s-2);
+  font-size: var(--t-xs);
+}
+.annotated-code .annot .annot-h {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.annotated-code pre {
+  position: relative;
+  counter-reset: lno;
+  background: oklch(11% 0.011 80);
+}
+.annotated-code pre .ln {
+  display: block;
+  padding-left: var(--s-7);
+  position: relative;
+  transition: background .15s var(--ease);
+}
+.annotated-code pre .ln::before {
+  content: counter(lno);
+  counter-increment: lno;
+  position: absolute;
+  left: 0;
+  width: 32px;
+  text-align: right;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.annotated-code pre .ln.hl  { background: var(--sage-soft); }
+.annotated-code pre .ln.hl::before { color: var(--sage); }
+
+/* ---------- gotchas (Anthropic blog: gotchas section) ----------------- */
+.gotchas { margin-top: var(--s-3); }
+.gotchas .row-name code { color: var(--clay); }
+.gotchas .col-right { color: var(--sage); }
+
+/* ---------- callout boxes (Willison: severity-coded callouts) -------- */
+.callout {
+  border-left: 3px solid var(--line);
+  background: var(--surface);
+  padding: var(--s-3) var(--s-4);
+  margin: var(--s-4) 0;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.callout.note     { border-color: var(--sage-line); background: var(--sage-soft); }
+.callout.warning  { border-color: var(--sand);      background: var(--sand-soft); }
+.callout.danger   { border-color: var(--clay-line); background: var(--clay-soft); }
+.callout .callout-h {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.callout.note .callout-h     { color: var(--sage); }
+.callout.warning .callout-h  { color: var(--sand); }
+.callout.danger .callout-h   { color: var(--clay); }
+
 /* ---------- architecture: major nouns ---------------------------------- */
 .nouns {
   display: flex;
@@ -2104,6 +2254,50 @@ footer a:hover { color: var(--ink-2); }
       </tr>
     </tbody>
   </table>
+
+  <h3 class="sub">Gotchas</h3>
+  <p class="cli-note">
+    Five things that look like they should work but don't, and what to do
+    instead. The architecture is opinionated; these are the load-bearing
+    opinions made visible.
+  </p>
+  <table class="supertable gotchas">
+    <thead>
+      <tr><th>If you try…</th><th>What happens</th><th>Do this instead</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="row-name"><code>DELETE FROM entries WHERE …</code></td>
+        <td>Trigger <code>entries_no_delete</code> aborts with <em>"entries are append-only"</em>. The transaction rolls back. A static test in <code>internal/testquality</code> also blocks this from production code at CI time.</td>
+        <td class="col-right">If the row is wrong, <code>aha verify --repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and re-ingest from depot bundles selectively.</td>
+      </tr>
+      <tr>
+        <td class="row-name"><code>UPDATE entries SET role=…</code></td>
+        <td>Same: <code>entries_no_update</code> aborts. Entries, messages, artifacts, and conflicts are all append-only.</td>
+        <td class="col-right">If two snapshots disagree, the second goes into <code>conflicts</code> automatically. Inspect with <code>aha conflicts</code>.</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">Pass <code>--depot</code> to <code>aha search</code> or <code>aha read</code></td>
+        <td>Search and read are corpus-only operations. The flag isn't accepted; you get a parse error.</td>
+        <td class="col-right">If you need a different corpus, use <code>--repo DIR</code>. If you need a different depot, run <code>aha refresh --depot …</code> first, then search the corpus that ingest produced.</td>
+      </tr>
+      <tr>
+        <td class="row-name">Query <code>fts_messages MATCH ?</code> with raw user text</td>
+        <td>FTS5 interprets characters like <code>AND</code>, <code>NEAR</code>, <code>*</code>, <code>:</code> as operators. A user search for <code>title:secret</code> would silently become a column filter.</td>
+        <td class="col-right">Always pass user text through <code>search.ftsQuery()</code> first; it quotes each whitespace-separated term and doubles embedded <code>"</code>. The FTS escaping playground above shows the rule.</td>
+      </tr>
+      <tr>
+        <td class="row-name">Hard-code R2 credentials in config.jsonc</td>
+        <td>Config schema doesn't accept secret fields. A round-trip test asserts secrets never appear in serialized output.</td>
+        <td class="col-right">Set <code>AHA_R2_ACCESS_KEY_ID</code> / <code>AHA_R2_SECRET_ACCESS_KEY</code> (or the unprefixed <code>R2_*</code> variants) in the environment. The depot driver reads them at startup; they live only in process memory.</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">Compute identity by string-concatenating tuples</td>
+        <td>Two distinct tuples can hash identically: <code>("pi","abc")</code> and <code>("pia","bc")</code> collide. The static test in <code>internal/testquality</code> rejects raw <code>+</code>/<code>strings.Builder</code> over identity inputs.</td>
+        <td class="col-right">Use <code>model.NewSessionKey(source, machine, source_session_id)</code>. It length-prefixes each segment before hashing. The session-key playground above demonstrates the collision-prevention property.</td>
+      </tr>
+    </tbody>
+  </table>
 </section>
 
 <!-- ===================================================== MECHANISMS ==== -->
@@ -2144,7 +2338,7 @@ footer a:hover { color: var(--ink-2); }
         <div class="out">
           <div><span class="k">canonical bytes  </span> <span class="v" id="sk-bytes"></span></div>
           <div><span class="k">sha256           </span> <span class="v" id="sk-hash"></span></div>
-          <div><span class="k">SessionKey       </span> <span class="v" id="sk-key"></span></div>
+          <div><span class="k">SessionKey       </span> <span class="v" id="sk-key"></span> <button class="copy-btn" data-copy="#sk-key">copy</button> <button class="copy-btn" data-copy-cmd="sk">copy as Go</button></div>
           <div style="margin-top: var(--s-2)"><span class="k">collision test:</span></div>
           <div><span class="k">  ("pi","abc",x)   </span> <span class="v" id="sk-col1"></span></div>
           <div><span class="k">  ("pia","bc",x)   </span> <span class="v" id="sk-col2"></span></div>
@@ -2194,7 +2388,7 @@ func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
             <input id="ref-sha" type="text" value="deadbeef0000000000000000000000000000000000000000000000000000beef"/>
           </div>
           <div class="out" style="align-self: start">
-            <div><span class="k">message ref   </span> <span class="v" id="ref-msg"></span></div>
+            <div><span class="k">message ref   </span> <span class="v" id="ref-msg"></span> <button class="copy-btn" data-copy="#ref-msg">copy</button></div>
             <div><span class="k">session ref   </span> <span class="v" id="ref-ses"></span></div>
             <div><span class="k">artifact ref  </span> <span class="v" id="ref-art"></span></div>
             <div style="margin-top: var(--s-2)"><span class="k">parse(msg) returns:</span></div>
@@ -2295,6 +2489,10 @@ func FormatRef(r Ref) string {
             <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
           </div>
           <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> — that's the property <code>refresh</code> relies on to skip re-fetching.</p>
+          <div style="display:flex; gap:var(--s-2); flex-wrap:wrap;">
+            <button class="copy-btn" data-copy-cmd="manifest-full">copy as manifest JSON</button>
+            <button class="copy-btn" data-copy-cmd="manifest-state">copy as state struct JSON</button>
+          </div>
         </div>
       </div>
 
@@ -2369,6 +2567,79 @@ func ManifestStateSHA256(m model.Manifest) string {
         <code>DELETE</code> against the append-only tables. Two independent
         layers, two different adversaries.
       </p>
+
+      <h4 style="font-size:var(--t-md); margin: var(--s-5) 0 var(--s-2); color:var(--ink)">Why not just <code>INSERT OR REPLACE</code>?</h4>
+      <p style="font-size:var(--t-sm); color:var(--ink-2); max-width:70ch; line-height:1.6">
+        The obvious shape for a re-ingest path. Two snapshots of the same
+        session, two SQL designs, two different futures:
+      </p>
+      <div class="compare">
+        <div class="pane bad">
+          <h4>Naïve <span class="tag">silent data loss</span></h4>
+<pre><code>INSERT OR REPLACE INTO entries
+       (session_key, entry_id, role, entry_sha256, ...)
+VALUES (?, ?, ?, ?, ...);</code></pre>
+          <p class="outcome">
+            Snapshot A inserts <code>entry-42</code> with hash <code>h1</code>.
+            Snapshot B inserts <code>entry-42</code> with hash <code>h2</code>
+            (the user edited the JSONL line before re-snapshotting).
+            <b>Snapshot A is silently overwritten.</b> No evidence the
+            disagreement ever existed. Search results change retroactively.
+            Two agents on two machines could even race to overwrite each
+            other's view.
+          </p>
+        </div>
+        <div class="pane good">
+          <h4>aha <span class="tag">append-only + quarantine</span></h4>
+<pre><code>-- attempted INSERT runs the trigger first
+-- existing row stays
+-- new conflicting row is dropped by RAISE(IGNORE)
+-- the disagreement is RECORDED as evidence:
+INSERT INTO conflicts(session_key, entry_id,
+                      first_entry_sha256, second_entry_sha256,
+                      details_json) ...</code></pre>
+          <p class="outcome">
+            The first snapshot wins. The second snapshot's row is dropped,
+            but the disagreement is recorded in <code>conflicts</code> for
+            <code>aha conflicts</code> to surface. <b>Evidence is preserved
+            without overwriting it.</b> Two agents on two machines see the
+            same coherent history; conflicts are explicit, not silent.
+          </p>
+        </div>
+      </div>
+
+      <h4 style="font-size:var(--t-md); margin: var(--s-5) 0 var(--s-2); color:var(--ink)">What the trigger does, line by line</h4>
+      <div class="annotated-code" id="trigger-annot">
+        <pre><code><span class="ln">create trigger entries_conflict_before_insert</span><span class="ln">  before insert on entries</span><span class="ln">  when exists(select 1 from entries</span><span class="ln">              where session_key=new.session_key</span><span class="ln">                and entry_id=new.entry_id) begin</span><span class="ln">    insert into conflicts(session_key, entry_id,</span><span class="ln">                          first_entry_sha256,</span><span class="ln">                          second_entry_sha256,</span><span class="ln">                          details_json)</span><span class="ln">      select new.session_key, new.entry_id,</span><span class="ln">             e.entry_sha256, new.entry_sha256,</span><span class="ln">             json_object('kind','same-session-trigger')</span><span class="ln">        from entries e</span><span class="ln">       where e.session_key=new.session_key</span><span class="ln">         and e.entry_id=new.entry_id</span><span class="ln">         and e.entry_sha256&lt;&gt;new.entry_sha256;</span><span class="ln">    select raise(ignore);</span><span class="ln">  end;</span></code></pre>
+        <div class="annots">
+          <div class="annot" data-lines="2">
+            <span class="annot-h"><span class="line-no">L2</span>BEFORE insert</span>
+            Fire BEFORE the row is written. <code>RAISE(IGNORE)</code> later cancels the insert without aborting the surrounding transaction.
+          </div>
+          <div class="annot" data-lines="3,4,5">
+            <span class="annot-h"><span class="line-no">L3-5</span>Only on a duplicate (session_key, entry_id)</span>
+            <code>WHEN exists(...)</code> means: this trigger doesn't fire for fresh entries. First insert wins straight through.
+          </div>
+          <div class="annot" data-lines="14,15,16">
+            <span class="annot-h"><span class="line-no">L14-16</span>Only record when hashes differ</span>
+            <code>e.entry_sha256 &lt;&gt; new.entry_sha256</code> filters the SELECT feeding the conflicts insert. Duplicate INSERT of the same content is recorded silently in <code>ingest_attempts</code> elsewhere; only true disagreement reaches <code>conflicts</code>.
+          </div>
+          <div class="annot" data-lines="17">
+            <span class="annot-h"><span class="line-no">L17</span>RAISE(IGNORE) — the original wins</span>
+            Drops the new row without raising an error. The transaction continues. The earlier insert remains the canonical truth.
+          </div>
+        </div>
+      </div>
+
+      <div class="callout warning">
+        <div class="callout-h">Tradeoff</div>
+        <b>First-write wins</b> is a deliberate choice. If snapshot A ingested
+        on Monday and snapshot B (with edits) on Tuesday, B's edits sit in
+        <code>conflicts</code> rather than overwriting A in <code>entries</code>.
+        That's correct for evidence preservation, but it means the canonical
+        <code>aha read</code> result reflects the older snapshot until you
+        explicitly inspect <code>aha conflicts</code>.
+      </div>
 
       <details>
         <summary>The actual triggers</summary>
@@ -2489,7 +2760,7 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
         <label>your query</label>
         <input id="fts-in" type="text" value='migration bug OR "drop table"'/>
         <div class="out" style="margin-top: var(--s-3)">
-          <div><span class="k">FTS5 MATCH string  </span> <span class="v" id="fts-out"></span></div>
+          <div><span class="k">FTS5 MATCH string  </span> <span class="v" id="fts-out"></span> <button class="copy-btn" data-copy="#fts-out">copy</button></div>
           <div style="margin-top: var(--s-1)"><span class="k">terms              </span> <span class="v" id="fts-terms"></span></div>
         </div>
         <p class="hint">Try <code>foo AND bar</code>, <code>title:secret</code>, or <code>he said "hi"</code>. Operators get quoted into literals.</p>
@@ -3658,6 +3929,103 @@ function renderPackageChart() {
   });
 }
 renderPackageChart();
+
+/* ============================================================
+   Copy buttons. The Anthropic article calls this out as the link
+   between explorables and real workflows: an HTML artifact ends in
+   an "export" that you can paste back into Claude Code, into Go
+   source, or into a shell command.
+   ============================================================ */
+(function () {
+  async function writeClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    // Fallback: a hidden textarea + execCommand for non-secure contexts
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function flashBtn(btn) {
+    const orig = btn.textContent;
+    btn.classList.add('copied');
+    btn.textContent = '✓ copied';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = orig; }, 1200);
+  }
+  function gatherManifest(stableOnly) {
+    const obj = {};
+    document.querySelectorAll('.ss-row').forEach(row => {
+      const stable = row.dataset.stable === '1';
+      if (stableOnly && !stable) return;
+      const inp = row.querySelector('input');
+      obj[inp.dataset.key] = inp.value;
+    });
+    return JSON.stringify(obj, null, 2);
+  }
+  function buildExport(kind) {
+    if (kind === 'sk') {
+      const src  = document.getElementById('sk-source').value;
+      const mac  = document.getElementById('sk-machine').value;
+      const sess = document.getElementById('sk-sess').value;
+      const key  = document.getElementById('sk-key').textContent;
+      return (
+`// Reconstruct this SessionKey in Go:
+sk, _ := model.NewSessionKey(${JSON.stringify(src)}, ${JSON.stringify(mac)}, ${JSON.stringify(sess)})
+// sk.String() == ${JSON.stringify(key)}
+
+// Or address it in a CLI command:
+//   aha read --session ${key}`);
+    }
+    if (kind === 'manifest-full')  return gatherManifest(false);
+    if (kind === 'manifest-state') return gatherManifest(true);
+    return '';
+  }
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const sel = btn.dataset.copy;
+    const kind = btn.dataset.copyCmd;
+    let text = '';
+    if (sel) {
+      const el = document.querySelector(sel);
+      text = el ? (el.textContent || '').trim() : '';
+    } else if (kind) {
+      text = buildExport(kind);
+    }
+    if (!text) return;
+    const ok = await writeClipboard(text);
+    if (ok) flashBtn(btn);
+  });
+})();
+
+/* ============================================================
+   Annotated-code: hovering a side annotation highlights the matching
+   lines in the code block (Willison: inline margin annotations).
+   ============================================================ */
+(function () {
+  const root = document.getElementById('trigger-annot');
+  if (!root) return;
+  const lines = [...root.querySelectorAll('pre .ln')];
+  const annots = [...root.querySelectorAll('.annot')];
+  function highlight(set) {
+    lines.forEach((l, i) => l.classList.toggle('hl', set.has(i + 1)));
+  }
+  for (const a of annots) {
+    const nums = new Set((a.dataset.lines || '').split(',').map(s => parseInt(s, 10)));
+    a.addEventListener('mouseenter', () => { highlight(nums); a.classList.add('active'); });
+    a.addEventListener('mouseleave', () => { highlight(new Set()); a.classList.remove('active'); });
+  }
+})();
 
 /* ============================================================
    Architecture: nouns map.
