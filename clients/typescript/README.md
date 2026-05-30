@@ -89,15 +89,128 @@ ArtifactRef`) lets your code branch on `kind` without parsing strings.
 
 ## Errors
 
-- Stdio transport: rejects with `Error("aha MCP error <code>: <message>")` for
-  JSON-RPC errors; rejects with the underlying stream error on framing or
-  socket failure.
-- HTTP transport: rejects with `Error("<code>: <message>")` matching the
-  server's pinned error envelope (`{ "error": { "code", "message" } }`).
+The stdio transport throws `AhaMcpError` (exported from `transports/stdio.ts`)
+with a stable `code` field, so callers can branch on the failure mode
+without regex-matching message text:
 
-Both transports surface `tools/call` validation failures (unknown argument,
-missing required field, unknown tool) as plain `Error` objects with the
-original message — your code can `try`/`catch` per call.
+```ts
+import { AhaMcpError } from "./transports/stdio.js";
+
+try {
+  await tools.read({ ref: someRef });
+} catch (e) {
+  if (e instanceof AhaMcpError) {
+    if (e.code === "tool_error")        { /* aha returned isError: a missing ref, bad query, etc. */ }
+    else if (e.code === "transport_closed") { /* aha mcp exited; respawn */ }
+    else                                { /* wire-level JSON-RPC error; e.code is the numeric code stringified */ }
+  }
+}
+```
+
+`AhaMcpError.code` values:
+
+- `"tool_error"` — the server returned `isError: true` on the
+  `CallToolResult` (unknown argument, missing required field, invalid ref,
+  etc.). The error's `message` is the server's `content[0].text`.
+- `"transport_closed"` — `aha mcp` exited or the stdio stream errored.
+- A numeric string (e.g. `"-32601"`) — a JSON-RPC error code from the
+  wire (method not found, parse error, etc.).
+
+The HTTP transport rejects with a plain `Error("<code>: <message>")`
+matching the server's pinned error envelope; symmetry with the stdio
+class is a follow-up.
+
+## How to wire aha into a code-mode runtime
+
+The pattern is the same across runtimes: the host owns the executor (the
+isolate, vm, subprocess, container, etc.); aha ships the typed surface
+the agent's TypeScript runs against. The `Transport` interface
+(`aha-mcp.ts`) is the seam.
+
+### Cloudflare `@cloudflare/codemode`
+
+Cloudflare's `DynamicWorkerExecutor` runs the agent's generated TS in a
+V8 isolate with no FS / no env / `globalOutbound: null`. Pass aha as a
+`ToolProvider` whose dispatcher implements the `Transport.call` shape:
+
+```ts
+import { createCodeTool, type ToolProvider } from "@cloudflare/codemode";
+import { aha as ahaFactory } from "./aha-mcp.js";
+import { connectStdio } from "./transports/stdio.js";
+
+// In the host (outside the sandbox):
+const child = spawn("aha", ["mcp"]);
+const transport = await connectStdio(child.stdin, child.stdout);
+
+const provider: ToolProvider = {
+  name: "aha",
+  // Hand-write the TS surface from the checked-in aha-mcp.ts; Cloudflare's
+  // codemode embeds it in the agent's tool description.
+  types: await readFile("./aha-mcp.ts", "utf8"),
+  dispatcher: {
+    call: (toolName, argsJson) => transport.call(toolName, JSON.parse(argsJson)),
+  },
+};
+
+const tools = [createCodeTool({ tools: [provider] })];
+// Hand `tools` to whatever model/agent SDK you use; the model writes TS like:
+//   const tools = aha(codemode); const hits = await tools.search({...}); ...
+```
+
+What the host is responsible for: starting / restarting the `aha mcp`
+subprocess, supplying the `Executor` (Cloudflare ships
+`DynamicWorkerExecutor` and `IframeSandboxExecutor`; you can implement
+`Executor` for `node:vm`, QuickJS, containers, etc.), and applying the
+sandbox's egress / FS policy. aha owns nothing inside the sandbox.
+
+### Anthropic code-execution-with-MCP
+
+Anthropic's runtime expects each MCP tool to be a thin TS module on a
+sandbox filesystem; the agent reads them with `ls`+`cat` on demand. The
+mechanical adapter is:
+
+```ts
+// servers/aha/index.ts (one of these per tool, generated from aha-mcp.ts)
+export async function search(input: SearchArgs): Promise<SearchResult[]> {
+  return callMCPTool<SearchResult[]>("aha__search", input);
+}
+```
+
+`callMCPTool` is the host-provided helper that bridges to whichever MCP
+transport the host configured (`aha mcp` over stdio, in our case). The
+host runs the agent's code inside Anthropic's hosted sandbox (Python
+3.11.12, 5 GiB RAM, no network) or a local `sandbox-runtime` (bubblewrap
+on Linux, sandbox-exec on macOS).
+
+What the host is responsible for: the sandbox itself, the
+`callMCPTool` bridge, and lazy filesystem discovery of the tool modules.
+aha owns only the typed wrappers.
+
+## What aha provides and what the host provides
+
+```
+   ┌────────────────────────┐         ┌────────────────────────┐
+   │   Code-mode runtime    │         │       aha (this        │
+   │   (Cloudflare,         │         │       repository)      │
+   │   Anthropic, custom)   │         │                        │
+   ├────────────────────────┤         ├────────────────────────┤
+   │ Sandbox / executor     │         │ aha mcp (Go server)    │
+   │   - V8 isolate or vm   │         │   - 7 read-only tools  │
+   │   - no FS / no egress  │ <─────> │   - SDK-driven wire    │
+   │ Tool surface injection │  stdio  │                        │
+   │   - generates the      │ JSON    │ Typed TS surface       │
+   │     `aha` namespace    │ RPC     │   - aha-mcp.ts         │
+   │     visible to the LLM │         │   - parseRef/formatRef │
+   │ Execution loop         │         │   - AhaMcpError class  │
+   │   - runs the agent's   │         │ Transports             │
+   │     TS, captures logs  │         │   - stdio (this repo)  │
+   └────────────────────────┘         │   - http (this repo)   │
+                                       └────────────────────────┘
+```
+
+The seam is the `Transport` interface. Anything that can implement
+`{ call(name, args): Promise<unknown> }` can drive `aha()`. The host
+chooses the sandbox; aha never tries to.
 
 ## Versioning
 

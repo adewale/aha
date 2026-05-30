@@ -394,19 +394,25 @@ omission is a decision rather than an oversight:
   error on arrays. The typed payload travels in `content[].text` for
   those tools and the TS client surface JSON-parses it transparently.
 
-## Open questions
+## Decided
 
-- Should `doctor` accept an opt-in `depot` arg, or stay strictly local?
-  Currently strictly local. The CLI's `aha doctor --depot` covers the
-  remote-probe case separately.
-- Should `read` accept an explicit `format` arg (`json` vs `md`)? Today
-  it returns the structured `[]ReadEntry` only; markdown can be added
-  additively.
+- **`doctor` will not accept a `depot` arg.** The MCP surface stays
+  strictly local-only. The CLI's `aha doctor --depot` covers remote
+  probing for users who want it; mixing remote network access into the
+  MCP path complicates the trust model with no offsetting benefit (an
+  agent can shell out to `aha doctor --depot` directly if it needs the
+  data).
+- **`read` will not gain a `format: "md"` arg.** The typed `[]ReadEntry`
+  surface is already exactly what the TS code-mode client needs and what
+  the CLI's `aha read --md` renders from. A second wire shape for the
+  same payload increases the conformance matrix without unlocking any
+  new pattern. Callers that want markdown can render from the typed
+  entries client-side.
 
-(Earlier revisions of this spec listed `structuredContent` and
-`readOnlyHint` annotations as deferred. Both shipped: every tool
-advertises the typed `ToolAnnotations{ReadOnlyHint: true, ...}` struct,
-and object-typed tools emit `structuredContent` alongside the text
-content. List-typed tools omit `structuredContent` because the official
-Python SDK rejects array structured content as a Pydantic type error;
-the typed payload travels in `content[].text` for those tools.)
+(Earlier revisions listed `structuredContent` and `readOnlyHint`
+annotations as deferred. Both shipped: every tool advertises the typed
+`ToolAnnotations{ReadOnlyHint: true, ...}` struct, and object-typed
+tools emit `structuredContent` alongside the text content. List-typed
+tools omit `structuredContent` because the official Python SDK rejects
+array structured content as a Pydantic type error; the typed payload
+travels in `content[].text` for those tools.)

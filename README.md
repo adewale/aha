@@ -1,10 +1,10 @@
 # aha — Agent History Aggregator
 
-`aha` is a local, cross-agent, cross-machine archive of your coding-agent history that helps you spot patterns in your own behaviour — and turn those patterns into better skills, prompts, and workflows.
+`aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-It captures Pi, Claude Code, and Codex sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot and propose new skills based on what you keep doing.
+It captures Pi, Claude Code, and Codex sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. Pattern detection and skill-candidate generation are documented as the next layer; they're not in the box today.
 
-Use it when you've accumulated enough coding-agent conversations that you want to understand and improve how you and your agents work — not just re-find snippets.
+Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
 ## Who is this for?
 
@@ -12,20 +12,20 @@ Use it when you've accumulated enough coding-agent conversations that you want t
 
 - use multiple coding agents (Pi, Claude Code, Codex — more adapters later) and want one place to examine everything they've done;
 - work across multiple machines and want a portable, content-addressed history that follows them;
-- want to find patterns in their own prompts and agent behaviour — repeated questions, recurring failure modes, prompts they keep retyping — so they can write the skill or template once and move on;
-- want their agents to analyse the depot too, so "look at what I keep doing → write a skill that does it for me" becomes a loop the agents themselves can run;
+- want to *manually* find patterns in their own prompts and agent behaviour today, and want the substrate that automated pattern detection will be built on tomorrow;
+- want their agents to *read* the depot today via MCP, with the "agent proposes new skills" loop tracked but not yet built;
 - need private local search over agent transcripts;
 - are currently using `rg`, ad hoc scripts, or tool-specific history search.
 
-## How it helps you improve
+## What ships today
 
-`aha` turns scattered transcripts into something you can actually reflect on. The current building blocks:
+The substrate is built. The pattern-detection layer the substrate is for is documented, not implemented:
 
-- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results and reading full session context, today; richer pattern views (recurring commands, retried prompts, costly loops) are on the roadmap.
-- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools, so an agent can analyse your depot the same way you would: "what did I struggle with last week?", "have I asked this before?", "which prompts do I keep repeating?".
-- **Typed TypeScript client** (`clients/typescript/`) — for code-mode agent runtimes that want to fan out (search → filter → read → synthesise) over the corpus in one round trip.
+- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results and reading full session context. Today: search box, results list, read pane, status strip, conflicts panel. Tomorrow (tracked in `docs/research/agent-trace-tools.md`): recurring-command rollups, retried-prompt views, costly-loop detection. Today's view is "browse"; tomorrow's view is "diagnose".
+- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?" or "which prompts do I keep repeating?" *via search queries you write*. The agent can't yet author skills from what it finds — that's the next layer.
+- **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can fan out (`search → filter → Promise.all(read)`) over the corpus in one round trip. See `clients/typescript/README.md` for concrete examples.
 
-The longer-term direction is to make those patterns first-class: skill-candidate detection, recurring-failure rollups, cross-machine "what was I doing last Tuesday across all my agents" — all built on the same indexed corpus.
+The longer-term direction is the pattern-detection layer in `docs/research/agent-trace-tools.md`: skill-candidate detection, recurring-failure rollups, cross-machine "what was I doing last Tuesday across all my agents". Nothing in there ships in this release.
 
 ## What does it replace?
 
