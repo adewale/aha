@@ -27,6 +27,29 @@
 
 import type { Transport } from "../aha-mcp.js";
 
+/**
+ * AhaMcpError surfaces a tool-side or transport-side failure with a
+ * stable `code` string callers can match on:
+ *   - JSON-RPC error codes from the wire become strings like `"-32000"`
+ *   - Tool-level isError results use the synthetic code `"tool_error"`
+ *   - Framing / connection failures use `"transport_closed"`
+ *
+ * Round-tripped via the typed surface so callers can `instanceof
+ * AhaMcpError` and branch on `.code` instead of regex-matching message
+ * text. Backwards-compatible with `try { ... } catch (e: unknown)`
+ * patterns that look at `.message`.
+ */
+export class AhaMcpError extends Error {
+  readonly code: string;
+  readonly data?: unknown;
+  constructor(message: string, code: string, data?: unknown) {
+    super(message);
+    this.name = "AhaMcpError";
+    this.code = code;
+    if (data !== undefined) this.data = data;
+  }
+}
+
 // Minimal structural views of a child process's stdio streams. A Node
 // ChildProcess's stdin/stdout satisfy these without importing @types/node.
 interface Writable {
@@ -132,7 +155,7 @@ export function connectStdio(
         if (!p) continue;
         pending.delete(m.id);
         if (m.error) {
-          p.reject(new Error(`aha MCP error ${m.error.code}: ${m.error.message}`));
+          p.reject(new AhaMcpError(m.error.message, String(m.error.code)));
         } else {
           p.resolve(m.result);
         }
@@ -142,7 +165,7 @@ export function connectStdio(
     }
   });
 
-  stdout.on("end", () => rejectAll(new Error("aha MCP stdio closed")));
+  stdout.on("end", () => rejectAll(new AhaMcpError("aha MCP stdio closed", "transport_closed")));
   stdout.on("error", (err: Error) => rejectAll(err));
 
   function rawCall(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -174,7 +197,7 @@ export function connectStdio(
             };
             if (result?.isError) {
               const text = result?.content?.[0]?.text ?? "tool error";
-              throw new Error(text);
+              throw new AhaMcpError(text, "tool_error");
             }
             // Per the 2025-06-18 spec, a server that emits structuredContent
             // SHOULD also emit the serialized form in content[].text. So

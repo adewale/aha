@@ -70,6 +70,22 @@ var ToolNames = []string{
 	"verify",
 }
 
+// ToolDescriptions is the canonical per-tool description text. The
+// registerTools function passes these strings into the SDK as the human-
+// readable tool descriptions, and internal/mcp/codegen reads them when
+// emitting JSDoc on each method of the generated TS aha() factory so a
+// code-mode LLM reading the surface gets the same descriptions it would
+// get over tools/list. Update here and both surfaces move together.
+var ToolDescriptions = map[string]string{
+	"search":      "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+	"read":        "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates.",
+	"status":      "Return corpus health summary: counts and disk usage.",
+	"verify":      "Run read-only corpus invariant checks (no repair).",
+	"conflicts":   "List quarantined merge conflicts.",
+	"corpus_size": "Return corpus on-disk size breakdown.",
+	"doctor":      "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+}
+
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
 
 // SearchInput names the documented filter set for the search tool. The
@@ -287,7 +303,7 @@ func NewServer(backend Backend) *mcp.Server {
 func registerTools(server *mcp.Server, b Backend) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search",
-		Description: "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+		Description: ToolDescriptions["search"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
 		out, err := doSearch(b, in)
@@ -299,7 +315,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "read",
-		Description: "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates.",
+		Description: ToolDescriptions["read"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		out, err := doRead(b, in)
@@ -311,7 +327,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "status",
-		Description: "Return corpus health summary: counts and disk usage.",
+		Description: ToolDescriptions["status"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
 		out, err := doStatus(b)
@@ -323,7 +339,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "verify",
-		Description: "Run read-only corpus invariant checks (no repair).",
+		Description: ToolDescriptions["verify"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.VerifyReport, error) {
 		out, err := doVerify(b)
@@ -335,7 +351,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "conflicts",
-		Description: "List quarantined merge conflicts.",
+		Description: ToolDescriptions["conflicts"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
 		out, err := doConflicts(b)
@@ -347,7 +363,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "corpus_size",
-		Description: "Return corpus on-disk size breakdown.",
+		Description: ToolDescriptions["corpus_size"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.SizeReport, error) {
 		out, err := doCorpusSize(b)
@@ -359,7 +375,7 @@ func registerTools(server *mcp.Server, b Backend) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "doctor",
-		Description: "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+		Description: ToolDescriptions["doctor"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
 		out, err := doDoctor(b)

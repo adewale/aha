@@ -23,5 +23,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if w := codegen.Warnings(); w != "" {
+		fmt.Fprint(os.Stderr, w)
+	}
 	fmt.Println("wrote", *out)
 }

@@ -12,8 +12,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { connectStdio } from "../transports/stdio.ts";
-import { aha } from "../aha-mcp.ts";
+import { connectStdio, AhaMcpError } from "../transports/stdio.ts";
+import { aha, parseRef, formatRef, type Ref } from "../aha-mcp.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -144,4 +144,44 @@ test("surfaces JSON-RPC errors as rejections", async () => {
   fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
 
   await assert.rejects(pending, /invalid ref/);
+});
+
+test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
+  const fake = new FakeStreams();
+  const connecting = connectStdio(fake.stdin, fake.stdout);
+  const init = fake.requests().find((m) => m.method === "initialize")!;
+  fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  const tools = aha(await connecting);
+
+  const pending = tools.read({ ref: "bad" });
+  const call = fake.requests().find((m) => m.method === "tools/call")!;
+  fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
+
+  try {
+    await pending;
+    assert.fail("expected throw");
+  } catch (e) {
+    assert.ok(e instanceof AhaMcpError, `expected AhaMcpError, got ${typeof e}`);
+    assert.equal((e as AhaMcpError).code, "-32000");
+    assert.match((e as AhaMcpError).message, /invalid ref/);
+  }
+});
+
+test("parseRef + formatRef round-trip every canonical shape", () => {
+  const cases: Ref[] = [
+    { kind: "message", session_key: "sk1_abc", entry_id: "p1" },
+    { kind: "session", session_key: "sk1_abc" },
+    { kind: "artifact", artifact_sha256: "a".repeat(64) },
+  ];
+  for (const ref of cases) {
+    const wire = formatRef(ref);
+    const parsed = parseRef(wire);
+    assert.deepEqual(parsed, ref, `round-trip for ${ref.kind} failed: ${wire}`);
+  }
+});
+
+test("parseRef returns null for malformed input", () => {
+  for (const bad of ["", "msg:abc", "session:v2:sk", "artifact:v1:not-a-sha", "garbage"]) {
+    assert.equal(parseRef(bad), null, `expected null for ${JSON.stringify(bad)}`);
+  }
 });
