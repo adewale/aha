@@ -163,18 +163,20 @@ aha init [--config PATH] [--accept-secrets] [--json]
 run a read-only stdio MCP server over the corpus
 
 ```txt
-aha mcp [--config PATH] [--repo DIR]
+aha mcp [--config PATH] [--repo DIR] [--dry-run]
 ```
 
 **Flags:**
 
 - `--config`
 - `--corpus`
+- `--dry-run`
 - `--repo`
 
 **Examples:**
 
 - `aha mcp`
+- `aha mcp --dry-run`
 
 **JSON contract:** `jsonrpc:tools/list|tools/call (stdio MCP)`
 

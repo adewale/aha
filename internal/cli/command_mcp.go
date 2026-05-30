@@ -2,7 +2,9 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/adewale/aha/internal/mcp"
 )
@@ -15,6 +17,7 @@ func cmdMcp(args []string, _, stderr io.Writer) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cf := registerCorpusFlags(fs)
+	dryRun := fs.Bool("dry-run", false, "open the corpus, register tools, print a one-line summary to stderr, then exit without serving stdio")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -27,5 +30,14 @@ func cmdMcp(args []string, _, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
+	if *dryRun {
+		// Build the server (which registers every tool) and exit
+		// without reading stdin. Hosts use this to smoke-test that
+		// `aha mcp` can open its corpus and that the registered tool
+		// set is what they expect.
+		_ = mcp.NewServer(mcp.NewCorpusBackend(store, cfg))
+		fmt.Fprintf(stderr, "aha mcp dry-run ok: %d tools (%s)\n", len(mcp.ToolNames), strings.Join(mcp.ToolNames, ", "))
+		return nil
+	}
 	return mcp.Serve(mcp.NewCorpusBackend(store, cfg))
 }

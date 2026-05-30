@@ -119,6 +119,9 @@ User goal: “Let my coding agent search and read prior sessions without shellin
 # Register once in the MCP host's config:
 #   { "mcpServers": { "aha": { "command": "aha", "args": ["mcp"] } } }
 aha mcp
+
+# Smoke-test the wiring before connecting a host:
+aha mcp --dry-run
 ```
 
 Rationale:
@@ -126,6 +129,7 @@ Rationale:
 - Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
 - It reuses the same corpus/search code as the CLI, so results match `--json` output exactly.
 - It is read-only by construction: snapshot/refresh/ingest are not reachable, so an agent cannot mutate the corpus.
+- `--dry-run` opens the corpus, registers tools, prints a one-line summary, and exits — confirms a host config before stdio carries protocol traffic.
 - For code-mode runtimes, the typed surface in `clients/typescript/` lets the agent fan out (`search` → filter → `read`) in one round trip. See `docs/mcp-spec.md`.
 
 ## Journey 7: browse the corpus locally

@@ -89,7 +89,7 @@ Supported methods (all SDK-provided):
 ## Process lifecycle
 
 ```
-aha mcp [--config PATH] [--repo DIR]
+aha mcp [--config PATH] [--repo DIR] [--dry-run]
 ```
 
 - Opens the corpus once at startup (read-only). The corpus is reused across
@@ -98,6 +98,10 @@ aha mcp [--config PATH] [--repo DIR]
 - Status, errors, and any diagnostics go to stderr (never to stdout — stdout is
   the protocol channel).
 - Exits cleanly when stdin closes.
+- `--dry-run` opens the corpus, registers every tool, prints a one-line
+  summary to stderr, and exits 0 without reading stdin. Useful as a
+  pre-flight check from a host config: confirms the binary can find its
+  corpus and that the advertised tool set is what the host expects.
 
 ## Security boundaries
 
@@ -118,14 +122,17 @@ The MCP server calls the same `internal/corpus`, `internal/search`, and (for
 `doctor`) `internal/adapters` functions that the CLI calls. No business logic
 is duplicated. The MCP layer is purely:
 
-1. SDK-provided framing and dispatch.
-2. Typed input structs with `jsonschema` tags (the SDK derives JSON-Schema).
-3. A per-handler `rejectExtras[InputType]` strict-decode that enforces
-   `additionalProperties: false` semantics the auto-derived schema doesn't
-   itself include.
-4. Invocation of the pure `do<Tool>` business function.
-5. SDK `CallToolResult` construction — text content for list-typed
-   payloads, text + `structuredContent` for object-typed ones.
+1. SDK-provided framing, dispatch, and `additionalProperties: false`
+   enforcement against the auto-derived schema for each typed input.
+2. Typed input structs with `jsonschema` tags (the SDK derives JSON-Schema
+   including the strict-additional-properties enforcement above).
+3. Invocation of the pure `do<Tool>` business function.
+4. SDK `CallToolResult` construction. Object-typed tools (`status`,
+   `verify`, `corpus_size`, `doctor`) return a typed `Out` and let the
+   SDK fill both `content[].text` and `structuredContent` from one
+   marshal. List-typed tools (`search`, `read`, `conflicts`) use
+   `Out=any` because the SDK refuses array output schemas, and call a
+   thin `textResult` helper to set `content[].text` manually.
 
 The same `CallTool` dispatch is exported and reused by the HTTP dashboard
 (`internal/server`), which doesn't go through the MCP wire.
@@ -318,8 +325,9 @@ Security posture:
   Plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
 - **Per-request timeout** via `http.TimeoutHandler` (`--timeout`, default
   30s). `ReadHeaderTimeout: 5s` and `IdleTimeout: 60s` on the server.
-- **Same dispatch as MCP** (`mcp.CallTool`), so the strict argument
-  validation (`rejectExtras`) applies. Unknown keys are rejected with 400.
+- **Same dispatch as MCP** (`mcp.CallTool`), so the SDK's strict
+  `additionalProperties: false` enforcement applies. Unknown keys are
+  rejected with 400.
 - **All routes are read-only.** No write surface; no CSRF token needed.
 - **Pinned error envelope** (`{error: {code, message}}` with stable codes:
   `bad_request`, `unauthorized`, `unsupported_media_type`,
