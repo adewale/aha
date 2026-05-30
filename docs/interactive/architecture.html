@@ -255,8 +255,7 @@ nav.tabs button.active {
 
 /* ---------- sections --------------------------------------------------- */
 section { display: none; }
-section.active { display: block; animation: fadein .35s var(--ease); }
-@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+section.active { display: block; }
 
 .section-head {
   display: grid;
@@ -418,69 +417,6 @@ svg .grp:hover .rule { stroke: var(--sage); }
   .mech .side { position: static; }
 }
 
-/* ---------- ingest scrubber (Bret Victor: time as a dimension) -------- */
-.scrubber {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: var(--s-5);
-  margin: var(--s-4) 0 var(--s-7);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-4);
-}
-.scr-controls { display: flex; flex-wrap: wrap; gap: var(--s-2); }
-.scr-controls button {
-  appearance: none;
-  background: var(--surface-2);
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 6px var(--s-3);
-  font: inherit;
-  font-size: var(--t-sm);
-  cursor: pointer;
-  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
-  font-family: ui-monospace, Menlo, monospace;
-}
-.scr-controls button:hover { background: var(--sage-soft); color: var(--ink); border-color: var(--sage-line); }
-.scr-controls button.primary { background: var(--sage-soft); color: var(--ink); border-color: var(--sage-line); }
-.scr-controls button.ghost { background: transparent; border-style: dashed; }
-.scr-stage { width: 100%; height: auto; }
-.scr-stage #scr-bundle { transition: transform .65s var(--ease), opacity .25s ease; }
-.scr-stage #scr-bundle rect { transition: fill .25s ease, stroke .25s ease; }
-.scr-stage #scr-bundle.fail rect { fill: var(--clay); }
-.scr-corpus {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--s-4);
-}
-@media (max-width: 720px) { .scr-corpus { grid-template-columns: 1fr; } }
-.scr-pane { min-width: 0; }
-.scr-rows {
-  background: oklch(11% 0.011 80);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: var(--s-2);
-  min-height: 70px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-xs);
-  color: var(--ink-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.scr-rows .scr-empty { color: var(--ink-3); font-style: italic; padding: 6px var(--s-2); }
-.scr-rows .item {
-  background: var(--surface-2);
-  padding: 3px var(--s-2);
-  border-radius: 3px;
-  border-left: 2px solid var(--sage);
-  animation: dbflash 1s var(--ease);
-}
-.scr-rows .item.tentative { border-left-color: var(--sand); opacity: .8; }
-.scr-rows .item.dropped { text-decoration: line-through; opacity: .4; border-left-color: var(--clay); }
-
 /* ---------- database simulator (Nicky Case style) --------------------- */
 .db-sim {
   display: grid;
@@ -544,7 +480,8 @@ svg .grp:hover .rule { stroke: var(--sage); }
 }
 .db-table li:last-child { border-bottom: 0; }
 .db-table li.fresh {
-  animation: dbflash 1.2s var(--ease);
+  /* state-confirmation flash on row insert; under animate-skill 500ms feedback budget */
+  animation: dbflash .5s var(--ease);
 }
 @keyframes dbflash {
   0%   { background: oklch(74% 0.115 175 / 0.35); }
@@ -838,18 +775,19 @@ svg .grp:hover .rule { stroke: var(--sage); }
   position: absolute;
   width: 14px; height: 14px;
   border-radius: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(1);
   cursor: pointer;
   z-index: 5;
   border: 2px solid var(--bg);
-  transition: transform .2s var(--ease), border-color .2s var(--ease), width .2s var(--ease), height .2s var(--ease);
+  /* transform + border-color only — never width/height (layout-driving) */
+  transition: transform .2s var(--ease), border-color .2s var(--ease);
 }
 .scatter-host .pt:hover {
-  transform: translate(-50%, -50%) scale(1.3);
+  transform: translate(-50%, -50%) scale(1.4);
 }
 .scatter-host .pt.selected {
   border-color: var(--ink);
-  width: 18px; height: 18px;
+  transform: translate(-50%, -50%) scale(1.25);
 }
 .scatter-host .pt.s-hot   { background: var(--clay); }
 .scatter-host .pt.s-warn  { background: var(--sand); }
@@ -920,40 +858,6 @@ svg .grp:hover .rule { stroke: var(--sage); }
   padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--line);
 }
-#hotspot-cards .card {
-  display: grid;
-  grid-template-columns: 1fr;
-  padding: var(--s-5) var(--s-5) var(--s-5) 0;
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
-  transition: background .18s var(--ease);
-}
-#hotspot-cards .card:hover { background: var(--surface); padding-left: var(--s-4); padding-right: var(--s-4); }
-#hotspot-cards .card h3 {
-  margin: 0 0 var(--s-2);
-  font-size: var(--t-xl);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-  display: flex;
-  align-items: baseline;
-  gap: var(--s-3);
-  flex-wrap: wrap;
-}
-#hotspot-cards .card .why {
-  color: var(--ink-3);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: var(--t-sm);
-  margin-bottom: var(--s-3);
-}
-#hotspot-cards .card p {
-  margin: 0 0 var(--s-3);
-  max-width: 68ch;
-  color: var(--ink-2);
-  line-height: 1.6;
-}
-#hotspot-cards .card p:last-child { margin-bottom: 0; }
-#hotspot-cards .card p b { color: var(--ink); font-weight: 600; }
 
 /* tag chips */
 .tag-chip {
@@ -976,29 +880,12 @@ svg .grp:hover .rule { stroke: var(--sage); }
 /* ---------- codebase map ---------------------------------------------- */
 .map-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 2fr;
+  grid-template-columns: minmax(360px, 1fr) minmax(280px, 1fr);
   gap: var(--s-7);
   align-items: start;
 }
+.map-grid #pkg-chart { width: 100%; height: auto; }
 @media (max-width: 880px) { .map-grid { grid-template-columns: 1fr; } }
-.tree {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: var(--t-md);
-  line-height: 1.9;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: var(--s-5);
-}
-.tree b { color: var(--ink); font-weight: 600; }
-.tree ul { padding-left: var(--s-5); margin: 0; border-left: 1px solid var(--line); }
-.tree li { list-style: none; }
-.tree a.pkg { color: var(--sage); border-bottom: none; }
-.tree a.pkg:hover { color: var(--sage-deep); border-bottom: 1px solid var(--sage-line); }
-.tree .lines {
-  color: var(--ink-3); font-size: var(--t-sm);
-  margin-left: var(--s-2); font-variant-numeric: tabular-nums;
-}
 .pkg-detail {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1726,9 +1613,11 @@ footer a:hover { color: var(--ink-2); }
     <button data-tab="map" role="tab">Codebase</button>
   </nav>
 
+  <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
+       update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num">16,172</span> lines</dd>
-    <dt>Packages</dt><dd><span class="num">15</span> in internal</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">8,399</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">15</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num">12</span></dd>
@@ -2837,54 +2726,6 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
-  <div class="scrubber" id="ingest-scrubber">
-    <div class="scr-controls">
-      <button data-act="play"  class="primary">▶  Play happy path</button>
-      <button data-act="fail-plan">💥  Fail during plan</button>
-      <button data-act="fail-write">💥  Fail after writes</button>
-      <button data-act="fail-promote">💥  Fail after blob promote</button>
-      <button data-act="reset" class="ghost">↻  reset</button>
-    </div>
-
-    <svg class="scr-stage" viewBox="0 0 720 200" role="img" aria-label="ingest stage scrubber">
-      <defs>
-        <marker id="scr-arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-          <path d="M0,0 L7,4 L0,8 z" fill="var(--ink-3)"/>
-        </marker>
-      </defs>
-      <!-- spine -->
-      <line x1="80" y1="100" x2="640" y2="100" stroke="var(--line)" stroke-width="1" marker-end="url(#scr-arr)"/>
-      <!-- stage anchors -->
-      <g id="scr-anchors">
-        <g><circle cx="80"  cy="100" r="5" fill="var(--ink-3)"/><text x="80"  y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">staging</text></g>
-        <g><circle cx="260" cy="100" r="5" fill="var(--ink-3)"/><text x="260" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">plan</text></g>
-        <g><circle cx="420" cy="100" r="5" fill="var(--ink-3)"/><text x="420" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">write tx</text></g>
-        <g><circle cx="560" cy="100" r="5" fill="var(--ink-3)"/><text x="560" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">promote</text></g>
-        <g><circle cx="640" cy="100" r="5" fill="var(--ink-3)"/><text x="640" y="135" fill="var(--ink-2)" text-anchor="middle" font-size="12">commit</text></g>
-      </g>
-      <!-- bundle traveler -->
-      <g id="scr-bundle" transform="translate(80,100)" opacity="0">
-        <rect x="-14" y="-10" width="28" height="20" rx="2" fill="var(--sage)" stroke="var(--ink)" stroke-width="0.5"/>
-        <text y="4" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace" fill="oklch(14% 0.012 80)">tar.zst</text>
-      </g>
-      <text x="80" y="40" id="scr-status" text-anchor="start" fill="var(--ink-2)" font-size="13" font-family="ui-monospace, monospace">click a button to begin</text>
-    </svg>
-
-    <div class="scr-corpus">
-      <div class="scr-pane">
-        <h4 class="db-pane-h">corpus rows <span class="db-meta" id="scr-rows-count">0</span></h4>
-        <div class="scr-rows" id="scr-rows"><div class="scr-empty">—</div></div>
-      </div>
-      <div class="scr-pane">
-        <h4 class="db-pane-h">blobs/bundles/ <span class="db-meta" id="scr-blob-count">0</span></h4>
-        <div class="scr-rows" id="scr-blobs"><div class="scr-empty">—</div></div>
-      </div>
-      <div class="scr-pane">
-        <h4 class="db-pane-h">ingest_attempts <span class="db-meta" id="scr-att-count">0</span></h4>
-        <div class="scr-rows" id="scr-att"><div class="scr-empty">—</div></div>
-      </div>
-    </div>
-  </div>
 
   <h3 class="sub">Stages, fully spelled out</h3>
   <div class="ingest-stages">
@@ -3072,12 +2913,9 @@ create index idx_session_path_tokens_token_session
     <h4>Pick a dot</h4>
     <div class="where">each hotspot has a where, a state, and a falsifier</div>
     <p style="color: var(--ink-2);">
-      Click any dot in the chart, or any row in the list below.
+      Click any dot in the chart to pin its detail panel.
     </p>
   </div>
-
-  <div class="hot-list-head">All hotspots</div>
-  <div id="hotspot-cards"></div>
 </section>
 
 
@@ -3092,18 +2930,13 @@ create index idx_session_path_tokens_token_session
     </p>
   </div>
 
-  <h3 class="sub">Package sizes</h3>
-  <p class="cli-note" style="margin-bottom: var(--s-4)">Production-code lines per package (tests omitted). Sorted by size. Click a name to load its detail panel below.</p>
-  <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
-
-  <h3 class="sub" style="margin-top: var(--s-7)">Package detail</h3>
+  <h3 class="sub">Packages, sized by production-code lines</h3>
+  <p class="cli-note" style="margin-bottom: var(--s-4)">Tests omitted. Click any row.</p>
   <div class="map-grid">
-    <div class="tree" id="tree"></div>
+    <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
     <div class="pkg-detail" id="pkg-detail">
       <h3>Pick a package</h3>
-      <p class="why">
-        Click a package name in the chart above or the tree on the left.
-      </p>
+      <p class="why">Click any name or dot on the left.</p>
     </div>
   </div>
 
@@ -3361,153 +3194,6 @@ updateRef();
     row.querySelector('input').addEventListener('input', update);
   }
   update();
-})();
-
-/* ============================================================
-   Ingest pipeline scrubber.
-   Plays the planner / writer / publisher / commit flow visibly,
-   so the commit-AFTER-promote ordering and the rollback behavior
-   become a thing you can see, not a sentence you have to trust.
-   ============================================================ */
-(function () {
-  const root = document.getElementById('ingest-scrubber');
-  if (!root) return;
-  const bundle = document.getElementById('scr-bundle');
-  const status = document.getElementById('scr-status');
-  const rowsEl = document.getElementById('scr-rows');
-  const blobsEl = document.getElementById('scr-blobs');
-  const attEl = document.getElementById('scr-att');
-  const rowsCt = document.getElementById('scr-rows-count');
-  const blobCt = document.getElementById('scr-blob-count');
-  const attCt = document.getElementById('scr-att-count');
-  const stages = { staging: 80, plan: 260, write: 420, promote: 560, commit: 640 };
-  let running = false;
-
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  function moveTo(stage) {
-    bundle.setAttribute('transform', `translate(${stages[stage]},100)`);
-  }
-  function setStatus(t, cls) {
-    status.textContent = t;
-    status.setAttribute('fill', cls === 'good' ? 'var(--sage)' : cls === 'bad' ? 'var(--clay)' : cls === 'warn' ? 'var(--sand)' : 'var(--ink-2)');
-  }
-  function setRows(arr) {
-    rowsEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
-    for (const r of arr) {
-      const d = document.createElement('div');
-      d.className = 'item' + (r.tentative ? ' tentative' : '') + (r.dropped ? ' dropped' : '');
-      d.textContent = r.text;
-      rowsEl.appendChild(d);
-    }
-    rowsCt.textContent = arr.filter(x => !x.dropped).length;
-  }
-  function setBlobs(arr) {
-    blobsEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
-    for (const r of arr) {
-      const d = document.createElement('div');
-      d.className = 'item' + (r.dropped ? ' dropped' : '');
-      d.textContent = r.text;
-      blobsEl.appendChild(d);
-    }
-    blobCt.textContent = arr.filter(x => !x.dropped).length;
-  }
-  function setAtt(arr) {
-    attEl.innerHTML = arr.length ? '' : '<div class="scr-empty">—</div>';
-    for (const r of arr) {
-      const d = document.createElement('div');
-      d.className = 'item';
-      d.textContent = r.text;
-      attEl.appendChild(d);
-    }
-    attCt.textContent = arr.length;
-  }
-  let runToken = 0;
-  function reset() {
-    runToken++;          // any in-flight async play loop becomes stale
-    running = false;
-    bundle.style.opacity = '0';
-    moveTo('staging');
-    bundle.classList.remove('fail');
-    setRows([]); setBlobs([]); setAtt([]);
-    setStatus('click a button to begin', '');
-  }
-
-  async function play(failAt) {
-    if (running) reset();          // abort any in-flight loop
-    running = true;
-    const token = ++runToken;
-    const live = () => token === runToken;
-    await sleep(50);
-    if (!live()) return;
-    bundle.style.opacity = '1';
-
-    setStatus('staging tar.zst into a temp file…', '');
-    moveTo('staging');
-    await sleep(700); if (!live()) return;
-
-    setStatus('Planner: hashing, validating manifest, budget checks…', '');
-    moveTo('plan');
-    await sleep(900); if (!live()) return;
-    if (failAt === 'plan') {
-      bundle.classList.add('fail');
-      setStatus('plan failed (bad manifest). nothing in corpus changed.', 'bad');
-      await sleep(900); if (!live()) return;
-      bundle.style.opacity = '0';
-      running = false; return;
-    }
-
-    setStatus('Writer: BEGIN; inserting rows (uncommitted)…', 'warn');
-    moveTo('write');
-    const rows = [];
-    for (const r of ['bundles row', 'machines row', 'sessions row × 3', 'entries × 42', 'messages × 18', 'fts_messages × 18 (trigger)']) {
-      await sleep(180); if (!live()) return;
-      rows.push({ text: r, tentative: true });
-      setRows(rows);
-    }
-    if (failAt === 'write') {
-      bundle.classList.add('fail');
-      setStatus('crash after writes. ROLLBACK. all rows discarded; no blob written.', 'bad');
-      await sleep(500); if (!live()) return;
-      setRows(rows.map(r => ({ ...r, dropped: true, tentative: false })));
-      await sleep(1200); if (!live()) return;
-      bundle.style.opacity = '0';
-      running = false; return;
-    }
-
-    setStatus('Publisher: atomic rename staging → blobs/bundles/<sha>.tar.zst', '');
-    moveTo('promote');
-    await sleep(600); if (!live()) return;
-    const blobs = [{ text: 'b5ce6c…f47.tar.zst' }];
-    setBlobs(blobs);
-    if (failAt === 'promote') {
-      bundle.classList.add('fail');
-      setStatus('crash after promote, before commit. blob removed by defer; tx rolled back.', 'bad');
-      await sleep(700); if (!live()) return;
-      setBlobs(blobs.map(b => ({ ...b, dropped: true })));
-      setRows(rows.map(r => ({ ...r, dropped: true, tentative: false })));
-      await sleep(1200); if (!live()) return;
-      bundle.style.opacity = '0';
-      running = false; return;
-    }
-
-    setStatus('tx.Commit() — rows and blob become visible together.', 'good');
-    moveTo('commit');
-    setRows(rows.map(r => ({ text: r.text })));   // no longer tentative
-    setAtt([{ text: 'bundle b5ce6c… duplicate=0' }]);
-    await sleep(900); if (!live()) return;
-    setStatus('done. coherent: readers see all rows AND the blob, or neither.', 'good');
-    running = false;
-  }
-
-  reset();
-  root.querySelectorAll('.scr-controls button').forEach(b => {
-    b.addEventListener('click', () => {
-      const a = b.dataset.act;
-      if (a === 'reset') { reset(); return; }
-      if (a === 'play') play(null);
-      else play(a.replace('fail-', ''));
-    });
-  });
 })();
 
 /* ============================================================
@@ -3826,21 +3512,10 @@ function showHotspot(id, scroll) {
       <p><b>State.</b> ${h.state}</p>
       <p><b>What would change our mind.</b> ${h.needs}</p>
     </div>`;
-  if (scroll) document.getElementById(`card-${h.id}`)?.scrollIntoView({behavior:'smooth', block:'center'});
+  if (scroll) document.getElementById('hot-detail')?.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
-const cards = document.getElementById('hotspot-cards');
-cards.innerHTML = HOTSPOTS.map(h => `
-  <div class="card" id="card-${h.id}" data-id="${h.id}">
-    <h3>${h.name} <span class="tag-chip ${h.severity==='solid'?'solid':'hot'}">${h.severity}</span></h3>
-    <div class="why">${h.where}</div>
-    <p><b>State.</b> ${h.state}</p>
-    <p><b>What would change our mind.</b> ${h.needs}</p>
-  </div>`).join('');
-cards.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
-  showHotspot(c.dataset.id, false);
-  document.querySelector('#hotspots .scatter-host').scrollIntoView({behavior:'smooth', block:'center'});
-}));
+/* hotspot card-list removed; the scatter + detail panel carry the same data without duplication. */
 
 /* ============================================================
    Codebase map
@@ -3863,13 +3538,6 @@ const PACKAGES = [
   { name: 'internal/testquality', lines: '~270', why: 'Static debt inventory. Fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.', read: ['cbc_debt_test.go', 'static_test.go'] },
 ];
 
-const tree = document.getElementById('tree');
-tree.innerHTML = '<div><b>aha</b></div><ul>' +
-  '<li>cmd/aha/main.go <span class="lines">11 lines</span></li>' +
-  '<li><b>internal/</b><ul>' +
-  PACKAGES.map(p => `<li><a href="#" class="pkg" data-pkg="${p.name}">${p.name.replace('internal/','')}</a> <span class="lines">${p.lines}</span></li>`).join('') +
-  '</ul></li></ul>';
-
 function loadPkg(name) {
   const p = PACKAGES.find(x => x.name === name);
   if (!p) return;
@@ -3879,10 +3547,6 @@ function loadPkg(name) {
     <b style="color:var(--ink-3);font-size:var(--t-xs);letter-spacing:.08em;text-transform:uppercase">Read these first</b>
     <ul>${p.read.map(r => `<li><code>${r}</code></li>`).join('')}</ul>`;
 }
-tree.querySelectorAll('a.pkg').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault();
-  loadPkg(a.dataset.pkg);
-}));
 
 /* ============================================================
    Cleveland dot plot of package sizes (Tufte B4 + B5)
