@@ -1109,6 +1109,221 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .hooks .pair span { color: var(--ink-2); }
 @media (max-width: 720px) { .hooks .pair { grid-template-columns: 1fr; gap: var(--s-1); } }
 
+/* ---------- architecture: layered dependencies ------------------------ */
+.layer-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: var(--s-3);
+}
+.layer-row {
+  background: var(--bg);
+  padding: var(--s-3) var(--s-5);
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: var(--s-5);
+  align-items: center;
+}
+.layer-row .layer-no {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  letter-spacing: 0.04em;
+}
+.layer-row .layer-pkgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.pkg-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 4px var(--s-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
+.pkg-chip:hover, .pkg-chip.active {
+  background: var(--sage-soft);
+  border-color: var(--sage-line);
+  color: var(--ink);
+}
+.pkg-chip.depended {
+  border-color: var(--sand);
+  background: oklch(82% 0.12 85 / 0.12);
+  color: var(--sand);
+}
+.pkg-chip .dep-count {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+.layer-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+  margin-top: var(--s-3);
+  min-height: 84px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.layer-detail h4 {
+  margin: 0 0 var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-md);
+  color: var(--ink);
+}
+.layer-detail .imp-list {
+  margin-top: var(--s-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+}
+.layer-detail .imp-list code { background: transparent; padding: 0; color: var(--sand); }
+.layer-detail .imp-list .none { color: var(--ink-3); font-style: italic; }
+
+/* ---------- bundle anatomy -------------------------------------------- */
+.bundle-anatomy {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-5);
+  margin-top: var(--s-3);
+}
+@media (max-width: 880px) { .bundle-anatomy { grid-template-columns: 1fr; } }
+.tar-tree {
+  background: oklch(11% 0.011 80);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+}
+.tar-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 60px;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  align-items: baseline;
+  transition: background .15s var(--ease);
+}
+.tar-row:hover { background: var(--surface-2); }
+.tar-row.active { background: var(--sage-soft); }
+.tar-sha  { color: var(--sand); font-variant-numeric: tabular-nums; }
+.tar-path { color: var(--ink); word-break: break-all; }
+.tar-size { color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
+.tar-info {
+  margin-top: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
+  border-left: 2px solid var(--sage-line);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  min-height: 60px;
+}
+.manifest-view {
+  background: oklch(11% 0.011 80);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  overflow-x: auto;
+}
+.manifest-head { color: var(--ink-3); padding: 0 var(--s-2) var(--s-2); }
+.manifest-view pre { background: transparent; border: 0; padding: 0; margin: 0; font-size: inherit; }
+.manifest-view code { background: transparent; padding: 0; color: var(--ink-2); }
+.manifest-view .vol { color: var(--clay); }
+.manifest-view .lbl { color: var(--ink-3); }
+
+/* ---------- schema ER ------------------------------------------------- */
+.schema-er {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+}
+.er-family {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+}
+.er-family-h {
+  font-size: var(--t-sm);
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: var(--s-3);
+  display: flex;
+  gap: var(--s-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.er-family-h .cli-note { font-weight: 400; }
+.er-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-3);
+}
+.er-table {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color .15s var(--ease);
+}
+.er-table:hover, .er-table.active { border-color: var(--sage); }
+.er-table.primary { border-left: 3px solid var(--sage); }
+.er-table.derived { border-style: dashed; }
+.er-table .er-name {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+.er-table .er-pk { color: var(--sage); }
+.er-table .er-uk { color: var(--sand); }
+.er-table .er-fk { color: var(--ink-3); }
+.er-table .er-note { color: var(--ink-3); font-family: inherit; font-style: italic; margin-top: 2px; }
+.er-table code { background: transparent; padding: 0; color: var(--ink-2); font-size: 100%; }
+.er-cols {
+  margin-top: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px dashed var(--line);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: none;
+  line-height: 1.65;
+}
+.er-table.active .er-cols { display: block; }
+
+/* ---------- trust table --------------------------------------------- */
+.trust-table {
+  margin-top: var(--s-3);
+}
+
 /* ---------- supertable (Tufte C6) -------------------------------------- */
 .supertable {
   width: 100%;
@@ -1207,6 +1422,7 @@ footer a:hover { color: var(--ink-2); }
 
   <nav class="tabs" id="tabs" role="tablist">
     <button data-tab="pipeline" class="active" role="tab">Pipeline</button>
+    <button data-tab="arch" role="tab">Architecture</button>
     <button data-tab="novel" role="tab">Mechanisms</button>
     <button data-tab="ingest" role="tab">Ingest</button>
     <button data-tab="dedup" role="tab">Deduplication</button>
@@ -1331,6 +1547,240 @@ footer a:hover { color: var(--ink-2); }
     <dt>Determinism</dt>
     <dd>Sorted manifest, normalized tar metadata, fixed zstd encoder. Repeat and shuffle byte-equality are property tests, not promises.</dd>
   </dl>
+</section>
+
+<!-- ===================================================== ARCHITECTURE = -->
+<section id="arch">
+  <div class="section-head">
+    <h2>Architecture</h2>
+    <p>
+      Four views of the same system. <em>Layers</em> shows what depends on what
+      (the static structure). <em>Bundle</em> shows what a snapshot actually
+      contains on disk. <em>Schema</em> shows the corpus tables and how rows
+      reference each other. <em>Trust boundaries</em> shows where untrusted
+      input enters and where network access is allowed.
+    </p>
+  </div>
+
+  <h3 class="sub">Layered dependencies</h3>
+  <p class="cli-note">
+    Every arrow is a real Go <code>import</code> taken from the source.
+    The architecture is honestly layered: every package only imports from
+    layers below it. Hover or tap any package to see what depends on it.
+  </p>
+  <div id="layer-diagram" class="layer-diagram"></div>
+  <div class="layer-detail" id="layer-detail">
+    <p class="cli-note" style="margin:0">Hover a package above for its responsibility and a list of importers.</p>
+  </div>
+
+  <h3 class="sub">Anatomy of a bundle</h3>
+  <p class="cli-note">
+    A bundle is a single deterministic <code>tar.zst</code>. One
+    <code>manifest.json</code> at the root, then the raw source files copied
+    verbatim, each entry's tar metadata normalized. Click to expand.
+  </p>
+  <div class="bundle-anatomy" id="bundle-anatomy">
+    <div class="tar-tree">
+      <div class="tar-row" data-info="The only file the bundle reader trusts to interpret. Schema, machine_id, captured_at, the list of files with their SHAs and source paths, the source/policy/adapters config snapshot. State signature hashes a subset of this excluding bundle_id and captured_at.">
+        <span class="tar-sha">a1b2c3d4…</span>
+        <span class="tar-path">manifest.json</span>
+        <span class="tar-size">4.2 KB</span>
+      </div>
+      <div class="tar-row" data-info="Raw Pi JSONL file, byte-for-byte copy. file_sha256 is the dedup key in the corpus blob store.">
+        <span class="tar-sha">e5f60123…</span>
+        <span class="tar-path">files/pi/sessions/01HEXAMPLE.jsonl</span>
+        <span class="tar-size">38 KB</span>
+      </div>
+      <div class="tar-row" data-info="A Claude Code session file. Each agent's session lands in its own path under files/.">
+        <span class="tar-sha">b7c89def…</span>
+        <span class="tar-path">files/claude-code/projects/aha/session.jsonl</span>
+        <span class="tar-size">214 KB</span>
+      </div>
+      <div class="tar-row" data-info="Subagent files (agent-*.jsonl) are detected by adapter and tagged is_subagent=true. Currently linked to no parent because the Claude adapter declares CanLinkSubagents=false.">
+        <span class="tar-sha">04ff5678…</span>
+        <span class="tar-path">files/claude-code/projects/aha/agent-abc.jsonl</span>
+        <span class="tar-size">12 KB</span>
+      </div>
+      <div class="tar-row" data-info="Codex rollout file. The Codex adapter only accepts rollout-*.jsonl and history.jsonl to avoid picking up stray files in the sessions root.">
+        <span class="tar-sha">9abcdef0…</span>
+        <span class="tar-path">files/codex/sessions/rollout-2024-01-01.jsonl</span>
+        <span class="tar-size">71 KB</span>
+      </div>
+      <div class="tar-row" data-info="Tool/agent output artifacts (text and images). Preserved verbatim. Text artifacts are FTS-indexed at ingest; image artifacts have their blobs preserved when include_images=true.">
+        <span class="tar-sha">deadbeef…</span>
+        <span class="tar-path">files/claude-code/artifacts/edit-foo.txt</span>
+        <span class="tar-size">2.1 KB</span>
+      </div>
+    </div>
+
+    <div class="manifest-view">
+      <div class="manifest-head">manifest.json &nbsp; <span class="cli-note" style="margin:0;font-size:var(--t-xs)">JSON-canonical; sorted; deterministic</span></div>
+<pre><code>{
+  "schema":         "aha-manifest/v2",
+  "bundle_id":      "bndl-<span class="vol">2024-01-01T10:00:00Z-abc123</span>",   <span class="lbl">// volatile</span>
+  "machine_id":     "ade-mbp",
+  "captured_at":    "<span class="vol">2024-01-01T10:00:00Z</span>",                <span class="lbl">// volatile</span>
+  "created_by":     "aha 0.x",
+  "implementation": { "language":"go","archive":"tar.zst" },
+  "source":         { "host_os":"darwin","hostname_hash":"..." },
+  "policy":         { "redaction":"none-v1","include_images":true,
+                      "index_tool_output":false },
+  "counts":         { "session_files":4,"artifact_files":2 },
+  "adapters":       [ { "name":"pi","version":"1","capabilities":{...} },
+                      { "name":"claude-code","version":"1","capabilities":{...} } ],
+  "files": [
+    { "source":"pi",          "path":"files/pi/sessions/01HEX.jsonl",      "sha256":"e5f60123…", "bytes":38912 },
+    { "source":"claude-code", "path":"files/claude-code/.../session.jsonl","sha256":"b7c89def…", "bytes":219136 },
+    ...
+  ]
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">Corpus schema</h3>
+  <p class="cli-note">
+    Twelve tables. Three families: <em>bundle metadata</em> at the top
+    (immutable provenance), <em>agent content</em> in the middle (append-only,
+    where the data lives), and <em>derived indexes</em> at the bottom
+    (FTS, path tokens — rebuildable from above).
+  </p>
+  <div class="schema-er" id="schema-er">
+    <div class="er-family">
+      <div class="er-family-h">bundle metadata <span class="cli-note">immutable; identity for everything below</span></div>
+      <div class="er-tables">
+        <div class="er-table" data-cols="bundle_id PK, bundle_sha256 UNIQUE, machine_id, captured_at, ingested_at, manifest_json">
+          <div class="er-name">bundles</div>
+          <div class="er-pk">PK <code>bundle_id</code></div>
+          <div class="er-uk">UQ <code>bundle_sha256</code></div>
+        </div>
+        <div class="er-table" data-cols="attempt_id, bundle_id, bundle_sha256, ingested_at, duplicate">
+          <div class="er-name">ingest_attempts</div>
+          <div class="er-note">audit log of every ingest call</div>
+        </div>
+        <div class="er-table" data-cols="machine_id PK, first_seen_at, last_seen_at, labels_json">
+          <div class="er-name">machines</div>
+          <div class="er-pk">PK <code>machine_id</code></div>
+        </div>
+        <div class="er-table" data-cols="source_id, source_name UNIQUE, adapter_version, capabilities_json">
+          <div class="er-name">sources</div>
+        </div>
+        <div class="er-table" data-cols="file_sha256 PK, kind, bytes, compressed_blob_path, first_seen_bundle_id">
+          <div class="er-name">files</div>
+          <div class="er-pk">PK <code>file_sha256</code></div>
+          <div class="er-note">content-addressed blob index</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="er-family">
+      <div class="er-family-h">agent content <span class="cli-note">append-only; triggers enforce; conflicts quarantine</span></div>
+      <div class="er-tables">
+        <div class="er-table primary" data-cols="session_key sk1_ PK (CHECK), source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, is_subagent, parent_session_key">
+          <div class="er-name">sessions</div>
+          <div class="er-pk">PK <code>session_key</code> (<code>sk1_</code> + sha256)</div>
+          <div class="er-fk">→ sessions (self, parent)</div>
+        </div>
+        <div class="er-table" data-cols="session_key+file_sha256+bundle_id UNIQUE, relative_path, raw_path, observed_at, copy_state">
+          <div class="er-name">session_versions</div>
+          <div class="er-fk">→ sessions, files, bundles</div>
+        </div>
+        <div class="er-table primary" data-cols="(session_key, entry_id) PK, parent_id, line_no, entry_type, timestamp, role, entry_sha256, raw_json">
+          <div class="er-name">entries</div>
+          <div class="er-pk">PK <code>(session_key, entry_id)</code></div>
+          <div class="er-fk">→ sessions</div>
+          <div class="er-note">append-only; conflict trigger</div>
+        </div>
+        <div class="er-table" data-cols="(session_key, entry_id) PK, role, text, tool_name, command, files_json, model, provider, tokens, cost">
+          <div class="er-name">messages</div>
+          <div class="er-fk">→ entries</div>
+          <div class="er-note">append-only; insert trigger mirrors text into fts_messages</div>
+        </div>
+        <div class="er-table" data-cols="artifact_id PK, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body">
+          <div class="er-name">artifacts</div>
+          <div class="er-fk">→ bundles</div>
+          <div class="er-note">append-only; insert trigger mirrors text into fts_artifacts</div>
+        </div>
+        <div class="er-table" data-cols="image_sha256 PK, source_name, mime_type, bytes, width, height, ext, blob_path">
+          <div class="er-name">images</div>
+        </div>
+        <div class="er-table" data-cols="(session_key, entry_id, asset_sha256, content_index, prompt_order) PK">
+          <div class="er-name">entry_assets</div>
+          <div class="er-fk">→ entries</div>
+          <div class="er-note">image attachments per entry</div>
+        </div>
+        <div class="er-table" data-cols="conflict_id PK, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json, created_at">
+          <div class="er-name">conflicts</div>
+          <div class="er-note">where the conflict trigger writes; append-only itself</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="er-family">
+      <div class="er-family-h">derived indexes <span class="cli-note">rebuildable with <code>aha verify --repair-fts</code></span></div>
+      <div class="er-tables">
+        <div class="er-table derived" data-cols="rowid==messages.rowid, session_key unindexed, entry_id unindexed, text">
+          <div class="er-name">fts_messages</div>
+          <div class="er-note">FTS5 virtual table; maintained by trigger; rowid identity</div>
+        </div>
+        <div class="er-table derived" data-cols="rowid==artifacts.artifact_id, text">
+          <div class="er-name">fts_artifacts</div>
+          <div class="er-note">FTS5 virtual table; maintained by trigger</div>
+        </div>
+        <div class="er-table derived" data-cols="(session_key, token) PK; INDEXED BY (token, session_key)">
+          <div class="er-name">session_path_tokens</div>
+          <div class="er-note">hand-rolled inverted index for --path-token search</div>
+        </div>
+        <div class="er-table derived" data-cols="(artifact_id, token) PK">
+          <div class="er-name">artifact_path_tokens</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Trust boundaries</h3>
+  <table class="supertable trust-table">
+    <thead>
+      <tr><th>Boundary</th><th>Direction</th><th>Authority</th><th>Enforcement</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="row-name">source roots</td>
+        <td>read-only inbound</td>
+        <td>adapter <em>discover</em> and <em>open</em>; never <em>write</em></td>
+        <td>capability interface omits write methods; static test on production code</td>
+      </tr>
+      <tr>
+        <td class="row-name">archive</td>
+        <td>file → bundle</td>
+        <td>copies bytes, hashes, validates manifest</td>
+        <td>budget checks; path-policy tests reject <code>..</code>, abs paths, backslashes</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">depot</td>
+        <td>local FS or network (R2)</td>
+        <td>only package that may import network libraries</td>
+        <td><b>static import test</b> in <code>internal/testquality</code> fails CI if any other package touches <code>net/*</code> or AWS SDK</td>
+      </tr>
+      <tr>
+        <td class="row-name">R2 credentials</td>
+        <td>env → process memory</td>
+        <td>read at startup; never persisted</td>
+        <td>config-round-trip test asserts secrets never appear in any serialized output</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">corpus</td>
+        <td>bundle → SQLite</td>
+        <td>derived; rebuildable</td>
+        <td>append-only triggers; <code>aha verify</code> +  <code>--repair-fts</code> reconstructs</td>
+      </tr>
+      <tr>
+        <td class="row-name">search / read</td>
+        <td>outbound text to user</td>
+        <td>local SQLite + FTS5 only</td>
+        <td>never contacts the depot; arguments parsed via <code>FlagSpec</code></td>
+      </tr>
+    </tbody>
+  </table>
 </section>
 
 <!-- ===================================================== MECHANISMS ==== -->
@@ -2885,6 +3335,118 @@ function renderPackageChart() {
   });
 }
 renderPackageChart();
+
+/* ============================================================
+   Architecture: layered dependency diagram.
+   Sources of truth, extracted directly from the codebase via:
+     grep '"github.com/adewale/aha/internal/' internal/<pkg>/*.go
+   ============================================================ */
+const PKG_GRAPH = {
+  // bottom: zero-import leaves
+  'model':       { deps: [],                              role: 'sealed types: SessionKey, EntryID, SHA256Hex, Ref variants; the Manifest struct and enums everyone consumes.' },
+  'hash':        { deps: [],                              role: 'SHA-256 helpers (bytes and streaming). Used wherever identity is computed.' },
+  'paths':       { deps: [],                              role: 'tilde expansion and a couple of stable path helpers.' },
+  'clock':       { deps: [],                              role: 'Clock / Sleeper / Backoff seams so ingest busy-retry is deterministic in tests.' },
+  'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
+  'media':       { deps: [],                              role: 'image and text artifact classification.' },
+  'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
+
+  'safety':      { deps: ['model','paths'],               role: 'path containment + source-root validation. Imported by adapters, archive, depot.' },
+  'config':      { deps: ['model','paths','adapters'],    role: 'JSONC config load/write, defaults; reads adapter capabilities to validate.' },
+
+  'adapters':    { deps: ['model','hash'],                role: 'source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures. The only place source-specific behaviour lives.' },
+  'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.' },
+  'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 driver, bundle key validation, catalog merge/repair/compaction. The only package that may import network packages.' },
+
+  'corpus':      { deps: ['model','adapters','archive','clock','fileutil','hash','media','paths'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
+  'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
+
+  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','paths','safety','search'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
+};
+const LAYERS = [
+  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality'] },
+  { label: 'L2 · helpers',         pkgs: ['safety','config'] },
+  { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
+  { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },
+  { label: 'L5 · entry point',     pkgs: ['cli'] },
+];
+const REVERSE_DEPS = (() => {
+  const r = {};
+  for (const p of Object.keys(PKG_GRAPH)) r[p] = [];
+  for (const [p, info] of Object.entries(PKG_GRAPH)) for (const d of info.deps) r[d] && r[d].push(p);
+  return r;
+})();
+(function () {
+  const root = document.getElementById('layer-diagram');
+  if (!root) return;
+  root.innerHTML = LAYERS.map(L => `
+    <div class="layer-row">
+      <div class="layer-no">${L.label}</div>
+      <div class="layer-pkgs">
+        ${L.pkgs.map(p => `<span class="pkg-chip" data-pkg="${p}">${p} <span class="dep-count">${REVERSE_DEPS[p].length}↑</span></span>`).join('')}
+      </div>
+    </div>`).join('');
+  const detail = document.getElementById('layer-detail');
+  function show(name) {
+    const info = PKG_GRAPH[name];
+    const deps = info.deps;
+    const imps = REVERSE_DEPS[name];
+    root.querySelectorAll('.pkg-chip').forEach(c => {
+      c.classList.toggle('active', c.dataset.pkg === name);
+      c.classList.toggle('depended', imps.includes(c.dataset.pkg));
+    });
+    detail.innerHTML = `
+      <h4>${name}</h4>
+      <p>${info.role}</p>
+      <div class="imp-list">
+        <span style="color:var(--ink-3)">imports →</span>
+        ${deps.length ? deps.map(d => `<code class="dep">${d}</code>`).join('') : '<span class="none">none</span>'}
+      </div>
+      <div class="imp-list">
+        <span style="color:var(--ink-3)">imported by →</span>
+        ${imps.length ? imps.map(d => `<code style="color:var(--sand)">${d}</code>`).join('') : '<span class="none">none (top of the graph)</span>'}
+      </div>`;
+  }
+  root.querySelectorAll('.pkg-chip').forEach(c => {
+    c.addEventListener('mouseenter', () => show(c.dataset.pkg));
+    c.addEventListener('click',      () => show(c.dataset.pkg));
+  });
+})();
+
+/* ============================================================
+   Bundle anatomy: hover any tar row to see what's in it.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('bundle-anatomy');
+  if (!root) return;
+  const tree = root.querySelector('.tar-tree');
+  // Inject an info bar below the tree
+  const info = document.createElement('div');
+  info.className = 'tar-info';
+  info.textContent = 'Hover a file to see what it contains and why aha treats it that way.';
+  tree.parentElement.insertBefore(info, tree.nextSibling);
+  tree.querySelectorAll('.tar-row').forEach(r => {
+    r.addEventListener('mouseenter', () => {
+      tree.querySelectorAll('.tar-row').forEach(x => x.classList.toggle('active', x === r));
+      info.textContent = r.dataset.info;
+    });
+  });
+})();
+
+/* ============================================================
+   Schema ER: click a table to reveal its columns.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('schema-er');
+  if (!root) return;
+  root.querySelectorAll('.er-table').forEach(t => {
+    const cols = document.createElement('div');
+    cols.className = 'er-cols';
+    cols.innerHTML = (t.dataset.cols || '').split(/,\s*/).map(c => `· ${c}`).join('<br>');
+    t.appendChild(cols);
+    t.addEventListener('click', () => t.classList.toggle('active'));
+  });
+})();
 </script>
 </body>
 </html>
