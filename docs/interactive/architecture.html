@@ -1109,6 +1109,152 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .hooks .pair span { color: var(--ink-2); }
 @media (max-width: 720px) { .hooks .pair { grid-template-columns: 1fr; gap: var(--s-1); } }
 
+/* ---------- architecture: major nouns ---------------------------------- */
+.nouns {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--s-3);
+}
+.noun-tier {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: stretch;
+}
+.noun-tier-h {
+  flex: 1 0 100%;
+  font-size: var(--t-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: var(--s-1);
+  font-weight: 500;
+}
+.noun {
+  flex: 1 1 180px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  cursor: pointer;
+  transition: border-color .15s var(--ease), background .15s var(--ease), transform .15s var(--ease);
+}
+.noun:hover, .noun.active { border-color: var(--sage); background: var(--sage-soft); }
+.noun.primary { border-left: 3px solid var(--sage); }
+.noun.related {
+  border-color: var(--sand);
+  background: oklch(82% 0.12 85 / 0.10);
+}
+.noun-name {
+  font-size: var(--t-md);
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.noun-tag {
+  margin-top: 2px;
+  font-size: var(--t-xs);
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+}
+.noun-arrow {
+  text-align: center;
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  padding: var(--s-2) 0;
+  letter-spacing: 0.04em;
+}
+.noun-arrow span { color: var(--sage); padding: 0 var(--s-2); }
+.noun-detail {
+  margin-top: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+  min-height: 90px;
+}
+.noun-detail h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-lg);
+  color: var(--ink);
+  font-weight: 600;
+}
+.noun-detail .ndef {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  max-width: 72ch;
+  margin: 0 0 var(--s-3);
+}
+.noun-detail .nex {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  color: var(--sand);
+  background: oklch(11% 0.011 80);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  word-break: break-all;
+  border-left: 2px solid var(--sand);
+}
+.noun-detail .nrel {
+  margin-top: var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.noun-detail .nrel code { background: transparent; padding: 0; color: var(--sage); }
+
+/* ---------- the message trace ----------------------------------------- */
+.trace {
+  list-style: none;
+  padding: 0;
+  margin: var(--s-3) 0 0;
+  counter-reset: tr;
+  border-left: 2px solid var(--sage-line);
+}
+.trace li {
+  display: grid;
+  grid-template-columns: 28px 180px 1fr;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  align-items: baseline;
+  font-size: var(--t-sm);
+  border-bottom: 1px dashed var(--line);
+}
+.trace li:last-child { border-bottom: 0; }
+.trace .trace-step {
+  color: var(--sage);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.trace .trace-noun {
+  color: var(--ink);
+  font-weight: 500;
+}
+.trace code.trace-val {
+  background: transparent;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  word-break: break-all;
+}
+@media (max-width: 720px) {
+  .trace li { grid-template-columns: 28px 1fr; }
+  .trace .trace-noun { grid-column: 2; color: var(--ink-3); font-size: var(--t-xs); }
+  .trace code.trace-val { grid-column: 2; }
+}
+
 /* ---------- architecture: layered dependencies ------------------------ */
 .layer-diagram {
   display: flex;
@@ -1554,13 +1700,190 @@ footer a:hover { color: var(--ink-2); }
   <div class="section-head">
     <h2>Architecture</h2>
     <p>
-      Four views of the same system. <em>Layers</em> shows what depends on what
-      (the static structure). <em>Bundle</em> shows what a snapshot actually
-      contains on disk. <em>Schema</em> shows the corpus tables and how rows
-      reference each other. <em>Trust boundaries</em> shows where untrusted
-      input enters and where network access is allowed.
+      Five views of the same system. The first names every <em>noun</em> in
+      <code>aha</code> and how they nest. Then the same single message
+      traced through each layer, then the static structure (which package
+      depends on which), then what a snapshot literally contains on disk,
+      then how the corpus schema is shaped, then where untrusted input
+      enters.
     </p>
   </div>
+
+  <h3 class="sub">The major abstractions</h3>
+  <p class="cli-note">
+    Five tiers from outside-in: where data lives in the world, how
+    <code>aha</code> snapshots it into evidence, where that evidence is
+    stored, how it's unpacked for query, and how users and agents address it.
+    Hover any noun to highlight its connections; click for the precise
+    definition and example.
+  </p>
+
+  <div class="nouns" id="nouns">
+    <div class="noun-tier">
+      <div class="noun-tier-h">external world</div>
+      <div class="noun" data-id="source"
+           data-def="A local directory of agent transcripts that aha treats as read-only. One per agent tool."
+           data-example="~/.claude/projects/  ·  ~/.pi/agent/sessions/  ·  ~/.codex/sessions/"
+           data-rel="adapter">
+        <div class="noun-name">Source</div>
+        <div class="noun-tag">read-only</div>
+      </div>
+      <div class="noun" data-id="adapter"
+           data-def="Source-specific code that discovers and parses JSONL files. Declares its capabilities (HasSubagents, HasStableEntryIDs, CanLinkSubagents…)."
+           data-example="adapters.Pi  ·  adapters.ClaudeCode  ·  adapters.CodexCLI"
+           data-rel="source,bundle">
+        <div class="noun-name">Adapter</div>
+        <div class="noun-tag">discover · parse</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>snapshot</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">evidence  ·  immutable</div>
+      <div class="noun primary" data-id="bundle"
+           data-def="A deterministic tar.zst snapshot. Contains one manifest.json plus the raw source files copied byte-for-byte. Content-addressed by SHA-256 of the compressed bytes."
+           data-example="b5ce6ccd…f47.tar.zst  (machine=ade-mbp, captured=2024-01-01T10:00:00Z)"
+           data-rel="adapter,manifest,depot">
+        <div class="noun-name">Bundle</div>
+        <div class="noun-tag">tar.zst · sha256-addressed</div>
+      </div>
+      <div class="noun" data-id="manifest"
+           data-def="The bundle's table of contents and provenance. Schema, machine_id, source/policy/adapters, plus a sorted list of files with their content addresses. Volatile fields (bundle_id, captured_at) excluded from the state signature."
+           data-example="{schema:&quot;aha-manifest/v2&quot;, files:[{sha256:&quot;e5f6…&quot;, …}], bundle_id:…, captured_at:…}"
+           data-rel="bundle,bundleref">
+        <div class="noun-name">Manifest</div>
+        <div class="noun-tag">JSON · sorted</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>publish</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">storage  ·  durable truth</div>
+      <div class="noun primary" data-id="depot"
+           data-def="A content-addressed store of bundles, addressed as local:PATH or r2:BUCKET. The only package allowed to import network libraries. Static test enforces."
+           data-example="local:~/.aha/depot  ·  r2:aha-depot"
+           data-rel="bundle,catalog">
+        <div class="noun-name">Depot</div>
+        <div class="noun-tag">local · r2</div>
+      </div>
+      <div class="noun" data-id="catalog"
+           data-def="A per-machine repairable JSON listing of BundleRefs in a depot. Not absolute truth; rebuildable from bundle objects by `aha depot verify --repair`."
+           data-example="catalog/v1/ade-mbp.json  ·  catalog/v1/work-laptop.json"
+           data-rel="depot,bundleref">
+        <div class="noun-name">Catalog shard</div>
+        <div class="noun-tag">per machine · repairable</div>
+      </div>
+      <div class="noun" data-id="bundleref"
+           data-def="The metadata for one bundle in a catalog: bundle_sha256, machine_id, captured_at, state_sha256, manifest_sha256, bytes, sessions count, filename, key. state_sha256 is the field that makes zero-fetch refresh possible."
+           data-example="{bundle_sha256:&quot;b5ce…&quot;, state_sha256:&quot;78bf…&quot;, captured_at:&quot;2024-01-01&quot;}"
+           data-rel="bundle,manifest">
+        <div class="noun-name">BundleRef</div>
+        <div class="noun-tag">catalog entry</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>ingest</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">query  ·  derived, rebuildable</div>
+      <div class="noun primary" data-id="corpus"
+           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth — entirely rebuildable from depot bundles."
+           data-example="~/.aha/corpus.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
+           data-rel="depot,session,entry,artifact">
+        <div class="noun-name">Corpus</div>
+        <div class="noun-tag">SQLite + FTS5</div>
+      </div>
+      <div class="noun" data-id="session"
+           data-def="One conversation. Identified by SessionKey = sk1_ + SHA-256 of length-prefixed (source, machine, source_session_id). Trigger refuses any non-sk1_ insert."
+           data-example="sk1_5bce6ccd94dabd28c0910f0dfc9af2e27da355d3efb7f4c94d7bfcf519927f47"
+           data-rel="corpus,entry,sessionkey">
+        <div class="noun-name">Session</div>
+        <div class="noun-tag">sk1_&lt;sha256&gt;</div>
+      </div>
+      <div class="noun" data-id="entry"
+           data-def="One event in a session: a message, a tool call, an event. Identified by (session_key, entry_id). Append-only — UPDATE/DELETE trigger ABORT, duplicate with different hash → conflict row."
+           data-example="(session_key, entry_id)  ·  e.g. (sk1_…, &quot;evt-42&quot;)"
+           data-rel="session,message,artifact,asset">
+        <div class="noun-name">Entry</div>
+        <div class="noun-tag">append-only</div>
+      </div>
+      <div class="noun" data-id="message"
+           data-def="An entry with text content (role, text, tool_name, model, tokens…). Insert trigger mirrors text into fts_messages."
+           data-example="{role:&quot;user&quot;, text:&quot;migrate database…&quot;, tokens:128}"
+           data-rel="entry">
+        <div class="noun-name">Message</div>
+        <div class="noun-tag">FTS-indexed</div>
+      </div>
+      <div class="noun" data-id="artifact"
+           data-def="A text or image file produced during a session. May link to a parent entry, or stand alone (unlinked but still searchable). Text artifacts get FTS-indexed; images get blob preservation when include_images=true."
+           data-example="(artifact_sha256, kind, parent_session_key?, parent_entry_id?)"
+           data-rel="entry,corpus">
+        <div class="noun-name">Artifact</div>
+        <div class="noun-tag">linked OR unlinked</div>
+      </div>
+      <div class="noun" data-id="asset"
+           data-def="An image attached to a specific entry (e.g. a pasted screenshot). Preserves prompt_order, content_index, mime_type for prompt reconstruction."
+           data-example="(entry, asset_sha256, content_index, prompt_order, mime_type)"
+           data-rel="entry">
+        <div class="noun-name">Asset</div>
+        <div class="noun-tag">image attachment</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>address</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">retrieval  ·  the API contract</div>
+      <div class="noun primary" data-id="ref"
+           data-def="The canonical, sealed retrieval identifier. Three variants form a closed sum: every search hit emits one; aha read parses one back."
+           data-example="msg:v1:&lt;b64-session&gt;:&lt;b64-entry&gt;   ·   session:v1:&lt;b64-session&gt;   ·   artifact:v1:&lt;sha256&gt;"
+           data-rel="entry,session,artifact">
+        <div class="noun-name">Ref</div>
+        <div class="noun-tag">msg:v1 · session:v1 · artifact:v1</div>
+      </div>
+      <div class="noun" data-id="sessionkey"
+           data-def="Opaque session identity, smart-constructed from a length-prefixed tuple to prevent concat collisions. CHECK + trigger refuse any other shape at the DB boundary."
+           data-example="sk1_&lt;64 hex chars&gt;"
+           data-rel="session">
+        <div class="noun-name">SessionKey</div>
+        <div class="noun-tag">sealed type</div>
+      </div>
+      <div class="noun" data-id="entryid"
+           data-def="Opaque entry identity within a session. Source-native when stable; derived otherwise."
+           data-example="&quot;evt-42&quot;  ·  &quot;01H…&quot;  ·  derived(file, line)"
+           data-rel="entry">
+        <div class="noun-name">EntryID</div>
+        <div class="noun-tag">sealed type</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="noun-detail" id="noun-detail">
+    <p class="cli-note" style="margin:0">Hover any noun above. Click to pin.</p>
+  </div>
+
+  <h3 class="sub">The same message, through every abstraction</h3>
+  <p class="cli-note">
+    A single line in a Claude Code JSONL file, traced through every noun
+    above. Same data, different shapes.
+  </p>
+  <ol class="trace" id="msg-trace">
+    <li><span class="trace-step">1</span><span class="trace-noun">Source file</span><code class="trace-val">~/.claude/projects/aha/session.jsonl, line 42</code></li>
+    <li><span class="trace-step">2</span><span class="trace-noun">Adapter parses</span><code class="trace-val">ParsedEntry{ entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">3</span><span class="trace-noun">Bundle contains</span><code class="trace-val">files/claude-code/projects/aha/session.jsonl   (file_sha256: e5f60123…)</code></li>
+    <li><span class="trace-step">4</span><span class="trace-noun">Manifest lists it</span><code class="trace-val">{ source:"claude-code", path:"files/…/session.jsonl", sha256:"e5f60123…", bytes:38912 }</code></li>
+    <li><span class="trace-step">5</span><span class="trace-noun">Depot stores bundle</span><code class="trace-val">bundles/v1/b5ce6ccd…f47.tar.zst</code></li>
+    <li><span class="trace-step">6</span><span class="trace-noun">Catalog ref</span><code class="trace-val">{ bundle_sha256:"b5ce6c…", machine_id:"ade-mbp", state_sha256:"78bf99…" }</code></li>
+    <li><span class="trace-step">7</span><span class="trace-noun">Corpus sessions row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", source:"claude-code", project_key:"aha" }</code></li>
+    <li><span class="trace-step">8</span><span class="trace-noun">Corpus entries row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", line_no:42, entry_sha256:"f1e2…" }</code></li>
+    <li><span class="trace-step">9</span><span class="trace-noun">Corpus messages row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">10</span><span class="trace-noun">fts_messages mirror</span><code class="trace-val">rowid=9001  text="migrate db…"   ← inserted by trigger messages_ai</code></li>
+    <li><span class="trace-step">11</span><span class="trace-noun">Search hit</span><code class="trace-val">{ score:-8.2, ref:MessageRef{…}, snippet:"…[migrate] db…" }</code></li>
+    <li><span class="trace-step">12</span><span class="trace-noun">Canonical ref</span><code class="trace-val">msg:v1:c2sxX2ExYjJjMy4uLg:ZXZ0LTQy</code></li>
+    <li><span class="trace-step">13</span><span class="trace-noun">aha read &lt;ref&gt;</span><code class="trace-val">window of entries from line_no=40..44 returned to the agent</code></li>
+  </ol>
 
   <h3 class="sub">Layered dependencies</h3>
   <p class="cli-note">
@@ -3335,6 +3658,47 @@ function renderPackageChart() {
   });
 }
 renderPackageChart();
+
+/* ============================================================
+   Architecture: nouns map.
+   Hover any noun to highlight its direct relations; click to pin
+   its definition + a concrete example.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('nouns');
+  if (!root) return;
+  const detail = document.getElementById('noun-detail');
+  const nouns = [...root.querySelectorAll('.noun')];
+  const byId = Object.fromEntries(nouns.map(n => [n.dataset.id, n]));
+  let pinned = null;
+  function show(n) {
+    nouns.forEach(x => { x.classList.remove('active'); x.classList.remove('related'); });
+    n.classList.add('active');
+    (n.dataset.rel || '').split(',').filter(Boolean).forEach(id => {
+      if (byId[id]) byId[id].classList.add('related');
+    });
+    detail.innerHTML = `
+      <h4>${n.querySelector('.noun-name').textContent}</h4>
+      <p class="ndef">${n.dataset.def}</p>
+      <div class="nex">${n.dataset.example}</div>
+      <div class="nrel">
+        <span>relates to:</span>
+        ${(n.dataset.rel || '').split(',').filter(Boolean).map(id => `<code>${id}</code>`).join('') || '<span style="color:var(--ink-3);font-style:italic">(top of the graph)</span>'}
+      </div>`;
+  }
+  for (const n of nouns) {
+    n.addEventListener('mouseenter', () => { if (!pinned) show(n); });
+    n.addEventListener('mouseleave', () => {
+      if (!pinned) {
+        nouns.forEach(x => { x.classList.remove('active'); x.classList.remove('related'); });
+      }
+    });
+    n.addEventListener('click', () => {
+      if (pinned === n) { pinned = null; show(n); /* unpin */ }
+      else { pinned = n; show(n); }
+    });
+  }
+})();
 
 /* ============================================================
    Architecture: layered dependency diagram.
