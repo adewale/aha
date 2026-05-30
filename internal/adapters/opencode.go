@@ -236,7 +236,7 @@ func openCodeMessageEntry(m, row map[string]any, lineNo int, raw string) model.P
 		Metadata:              map[string]any{},
 	}
 	parts, _ := m["parts"].([]any)
-	pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = openCodeParts(parts)
+	pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets, pe.ToolCalls, pe.ToolResults = openCodeParts(parts)
 	return pe
 }
 
@@ -252,9 +252,10 @@ func openCodeData(row map[string]any) map[string]any {
 	return row
 }
 
-func openCodeParts(parts []any) (text, tool, command, filesJSON string, assets []model.ParsedAsset) {
+func openCodeParts(parts []any) (text, tool, command, filesJSON string, assets []model.ParsedAsset, calls []model.ParsedToolCall, results []model.ParsedToolResult) {
 	var texts []string
 	order := 0
+	toolOrdinal := 0
 	for i, p := range parts {
 		pm, ok := p.(map[string]any)
 		if !ok {
@@ -267,18 +268,38 @@ func openCodeParts(parts []any) (text, tool, command, filesJSON string, assets [
 				texts = append(texts, s)
 			}
 		case "tool":
+			toolName := firstNonEmpty(stringField(data, "tool"), stringField(data, "name"))
 			if tool == "" {
-				tool = firstNonEmpty(stringField(data, "tool"), stringField(data, "name"))
+				tool = toolName
 			}
+			call := model.ParsedToolCall{ID: firstNonEmpty(stringField(data, "callID"), stringField(data, "call_id"), stringField(data, "id")), ToolName: toolName, Ordinal: toolOrdinal}
+			var result model.ParsedToolResult
+			result.ForID = call.ID
+			result.Ordinal = toolOrdinal
+			toolOrdinal++
 			if state, ok := data["state"].(map[string]any); ok {
 				if in, ok := state["input"].(map[string]any); ok {
+					call.Command = stringField(in, "command")
+					call.FilesJSON = mustJSON(in)
 					if command == "" {
-						command = stringField(in, "command")
+						command = call.Command
 					}
 					if filesJSON == "" {
-						filesJSON = mustJSON(in)
+						filesJSON = call.FilesJSON
 					}
 				}
+				status := strings.ToLower(stringField(state, "status"))
+				if code, ok := int64Field(state, "exit_code", "exitCode", "code"); ok {
+					result.ExitCode, result.ExitCodeValid = code, true
+				}
+				result.IsError = boolField(state, "isError") || boolField(state, "is_error") || status == "error" || status == "failed" || (result.ExitCodeValid && result.ExitCode != 0)
+				result.OutcomeText = truncateUTF8(firstNonEmpty(stringField(state, "output"), stringField(state, "error")), maxOutcomeTextBytes)
+			}
+			if call.ToolName != "" || call.Command != "" || call.FilesJSON != "" {
+				calls = append(calls, call)
+			}
+			if result.IsError || result.OutcomeText != "" {
+				results = append(results, result)
 			}
 		case "file":
 			if a, ok := openCodeFileAsset(data, i, order); ok {
@@ -287,7 +308,7 @@ func openCodeParts(parts []any) (text, tool, command, filesJSON string, assets [
 			}
 		}
 	}
-	return strings.TrimSpace(strings.Join(texts, "\n")), tool, command, filesJSON, assets
+	return strings.TrimSpace(strings.Join(texts, "\n")), tool, command, filesJSON, assets, calls, results
 }
 
 func openCodeFileAsset(data map[string]any, idx, order int) (model.ParsedAsset, bool) {

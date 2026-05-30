@@ -7,7 +7,7 @@ import (
 
 func Status(db *sql.DB, root string) (map[string]any, error) {
 	stats := map[string]any{"corpus_dir": root}
-	for _, table := range []string{"machines", "bundles", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
+	for _, table := range []string{"machines", "bundles", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
 		var n int
 		if err := db.QueryRow("select count(*) from " + table).Scan(&n); err != nil {
 			return nil, fmt.Errorf("status count %s: %w", table, err)

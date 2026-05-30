@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
@@ -85,7 +86,9 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 			pe.Label = stringField(m, "label")
 			pe.LabelTargetEntryID = stringField(m, "targetId")
 		}
-		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(m)
+		ec := extractContent(m)
+		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = ec.text, ec.tool, ec.command, ec.files, ec.assets
+		pe.ToolCalls, pe.ToolResults = ec.toolCalls, ec.toolResults
 		if pe.Role == "user" && contentHasBlockType(m, "tool_result") {
 			pe.Role = "toolResult"
 		}
@@ -109,7 +112,45 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 	return ps, nil
 }
 
-func extractContent(m map[string]any) (text, tool, command, files string, assets []model.ParsedAsset) {
+const maxOutcomeTextBytes = 4096
+
+type extractedContent struct {
+	text        string
+	tool        string
+	command     string
+	files       string
+	assets      []model.ParsedAsset
+	toolCalls   []model.ParsedToolCall
+	toolResults []model.ParsedToolResult
+}
+
+// ExtractToolSignals projects only tool call/result signals from a raw JSON
+// transcript entry. Corpus migrations use this to backfill derived cluster data
+// for DBs that were ingested before tool_invocations existed.
+func ExtractToolSignals(raw string) ([]model.ParsedToolCall, []model.ParsedToolResult, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, nil, err
+	}
+	if payload, ok := m["payload"].(map[string]any); ok {
+		var pe model.ParsedEntry
+		fillCodexResponseItem(&pe, payload, "", "")
+		if len(pe.ToolCalls) > 0 || len(pe.ToolResults) > 0 {
+			return pe.ToolCalls, pe.ToolResults, nil
+		}
+	}
+	if parts, ok := m["parts"].([]any); ok {
+		_, _, _, _, _, calls, results := openCodeParts(parts)
+		if len(calls) > 0 || len(results) > 0 {
+			return calls, results, nil
+		}
+	}
+	ec := extractContent(m)
+	return ec.toolCalls, ec.toolResults, nil
+}
+
+func extractContent(m map[string]any) extractedContent {
+	var ec extractedContent
 	var parts []string
 	msg, _ := m["message"].(map[string]any)
 	content, ok := msg["content"]
@@ -117,6 +158,8 @@ func extractContent(m map[string]any) (text, tool, command, files string, assets
 		content = m["content"]
 	}
 	order := 0
+	toolOrdinal := 0
+	resultOrdinal := 0
 	var walkContent func(any, int)
 	walkContent = func(v any, idx int) {
 		switch x := v.(type) {
@@ -135,39 +178,117 @@ func extractContent(m map[string]any) (text, tool, command, files string, assets
 				if s := stringField(x, "text"); s != "" {
 					parts = append(parts, s)
 				}
-			case "tool_use":
-				if tool == "" {
-					tool = stringField(x, "name")
-				}
-				if b, err := json.Marshal(x["input"]); err == nil {
-					files = string(b)
-					if mm, ok := x["input"].(map[string]any); ok {
-						command = stringField(mm, "command")
+			case "tool_use", "toolCall":
+				call := model.ParsedToolCall{ID: stringField(x, "id"), ToolName: firstNonEmpty(stringField(x, "name"), stringField(x, "toolName")), Ordinal: toolOrdinal}
+				toolOrdinal++
+				input := firstNonNil(x["input"], x["arguments"])
+				if b, err := json.Marshal(input); err == nil && input != nil {
+					call.FilesJSON = string(b)
+					if mm, ok := input.(map[string]any); ok {
+						call.Command = firstNonEmpty(stringField(mm, "command"), stringField(mm, "cmd"), stringField(x, "command"))
 					}
 				}
+				if call.Command == "" {
+					call.Command = stringField(x, "command")
+				}
+				ec.toolCalls = append(ec.toolCalls, call)
+				if ec.tool == "" {
+					ec.tool = call.ToolName
+				}
+				if ec.command == "" {
+					ec.command = call.Command
+				}
+				if ec.files == "" {
+					ec.files = call.FilesJSON
+				}
 			case "image", "image_url":
-				assets = append(assets, parseImageAsset(x, idx, order))
+				ec.assets = append(ec.assets, parseImageAsset(x, idx, order))
 				order++
-			case "tool_result":
+			case "tool_result", "toolResult":
 				// Extract content so the index_tool_output config flag has
 				// something to index when enabled; ingest's shouldIndexText
 				// gates whether the text actually lands in messages.text.
 				if inner, ok := x["content"]; ok {
 					walkContent(inner, idx)
 				}
+				res := model.ParsedToolResult{ForID: firstNonEmpty(stringField(x, "tool_use_id"), stringField(x, "toolCallId")), IsError: boolField(x, "is_error") || boolField(x, "isError"), Ordinal: resultOrdinal}
+				resultOrdinal++
+				if code, ok := int64Field(x, "exit_code", "exitCode"); ok {
+					res.ExitCode, res.ExitCodeValid = code, true
+					if code != 0 {
+						res.IsError = true
+					}
+				}
+				if s := toolResultText(x["content"]); s != "" {
+					res.OutcomeText = truncateUTF8(s, maxOutcomeTextBytes)
+				}
+				ec.toolResults = append(ec.toolResults, res)
 			default:
 				if s := stringField(x, "text"); s != "" {
 					parts = append(parts, s)
 				}
 				if src, ok := x["source"].(map[string]any); ok && (stringField(src, "media_type") != "" || stringField(src, "data") != "") {
-					assets = append(assets, parseImageAsset(x, idx, order))
+					ec.assets = append(ec.assets, parseImageAsset(x, idx, order))
 					order++
 				}
 			}
 		}
 	}
 	walkContent(content, 0)
-	return strings.TrimSpace(strings.Join(parts, "\n")), tool, command, files, assets
+	ec.text = strings.TrimSpace(strings.Join(parts, "\n"))
+	role := firstNonEmpty(nestedString(m, "message", "role"), stringField(m, "role"))
+	if role == "toolResult" && len(ec.toolResults) == 0 {
+		res := model.ParsedToolResult{
+			ForID:   firstNonEmpty(nestedString(m, "message", "toolCallId"), nestedString(m, "message", "tool_use_id"), stringField(m, "toolCallId"), stringField(m, "tool_use_id")),
+			IsError: boolField(msg, "isError") || boolField(msg, "is_error") || boolField(m, "isError") || boolField(m, "is_error"),
+		}
+		if code, ok := int64Field(msg, "exit_code", "exitCode"); ok {
+			res.ExitCode, res.ExitCodeValid = code, true
+			if code != 0 {
+				res.IsError = true
+			}
+		}
+		if ec.text != "" {
+			res.OutcomeText = truncateUTF8(ec.text, maxOutcomeTextBytes)
+		}
+		ec.toolResults = append(ec.toolResults, res)
+		if ec.tool == "" {
+			ec.tool = firstNonEmpty(nestedString(m, "message", "toolName"), stringField(m, "toolName"))
+		}
+	}
+	return ec
+}
+
+func toolResultText(content any) string {
+	switch x := content.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case []any:
+		var parts []string
+		for _, it := range x {
+			if mm, ok := it.(map[string]any); ok {
+				if s := stringField(mm, "text"); s != "" {
+					parts = append(parts, s)
+				}
+			} else if s, ok := it.(string); ok && s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	default:
+		return ""
+	}
+}
+
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	b := []byte(s)[:max]
+	for len(b) > 0 && !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return string(b)
 }
 
 func parseImageAsset(block map[string]any, idx, order int) model.ParsedAsset {
@@ -252,6 +373,31 @@ func numField(m map[string]any, k string) float64 {
 		return f
 	}
 	return 0
+}
+
+func int64Field(m map[string]any, keys ...string) (int64, bool) {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case float64:
+			return int64(v), true
+		case int:
+			return int64(v), true
+		case int64:
+			return v, true
+		case json.Number:
+			n, err := v.Int64()
+			return n, err == nil
+		case string:
+			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			return n, err == nil
+		}
+	}
+	return 0, false
+}
+
+func boolField(m map[string]any, k string) bool {
+	b, _ := firstBool(m, []string{k})
+	return b
 }
 
 func firstBool(m map[string]any, paths ...[]string) (bool, bool) {

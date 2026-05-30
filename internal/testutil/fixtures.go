@@ -35,6 +35,8 @@ func WriteAgentFixtures(t *testing.T, root string) FixtureRoots {
 `
 	claude := `{"type":"user","timestamp":"2026-01-02T00:00:01Z","message":{"content":[{"type":"text","text":"claude needle"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + png + `"}}]}}
 {"type":"assistant","timestamp":"2026-01-02T00:00:02Z","message":{"content":[{"type":"text","text":"claude reply"}],"model":"claude-test","usage":{"input_tokens":1,"output_tokens":2}}}
+{"type":"assistant","uuid":"ctool","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fix","name":"Bash","input":{"command":"gh pr create --title needle"}}]}}
+{"type":"user","uuid":"cres","timestamp":"2026-01-02T00:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fix","is_error":true,"content":[{"type":"text","text":"pull request create failed: Head sha can't be blank"}]}]}}
 `
 	if err := os.WriteFile(filepath.Join(piRoot, "--Users-me-proj--", "2026_pi.jsonl"), []byte(pi), 0o644); err != nil {
 		t.Fatal(err)

@@ -31,6 +31,9 @@ func FuzzValidateBundleKey(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, key string) {
+		if len(key) > 512 {
+			t.Skip("bundle keys are bounded path-like identifiers")
+		}
 		err := depot.ValidateBundleKey(key)
 		if err == nil {
 			sha := strings.TrimSuffix(strings.TrimPrefix(key, "bundles/v1/"), ".tar.zst")

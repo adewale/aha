@@ -66,7 +66,7 @@ How this is enforced:
 
 ## Guarantee 5: projection redaction is explicit and observable
 
-By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `entries.raw_json`, artifact text, or FTS. Raw bundles remain unredacted provenance.
+By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `tool_invocations`, `entries.raw_json`, artifact text, or FTS. Raw bundles remain unredacted provenance.
 
 How this is enforced:
 

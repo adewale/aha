@@ -86,6 +86,28 @@ type ParsedSession struct {
 	Metadata        map[string]any
 }
 
+// ParsedToolCall is one tool_use block projected out of a transcript entry.
+// A single assistant message can contain several tool calls, so callers must
+// use this slice form rather than the legacy first-call ToolName/Command fields.
+type ParsedToolCall struct {
+	ID        string
+	ToolName  string
+	Command   string
+	FilesJSON string
+	Ordinal   int
+}
+
+// ParsedToolResult is one tool_result block projected out of a transcript entry.
+// Results pair to calls by ForID when present, otherwise by encounter order.
+type ParsedToolResult struct {
+	ForID         string
+	IsError       bool
+	OutcomeText   string
+	ExitCode      int64
+	ExitCodeValid bool
+	Ordinal       int
+}
+
 type ParsedEntry struct {
 	EntryID                    string
 	ParentID                   string
@@ -98,6 +120,8 @@ type ParsedEntry struct {
 	ToolName                   string
 	Command                    string
 	FilesJSON                  string
+	ToolCalls                  []ParsedToolCall
+	ToolResults                []ParsedToolResult
 	Model                      string
 	Provider                   string
 	Tokens                     int64

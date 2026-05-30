@@ -38,7 +38,15 @@ main {
 section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
 #search { grid-column: 1; grid-row: 1 / span 2; }
 #reader { grid-column: 2; grid-row: 1 / span 2; }
+#clusters-section { grid-column: 1 / span 2; }
 #conflicts-section { grid-column: 1 / span 2; }
+ol#clusters { list-style: none; padding: 0; margin: 0.75rem 0 0 0; max-height: 50vh; overflow: auto; }
+ol#clusters li { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem; cursor: pointer; }
+ol#clusters li:hover { background: var(--hit); }
+ol#clusters li.no-ref { cursor: default; opacity: 0.85; }
+ol#clusters .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.2rem; }
+ol#clusters .snippet { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
+ol#clusters code { background: #efefef; padding: 0 4px; border-radius: 3px; }
 form { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; }
 input, button { font: inherit; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
 button { background: var(--accent); color: white; border-color: var(--accent); cursor: pointer; }

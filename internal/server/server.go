@@ -195,7 +195,10 @@ func requireLoopback(addr string) error {
 	if err != nil {
 		return fmt.Errorf("parse addr %q: %w", addr, err)
 	}
-	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if host == "" {
+		return fmt.Errorf("refusing wildcard bind %q without --allow-remote; use 127.0.0.1:PORT for loopback", addr)
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return nil
 	}
 	ip := net.ParseIP(host)
@@ -215,6 +218,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/doctor", s.jsonGet("doctor"))
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/read", s.handleRead)
+	s.mux.HandleFunc("/api/clusters", s.handleClusters)
 	s.mux.HandleFunc("/api/tools", s.handleToolsList)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 }
@@ -255,7 +259,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"tools": []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"},
+		"tools": append([]string(nil), mcp.ToolNames...),
 	})
 }
 
@@ -281,6 +285,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	s.handleJSONPost(w, r, "read")
+}
+
+func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
+	s.handleJSONPost(w, r, "clusters")
 }
 
 func (s *Server) handleJSONPost(w http.ResponseWriter, r *http.Request, tool string) {
@@ -315,10 +323,15 @@ func isJSONContentType(ct string) bool {
 	return strings.EqualFold(strings.TrimSpace(ct), "application/json")
 }
 
+const maxJSONArgsBytes = 1 << 20
+
 func readArgs(r io.Reader) (json.RawMessage, error) {
-	body, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(r, maxJSONArgsBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxJSONArgsBytes {
+		return nil, fmt.Errorf("JSON request body exceeds %d bytes", maxJSONArgsBytes)
 	}
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {

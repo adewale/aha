@@ -59,8 +59,8 @@ console.log(`${status.sessions} sessions, ${status.entries} entries`);
 ## Usage — code-mode runtimes
 
 Code-mode runtimes already expose a `Transport`-shaped tool proxy. Pass it to
-`aha()` and you can write a single TypeScript program that fans out across the
-corpus instead of issuing one MCP tool call at a time:
+`aha()` and you can write a single TypeScript program that plans, filters, and
+fans out across the corpus over a long-lived transport:
 
 ```ts
 // inside a code-mode sandbox, where `mcp` is the runtime-provided tool proxy
@@ -78,7 +78,8 @@ for (const hit of projects) {
 console.log(JSON.stringify(grouped));
 ```
 
-One MCP round trip, arbitrary intermediate logic. That's the win.
+One code-mode program, arbitrary intermediate logic. The fan-out still performs
+one MCP tool call per `read`; use `Promise.all` when you want parallelism.
 
 ## Refs are the API
 
@@ -195,7 +196,7 @@ aha owns only the typed wrappers.
    │   Anthropic, custom)   │         │                        │
    ├────────────────────────┤         ├────────────────────────┤
    │ Sandbox / executor     │         │ aha mcp (Go server)    │
-   │   - V8 isolate or vm   │         │   - 7 read-only tools  │
+   │   - V8 isolate or vm   │         │   - 8 read-only tools  │
    │   - no FS / no egress  │ <─────> │   - SDK-driven wire    │
    │ Tool surface injection │  stdio  │                        │
    │   - generates the      │ JSON    │ Typed TS surface       │

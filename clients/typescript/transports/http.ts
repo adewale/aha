@@ -2,7 +2,7 @@
 //
 // Points at a running `aha serve` (default 127.0.0.1:18428) and translates
 // tool calls into the matching REST routes. GET for no-argument tools; POST
-// application/json for `search` and `read`.
+// application/json for argument-bearing tools (`search`, `read`, `clusters`).
 //
 // Example:
 //   import { aha } from "../aha-mcp.js";
@@ -19,6 +19,7 @@ import type { Transport } from "../aha-mcp.js";
 const ROUTES: Record<string, { method: "GET" | "POST"; path: string }> = {
   search: { method: "POST", path: "/api/search" },
   read: { method: "POST", path: "/api/read" },
+  clusters: { method: "POST", path: "/api/clusters" },
   status: { method: "GET", path: "/api/status" },
   verify: { method: "GET", path: "/api/verify" },
   conflicts: { method: "GET", path: "/api/conflicts" },

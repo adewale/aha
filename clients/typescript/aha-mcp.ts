@@ -106,6 +106,7 @@ export interface VerifyStats {
   bundles: number;
   redactions: number;
   redaction_events: number;
+  tool_invocations: number;
 }
 
 export interface VerifyReport {
@@ -133,6 +134,21 @@ export interface SizeReport {
   image_blob_bytes: number;
   other_bytes: number;
   files: number;
+}
+
+export interface Cluster {
+  tool_name: string;
+  command_family: string;
+  error_signature: string;
+  count: number;
+  distinct_sessions: number;
+  distinct_projects: number;
+  first_seen: string;
+  last_seen: string;
+  sample_command: string;
+  sample_error: string;
+  sample_ref?: string;
+  score: number;
 }
 
 // Tools whose Go return type is map[string]any are exposed loosely.
@@ -181,6 +197,13 @@ export interface SearchArgs {
   project?: string;
   /**
    * Cap on returned hits (default 20, max 200)
+   */
+  limit?: number;
+}
+
+export interface ClustersArgs {
+  /**
+   * Cap on returned clusters (default 50, max 200)
    */
   limit?: number;
 }
@@ -239,32 +262,36 @@ export interface Transport {
 
 export function aha(transport: Transport) {
   return {
-    /** Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read. */
-    search: (args: SearchArgs) =>
-      transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
-    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
-    read: (args: ReadArgs) =>
-      transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
-    /** Return corpus health summary: counts and disk usage. */
-    status: () => transport.call("status", {}) as Promise<StatusReport>,
-    /** Run read-only corpus invariant checks (no repair). */
-    verify: () => transport.call("verify", {}) as Promise<VerifyReport>,
+    /** Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output. */
+    clusters: (args: ClustersArgs = {}) =>
+      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
     /** List quarantined merge conflicts. */
     conflicts: () => transport.call("conflicts", {}) as Promise<Conflict[]>,
     /** Return corpus on-disk size breakdown. */
     corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
     /** Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only. */
     doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
+    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
+    read: (args: ReadArgs) =>
+      transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
+    /** Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read. */
+    search: (args: SearchArgs) =>
+      transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
+    /** Return corpus health summary: counts and disk usage. */
+    status: () => transport.call("status", {}) as Promise<StatusReport>,
+    /** Run read-only corpus invariant checks (no repair). */
+    verify: () => transport.call("verify", {}) as Promise<VerifyReport>,
   };
 }
 
 export const TOOLS = [
-  "search",
-  "read",
-  "status",
-  "verify",
+  "clusters",
   "conflicts",
   "corpus_size",
   "doctor",
+  "read",
+  "search",
+  "status",
+  "verify",
 ] as const;
 export type ToolName = (typeof TOOLS)[number];

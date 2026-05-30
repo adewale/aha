@@ -2,7 +2,7 @@
 
 `aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. Pattern detection and skill-candidate generation are documented as the next layer; they're not in the box today.
+It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. `aha clusters` now surfaces recurring tool-call failures as skill candidates; it does not write skills for you.
 
 Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
@@ -12,20 +12,21 @@ Use it when you've accumulated enough coding-agent conversations that you want t
 
 - use multiple coding agents (Pi, Claude Code, Codex, OpenCode — more adapters later) and want one place to examine everything they've done;
 - work across multiple machines and want a portable, content-addressed history that follows them;
-- want to *manually* find patterns in their own prompts and agent behaviour today, and want the substrate that automated pattern detection will be built on tomorrow;
-- want their agents to *read* the depot today via MCP, with the "agent proposes new skills" loop tracked but not yet built;
+- want to find patterns in their own prompts, agent behaviour, and recurring tool-call failures;
+- want their agents to *read* the depot today via MCP while keeping skill authoring an explicit human/agent workflow outside `aha`;
 - need private local search over agent transcripts;
 - are currently using `rg`, ad hoc scripts, or tool-specific history search.
 
 ## What ships today
 
-The substrate is built. The pattern-detection layer the substrate is for is documented, not implemented:
+The substrate is built, with a first deterministic pattern layer for recurring tool failures:
 
-- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results and reading full session context. Today: search box, results list, read pane, status strip, conflicts panel. Tomorrow (tracked in `docs/research/agent-trace-tools.md`): recurring-command rollups, retried-prompt views, costly-loop detection. Today's view is "browse"; tomorrow's view is "diagnose".
-- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?" or "which prompts do I keep repeating?" *via search queries you write*. The agent can't yet author skills from what it finds — that's the next layer.
-- **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can fan out (`search → filter → Promise.all(read)`) over the corpus in one round trip. See `clients/typescript/README.md` for concrete examples.
+- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results, reading full session context, checking status/conflicts, and scanning recurring failure clusters. It is still a browser over local data, not an autonomous skill author.
+- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?" or "which failures keep recurring?" via read-only tools.
+- **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can run one code-mode program over a long-lived transport (`search → filter → Promise.all(read)`). That is still multiple MCP tool calls when the program fans out. See `clients/typescript/README.md` for examples.
+- **Error clusters** (`aha clusters`) — recurring tool-call failures are grouped by tool, command family, and normalized error signature with a `sample_ref` for drilling into the sample command row. Clusters are candidate signals for humans/agents to write better skills; `aha` does not generate or install skills.
 
-The longer-term direction is the pattern-detection layer in `docs/research/agent-trace-tools.md`: skill-candidate detection, recurring-failure rollups, cross-machine "what was I doing last Tuesday across all my agents". Nothing in there ships in this release.
+The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader skill-candidate detection, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
 
 ## What does it replace?
 
@@ -53,7 +54,7 @@ Many users start with:
 
 By default, `aha` preserves today's `none-v1` behavior: bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `entries.raw_json`, artifacts, and FTS) at ingest. Bundles remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
+Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `tool_invocations`, `entries.raw_json`, artifacts, and FTS) at ingest. Bundles remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
 
 ## Install / build
 
@@ -189,6 +190,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
+aha clusters [--repo DIR] [--limit N] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
@@ -207,10 +209,11 @@ Command roles:
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
+- `clusters`: rank recurring tool-call failure clusters as skill-candidate signals; each row includes a `sample_ref` for `aha read` drill-in to the sample command row.
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
-- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
+- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
 - `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Loopback binds need no auth; passing `--allow-remote` (or setting `AHA_ALLOW_REMOTE=1`) requires a shared-secret bearer token via `--token` (or `AHA_DASHBOARD_TOKEN`). Hostnames accepted via `Host:` are restricted to the loopback allowlist by default; extend with `--allowed-hosts`.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
@@ -274,7 +277,7 @@ For coding agents using `aha`:
 1. Use `aha search ... --json` or `--refs` to find leads.
 2. Use `aha read <ref> --json` to retrieve full source context.
 3. Answer from retrieved context, not from snippets alone.
-4. Prefer query-only commands (`search`, `read`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
+4. Prefer query-only commands (`search`, `read`, `clusters`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
 5. Check `aha status --json` for `redaction_levels`; if the corpus is `none-v1`, do not assume secrets are redacted.
 
 ## Accepted v1 limits

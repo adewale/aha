@@ -26,6 +26,7 @@ func Init(db *sql.DB) error {
 		`create table if not exists session_path_tokens(session_key text,token text,primary key(session_key,token),foreign key(session_key) references sessions(session_key))`,
 		`create table if not exists artifact_path_tokens(artifact_id integer,token text,primary key(artifact_id,token),foreign key(artifact_id) references artifacts(artifact_id))`,
 		`create table if not exists conflicts(conflict_id integer primary key,session_key text,entry_id text,first_entry_sha256 text,second_entry_sha256 text,details_json text,created_at text default current_timestamp)`,
+		toolInvocationsSchemaSQL,
 		`create virtual table if not exists fts_messages using fts5(session_key unindexed,entry_id unindexed,text)`,
 		`create virtual table if not exists fts_artifacts using fts5(artifact_id unindexed,text)`,
 		`create index if not exists idx_sessions_source_machine on sessions(source_name,machine_id)`,
@@ -37,6 +38,7 @@ func Init(db *sql.DB) error {
 		`create index if not exists idx_entries_session_line on entries(session_key,line_no)`,
 		`create index if not exists idx_entries_session_entry_hash on entries(session_key,entry_id,entry_sha256)`,
 		`create index if not exists idx_entries_time_role on entries(timestamp,role)`,
+		`create index if not exists idx_tool_invocations_cluster on tool_invocations(is_error,tool_name,command_family,error_signature)`,
 		`create trigger if not exists entries_require_session before insert on entries when not exists(select 1 from sessions where session_key=new.session_key) begin select raise(abort,'entry session missing'); end`,
 		`create trigger if not exists entries_require_nonempty before insert on entries when new.session_key='' or new.entry_id='' begin select raise(abort,'entry key required'); end`,
 		`create trigger if not exists entries_conflict_before_insert before insert on entries when exists(select 1 from entries where session_key=new.session_key and entry_id=new.entry_id) begin insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) select new.session_key,new.entry_id,e.entry_sha256,new.entry_sha256,json_object('kind','same-session-trigger') from entries e where e.session_key=new.session_key and e.entry_id=new.entry_id and e.entry_sha256<>new.entry_sha256; select raise(ignore); end`,
@@ -53,6 +55,9 @@ func Init(db *sql.DB) error {
 		`create trigger if not exists artifacts_no_delete before delete on artifacts begin select raise(abort,'artifacts are append-only'); end`,
 		`create trigger if not exists conflicts_no_update before update on conflicts begin select raise(abort,'conflicts are append-only'); end`,
 		`create trigger if not exists conflicts_no_delete before delete on conflicts begin select raise(abort,'conflicts are append-only'); end`,
+		`create trigger if not exists tool_invocations_require_entry before insert on tool_invocations when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.entry_id) begin select raise(abort,'tool invocation entry missing'); end`,
+		`create trigger if not exists tool_invocations_no_update before update on tool_invocations begin select raise(abort,'tool invocations are append-only'); end`,
+		`create trigger if not exists tool_invocations_no_delete before delete on tool_invocations begin select raise(abort,'tool invocations are append-only'); end`,
 	}
 	for _, st := range stmts {
 		if _, err := db.Exec(st); err != nil {
@@ -199,6 +204,7 @@ var migrations = []migration{
 		return nil
 	}},
 	{version: 12, apply: migrateRedactionEvents},
+	{version: 13, apply: migrateToolInvocations},
 }
 
 func migrateRedactionEvents(db *sql.DB) error {

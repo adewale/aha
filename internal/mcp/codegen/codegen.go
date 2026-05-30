@@ -50,6 +50,7 @@ func Generate() []byte {
 		{"VerifyReport", reflect.TypeOf(corpus.VerifyReport{})},
 		{"Conflict", reflect.TypeOf(corpus.Conflict{})},
 		{"SizeReport", reflect.TypeOf(corpus.SizeReport{})},
+		{"Cluster", reflect.TypeOf(corpus.Cluster{})},
 	} {
 		writeStructInterface(&b, e.name, e.t, known)
 		known[e.name] = true
@@ -164,6 +165,7 @@ export type DoctorReport = Record<string, unknown>;
 func inputInterfaces() string {
 	var b bytes.Buffer
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
+	writeStructInterfaceWithDocs(&b, "ClustersArgs", reflect.TypeOf(mcp.ClustersInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
@@ -231,7 +233,7 @@ export interface Transport {
 export function aha(transport: Transport) {
   return {
 `)
-	for _, name := range []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"} {
+	for _, name := range mcp.ToolNames {
 		desc := mcp.ToolDescriptions[name]
 		fmt.Fprintf(&b, "    /** %s */\n", strings.ReplaceAll(desc, "*/", "* /"))
 		switch name {
@@ -258,20 +260,21 @@ export function aha(transport: Transport) {
 		case "doctor":
 			b.WriteString(`    doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
 `)
+		case "clusters":
+			b.WriteString(`    clusters: (args: ClustersArgs = {}) =>
+      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
+`)
 		}
 	}
 	b.WriteString(`  };
 }
 
 export const TOOLS = [
-  "search",
-  "read",
-  "status",
-  "verify",
-  "conflicts",
-  "corpus_size",
-  "doctor",
-] as const;
+`)
+	for _, name := range mcp.ToolNames {
+		fmt.Fprintf(&b, "  %q,\n", name)
+	}
+	b.WriteString(`] as const;
 export type ToolName = (typeof TOOLS)[number];
 `)
 	return b.String()

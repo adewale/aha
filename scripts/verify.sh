@@ -80,11 +80,11 @@ fuzz() {
 # CI without Node still pass `full`.
 ts() {
   local dir="clients/typescript"
-  if ! command -v tsc >/dev/null 2>&1; then
-    printf '\n==> ts: skipped (tsc not found)\n' >&2
-    return 0
+  if command -v tsc >/dev/null 2>&1; then
+    run_shell "cd '$dir' && tsc --noEmit"
+  else
+    printf '\n==> ts typecheck: skipped (tsc not found)\n' >&2
   fi
-  run_shell "cd '$dir' && tsc --noEmit"
   if command -v node >/dev/null 2>&1; then
     run node --experimental-strip-types --test "$dir/test/stdio.test.ts"
   else
@@ -121,18 +121,20 @@ mcp_conformance() {
   command -v node    >/dev/null 2>&1 && have_node=1
   command -v tsc     >/dev/null 2>&1 && have_tsc=1
 
-  # Build aha + the Go-SDK reference server once.
-  if [[ ! -x /tmp/aha ]]; then
-    run go build -o /tmp/aha ./cmd/aha
-  fi
-  if [[ ! -x /tmp/aha-ref-mcp ]]; then
-    run go build -o /tmp/aha-ref-mcp ./cmd/aha-ref-mcp
-  fi
+  # Build aha + the Go-SDK reference server for this checkout every time.
+  # Reusing /tmp binaries made `verify.sh mcp` capable of testing a stale
+  # executable after source changes.
+  run go build -o /tmp/aha ./cmd/aha
+  run go build -o /tmp/aha-ref-mcp ./cmd/aha-ref-mcp
 
   # Make sure the TS SDK + zod are installed in scripts/mcp-conformance/ if
   # node is available. Skip the install if package-lock is fresh enough.
   if (( have_node )) && [[ ! -d scripts/mcp-conformance/node_modules ]]; then
-    run_shell "cd scripts/mcp-conformance && npm install --silent --no-audit --no-fund"
+    if [[ -f scripts/mcp-conformance/package-lock.json ]]; then
+      run_shell "cd scripts/mcp-conformance && npm ci --silent --ignore-scripts --no-audit --no-fund"
+    else
+      run_shell "cd scripts/mcp-conformance && npm install --silent --ignore-scripts --no-audit --no-fund"
+    fi
   fi
 
   # Populate a fixture corpus the Python+TS+Go clients can drive against.

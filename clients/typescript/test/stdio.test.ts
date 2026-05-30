@@ -13,6 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connectStdio, AhaMcpError } from "../transports/stdio.ts";
+import { connectHTTP } from "../transports/http.ts";
 import { aha, parseRef, formatRef, type Ref } from "../aha-mcp.ts";
 
 const encoder = new TextEncoder();
@@ -165,6 +166,21 @@ test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
     assert.equal((e as AhaMcpError).code, "-32000");
     assert.match((e as AhaMcpError).message, /invalid ref/);
   }
+});
+
+test("HTTP transport routes every typed tool including clusters", async () => {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fakeFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    calls.push({ url: String(url), init: init ?? {} });
+    return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const tools = aha(connectHTTP("http://127.0.0.1:18428/", { fetch: fakeFetch as typeof fetch }));
+  await tools.clusters({ limit: 1 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "http://127.0.0.1:18428/api/clusters");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal((calls[0].init.headers as Record<string, string>)["Content-Type"], "application/json");
+  assert.equal(calls[0].init.body, JSON.stringify({ limit: 1 }));
 });
 
 test("parseRef + formatRef round-trip every canonical shape", () => {

@@ -119,7 +119,7 @@ func manualFTSWrites(t *testing.T) map[string]int {
 func directAppendOnlyMutations(t *testing.T) map[string]int {
 	t.Helper()
 	out := map[string]int{}
-	re := regexp.MustCompile(`(?is)\b(delete\s+from|update)\s+(entries|messages|artifacts|conflicts)\b`)
+	re := regexp.MustCompile(`(?is)\b(delete\s+from|update)\s+(entries|messages|artifacts|conflicts|tool_invocations)\b`)
 	walkProductionGo(t, func(rel, _ string, b []byte) {
 		for _, m := range re.FindAllSubmatch(b, -1) {
 			out[rel+":"+strings.ToLower(string(m[1]))+":"+strings.ToLower(string(m[2]))]++

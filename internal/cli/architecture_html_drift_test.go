@@ -97,13 +97,13 @@ func TestArchitectureHTMLPackageGraphCoversAllPackages(t *testing.T) {
 }
 
 // TestArchitectureHTMLSchemaTablesMatch asserts the schema ER diagram
-// names every corpus table from schema.go and doesn't name any that
+// names every corpus table from corpus DDL sources and doesn't name any that
 // don't exist. The two virtual FTS tables (fts_messages, fts_artifacts)
 // and the meta schema_migrations row are intentionally excluded from
 // the visual schema — they're called out elsewhere or aren't first
 // class — so the test treats them as optional.
 func TestArchitectureHTMLSchemaTablesMatch(t *testing.T) {
-	tables, err := listSchemaTables("../corpus/schema.go")
+	tables, err := listSchemaTables("../corpus")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,19 +204,30 @@ func listProductionInternalPackages(root string) ([]string, error) {
 	return pkgs, nil
 }
 
-// listSchemaTables greps internal/corpus/schema.go for table-creation
-// statements (both ordinary and FTS5 virtual) and returns their names
-// in sorted order, deduplicated.
+// listSchemaTables greps internal/corpus production Go files for
+// table-creation statements (both ordinary and FTS5 virtual) and returns their
+// names in sorted order, deduplicated. DDL constants may live next to their
+// migrations, not only in schema.go.
 var schemaTableRE = regexp.MustCompile(`create (?:virtual )?table if not exists ([a-z_]+)`)
 
-func listSchemaTables(schemaPath string) ([]string, error) {
-	b, err := os.ReadFile(schemaPath)
+func listSchemaTables(schemaDir string) ([]string, error) {
+	entries, err := os.ReadDir(schemaDir)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
-	for _, m := range schemaTableRE.FindAllStringSubmatch(string(b), -1) {
-		seen[m[1]] = true
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(schemaDir, name))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range schemaTableRE.FindAllStringSubmatch(string(b), -1) {
+			seen[m[1]] = true
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for k := range seen {
