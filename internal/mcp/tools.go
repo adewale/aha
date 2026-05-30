@@ -238,34 +238,28 @@ func doDoctor(b Backend) (map[string]any, error) {
 	}, nil
 }
 
-// rejectExtras strict-decodes the raw arguments into a fresh T using
-// DisallowUnknownFields and returns an isError CallToolResult if the
-// strict decode fails. Returns nil when the arguments are well-formed
-// (or absent). Wraps each tool handler to give us "additionalProperties:
-// false" semantics without having to hand-construct the input schema.
-//
-// AddTool already decoded the args into the typed In struct (silently
-// dropping unknown fields). We re-decode strictly here to surface the
-// rejection the JSON Schema doesn't itself enforce.
-//
-// The error text mirrors the HTTP-side decodeInput phrasing
-// ("unexpected argument for <tool>: ...") so consumers can string-match
-// errors with one rule regardless of transport.
-func rejectExtras[T any](req *mcp.CallToolRequest) *mcp.CallToolResult {
-	raw := req.Params.Arguments
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	var t T
-	if err := dec.Decode(&t); err != nil {
-		return errorResult(fmt.Errorf("unexpected argument for %s: %w", req.Params.Name, err))
-	}
-	return nil
-}
-
 // ---------- SDK registration ----------
+//
+// Two patterns by output shape:
+//
+//   - Object-typed tools (status, verify, corpus_size, doctor) pass a typed
+//     Out value as the second return; the SDK derives the output schema
+//     from Out, marshals it once, and fills BOTH CallToolResult.Content
+//     (as a TextContent block) AND CallToolResult.StructuredContent from
+//     the same bytes. We return nil for the *CallToolResult.
+//
+//   - List-typed tools (search, read, conflicts) declare Out=any so the
+//     SDK skips output-schema derivation — array schemas would otherwise
+//     panic the SDK with "output schema must have type object" (which
+//     matches the official Python SDK's Pydantic Dict[str, Any] constraint
+//     on structuredContent). We hand-build CallToolResult.Content with the
+//     JSON-marshalled list payload; structuredContent stays nil for these.
+//
+// Input validation is the SDK's job too. AddTool derives the input schema
+// from the typed In struct via jsonschema-go, which emits
+// `additionalProperties: false` for structs by default, and the SDK then
+// validates every tools/call's arguments against that schema before our
+// handler runs. No additional argument-strictness wrapper is needed.
 
 // readOnlyAnnotations is the ToolAnnotations applied to every tool. aha's
 // MCP surface is read-only by construction: there is no write tool to be
@@ -291,150 +285,108 @@ func NewServer(backend Backend) *mcp.Server {
 }
 
 func registerTools(server *mcp.Server, b Backend) {
-	// Tools whose Out type is a Go slice (search/read/conflicts) would
-	// produce an "array"-typed JSON schema, which the SDK refuses for
-	// output schemas (spec wants object). Those are registered with
-	// Out=any so the SDK skips output-schema derivation; the typed
-	// payload still travels in content[].text and is JSON-parseable
-	// client-side (which is exactly what the bidirectional conformance
-	// tests verify).
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search",
 		Description: "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[SearchInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
 		out, err := doSearch(b, in)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
-		return textOnlyResult(out), nil, nil
+		return textResult(out), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "read",
 		Description: "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[ReadInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		out, err := doRead(b, in)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
-		return textOnlyResult(out), nil, nil
+		return textResult(out), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "status",
 		Description: "Return corpus health summary: counts and disk usage.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[EmptyInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
 		out, err := doStatus(b)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
-		return objectResult(out), nil, nil
+		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "verify",
 		Description: "Run read-only corpus invariant checks (no repair).",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[EmptyInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.VerifyReport, error) {
 		out, err := doVerify(b)
 		if err != nil {
-			return errorResult(err), nil, nil
+			return errorResult(err), out, nil
 		}
-		return objectResult(out), nil, nil
+		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "conflicts",
 		Description: "List quarantined merge conflicts.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[EmptyInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
 		out, err := doConflicts(b)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
-		return textOnlyResult(out), nil, nil
+		return textResult(out), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "corpus_size",
 		Description: "Return corpus on-disk size breakdown.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[EmptyInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.SizeReport, error) {
 		out, err := doCorpusSize(b)
 		if err != nil {
-			return errorResult(err), nil, nil
+			return errorResult(err), out, nil
 		}
-		return objectResult(out), nil, nil
+		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "doctor",
 		Description: "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, req *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		if r := rejectExtras[EmptyInput](req); r != nil {
-			return r, nil, nil
-		}
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
 		out, err := doDoctor(b)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
-		return objectResult(out), nil, nil
+		return nil, out, nil
 	})
 }
 
-// textOnlyResult builds a CallToolResult that carries the payload only as
-// JSON in content[].text. Used for list-shaped outputs, where structured
-// content (which the Python SDK requires to be a JSON object) doesn't fit.
-// The SDK fills structuredContent itself when the Out generic type is
-// non-nil; we use the zero-output overload by returning nil for Out via
-// the surrounding handler signature... except we can't, so we set
-// structuredContent: nil in CallToolResult to override.
-func textOnlyResult(v any) *mcp.CallToolResult {
+// textResult builds a CallToolResult carrying v as a JSON text content
+// block. Used for list-typed tool outputs, where the SDK's auto-fill path
+// is unavailable: a Go slice's auto-derived schema has type=array, which
+// the SDK refuses for output schemas (Python SDK Pydantic requires
+// Dict[str, Any] for structuredContent). The typed payload travels in
+// content[].text and the TS client surface JSON-parses it transparently.
+//
+// Object-typed tools don't need this helper: the SDK fills both Content
+// and StructuredContent from the typed Out return value when the handler
+// returns (nil, out, nil).
+func textResult(v any) *mcp.CallToolResult {
 	text, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return errorResult(err)
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(text)}},
-		// Explicitly nil-overriding StructuredContent so the SDK doesn't
-		// emit a list under a "structuredContent" key that the official
-		// Python SDK Pydantic Dict type rejects.
-		StructuredContent: nil,
-	}
-}
-
-// objectResult builds a CallToolResult for object-typed outputs. Both
-// content[].text and StructuredContent carry the value.
-func objectResult(v any) *mcp.CallToolResult {
-	text, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return errorResult(err)
-	}
-	return &mcp.CallToolResult{
-		Content:           []mcp.Content{&mcp.TextContent{Text: string(text)}},
-		StructuredContent: v,
 	}
 }
 
