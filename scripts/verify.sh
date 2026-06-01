@@ -92,9 +92,10 @@ ts() {
   fi
 }
 
-# mcp runs the cross-SDK conformance suite. Six legs across three SDKs
+# mcp runs the cross-SDK conformance suite. Six SDK legs across three SDKs
 # (Python `mcp`, TypeScript `@modelcontextprotocol/sdk`, Go
-# `github.com/modelcontextprotocol/go-sdk`):
+# `github.com/modelcontextprotocol/go-sdk`), plus a Code Mode workflow leg
+# and an in-process HTTP<->MCP consistency check (run via go test below):
 #
 #   server (aha mcp) is driven by ...
 #     1. Python SDK client      -> scripts/mcp-conformance/client_against_aha.py
@@ -105,6 +106,10 @@ ts() {
 #     4. Python SDK reference server (FastMCP)
 #     5. TypeScript SDK reference server (McpServer)
 #     6. Go SDK reference server (cmd/aha-ref-mcp)
+#
+#   plus ...
+#     7. Code Mode workflow     -> scripts/mcp-conformance/codemode_workflow.ts
+#     8. HTTP<->MCP consistency -> internal/mcp TestHTTPAndMCPPathsAreConsistent
 #
 # Each leg skips gracefully when its toolchain is missing, so this mode
 # still does *something* useful on a Python-only or Go-only box.
