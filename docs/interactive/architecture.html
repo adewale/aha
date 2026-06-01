@@ -1,0 +1,4444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>aha · architecture, mechanisms, soft spots</title>
+<style>
+/* ---------- design tokens ---------------------------------------------- */
+:root {
+  /* cool porcelain neutrals: light without the default cream/beige AI surface */
+  --bg:          oklch(96.5% 0.006 240);
+  --surface:     oklch(99% 0.003 240);
+  --surface-2:   oklch(93.5% 0.007 240);
+  --surface-3:   oklch(89.5% 0.008 240);
+  --code-bg:     oklch(94% 0.006 240);
+  --tooltip-bg:  oklch(99% 0.003 240 / 0.96);
+  --bg-glass:    oklch(96.5% 0.006 240 / 0.92);
+  --line:        oklch(83% 0.008 240);
+  --line-strong: oklch(68% 0.012 240);
+  --ink:         oklch(20% 0.018 240);
+  --ink-2:       oklch(32% 0.018 240);
+  --ink-3:       oklch(44% 0.016 240);
+
+  /* sage: archival, deliberate, canonical (175° green) */
+  --sage:        oklch(45% 0.09 172);
+  --sage-deep:   oklch(35% 0.085 172);
+  --sage-soft:   oklch(88% 0.055 172 / 0.45);
+  --sage-wash:   oklch(90% 0.045 172 / 0.24);
+  --sage-line:   oklch(52% 0.09 172 / 0.34);
+  --sage-flash:  oklch(78% 0.08 172 / 0.32);
+
+  /* clay: doubt, hotspots (40° terracotta) */
+  --clay:        oklch(49% 0.13 40);
+  --clay-soft:   oklch(89% 0.075 40 / 0.48);
+  --clay-wash:   oklch(91% 0.055 40 / 0.24);
+  --clay-line:   oklch(55% 0.12 40 / 0.34);
+
+  /* sand: accepted limit (85° muted gold) */
+  --sand:        oklch(52% 0.105 82);
+  --sand-soft:   oklch(90% 0.08 82 / 0.48);
+  --sand-line:   oklch(58% 0.105 82 / 0.34);
+
+  /* light-mode shadow rings; dividers still use borders */
+  --shadow-border:
+    0 0 0 1px rgba(0, 0, 0, 0.055),
+    0 1px 2px -1px rgba(0, 0, 0, 0.08),
+    0 12px 28px -24px rgba(74, 55, 24, 0.28);
+  --shadow-border-hover:
+    0 0 0 1px rgba(0, 0, 0, 0.085),
+    0 2px 5px -2px rgba(0, 0, 0, 0.12),
+    0 18px 34px -24px rgba(74, 55, 24, 0.34);
+
+  --accent: var(--sage);
+  --accent-2: var(--sage-deep);  /* JS pipeline label color */
+
+  /* modular type scale */
+  --t-xs:     13px;     /* labels, eyebrows */
+  --t-sm:     14px;     /* secondary, mono in chrome */
+  --t-md:     16px;     /* body */
+  --t-lg:     19px;     /* lead paragraphs, subheads */
+  --t-xl:     23px;     /* h3 / mech headings */
+  --t-2xl:    30px;     /* section-secondary h2 */
+  --t-3xl:    40px;     /* section h2 */
+  --t-display: clamp(56px, 9vw, 120px);  /* hero */
+
+  /* spacing: 4pt grid */
+  --s-1: 4px; --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 24px;
+  --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px; --s-10: 128px;
+
+  --radius:    8px;
+  --radius-lg: 16px;
+
+  --ease:      cubic-bezier(0.25, 1, 0.5, 1);   /* ease-out-quart */
+  --ease-soft: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+/* ---------- base ------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+body {
+  font: 400 var(--t-md)/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        system-ui, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "kern", "liga", "calt", "ss01";
+  text-rendering: optimizeLegibility;
+  background: var(--bg);
+}
+p { text-wrap: pretty; }
+.mono, code, pre, input.mono {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum", "zero", "ss02";
+  font-variant-ligatures: none;
+}
+code {
+  background: var(--surface-2);
+  padding: 0.08em 0.42em;
+  border-radius: 4px;
+  font-size: 90%;
+  color: var(--ink);
+}
+pre {
+  background: var(--code-bg);
+  border: 0;
+  box-shadow: var(--shadow-border);
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  font-size: 15px;
+  line-height: 1.7;
+}
+pre code { background: none; padding: 0; color: var(--ink); font-size: inherit; }
+em { font-style: italic; color: var(--ink); }
+b, strong { font-weight: 600; color: var(--ink); }
+a { color: var(--sage); text-decoration: none; border-bottom: 1px solid var(--sage-line); transition: color .15s var(--ease), border-color .15s var(--ease); }
+a:hover { color: var(--sage-deep); border-bottom-color: var(--sage); }
+hr { border: 0; border-top: 1px solid var(--line); margin: var(--s-7) 0; }
+h1, h2, h3, h4 { text-wrap: balance; }
+
+/* numbers + hashes get tabular figures */
+.mono, code, pre, .nums { font-variant-numeric: tabular-nums; }
+
+::selection { background: var(--sage-soft); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; border-radius: 6px; }
+
+/* ---------- layout: sidebar + main -------------------------------------- */
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+}
+@media (max-width: 880px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--s-6) var(--s-5) var(--s-5);
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+@media (max-width: 880px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s-4);
+    padding: var(--s-3) var(--s-5);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    z-index: 30;
+    background: var(--bg-glass);
+    backdrop-filter: saturate(140%) blur(8px);
+    -webkit-backdrop-filter: saturate(140%) blur(8px);
+  }
+}
+
+.sidebar .brand h1 {
+  font-size: clamp(40px, 4vw, 48px);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+  margin: 0;
+}
+.sidebar .brand .brand-line {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  margin: var(--s-2) 0 0;
+}
+@media (max-width: 880px) {
+  .sidebar .brand h1 { font-size: 26px; }
+  .sidebar .brand .brand-line { display: none; }
+}
+
+/* sidebar nav */
+.sidebar nav.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.sidebar nav.tabs button {
+  appearance: none;
+  background: transparent;
+  color: var(--ink-2);
+  border: 0;
+  border-left: 2px solid transparent;
+  padding: var(--s-2) var(--s-3);
+  font: inherit;
+  font-size: var(--t-md);
+  cursor: pointer;
+  text-align: left;
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+  white-space: nowrap;
+}
+.sidebar nav.tabs button:hover { color: var(--ink); background: var(--surface); }
+.sidebar nav.tabs button.active {
+  color: var(--ink);
+  border-left-color: var(--sage);
+  background: var(--sage-soft);
+}
+@media (max-width: 880px) {
+  .sidebar nav.tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--s-3);
+    flex: 1 0 100%;
+    order: 3;
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--line);
+  }
+  .sidebar nav.tabs button {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    padding: var(--s-1) 0;
+    font-size: var(--t-sm);
+  }
+  .sidebar nav.tabs button.active {
+    background: transparent;
+    border-bottom-color: var(--sage);
+    border-left-color: transparent;
+  }
+}
+
+/* sidebar meta */
+.sidebar-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-1) var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-4);
+  margin-top: auto;
+}
+.sidebar-meta dt { color: var(--ink-3); }
+.sidebar-meta dd { margin: 0; color: var(--ink-2); }
+.sidebar-meta .num {
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+@media (max-width: 880px) {
+  .sidebar-meta { display: none; }
+}
+
+/* main content area */
+main.content {
+  padding: var(--s-7) var(--s-7) var(--s-10);
+  max-width: 1160px;
+  min-width: 0;
+}
+@media (max-width: 880px) {
+  main.content { padding: var(--s-6) var(--s-5) var(--s-9); max-width: 100%; }
+}
+nav.tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--sage);
+}
+
+/* ---------- sections --------------------------------------------------- */
+section { display: none; }
+section.active { display: block; }
+
+.section-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s-4);
+  margin-bottom: var(--s-7);
+  max-width: 62ch;
+}
+.section-head h2 {
+  font-size: var(--t-3xl);
+  letter-spacing: -0.015em;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.1;
+}
+.section-head p {
+  color: var(--ink-2);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ---------- Tufte primitives ------------------------------------------ */
+.figure {
+  margin: var(--s-5) 0 var(--s-7);
+}
+.figure > svg,
+.figure > .figure-body {
+  margin: 0;
+}
+.figcaption {
+  max-width: 78ch;
+  margin-top: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+.figcaption b { color: var(--ink); font-weight: 600; }
+.sidenote {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  border-top: 1px solid var(--sage-line);
+  padding-top: var(--s-3);
+  max-width: 34ch;
+}
+.sidenote b { color: var(--ink); font-weight: 600; }
+.sidenote code { background: transparent; padding: 0; color: var(--ink-2); }
+.pull-note {
+  float: right;
+  width: min(260px, 32%);
+  margin: 0 0 var(--s-5) var(--s-6);
+}
+.margin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  gap: var(--s-6);
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .pull-note { float: none; width: auto; margin: 0 0 var(--s-5); max-width: 70ch; }
+  .margin-grid { grid-template-columns: 1fr; }
+  .sidenote { max-width: 70ch; }
+}
+.evidence-note {
+  margin: var(--s-5) 0;
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--sage-line);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  max-width: 78ch;
+}
+.evidence-note b { color: var(--ink); }
+.sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 80px;
+  height: 18px;
+  color: var(--sage);
+}
+.sparkline polyline { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.sparkline circle { fill: var(--sage); }
+.range-bar {
+  --p: 0%;
+  position: relative;
+  display: inline-block;
+  width: 110px;
+  height: 18px;
+  vertical-align: middle;
+}
+.range-bar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--line-strong);
+}
+.range-bar::after {
+  content: "";
+  position: absolute;
+  left: var(--p);
+  top: 50%;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--sage);
+  transform: translate(-50%, -50%);
+}
+.range-bar.warn::after { background: var(--sand); }
+.range-bar.hot::after { background: var(--clay); }
+
+/* ---------- pipeline (Tufte: minimal ink, no box chartjunk) ------------ */
+.pipeline-wrap {
+  margin: 0 0 var(--s-7);
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  gap: var(--s-6);
+  align-items: start;
+}
+.pipeline-wrap .figure { grid-column: 1; margin-top: 0; }
+.pipeline-wrap .pull-note { grid-column: 2; float: none; width: auto; margin: var(--s-5) 0 0; }
+.pipeline-wrap .pkg-info { grid-column: 1 / -1; }
+@media (max-width: 980px) {
+  .pipeline-wrap { grid-template-columns: 1fr; }
+  .pipeline-wrap .figure,
+  .pipeline-wrap .pull-note,
+  .pipeline-wrap .pkg-info { grid-column: 1; }
+  .pipeline-wrap .pull-note { margin-top: 0; }
+}
+h3.sub {
+  font-size: var(--t-md);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: var(--s-7) 0 var(--s-3);
+}
+.cli-line { margin: 0; color: var(--ink-2); line-height: 1.9; max-width: 80ch; }
+.cli-line code { background: transparent; padding: 0; color: var(--ink); }
+.cli-note { font-size: var(--t-sm); color: var(--ink-3); margin: var(--s-2) 0 0; max-width: 70ch; line-height: 1.55; }
+.pkg-info {
+  margin-top: var(--s-5);
+  color: var(--ink-2);
+  font-size: var(--t-md);
+  line-height: 1.55;
+  min-height: 1.6em;
+  padding: var(--s-3) 0;
+  max-width: 75ch;
+  border-top: 1px solid var(--sage-line);
+  background: transparent;
+  border-radius: 0;
+  transition: background .18s var(--ease);
+}
+.pkg-info b { color: var(--sage); font-weight: 600; }
+
+/* SVG shared styling */
+svg { display: block; max-width: 100%; height: auto; }
+svg text {
+  font: 13px ui-monospace, Menlo, monospace;
+  fill: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+svg text.title { fill: var(--ink); font-size: 14px; font-weight: 600; }
+svg text.lbl   { fill: var(--ink-3); }
+svg text.good  { fill: var(--sage); }
+svg text.warn  { fill: var(--sand); }
+svg text.bad   { fill: var(--clay); }
+/* Tufte: erase the dreaded box (B5). Rect borders carried no data;
+   removed. Hairline rules at top/bottom of each block stand in. */
+svg .box { fill: none; stroke: none; }
+svg .rule { stroke: var(--line); stroke-width: 1; fill: none; }
+svg .rule.accent { stroke: var(--sage); stroke-width: 1.4; }
+svg .arrow {
+  stroke: var(--ink-3);
+  stroke-width: 1.2;
+  fill: none;
+  marker-end: url(#arrow);
+}
+svg .arrow.thick { stroke: var(--sage); stroke-width: 1.6; }
+svg .grp { cursor: pointer; transition: opacity .15s var(--ease); }
+svg .grp:hover { opacity: 1; }
+svg .grp:hover text.title { fill: var(--sage-deep); }
+svg .grp:hover .rule { stroke: var(--sage); }
+
+/* ---------- key facts (typographic list, not card grid) ---------------- */
+.facts {
+  margin: var(--s-7) 0 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 3fr;
+  gap: var(--s-3) var(--s-6);
+  font-size: var(--t-md);
+}
+@media (max-width: 720px) {
+  .facts { grid-template-columns: 1fr; gap: var(--s-1); }
+  .facts dd { margin-bottom: var(--s-3); }
+}
+.facts dt {
+  color: var(--ink-3);
+  font-weight: 500;
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+}
+.facts dd {
+  margin: 0;
+  color: var(--ink-2);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+  max-width: 70ch;
+}
+@media (max-width: 720px) { .facts dd { border-top: 0; padding-top: 0; } }
+
+/* ---------- mechanisms ------------------------------------------------- */
+.mech {
+  display: grid;
+  grid-template-columns: minmax(220px, 18ch) 1fr;
+  gap: var(--s-7);
+  padding: var(--s-7) 0;
+  border-top: 1px solid var(--line);
+  align-items: start;
+}
+.mech:first-of-type { border-top: 0; padding-top: var(--s-4); }
+.mech .side {
+  position: sticky;
+  top: 72px;
+  align-self: start;
+}
+.mech .side h3 {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--s-3);
+  line-height: 1.25;
+}
+.mech .side .where {
+  color: var(--ink-3);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+.mech .body { min-width: 0; }
+.mech .body > p { margin: 0 0 var(--s-5); max-width: 68ch; color: var(--ink-2); line-height: 1.65; }
+.mech .body > p:first-child { color: var(--ink); font-size: var(--t-lg); line-height: 1.55; }
+.mech .body > p.lead { color: var(--ink); }
+.mech .body ul { color: var(--ink-2); max-width: 68ch; line-height: 1.6; }
+.mech .body ul li { margin-bottom: var(--s-2); }
+.mech details { margin-top: var(--s-5); }
+.mech details summary {
+  color: var(--sage); cursor: pointer; padding: var(--s-2) 0;
+  font-size: var(--t-md); list-style: none;
+}
+.mech details summary::-webkit-details-marker { display: none; }
+.mech details summary::before {
+  content: "›";
+  display: inline-block;
+  width: 1em;
+  transition: transform .2s var(--ease);
+  color: var(--sage);
+}
+.mech details[open] summary::before { transform: rotate(90deg); }
+@media (max-width: 880px) {
+  .mech { grid-template-columns: 1fr; gap: var(--s-4); }
+  .mech .side { position: static; }
+}
+
+/* ---------- database simulator (Nicky Case style) --------------------- */
+.db-sim {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  gap: var(--s-3) var(--s-5);
+  margin: var(--s-5) 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+@media (max-width: 720px) { .db-sim { grid-template-columns: 1fr; } }
+.db-pane { min-width: 0; }
+.db-pane-h {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.db-meta {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.db-table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-height: 100px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.db-table:empty::before {
+  content: "– empty –";
+  display: block;
+  color: var(--ink-3);
+  padding: var(--s-3);
+  font-style: italic;
+  font-size: var(--t-xs);
+}
+.db-table li {
+  padding: var(--s-1) var(--s-3);
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-3);
+  align-items: baseline;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+.db-table li:last-child { border-bottom: 0; }
+.db-table li.fresh {
+  /* state-confirmation flash on row insert; under animate-skill 500ms feedback budget */
+  animation: dbflash .5s var(--ease);
+}
+@keyframes dbflash {
+  0%   { background: var(--sage-flash); }
+  100% { background: transparent; }
+}
+.db-table li.conflict-row { color: var(--clay); }
+.db-table li .key   { color: var(--ink); }
+.db-table li .hash  { color: var(--ink-3); text-align: right; }
+.db-table li .role  { color: var(--sage); }
+.db-table li .note  { color: var(--ink-3); }
+
+.db-actions {
+  grid-column: 1 / span 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.db-actions button {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-2) var(--s-3);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.db-actions button:hover { background: var(--sage-soft); border-color: var(--sage-line); color: var(--ink); }
+.db-actions button.forbidden { border-color: var(--clay-line); color: var(--clay); }
+.db-actions button.forbidden:hover { background: var(--clay-soft); color: var(--clay); }
+.db-actions button.ghost { background: transparent; border-style: dashed; }
+
+.db-log {
+  grid-column: 1 / span 2;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.db-log p { margin: 0 0 4px; line-height: 1.55; }
+.db-log p.ok    { color: var(--sage); }
+.db-log p.warn  { color: var(--sand); }
+.db-log p.deny  { color: var(--clay); }
+.db-log p.sql   { color: var(--ink-3); }
+.db-log p.sql code { color: var(--ink-2); background: transparent; padding: 0; }
+.db-log-hint { color: var(--ink-3); font-style: italic; }
+.db-log .forbidden { color: var(--clay); }
+
+/* ---------- state-signature explorable -------------------------------- */
+.state-sig {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: var(--s-6);
+  margin: var(--s-5) 0 var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+@media (max-width: 720px) { .state-sig { grid-template-columns: 1fr; gap: var(--s-5); } }
+.ss-fields { display: flex; flex-direction: column; gap: var(--s-2); }
+.ss-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 70px;
+  gap: var(--s-3);
+  align-items: center;
+  font-size: var(--t-sm);
+}
+.ss-name { color: var(--ink-2); font-family: ui-monospace, Menlo, monospace; }
+.ss-row input[type=text] {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-1) var(--s-2);
+  font: 13px ui-monospace, Menlo, monospace;
+  min-width: 0;
+  width: 100%;
+  transition: border-color .15s var(--ease);
+}
+.ss-row input[type=text]:focus { border-color: var(--sage); outline: none; }
+.ss-row[data-stable="1"] input { border-left: 2px solid var(--sage); }
+.ss-row[data-stable="0"] input { border-left: 2px solid var(--clay); }
+.ss-tag {
+  font-size: var(--t-xs);
+  text-align: right;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+}
+.ss-tag.stable   { color: var(--sage); }
+.ss-tag.volatile { color: var(--clay); }
+.ss-divider {
+  height: 1px; background: var(--line); margin: var(--s-2) 0;
+}
+.ss-output { display: flex; flex-direction: column; gap: var(--s-4); align-self: start; }
+.ss-hash { display: flex; flex-direction: column; gap: var(--s-1); }
+.ss-hash-label { font-size: var(--t-sm); color: var(--ink-2); font-weight: 500; }
+.ss-hash-help { color: var(--ink-3); font-weight: 400; margin-left: var(--s-2); font-size: var(--t-xs); }
+.ss-hash-value {
+  font-size: var(--t-xs);
+  word-break: break-all;
+  color: var(--sage);
+  background: var(--code-bg);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  transition: border-color .35s var(--ease), background .35s var(--ease);
+}
+.ss-hash-value.flash {
+  border-color: var(--sage);
+  background: var(--sage-soft);
+}
+.ss-hash-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 999px;
+  position: relative;
+}
+.ss-hash-bar > div {
+  position: absolute;
+  inset: 0;
+  background: var(--sage);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .35s var(--ease);
+}
+.ss-hint { font-size: var(--t-sm); color: var(--ink-3); line-height: 1.55; margin: 0; }
+.ss-hint b { color: var(--ink); }
+
+/* ---------- interactive widgets ---------------------------------------- */
+.widget {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+  margin-top: var(--s-5);
+}
+.widget label {
+  display: block;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  margin-bottom: var(--s-2);
+  font-weight: 500;
+}
+.widget input[type=text] {
+  width: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-3);
+  font: inherit;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  transition: border-color .15s var(--ease);
+}
+.widget input[type=text]:hover { border-color: var(--line-strong); }
+.widget input[type=text]:focus { border-color: var(--sage); outline: none; }
+.widget .row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.widget .row.two { grid-template-columns: 1fr 1fr; align-items: start; }
+@media (max-width: 720px) { .widget .row, .widget .row.two { grid-template-columns: 1fr; } }
+.widget .out {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-4) var(--s-4);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  line-height: 1.85;
+}
+.widget .out .k { color: var(--ink-3); }
+.widget .out .v { color: var(--sage); word-break: break-all; font-variant-numeric: tabular-nums; }
+.widget .out .v.match { color: var(--sage); }
+.widget .out .v.miss  { color: var(--clay); }
+.widget .hint { font-size: var(--t-sm); color: var(--ink-3); margin-top: var(--s-3); line-height: 1.5; }
+
+/* ---------- hotspots --------------------------------------------------- */
+.hot-intro {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-7);
+  align-items: end;
+  margin-bottom: var(--s-5);
+}
+@media (max-width: 880px) { .hot-intro { grid-template-columns: 1fr; } }
+.hot-intro .legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-md);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.hot-intro .legend .dot {
+  display: inline-block;
+  width: 10px; height: 10px; border-radius: 50%;
+  margin-right: var(--s-2); vertical-align: middle;
+}
+
+/* Tufte: erase the dreaded box; mute quadrant fills; hairline midlines. */
+.scatter-host {
+  position: relative;
+  height: 520px;
+  overflow: visible;
+  margin: var(--s-3) var(--s-7) 0 var(--s-7);
+}
+.scatter-host .quad {
+  position: absolute;
+  width: 50%; height: 50%;
+  box-sizing: border-box;
+}
+/* very faint tints; encode quadrant meaning without competing with the data */
+.scatter-host .quad.tl { left: 0; top: 0; background: var(--clay-wash); }
+.scatter-host .quad.tr { right: 0; top: 0; background: var(--sage-wash); }
+.scatter-host .quad.bl { left: 0; bottom: 0; background: transparent; }
+.scatter-host .quad.br { right: 0; bottom: 0; background: transparent; }
+.scatter-host .quad .qlabel {
+  position: absolute;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  padding: var(--s-2) var(--s-3);
+  max-width: 26ch;
+  font-style: italic;
+}
+.scatter-host .midline-v {
+  position: absolute; left: 50%; top: 0; bottom: 0;
+  border-left: 1px solid var(--line);
+}
+.scatter-host .midline-h {
+  position: absolute; top: 50%; left: 0; right: 0;
+  border-top: 1px solid var(--line);
+}
+/* range-frame: axis lines exactly span data range */
+.scatter-host .frame-x {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  border-top: 1px solid var(--ink-3);
+}
+.scatter-host .frame-y {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  border-left: 1px solid var(--ink-3);
+}
+.scatter-host .tick-label {
+  position: absolute;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.scatter-wrap {
+  margin-top: var(--s-3);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr auto;
+  gap: var(--s-2);
+}
+.scatter-wrap .scatter-host { grid-column: 2; grid-row: 1; margin: 0; }
+.axis-label {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+}
+.axis-label-y {
+  grid-column: 1; grid-row: 1;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  align-self: center;
+}
+.axis-label-x {
+  grid-column: 2; grid-row: 2;
+  text-align: center;
+  padding-top: var(--s-2);
+}
+.scatter-host .pt {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  cursor: pointer;
+  z-index: 5;
+  border: 2px solid var(--bg);
+  /* transform + border-color only – never width/height (layout-driving) */
+  transition: transform .2s var(--ease), border-color .2s var(--ease);
+}
+.scatter-host .pt:hover {
+  transform: translate(-50%, -50%) scale(1.4);
+}
+.scatter-host .pt.selected {
+  border-color: var(--ink);
+  transform: translate(-50%, -50%) scale(1.25);
+}
+.scatter-host .pt.s-hot   { background: var(--clay); }
+.scatter-host .pt.s-warn  { background: var(--sand); }
+.scatter-host .pt.s-solid { background: var(--sage); }
+.scatter-host .pt.s-novel { background: var(--sage); }
+.scatter-host .pt-label {
+  position: absolute;
+  transform: translate(-50%, 10px);
+  color: var(--ink-2);
+  padding: 0.15em 0.45em;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity .14s var(--ease);
+  font-feature-settings: "tnum";
+}
+/* hover state: small tooltip-ish */
+.scatter-host .pt-label.show {
+  opacity: 1;
+  color: var(--ink);
+  background: var(--tooltip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+/* Tufte direct labels: anchor labels are always visible, no background */
+.scatter-host .pt-label.anchor {
+  opacity: 1;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-style: italic;
+}
+
+.hot-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5) var(--s-6);
+  margin-top: var(--s-5);
+  min-height: 200px;
+}
+.hot-detail h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.hot-detail .where {
+  color: var(--ink-3);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--t-sm);
+  margin-bottom: var(--s-4);
+}
+.hot-detail .doubt    { border-left: 2px solid var(--clay-line); padding-left: var(--s-4); }
+.hot-detail .grounded { border-left: 2px solid var(--sage-line); padding-left: var(--s-4); }
+.hot-detail p { margin: 0 0 var(--s-3); max-width: 68ch; color: var(--ink-2); line-height: 1.6; }
+.hot-detail p:last-child { margin-bottom: 0; }
+.hot-detail p b { color: var(--ink); font-weight: 600; }
+
+.hot-list-head {
+  font-size: var(--t-md);
+  color: var(--ink);
+  font-weight: 600;
+  margin: var(--s-8) 0 var(--s-3);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.ranked-hotspots {
+  margin: var(--s-4) 0 var(--s-7);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.hotspot-rank-row {
+  display: grid;
+  grid-template-columns: 34px minmax(180px, 1.05fr) 150px minmax(180px, 1.05fr) minmax(220px, 1.45fr);
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.hotspot-rank-row:hover,
+.hotspot-rank-row.active { background: var(--sage-wash); }
+.hotspot-rank-row.active .issue { color: var(--sage); }
+.hotspot-rank-row.header {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.hotspot-rank-row.header:hover { background: transparent; }
+.hotspot-rank-row .rank {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hotspot-rank-row .issue { color: var(--ink); font-weight: 600; }
+.hotspot-rank-row .where,
+.hotspot-rank-row .next { line-height: 1.45; }
+.hotspot-rank-row .where code { background: transparent; padding: 0; color: var(--ink-3); }
+.hotspot-rank-row .score {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  align-items: center;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.hotspot-rank-row .score-num { color: var(--ink-2); }
+@media (max-width: 980px) {
+  .hotspot-rank-row { grid-template-columns: 34px 1fr; }
+  .hotspot-rank-row.header { display: none; }
+  .hotspot-rank-row .score,
+  .hotspot-rank-row .where,
+  .hotspot-rank-row .next { grid-column: 2; }
+}
+
+/* tag chips */
+.tag-chip {
+  display: inline-block;
+  font-size: var(--t-sm);
+  padding: 0.15em 0.65em;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  background: var(--surface);
+  vertical-align: middle;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.tag-chip.novel { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
+.tag-chip.solid { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
+.tag-chip.hot   { color: var(--clay); border-color: var(--clay-line); background: var(--clay-soft); }
+.tag-chip.warn  { color: var(--sand); border-color: var(--sand-line); background: var(--sand-soft); }
+
+/* ---------- codebase map ---------------------------------------------- */
+.map-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(280px, 1fr);
+  gap: var(--s-7);
+  align-items: start;
+}
+.map-grid #pkg-chart { width: 100%; height: auto; }
+@media (max-width: 880px) { .map-grid { grid-template-columns: 1fr; } }
+.pkg-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-6) var(--s-7);
+}
+.pkg-detail h3 { margin: 0 0 var(--s-3); font-size: var(--t-xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+.pkg-detail .why { color: var(--ink-2); margin-bottom: var(--s-4); max-width: 60ch; line-height: 1.6; }
+.pkg-detail ul { padding-left: var(--s-5); margin-top: var(--s-3); }
+.pkg-detail li { margin-bottom: var(--s-2); color: var(--ink-2); line-height: 1.55; }
+.pkg-detail code { font-size: var(--t-sm); }
+
+.package-matrix {
+  margin-top: var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.package-matrix-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) 150px 150px 150px minmax(220px, 1.6fr);
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.package-matrix-row:hover { background: var(--sage-wash); }
+.package-matrix-row.header {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.package-matrix-row.header:hover { background: transparent; }
+.package-matrix-row .pkg-name {
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, monospace;
+  font-weight: 600;
+}
+.package-matrix-row .metric {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  align-items: center;
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.package-matrix-row .metric b { color: var(--ink-2); font-weight: 500; }
+.package-matrix-row .first-read { line-height: 1.45; color: var(--ink-2); }
+.package-matrix-row .first-read code { background: transparent; padding: 0; color: var(--ink-2); }
+@media (max-width: 980px) {
+  .package-matrix-row { grid-template-columns: minmax(140px, 1fr) 1fr; }
+  .package-matrix-row.header { display: none; }
+  .package-matrix-row .metric,
+  .package-matrix-row .first-read { grid-column: 2; }
+}
+
+/* reading order list */
+.reading-order {
+  list-style: none;
+  padding: 0;
+  margin: var(--s-5) 0 0;
+  counter-reset: step;
+}
+.reading-order li {
+  counter-increment: step;
+  padding: var(--s-4) 0 var(--s-4) var(--s-7);
+  border-top: 1px solid var(--line);
+  position: relative;
+  color: var(--ink-2);
+  font-size: var(--t-md);
+  line-height: 1.6;
+  max-width: 75ch;
+}
+.reading-order li:first-child { border-top: 0; }
+.reading-order li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0; top: var(--s-4);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-md);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.reading-order li b { color: var(--ink); font-weight: 600; }
+
+/* ---------- ingest stages (Tufte: erase the box) ---------------------- */
+.ingest-stages {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--s-7);
+  margin-top: var(--s-4);
+}
+@media (max-width: 880px) { .ingest-stages { grid-template-columns: 1fr; gap: var(--s-6); } }
+.stage {
+  padding: 0;
+  position: relative;
+  border-top: 1px solid var(--sage-line);
+  padding-top: var(--s-4);
+}
+.stage .role {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  margin-bottom: var(--s-2);
+}
+.stage h4 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+.stage ol {
+  padding-left: var(--s-5);
+  margin: 0 0 var(--s-3);
+  color: var(--ink-2);
+  font-size: var(--t-md);
+  line-height: 1.55;
+}
+.stage ol li { margin-bottom: var(--s-2); }
+.stage .end {
+  font-size: var(--t-sm);
+  margin-top: var(--s-3);
+  color: var(--ink-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+.stage .end.good { color: var(--sage); }
+.stage .end.warn { color: var(--sand); }
+.stage .end.bad  { color: var(--clay); }
+
+.hooks {
+  margin-top: var(--s-5);
+  padding: var(--s-5) var(--s-6);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.hooks h4 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-lg);
+  color: var(--ink);
+  font-weight: 600;
+}
+.hooks p { color: var(--ink-2); margin: var(--s-3) 0 0; font-size: var(--t-md); max-width: 70ch; line-height: 1.6; }
+.hooks .pair {
+  display: grid; grid-template-columns: 320px 1fr;
+  gap: var(--s-4); margin: var(--s-3) 0; align-items: baseline;
+  font-size: var(--t-md);
+  line-height: 1.5;
+}
+.hooks .pair code { white-space: nowrap; }
+.hooks .pair span { color: var(--ink-2); }
+@media (max-width: 720px) { .hooks .pair { grid-template-columns: 1fr; gap: var(--s-1); } }
+
+/* ---------- copy buttons (Anthropic blog: export ↔ workflow link) ----- */
+.copy-btn {
+  appearance: none;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.2em var(--s-3);
+  font: inherit;
+  font-size: var(--t-xs);
+  font-family: ui-monospace, Menlo, monospace;
+  cursor: pointer;
+  margin-left: var(--s-2);
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+}
+.copy-btn:hover { color: var(--ink); border-color: var(--sage-line); background: var(--sage-soft); }
+.copy-btn.copied { color: var(--sage); border-color: var(--sage); }
+
+/* ---------- side-by-side comparison (Anthropic blog: alternatives) ---- */
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+  margin: var(--s-5) 0;
+}
+@media (max-width: 880px) { .compare { grid-template-columns: 1fr; } }
+.compare .pane {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-5);
+}
+.compare .pane.bad   { box-shadow: inset 0 2px 0 var(--clay); }
+.compare .pane.good  { box-shadow: inset 0 2px 0 var(--sage); }
+.compare .pane h4 {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-md);
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+.compare .pane h4 .tag {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.compare .pane.bad h4 .tag  { color: var(--clay); }
+.compare .pane.good h4 .tag { color: var(--sage); }
+.compare .pane pre { margin: var(--s-3) 0 var(--s-3); font-size: var(--t-xs); }
+.compare .outcome {
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0;
+}
+.compare .outcome b { color: var(--ink); }
+.compare .pane.bad  .outcome b { color: var(--clay); }
+.compare .pane.good .outcome b { color: var(--sage); }
+
+/* ---------- margin-annotated code (Willison: inline margin annotations) */
+.annotated-code {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 320px);
+  gap: var(--s-4);
+  margin: var(--s-5) 0;
+  align-items: start;
+}
+@media (max-width: 880px) { .annotated-code { grid-template-columns: 1fr; } }
+.annotated-code pre { margin: 0; }
+.annotated-code .annots { display: flex; flex-direction: column; gap: var(--s-2); }
+.annotated-code .annot {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  line-height: 1.55;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--sage-line);
+  cursor: pointer;
+  transition: border-color .15s var(--ease), color .15s var(--ease);
+}
+.annotated-code .annot:hover { border-color: var(--sage); color: var(--ink); }
+.annotated-code .annot.active { border-color: var(--sage); color: var(--ink); }
+.annotated-code .annot .line-no {
+  display: inline-block;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--sage);
+  margin-right: var(--s-2);
+  font-size: var(--t-xs);
+}
+.annotated-code .annot .annot-h {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: var(--s-1);
+}
+.annotated-code pre {
+  position: relative;
+  counter-reset: lno;
+  background: var(--code-bg);
+}
+.annotated-code pre .ln {
+  display: block;
+  padding-left: var(--s-7);
+  position: relative;
+  transition: background .15s var(--ease);
+}
+.annotated-code pre .ln::before {
+  content: counter(lno);
+  counter-increment: lno;
+  position: absolute;
+  left: 0;
+  width: 32px;
+  text-align: right;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.annotated-code pre .ln.hl  { background: var(--sage-soft); }
+.annotated-code pre .ln.hl::before { color: var(--sage); }
+
+/* ---------- gotchas (Anthropic blog: gotchas section) ----------------- */
+.gotchas { margin-top: var(--s-3); }
+.gotchas .row-name code { color: var(--clay); }
+.gotchas .col-right { color: var(--sage); }
+
+/* ---------- callout boxes (Willison: severity-coded callouts) -------- */
+.callout {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: var(--s-3) 0;
+  margin: var(--s-4) 0;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  border-radius: 0;
+}
+.callout.note     { border-color: var(--sage-line); background: var(--sage-soft); }
+.callout.warning  { border-color: var(--sand);      background: var(--sand-soft); }
+.callout.danger   { border-color: var(--clay-line); background: var(--clay-soft); }
+.callout .callout-h {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: var(--s-1);
+}
+.callout.note .callout-h     { color: var(--sage); }
+.callout.warning .callout-h  { color: var(--sand); }
+.callout.danger .callout-h   { color: var(--clay); }
+
+/* ---------- architecture: major nouns ---------------------------------- */
+.nouns {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--s-3);
+}
+.noun-tier {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: stretch;
+}
+.noun-tier-h {
+  flex: 1 0 100%;
+  font-size: var(--t-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: var(--s-1);
+  font-weight: 500;
+}
+.noun {
+  flex: 1 1 180px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3) var(--s-4);
+  cursor: pointer;
+  transition: border-color .15s var(--ease), background .15s var(--ease), transform .15s var(--ease);
+}
+.noun:hover, .noun.active { border-color: var(--sage); background: var(--sage-soft); }
+.noun.primary { box-shadow: inset 0 2px 0 var(--sage); }
+.noun.related {
+  border-color: var(--sand);
+  background: var(--sand-soft);
+}
+.noun-name {
+  font-size: var(--t-md);
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.noun-tag {
+  margin-top: var(--s-1);
+  font-size: var(--t-xs);
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+}
+.noun-arrow {
+  text-align: center;
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  padding: var(--s-2) 0;
+  letter-spacing: 0.04em;
+}
+.noun-arrow span { color: var(--sage); padding: 0 var(--s-2); }
+.noun-detail {
+  margin-top: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+  min-height: 90px;
+}
+.noun-detail h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-lg);
+  color: var(--ink);
+  font-weight: 600;
+}
+.noun-detail .ndef {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  max-width: 72ch;
+  margin: 0 0 var(--s-3);
+}
+.noun-detail .nex {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  color: var(--sand);
+  background: var(--code-bg);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  word-break: break-all;
+  box-shadow: inset 0 1px 0 var(--sand-line);
+}
+.noun-detail .nrel {
+  margin-top: var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.noun-detail .nrel code { background: transparent; padding: 0; color: var(--sage); }
+
+/* ---------- the message trace ----------------------------------------- */
+.trace {
+  list-style: none;
+  padding: 0;
+  margin: var(--s-3) 0 0;
+  counter-reset: tr;
+  border-left: 2px solid var(--sage-line);
+}
+.trace li {
+  display: grid;
+  grid-template-columns: 28px 180px 1fr;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  align-items: baseline;
+  font-size: var(--t-sm);
+  border-bottom: 1px dashed var(--line);
+}
+.trace li:last-child { border-bottom: 0; }
+.trace .trace-step {
+  color: var(--sage);
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.trace .trace-noun {
+  color: var(--ink);
+  font-weight: 500;
+}
+.trace code.trace-val {
+  background: transparent;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  word-break: break-all;
+}
+@media (max-width: 720px) {
+  .trace li { grid-template-columns: 28px 1fr; }
+  .trace .trace-noun { grid-column: 2; color: var(--ink-3); font-size: var(--t-xs); }
+  .trace code.trace-val { grid-column: 2; }
+}
+
+/* ---------- architecture: layered dependencies ------------------------ */
+.layer-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: var(--s-3);
+}
+.layer-row {
+  background: var(--bg);
+  padding: var(--s-3) var(--s-5);
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: var(--s-5);
+  align-items: center;
+}
+.layer-row .layer-no {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  letter-spacing: 0.04em;
+}
+.layer-row .layer-pkgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.pkg-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
+.pkg-chip:hover, .pkg-chip.active {
+  background: var(--sage-soft);
+  border-color: var(--sage-line);
+  color: var(--ink);
+}
+.pkg-chip.depended {
+  border-color: var(--sand);
+  background: var(--sand-soft);
+  color: var(--sand);
+}
+.pkg-chip .dep-count {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+.layer-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+  margin-top: var(--s-3);
+  min-height: 84px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.layer-detail h4 {
+  margin: 0 0 var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-md);
+  color: var(--ink);
+}
+.layer-detail .imp-list {
+  margin-top: var(--s-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+}
+.layer-detail .imp-list code { background: transparent; padding: 0; color: var(--sand); }
+.layer-detail .imp-list .none { color: var(--ink-3); font-style: italic; }
+
+/* ---------- bundle anatomy -------------------------------------------- */
+.bundle-anatomy {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-5);
+  margin-top: var(--s-3);
+}
+@media (max-width: 880px) { .bundle-anatomy { grid-template-columns: 1fr; } }
+.tar-tree {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-sm);
+}
+.tar-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 60px;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  align-items: baseline;
+  transition: background .15s var(--ease);
+}
+.tar-row:hover { background: var(--surface-2); }
+.tar-row.active { background: var(--sage-soft); }
+.tar-sha  { color: var(--sand); font-variant-numeric: tabular-nums; }
+.tar-path { color: var(--ink); word-break: break-all; }
+.tar-size { color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
+.tar-info {
+  margin-top: var(--s-3);
+  padding: var(--s-3) 0;
+  background: transparent;
+  border-top: 1px solid var(--sage-line);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  line-height: 1.55;
+  border-radius: 0;
+  min-height: 60px;
+}
+.manifest-view {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  overflow-x: auto;
+}
+.manifest-head { color: var(--ink-3); padding: 0 var(--s-2) var(--s-2); }
+.manifest-view pre { background: transparent; border: 0; padding: 0; margin: 0; font-size: inherit; }
+.manifest-view code { background: transparent; padding: 0; color: var(--ink-2); }
+.manifest-view .vol { color: var(--clay); }
+.manifest-view .lbl { color: var(--ink-3); }
+
+/* ---------- schema ER ------------------------------------------------- */
+.schema-er {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+}
+.er-family {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4) var(--s-5);
+}
+.er-family-h {
+  font-size: var(--t-sm);
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: var(--s-3);
+  display: flex;
+  gap: var(--s-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.er-family-h .cli-note { font-weight: 400; }
+.er-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-3);
+}
+.er-table {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--t-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  cursor: pointer;
+  transition: border-color .15s var(--ease);
+}
+.er-table:hover, .er-table.active { border-color: var(--sage); }
+.er-table.primary { box-shadow: inset 0 2px 0 var(--sage); }
+.er-table.derived { border-style: dashed; }
+.er-table .er-name {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--t-sm);
+}
+.er-table .er-pk { color: var(--sage); }
+.er-table .er-uk { color: var(--sand); }
+.er-table .er-fk { color: var(--ink-3); }
+.er-table .er-note { color: var(--ink-3); font-family: inherit; font-style: italic; margin-top: var(--s-1); }
+.er-table code { background: transparent; padding: 0; color: var(--ink-2); font-size: 100%; }
+.er-cols {
+  margin-top: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px dashed var(--line);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: none;
+  line-height: 1.65;
+}
+.er-table.active .er-cols { display: block; }
+
+/* ---------- trust table --------------------------------------------- */
+.trust-table {
+  margin-top: var(--s-3);
+}
+
+/* ---------- supertable (Tufte C6) -------------------------------------- */
+.supertable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+  margin-top: var(--s-3);
+  font-variant-numeric: tabular-nums;
+}
+.supertable thead th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink-3);
+  padding: 0 var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.supertable tbody td, .supertable tbody th {
+  padding: var(--s-3);
+  vertical-align: top;
+  color: var(--ink-2);
+  text-align: left;
+  font-weight: 400;
+  line-height: 1.5;
+}
+/* topical rules between groups (supertable convention, p.178) */
+.supertable tbody tr.topical th,
+.supertable tbody tr.topical td {
+  border-top: 1px solid var(--line);
+}
+.supertable tbody tr {
+  transition: background .15s var(--ease);
+  cursor: pointer;
+}
+.supertable tbody tr:hover { background: var(--surface); }
+.supertable .row-num {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  width: 28px;
+}
+.supertable .row-name { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.supertable code { font-size: 92%; background: transparent; padding: 0; color: var(--ink); }
+@media (max-width: 880px) {
+  .supertable { display: block; overflow-x: auto; }
+  .supertable .row-name { white-space: normal; }
+}
+
+.dedup-info {
+  margin-top: var(--s-5);
+  font-size: var(--t-md);
+  color: var(--ink-2);
+  line-height: 1.55;
+  min-height: 1.6em;
+  padding: var(--s-3) var(--s-4);
+  max-width: 75ch;
+  border-left: 2px solid var(--sage-line);
+  background: var(--sage-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Tufte de-chroming pass: detail panels are annotations, not dashboard cards. */
+.pkg-info,
+.dedup-info,
+.noun-detail,
+.layer-detail,
+.hot-detail,
+.pkg-detail {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--sage-line);
+  border-radius: 0;
+  padding: var(--s-3) 0;
+}
+.hot-detail { border-top-color: var(--clay-line); }
+.hot-detail .doubt,
+.hot-detail .grounded { border-left: 0; padding-left: 0; }
+
+/* ---------- interface polish: surfaces, hit targets, motion ----------- */
+.db-sim,
+.state-sig,
+.widget,
+.hooks,
+.compare .pane,
+.tar-tree,
+.manifest-view,
+.er-family,
+.er-table,
+.noun-tier,
+.noun,
+.layer-diagram,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  border: 0;
+  box-shadow: var(--shadow-border);
+}
+.db-sim,
+.state-sig,
+.widget,
+.hooks,
+.compare .pane,
+.tar-tree,
+.manifest-view,
+.er-family,
+.layer-diagram {
+  background: var(--surface);
+}
+.er-table,
+.noun,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  background: var(--code-bg);
+}
+.db-actions button,
+.copy-btn,
+.pkg-chip,
+.tag-chip {
+  border: 0;
+  box-shadow: var(--shadow-border);
+}
+.db-actions button:hover,
+.copy-btn:hover,
+.pkg-chip:hover,
+.tag-chip:hover,
+.er-table:hover,
+.noun:hover {
+  box-shadow: var(--shadow-border-hover);
+}
+.noun,
+.er-table,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  box-shadow: none;
+}
+.noun.primary .noun-name,
+.er-table.primary .er-name { color: var(--sage-deep); }
+.er-table.derived .er-name { color: var(--ink-2); }
+.compare .pane.bad  { box-shadow: var(--shadow-border), inset 0 2px 0 var(--clay); }
+.compare .pane.good { box-shadow: var(--shadow-border), inset 0 2px 0 var(--sage); }
+.noun:hover,
+.er-table:hover,
+.noun.active,
+.er-table.active { box-shadow: none; }
+.noun.related { background: var(--sand-soft); }
+.er-table.active { background: var(--sage-wash); }
+.sidebar nav.tabs button,
+.db-actions button,
+.copy-btn,
+.pkg-chip,
+.noun,
+.tar-row,
+.er-table,
+.hotspot-rank-row,
+.package-matrix-row {
+  -webkit-tap-highlight-color: transparent;
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease);
+}
+.sidebar nav.tabs button,
+.db-actions button,
+.copy-btn,
+.pkg-chip {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+.sidebar nav.tabs button { width: 100%; }
+@media (max-width: 880px) {
+  .sidebar nav.tabs button { width: auto; padding: var(--s-2) var(--s-1); }
+}
+.sidebar nav.tabs button:active,
+.db-actions button:active,
+.copy-btn:active,
+.pkg-chip:active {
+  transform: scale(0.96);
+}
+.noun,
+.tar-row,
+.er-table,
+.hotspot-rank-row,
+.package-matrix-row {
+  min-height: 40px;
+}
+.widget input[type=text],
+.ss-row input[type=text] {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.widget input[type=text]:focus,
+.ss-row input[type=text]:focus {
+  box-shadow: inset 0 0 0 1px var(--sage-line), var(--shadow-border);
+}
+/* Flatten the inside of any elevated surface. This keeps depth at one layer
+   instead of card-inside-card stacks. */
+.db-sim *,
+.state-sig *,
+.widget *,
+.hooks *,
+.compare .pane *,
+.noun-tier *,
+.er-family *,
+.layer-diagram *,
+.tar-tree *,
+.manifest-view * {
+  box-shadow: none !important;
+}
+
+/* Page-level slop cleanup for #novel: the mechanisms page should feel like
+   an annotated technical paper, not a stack of cards with accent tabs. */
+#novel .widget,
+#novel .state-sig,
+#novel .db-sim,
+#novel .compare .pane,
+#novel .callout {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: var(--s-4) 0;
+}
+#novel .compare .pane.bad,
+#novel .compare .pane.good {
+  box-shadow: none;
+}
+#novel .widget .out,
+#novel .db-table,
+#novel .db-log,
+#novel .ss-hash-value {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+#novel .ss-row[data-stable="1"] input,
+#novel .ss-row[data-stable="0"] input {
+  border-left: 0;
+}
+#novel .callout.note,
+#novel .callout.warning,
+#novel .callout.danger {
+  background: transparent;
+}
+.scatter-host .pt::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 40px; height: 40px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+body.has-switched section.active > * {
+  animation: section-enter 260ms var(--ease-soft) both;
+}
+body.has-switched section.active > *:nth-child(2) { animation-delay: 60ms; }
+body.has-switched section.active > *:nth-child(3) { animation-delay: 120ms; }
+body.has-switched section.active > *:nth-child(n+4) { animation-delay: 160ms; }
+@keyframes section-enter {
+  from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.has-switched section.active > * { animation: none; }
+}
+
+/* ---------- key-value helper ------------------------------------------ */
+.kv {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--s-2) var(--s-4);
+  font-size: var(--t-sm);
+  margin-top: var(--s-3);
+}
+.kv b { color: var(--ink-3); font-weight: 500; font-size: var(--t-xs); letter-spacing: 0.08em; text-transform: uppercase; padding-top: var(--s-1); }
+.kv span { color: var(--ink-2); }
+.kv span b { color: var(--ink); font-size: inherit; letter-spacing: 0; text-transform: none; }
+
+.checklist-gate {
+  margin-top: var(--s-8);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line);
+}
+.checklist-gate h3 { margin-top: 0; }
+.checklist-gate ol {
+  list-style: none;
+  padding: 0;
+  margin: var(--s-3) 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--s-7);
+}
+.checklist-gate li {
+  border-top: 1px solid var(--line);
+  padding: var(--s-3) 0 var(--s-3) var(--s-6);
+  position: relative;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+.checklist-gate li::before {
+  content: "□";
+  position: absolute;
+  left: 0;
+  color: var(--sage);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.checklist-gate pre { margin-top: var(--s-4); font-size: var(--t-xs); }
+@media (max-width: 880px) { .checklist-gate ol { grid-template-columns: 1fr; } }
+
+/* ---------- footer ---------------------------------------------------- */
+footer {
+  margin-top: var(--s-9);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.04em;
+}
+footer a { color: var(--ink-3); border-bottom-color: var(--line); }
+footer a:hover { color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<aside class="sidebar">
+  <div class="brand">
+    <h1>aha</h1>
+    <p class="brand-line">Agent History Aggregator</p>
+  </div>
+
+  <nav class="tabs" id="tabs" role="tablist">
+    <button data-tab="pipeline" class="active" role="tab">Pipeline</button>
+    <button data-tab="arch" role="tab">Architecture</button>
+    <button data-tab="novel" role="tab">Mechanisms</button>
+    <button data-tab="ingest" role="tab">Ingest</button>
+    <button data-tab="dedup" role="tab">Deduplication</button>
+    <button data-tab="hotspots" role="tab">Hotspots</button>
+    <button data-tab="map" role="tab">Codebase</button>
+  </nav>
+
+  <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
+       update both, or the test fails. -->
+  <dl class="sidebar-meta">
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">8,399</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">15</span> in <code>internal/</code></dd>
+    <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
+    <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
+    <dt>Commands</dt><dd><span class="num">12</span></dd>
+  </dl>
+</aside>
+
+<main class="content">
+
+<!-- ===================================================== PIPELINE ====== -->
+<section id="pipeline" class="active">
+  <div class="section-head">
+    <h2>Pipeline</h2>
+    <p>
+      Local histories become snapshot bundles, which land in a depot, which an
+      ingest step compiles into a corpus, which search and read query. Each
+      labeled stage owns one thing; the package names are printed directly,
+      and hover/click only reveals secondary notes.
+    </p>
+  </div>
+
+  <div class="pipeline-wrap">
+    <aside class="sidenote pull-note">
+      <b>Static-first rule.</b> The flow, package ownership, and transition verbs are visible without hovering. Hover only reveals secondary implementation notes.
+    </aside>
+    <figure class="figure">
+      <svg viewBox="0 0 1180 240" role="img" aria-label="aha pipeline">
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M0,0 L9,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- single horizontal flow line (Tufte: the data-ink is the connection) -->
+      <g color="var(--ink-3)">
+        <path class="arrow" d="M115,170 L1100,170"/>
+      </g>
+
+      <!-- Stage 1: sources -->
+      <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery and parse. Read-only. Source-specific behavior stays here; everything downstream is source-agnostic.">
+        <text x="115" y="40" class="title" text-anchor="middle">local sources</text>
+        <text x="115" y="62" text-anchor="middle" class="lbl">~/.pi/agent/sessions</text>
+        <text x="115" y="80" text-anchor="middle" class="lbl">~/.claude/projects</text>
+        <text x="115" y="98" text-anchor="middle" class="lbl">~/.codex/sessions</text>
+        <text x="115" y="124" text-anchor="middle" class="good">read-only</text>
+        <text x="115" y="160" text-anchor="middle" class="lbl">internal/adapters</text>
+        <circle cx="115" cy="170" r="3" fill="var(--ink-2)"/>
+      </g>
+
+      <!-- Stage 2: snapshot bundle -->
+      <g class="grp" data-pkg="internal/archive" data-info="Capture, then manifest.json plus copied raw files, then a deterministic tar.zst. Determinism rules: sorted manifest and files, normalized tar metadata, fixed zstd encoder, length-prefixed state signature.">
+        <text x="370" y="40" class="title" text-anchor="middle">snapshot bundle</text>
+        <text x="370" y="62" text-anchor="middle" class="lbl">manifest.json</text>
+        <text x="370" y="80" text-anchor="middle" class="lbl">stable file copies</text>
+        <text x="370" y="98" text-anchor="middle" class="lbl">deterministic tar.zst</text>
+        <text x="370" y="124" text-anchor="middle" class="good">content-addressed</text>
+        <text x="370" y="160" text-anchor="middle" class="lbl">internal/archive</text>
+        <circle cx="370" cy="170" r="4" fill="var(--sage)"/>
+      </g>
+
+      <!-- Stage 3: depot -->
+      <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Bundle objects are durable truth; catalog shards are repairable.">
+        <text x="640" y="40" class="title" text-anchor="middle">depot</text>
+        <text x="640" y="62" text-anchor="middle" class="lbl">bundles/v1/&lt;sha&gt;.tar.zst</text>
+        <text x="640" y="80" text-anchor="middle" class="lbl">catalog/v1/&lt;machine&gt;.json</text>
+        <text x="640" y="98" text-anchor="middle" class="lbl">depot.json (marker)</text>
+        <text x="640" y="124" text-anchor="middle" class="good">local by default</text>
+        <text x="640" y="160" text-anchor="middle" class="lbl">internal/depot</text>
+        <circle cx="640" cy="170" r="4" fill="var(--sage)"/>
+      </g>
+
+      <!-- Stage 4: corpus -->
+      <g class="grp" data-pkg="internal/corpus" data-info="Derived SQLite + FTS5 + blobs. Append-only ingest, trigger-maintained FTS. Rebuildable from depot.">
+        <text x="910" y="40" class="title" text-anchor="middle">corpus</text>
+        <text x="910" y="62" text-anchor="middle" class="lbl">corpus.db (SQLite + FTS5)</text>
+        <text x="910" y="80" text-anchor="middle" class="lbl">blobs/ &nbsp; images/</text>
+        <text x="910" y="98" text-anchor="middle" class="lbl">append-only triggers</text>
+        <text x="910" y="124" text-anchor="middle" class="good">derived &amp; repairable</text>
+        <text x="910" y="160" text-anchor="middle" class="lbl">internal/corpus</text>
+        <circle cx="910" cy="170" r="4" fill="var(--sage)"/>
+      </g>
+
+      <!-- Stage 5: search + read forks -->
+      <g class="grp" data-pkg="internal/search" data-info="Local FTS5 query construction, indexed <span>-</span><span>-</span>project and <span>-</span><span>-</span>path-token filters, capped limits. Search never contacts the depot.">
+        <text x="1100" y="62" class="title" text-anchor="middle">search</text>
+        <text x="1100" y="80" text-anchor="middle" class="lbl">FTS5</text>
+      </g>
+      <g class="grp" data-pkg="corpus.ReadCanonical / ResolveHuman" data-info="ReadCanonical: exact lookup of msg:v1, session:v1, artifact:v1 refs. ResolveHuman: a separate fallible resolver for fuzzy human input.">
+        <text x="1100" y="118" class="title" text-anchor="middle">read</text>
+        <text x="1100" y="136" text-anchor="middle" class="lbl">canonical refs</text>
+      </g>
+      <circle cx="1100" cy="170" r="3" fill="var(--ink-2)"/>
+
+      <!-- arrow labels (transition verbs) sit BELOW the spine -->
+      <text x="240" y="195" class="lbl" text-anchor="middle">discover / parse</text>
+      <text x="505" y="195" class="lbl" text-anchor="middle">PutBundle</text>
+      <text x="775" y="195" class="lbl" text-anchor="middle">ingest pending</text>
+      </svg>
+      <figcaption>
+      <b>Figure.</b> Bundle bytes are the durable evidence. Catalogs and the corpus are deliberately rebuildable; search and read only query the local corpus.
+    </figcaption>
+    </figure>
+
+    <div class="pkg-info" id="pkg-info">Static read: local sources → deterministic bundle → depot → derived corpus → search/read. Hover or click a stage for the package-level ownership note.</div>
+  </div>
+
+  <h3 class="sub">CLI surface</h3>
+  <p class="cli-line"><code>snapshot</code> · <code>refresh</code> · <code>ingest</code> · <code>search</code> · <code>read</code> · <code>status</code> · <code>verify</code> · <code>conflicts</code> · <code>corpus</code> · <code>depot</code> · <code>doctor</code> · <code>init</code></p>
+  <p class="cli-note">Every command emits <code><span>-</span><span>-</span>json</code>; refs round-trip; search emits copy-pastable <code>ref_text</code>; read accepts <code>msg:v1</code>, <code>session:v1</code>, <code>artifact:v1</code>.</p>
+
+  <h3 class="sub">Invariants</h3>
+  <dl class="facts">
+    <dt>Trust boundary</dt>
+    <dd>Only <code>internal/depot</code> may import network packages. A static test guards it.</dd>
+
+    <dt>Durability</dt>
+    <dd>Bundle bytes are truth. Catalog shards and corpus are derived and repairable from those bytes.</dd>
+
+    <dt>Identity</dt>
+    <dd>SHA-256 over length-prefixed tuples, returned as opaque sealed types, with raw string concatenation kept out of the boundary.</dd>
+
+    <dt>Determinism</dt>
+    <dd>Sorted manifest, normalized tar metadata, fixed zstd encoder. Repeat and shuffle byte-equality are property tests, not promises.</dd>
+  </dl>
+</section>
+
+<!-- ===================================================== ARCHITECTURE = -->
+<section id="arch">
+  <div class="section-head">
+    <h2>Architecture</h2>
+    <p>
+      Five views of the same system. The first names every <em>noun</em> in
+      <code>aha</code> and how they nest. Then the same single message
+      traced through each layer, then the static structure (which package
+      depends on which), then what a snapshot literally contains on disk,
+      then how the corpus schema is shaped, then where untrusted input
+      enters.
+    </p>
+  </div>
+
+  <aside class="sidenote pull-note">
+    <b>Margin-note convention.</b> Side notes carry the invariant or falsifier that makes a diagram useful. The diagram names the thing; the margin explains why the thing is safe to trust.
+  </aside>
+  <h3 class="sub">The major abstractions</h3>
+  <p class="cli-note">
+    Five tiers from outside-in: where data lives in the world, how
+    <code>aha</code> snapshots it into evidence, where that evidence is
+    stored, how it's unpacked for query, and how users and agents address it.
+    The noun labels, examples, and relationships are readable before any
+    hover; hover/click only deepens the definition.
+  </p>
+
+  <div class="nouns" id="nouns">
+    <div class="noun-tier">
+      <div class="noun-tier-h">external world</div>
+      <div class="noun" data-id="source"
+           data-def="A local directory of agent transcripts that aha treats as read-only. One per agent tool."
+           data-example="~/.claude/projects/  ·  ~/.pi/agent/sessions/  ·  ~/.codex/sessions/"
+           data-rel="adapter">
+        <div class="noun-name">Source</div>
+        <div class="noun-tag">read-only</div>
+      </div>
+      <div class="noun" data-id="adapter"
+           data-def="Source-specific code that discovers and parses JSONL files. Declares its capabilities (HasSubagents, HasStableEntryIDs, CanLinkSubagents…)."
+           data-example="adapters.Pi  ·  adapters.ClaudeCode  ·  adapters.CodexCLI"
+           data-rel="source,bundle">
+        <div class="noun-name">Adapter</div>
+        <div class="noun-tag">discover · parse</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>snapshot</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">evidence  ·  immutable</div>
+      <div class="noun primary" data-id="bundle"
+           data-def="A deterministic tar.zst snapshot. Contains one manifest.json plus the raw source files copied byte-for-byte. Content-addressed by SHA-256 of the compressed bytes."
+           data-example="b5ce6ccd…f47.tar.zst  (machine=ade-mbp, captured=2024-01-01T10:00:00Z)"
+           data-rel="adapter,manifest,depot">
+        <div class="noun-name">Bundle</div>
+        <div class="noun-tag">tar.zst · sha256-addressed</div>
+      </div>
+      <div class="noun" data-id="manifest"
+           data-def="The bundle's table of contents and provenance. Schema, machine_id, source/policy/adapters, plus a sorted list of files with their content addresses. Volatile fields (bundle_id, captured_at) excluded from the state signature."
+           data-example="{schema:&quot;aha-manifest/v2&quot;, files:[{sha256:&quot;e5f6…&quot;, …}], bundle_id:…, captured_at:…}"
+           data-rel="bundle,bundleref">
+        <div class="noun-name">Manifest</div>
+        <div class="noun-tag">JSON · sorted</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>publish</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">storage  ·  durable truth</div>
+      <div class="noun primary" data-id="depot"
+           data-def="A content-addressed store of bundles, addressed as local:PATH or r2:BUCKET. The only package allowed to import network libraries. Static test enforces."
+           data-example="local:~/.aha/depot  ·  r2:aha-depot"
+           data-rel="bundle,catalog">
+        <div class="noun-name">Depot</div>
+        <div class="noun-tag">local · r2</div>
+      </div>
+      <div class="noun" data-id="catalog"
+           data-def="A per-machine repairable JSON listing of BundleRefs in a depot. Not absolute truth; rebuildable from bundle objects by `aha depot verify --repair`."
+           data-example="catalog/v1/ade-mbp.json  ·  catalog/v1/work-laptop.json"
+           data-rel="depot,bundleref">
+        <div class="noun-name">Catalog shard</div>
+        <div class="noun-tag">per machine · repairable</div>
+      </div>
+      <div class="noun" data-id="bundleref"
+           data-def="The metadata for one bundle in a catalog: bundle_sha256, machine_id, captured_at, state_sha256, manifest_sha256, bytes, sessions count, filename, key. state_sha256 is the field that makes zero-fetch refresh possible."
+           data-example="{bundle_sha256:&quot;b5ce…&quot;, state_sha256:&quot;78bf…&quot;, captured_at:&quot;2024-01-01&quot;}"
+           data-rel="bundle,manifest">
+        <div class="noun-name">BundleRef</div>
+        <div class="noun-tag">catalog entry</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>ingest</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">query  ·  derived, rebuildable</div>
+      <div class="noun primary" data-id="corpus"
+           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth – entirely rebuildable from depot bundles."
+           data-example="~/.aha/corpus.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
+           data-rel="depot,session,entry,artifact">
+        <div class="noun-name">Corpus</div>
+        <div class="noun-tag">SQLite + FTS5</div>
+      </div>
+      <div class="noun" data-id="session"
+           data-def="One conversation. Identified by SessionKey = sk1_ + SHA-256 of length-prefixed (source, machine, source_session_id). Trigger refuses any non-sk1_ insert."
+           data-example="sk1_5bce6ccd94dabd28c0910f0dfc9af2e27da355d3efb7f4c94d7bfcf519927f47"
+           data-rel="corpus,entry,sessionkey">
+        <div class="noun-name">Session</div>
+        <div class="noun-tag">sk1_&lt;sha256&gt;</div>
+      </div>
+      <div class="noun" data-id="entry"
+           data-def="One event in a session: a message, a tool call, an event. Identified by (session_key, entry_id). Append-only – UPDATE/DELETE trigger ABORT, duplicate with different hash → conflict row."
+           data-example="(session_key, entry_id)  ·  e.g. (sk1_…, &quot;evt-42&quot;)"
+           data-rel="session,message,artifact,asset">
+        <div class="noun-name">Entry</div>
+        <div class="noun-tag">append-only</div>
+      </div>
+      <div class="noun" data-id="message"
+           data-def="An entry with text content (role, text, tool_name, model, tokens…). Insert trigger mirrors text into fts_messages."
+           data-example="{role:&quot;user&quot;, text:&quot;migrate database…&quot;, tokens:128}"
+           data-rel="entry">
+        <div class="noun-name">Message</div>
+        <div class="noun-tag">FTS-indexed</div>
+      </div>
+      <div class="noun" data-id="artifact"
+           data-def="A text or image file produced during a session. May link to a parent entry, or stand alone (unlinked but still searchable). Text artifacts get FTS-indexed; images get blob preservation when include_images=true."
+           data-example="(artifact_sha256, kind, parent_session_key?, parent_entry_id?)"
+           data-rel="entry,corpus">
+        <div class="noun-name">Artifact</div>
+        <div class="noun-tag">linked OR unlinked</div>
+      </div>
+      <div class="noun" data-id="asset"
+           data-def="An image attached to a specific entry (e.g. a pasted screenshot). Preserves prompt_order, content_index, mime_type for prompt reconstruction."
+           data-example="(entry, asset_sha256, content_index, prompt_order, mime_type)"
+           data-rel="entry">
+        <div class="noun-name">Asset</div>
+        <div class="noun-tag">image attachment</div>
+      </div>
+    </div>
+
+    <div class="noun-arrow">↓ <span>address</span> ↓</div>
+
+    <div class="noun-tier">
+      <div class="noun-tier-h">retrieval  ·  the API contract</div>
+      <div class="noun primary" data-id="ref"
+           data-def="The canonical, sealed retrieval identifier. Three variants form a closed sum: every search hit emits one; aha read parses one back."
+           data-example="msg:v1:&lt;b64-session&gt;:&lt;b64-entry&gt;   ·   session:v1:&lt;b64-session&gt;   ·   artifact:v1:&lt;sha256&gt;"
+           data-rel="entry,session,artifact">
+        <div class="noun-name">Ref</div>
+        <div class="noun-tag">msg:v1 · session:v1 · artifact:v1</div>
+      </div>
+      <div class="noun" data-id="sessionkey"
+           data-def="Opaque session identity, smart-constructed from a length-prefixed tuple to prevent concat collisions. CHECK + trigger refuse any other shape at the DB boundary."
+           data-example="sk1_&lt;64 hex chars&gt;"
+           data-rel="session">
+        <div class="noun-name">SessionKey</div>
+        <div class="noun-tag">sealed type</div>
+      </div>
+      <div class="noun" data-id="entryid"
+           data-def="Opaque entry identity within a session. Source-native when stable; derived otherwise."
+           data-example="&quot;evt-42&quot;  ·  &quot;01H…&quot;  ·  derived(file, line)"
+           data-rel="entry">
+        <div class="noun-name">EntryID</div>
+        <div class="noun-tag">sealed type</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="noun-detail" id="noun-detail">
+    <p class="cli-note" style="margin:0">Static read: evidence flows from read-only sources to immutable bundles to durable depot bytes to a rebuildable corpus to sealed refs. Hover any noun to deepen; click to pin.</p>
+  </div>
+
+  <h3 class="sub">The same message, through every abstraction</h3>
+  <p class="cli-note">
+    A single line in a Claude Code JSONL file, traced through every noun
+    above. Same data, different shapes.
+  </p>
+  <ol class="trace" id="msg-trace">
+    <li><span class="trace-step">A</span><span class="trace-noun">Source file</span><code class="trace-val">~/.claude/projects/aha/session.jsonl, line 42</code></li>
+    <li><span class="trace-step">B</span><span class="trace-noun">Adapter parses</span><code class="trace-val">ParsedEntry{ entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">C</span><span class="trace-noun">Bundle contains</span><code class="trace-val">files/claude-code/projects/aha/session.jsonl   (file_sha256: e5f60123…)</code></li>
+    <li><span class="trace-step">D</span><span class="trace-noun">Manifest lists it</span><code class="trace-val">{ source:"claude-code", path:"files/…/session.jsonl", sha256:"e5f60123…", bytes:38912 }</code></li>
+    <li><span class="trace-step">E</span><span class="trace-noun">Depot stores bundle</span><code class="trace-val">bundles/v1/b5ce6ccd…f47.tar.zst</code></li>
+    <li><span class="trace-step">F</span><span class="trace-noun">Catalog ref</span><code class="trace-val">{ bundle_sha256:"b5ce6c…", machine_id:"ade-mbp", state_sha256:"78bf99…" }</code></li>
+    <li><span class="trace-step">G</span><span class="trace-noun">Corpus sessions row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", source:"claude-code", project_key:"aha" }</code></li>
+    <li><span class="trace-step">H</span><span class="trace-noun">Corpus entries row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", line_no:42, entry_sha256:"f1e2…" }</code></li>
+    <li><span class="trace-step">I</span><span class="trace-noun">Corpus messages row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">J</span><span class="trace-noun">fts_messages mirror</span><code class="trace-val">rowid=9001  text="migrate db…"   ← inserted by trigger messages_ai</code></li>
+    <li><span class="trace-step">K</span><span class="trace-noun">Search hit</span><code class="trace-val">{ score:-8.2, ref:MessageRef{…}, snippet:"…[migrate] db…" }</code></li>
+    <li><span class="trace-step">L</span><span class="trace-noun">Canonical ref</span><code class="trace-val">msg:v1:c2sxX2ExYjJjMy4uLg:ZXZ0LTQy</code></li>
+    <li><span class="trace-step">M</span><span class="trace-noun">aha read &lt;ref&gt;</span><code class="trace-val">window of entries from line_no=40..44 returned to the agent</code></li>
+  </ol>
+
+  <h3 class="sub">Layered dependencies</h3>
+  <p class="cli-note">
+    Every arrow is a real Go <code>import</code> taken from the source.
+    The architecture is honestly layered: every package only imports from
+    layers below it. Hover or tap any package to see what depends on it.
+  </p>
+  <div id="layer-diagram" class="layer-diagram"></div>
+  <div class="layer-detail" id="layer-detail">
+    <p class="cli-note" style="margin:0">Static read: leaves define identity and helpers; I/O packages preserve evidence; corpus/search are derived stores; cli is the only top-level orchestrator. Hover a package for importers.</p>
+  </div>
+
+  <h3 class="sub">Anatomy of a bundle</h3>
+  <p class="cli-note">
+    A bundle is a single deterministic <code>tar.zst</code>. One
+    <code>manifest.json</code> at the root, then the raw source files copied
+    verbatim, each entry's tar metadata normalized. Click to expand.
+  </p>
+  <div class="bundle-anatomy" id="bundle-anatomy">
+    <div class="tar-tree">
+      <div class="tar-row" data-info="The only file the bundle reader trusts to interpret. Schema, machine_id, captured_at, the list of files with their SHAs and source paths, the source/policy/adapters config snapshot. State signature hashes a subset of this excluding bundle_id and captured_at.">
+        <span class="tar-sha">a1b2c3d4…</span>
+        <span class="tar-path">manifest.json</span>
+        <span class="tar-size">4.2 KB</span>
+      </div>
+      <div class="tar-row" data-info="Raw Pi JSONL file, byte-for-byte copy. file_sha256 is the dedup key in the corpus blob store.">
+        <span class="tar-sha">e5f60123…</span>
+        <span class="tar-path">files/pi/sessions/01HEXAMPLE.jsonl</span>
+        <span class="tar-size">38 KB</span>
+      </div>
+      <div class="tar-row" data-info="A Claude Code session file. Each agent's session lands in its own path under files/.">
+        <span class="tar-sha">b7c89def…</span>
+        <span class="tar-path">files/claude-code/projects/aha/session.jsonl</span>
+        <span class="tar-size">214 KB</span>
+      </div>
+      <div class="tar-row" data-info="Subagent files (agent-*.jsonl) are detected by adapter and tagged is_subagent=true. Currently linked to no parent because the Claude adapter declares CanLinkSubagents=false.">
+        <span class="tar-sha">04ff5678…</span>
+        <span class="tar-path">files/claude-code/projects/aha/agent-abc.jsonl</span>
+        <span class="tar-size">12 KB</span>
+      </div>
+      <div class="tar-row" data-info="Codex rollout file. The Codex adapter only accepts rollout-*.jsonl and history.jsonl to avoid picking up stray files in the sessions root.">
+        <span class="tar-sha">9abcdef0…</span>
+        <span class="tar-path">files/codex/sessions/rollout-2024-01-01.jsonl</span>
+        <span class="tar-size">71 KB</span>
+      </div>
+      <div class="tar-row" data-info="Tool/agent output artifacts (text and images). Preserved verbatim. Text artifacts are FTS-indexed at ingest; image artifacts have their blobs preserved when include_images=true.">
+        <span class="tar-sha">deadbeef…</span>
+        <span class="tar-path">files/claude-code/artifacts/edit-foo.txt</span>
+        <span class="tar-size">2.1 KB</span>
+      </div>
+    </div>
+
+    <div class="manifest-view">
+      <div class="manifest-head">manifest.json &nbsp; <span class="cli-note" style="margin:0;font-size:var(--t-xs)">JSON-canonical; sorted; deterministic</span></div>
+<pre><code>{
+  "schema":         "aha-manifest/v2",
+  "bundle_id":      "bndl-<span class="vol">2024-01-01T10:00:00Z-abc123</span>",   <span class="lbl">// volatile</span>
+  "machine_id":     "ade-mbp",
+  "captured_at":    "<span class="vol">2024-01-01T10:00:00Z</span>",                <span class="lbl">// volatile</span>
+  "created_by":     "aha 0.x",
+  "implementation": { "language":"go","archive":"tar.zst" },
+  "source":         { "host_os":"darwin","hostname_hash":"..." },
+  "policy":         { "redaction":"none-v1","include_images":true,
+                      "index_tool_output":false },
+  "counts":         { "session_files":4,"artifact_files":2 },
+  "adapters":       [ { "name":"pi","version":"1","capabilities":{...} },
+                      { "name":"claude-code","version":"1","capabilities":{...} } ],
+  "files": [
+    { "source":"pi",          "path":"files/pi/sessions/01HEX.jsonl",      "sha256":"e5f60123…", "bytes":38912 },
+    { "source":"claude-code", "path":"files/claude-code/.../session.jsonl","sha256":"b7c89def…", "bytes":219136 },
+    ...
+  ]
+}</code></pre>
+    </div>
+  </div>
+
+  <h3 class="sub">Corpus schema</h3>
+  <p class="cli-note">
+    Twelve tables. Three families: <em>bundle metadata</em> at the top
+    (immutable provenance), <em>agent content</em> in the middle (append-only,
+    where the data lives), and <em>derived indexes</em> at the bottom
+    (FTS, path tokens – rebuildable from above).
+  </p>
+  <div class="schema-er" id="schema-er">
+    <div class="er-family">
+      <div class="er-family-h">bundle metadata <span class="cli-note">immutable; identity for everything below</span></div>
+      <div class="er-tables">
+        <div class="er-table" data-cols="bundle_id PK, bundle_sha256 UNIQUE, machine_id, captured_at, ingested_at, manifest_json">
+          <div class="er-name">bundles</div>
+          <div class="er-pk">PK <code>bundle_id</code></div>
+          <div class="er-uk">UQ <code>bundle_sha256</code></div>
+        </div>
+        <div class="er-table" data-cols="attempt_id, bundle_id, bundle_sha256, ingested_at, duplicate">
+          <div class="er-name">ingest_attempts</div>
+          <div class="er-note">audit log of every ingest call</div>
+        </div>
+        <div class="er-table" data-cols="machine_id PK, first_seen_at, last_seen_at, labels_json">
+          <div class="er-name">machines</div>
+          <div class="er-pk">PK <code>machine_id</code></div>
+        </div>
+        <div class="er-table" data-cols="source_id, source_name UNIQUE, adapter_version, capabilities_json">
+          <div class="er-name">sources</div>
+        </div>
+        <div class="er-table" data-cols="file_sha256 PK, kind, bytes, compressed_blob_path, first_seen_bundle_id">
+          <div class="er-name">files</div>
+          <div class="er-pk">PK <code>file_sha256</code></div>
+          <div class="er-note">content-addressed blob index</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="er-family">
+      <div class="er-family-h">agent content <span class="cli-note">append-only; triggers enforce; conflicts quarantine</span></div>
+      <div class="er-tables">
+        <div class="er-table primary" data-cols="session_key sk1_ PK (CHECK), source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, is_subagent, parent_session_key">
+          <div class="er-name">sessions</div>
+          <div class="er-pk">PK <code>session_key</code> (<code>sk1_</code> + sha256)</div>
+          <div class="er-fk">→ sessions (self, parent)</div>
+        </div>
+        <div class="er-table" data-cols="session_key+file_sha256+bundle_id UNIQUE, relative_path, raw_path, observed_at, copy_state">
+          <div class="er-name">session_versions</div>
+          <div class="er-fk">→ sessions, files, bundles</div>
+        </div>
+        <div class="er-table primary" data-cols="(session_key, entry_id) PK, parent_id, line_no, entry_type, timestamp, role, entry_sha256, raw_json">
+          <div class="er-name">entries</div>
+          <div class="er-pk">PK <code>(session_key, entry_id)</code></div>
+          <div class="er-fk">→ sessions</div>
+          <div class="er-note">append-only; conflict trigger</div>
+        </div>
+        <div class="er-table" data-cols="(session_key, entry_id) PK, role, text, tool_name, command, files_json, model, provider, tokens, cost">
+          <div class="er-name">messages</div>
+          <div class="er-fk">→ entries</div>
+          <div class="er-note">append-only; insert trigger mirrors text into fts_messages</div>
+        </div>
+        <div class="er-table" data-cols="artifact_id PK, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body">
+          <div class="er-name">artifacts</div>
+          <div class="er-fk">→ bundles</div>
+          <div class="er-note">append-only; insert trigger mirrors text into fts_artifacts</div>
+        </div>
+        <div class="er-table" data-cols="image_sha256 PK, source_name, mime_type, bytes, width, height, ext, blob_path">
+          <div class="er-name">images</div>
+        </div>
+        <div class="er-table" data-cols="(session_key, entry_id, asset_sha256, content_index, prompt_order) PK">
+          <div class="er-name">entry_assets</div>
+          <div class="er-fk">→ entries</div>
+          <div class="er-note">image attachments per entry</div>
+        </div>
+        <div class="er-table" data-cols="conflict_id PK, session_key, entry_id, first_entry_sha256, second_entry_sha256, details_json, created_at">
+          <div class="er-name">conflicts</div>
+          <div class="er-note">where the conflict trigger writes; append-only itself</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="er-family">
+      <div class="er-family-h">derived indexes <span class="cli-note">rebuildable with <code>aha verify <span>-</span><span>-</span>repair-fts</code></span></div>
+      <div class="er-tables">
+        <div class="er-table derived" data-cols="rowid==messages.rowid, session_key unindexed, entry_id unindexed, text">
+          <div class="er-name">fts_messages</div>
+          <div class="er-note">FTS5 virtual table; maintained by trigger; rowid identity</div>
+        </div>
+        <div class="er-table derived" data-cols="rowid==artifacts.artifact_id, text">
+          <div class="er-name">fts_artifacts</div>
+          <div class="er-note">FTS5 virtual table; maintained by trigger</div>
+        </div>
+        <div class="er-table derived" data-cols="(session_key, token) PK; INDEXED BY (token, session_key)">
+          <div class="er-name">session_path_tokens</div>
+          <div class="er-note">hand-rolled inverted index for <span>-</span><span>-</span>path-token search</div>
+        </div>
+        <div class="er-table derived" data-cols="(artifact_id, token) PK">
+          <div class="er-name">artifact_path_tokens</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sub">Trust boundaries</h3>
+  <table class="supertable trust-table">
+    <thead>
+      <tr><th>Boundary</th><th>Direction</th><th>Authority</th><th>Enforcement</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="row-name">source roots</td>
+        <td>read-only inbound</td>
+        <td>adapter <em>discover</em> and <em>open</em>; never <em>write</em></td>
+        <td>capability interface omits write methods; static test on production code</td>
+      </tr>
+      <tr>
+        <td class="row-name">archive</td>
+        <td>file → bundle</td>
+        <td>copies bytes, hashes, validates manifest</td>
+        <td>budget checks; path-policy tests reject <code>..</code>, abs paths, backslashes</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">depot</td>
+        <td>local FS or network (R2)</td>
+        <td>only package that may import network libraries</td>
+        <td><b>static import test</b> in <code>internal/testquality</code> fails CI if any other package touches <code>net/*</code> or AWS SDK</td>
+      </tr>
+      <tr>
+        <td class="row-name">R2 credentials</td>
+        <td>env → process memory</td>
+        <td>read at startup; never persisted</td>
+        <td>config-round-trip test asserts secrets never appear in any serialized output</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">corpus</td>
+        <td>bundle → SQLite</td>
+        <td>derived; rebuildable</td>
+        <td>append-only triggers; <code>aha verify</code> +  <code><span>-</span><span>-</span>repair-fts</code> reconstructs</td>
+      </tr>
+      <tr>
+        <td class="row-name">search / read</td>
+        <td>outbound text to user</td>
+        <td>local SQLite + FTS5 only</td>
+        <td>never contacts the depot; arguments parsed via <code>FlagSpec</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub">Gotchas</h3>
+  <p class="cli-note">
+    Five things that look like they should work but don't, and what to do
+    instead. The architecture is opinionated; these are the load-bearing
+    opinions made visible.
+  </p>
+  <table class="supertable gotchas">
+    <thead>
+      <tr><th>If you try…</th><th>What happens</th><th>Do this instead</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="row-name"><code>DELETE FROM entries WHERE …</code></td>
+        <td>Trigger <code>entries_no_delete</code> aborts with <em>"entries are append-only"</em>. The transaction rolls back. A static test in <code>internal/testquality</code> also blocks this from production code at CI time.</td>
+        <td class="col-right">If the row is wrong, <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and re-ingest from depot bundles selectively.</td>
+      </tr>
+      <tr>
+        <td class="row-name"><code>UPDATE entries SET role=…</code></td>
+        <td>Same: <code>entries_no_update</code> aborts. Entries, messages, artifacts, and conflicts are all append-only.</td>
+        <td class="col-right">If two snapshots disagree, the second goes into <code>conflicts</code> automatically. Inspect with <code>aha conflicts</code>.</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">Pass <code><span>-</span><span>-</span>depot</code> to <code>aha search</code> or <code>aha read</code></td>
+        <td>Search and read are corpus-only operations. The flag isn't accepted; you get a parse error.</td>
+        <td class="col-right">If you need a different corpus, use <code><span>-</span><span>-</span>repo DIR</code>. If you need a different depot, run <code>aha refresh <span>-</span><span>-</span>depot …</code> first, then search the corpus that ingest produced.</td>
+      </tr>
+      <tr>
+        <td class="row-name">Query <code>fts_messages MATCH ?</code> with raw user text</td>
+        <td>FTS5 interprets characters like <code>AND</code>, <code>NEAR</code>, <code>*</code>, <code>:</code> as operators. A user search for <code>title:secret</code> would silently become a column filter.</td>
+        <td class="col-right">Always pass user text through <code>search.ftsQuery()</code> first; it quotes each whitespace-separated term and doubles embedded <code>"</code>. The FTS escaping playground above shows the rule.</td>
+      </tr>
+      <tr>
+        <td class="row-name">Hard-code R2 credentials in config.jsonc</td>
+        <td>Config schema doesn't accept secret fields. A round-trip test asserts secrets never appear in serialized output.</td>
+        <td class="col-right">Set <code>AHA_R2_ACCESS_KEY_ID</code> / <code>AHA_R2_SECRET_ACCESS_KEY</code> (or the unprefixed <code>R2_*</code> variants) in the environment. The depot driver reads them at startup; they live only in process memory.</td>
+      </tr>
+      <tr class="topical">
+        <td class="row-name">Compute identity by string-concatenating tuples</td>
+        <td>Two distinct tuples can hash identically: <code>("pi","abc")</code> and <code>("pia","bc")</code> collide. The static test in <code>internal/testquality</code> rejects raw <code>+</code>/<code>strings.Builder</code> over identity inputs.</td>
+        <td class="col-right">Use <code>model.NewSessionKey(source, machine, source_session_id)</code>. It length-prefixes each segment before hashing. The session-key playground above demonstrates the collision-prevention property.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===================================================== MECHANISMS ==== -->
+<section id="novel">
+  <div class="section-head">
+    <h2>Mechanisms</h2>
+    <p>
+      Eight places in the codebase where a type, a SQL constraint, or a small
+      algorithm replaces what would otherwise be a comment and a runtime
+      check. Most of the rest of <code>aha</code> is plumbing around these.
+    </p>
+  </div>
+
+  <!-- ----------------------------------- 1: SESSION KEY ----------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Session-key construction</h3>
+      <div class="where">internal/model/identity.go</div>
+    </div>
+    <div class="body">
+      <p>
+        Session identity must be stable across machines, across captures of the
+        same session, and across slight changes in the raw file (an in-progress
+        JSONL grows). The session key is <code>sk1_</code> + sha256 of a
+        <em>length-prefixed</em> tuple <code>(source, machine, source_session_id)</code>.
+        Length-prefixing kills the classic concat collision where
+        <code>("pi", "abc")</code> and <code>("pia", "bc")</code> would hash
+        identically. The DB enforces the shape with a <code>CHECK</code> and a
+        trigger that aborts any non-<code>sk1_</code> insert.
+      </p>
+
+      <div class="widget" id="sk-play">
+        <div class="row">
+          <div><label>source</label><input id="sk-source" type="text" value="claude-code"/></div>
+          <div><label>machine_id</label><input id="sk-machine" type="text" value="ade-mbp"/></div>
+          <div><label>source_session_id</label><input id="sk-sess" type="text" value="01HEXAMPLE-SESSION-UUID"/></div>
+        </div>
+        <div class="out">
+          <div><span class="k">canonical bytes  </span> <span class="v" id="sk-bytes"></span></div>
+          <div><span class="k">sha256           </span> <span class="v" id="sk-hash"></span></div>
+          <div><span class="k">SessionKey       </span> <span class="v" id="sk-key"></span> <button class="copy-btn" data-copy="#sk-key">copy</button> <button class="copy-btn" data-copy-cmd="sk">copy as Go</button></div>
+          <div style="margin-top: var(--s-2)"><span class="k">collision test:</span></div>
+          <div><span class="k">  ("pi","abc",x)   </span> <span class="v" id="sk-col1"></span></div>
+          <div><span class="k">  ("pia","bc",x)   </span> <span class="v" id="sk-col2"></span></div>
+          <div><span class="k">  match?           </span> <span class="v" id="sk-col-match"></span></div>
+        </div>
+        <p class="hint">The JS uses the same SHA-256 and length-prefix encoding as <code>identity.go</code>; verified byte-for-byte.</p>
+      </div>
+
+      <details>
+        <summary>Where this lives</summary>
+        <pre><code>// internal/model/identity.go
+func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
+    h := sha256.New()
+    writeLengthPrefixed(h, source)         // 8 BE bytes of len, then bytes
+    writeLengthPrefixed(h, machine)
+    writeLengthPrefixed(h, sourceSession)
+    return SessionKey{value: "sk1_" + hex.EncodeToString(h.Sum(nil))}, nil
+}</code></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 2: SEALED REFS ----------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Sealed canonical refs</h3>
+      <div class="where">internal/model/ref.go</div>
+    </div>
+    <div class="body">
+      <p>
+        The boundary between humans, agents, and the corpus is a single type
+        <code>model.Ref</code> with three variants. Search hits emit a
+        <code>ref_text</code>; <code>read &lt;ref&gt;</code> parses it back.
+        The <code>refVariant()</code> method is unexported, so no outside
+        package can implement the interface, which closes the sum at compile
+        time.
+      </p>
+
+      <div class="widget">
+        <div class="row two">
+          <div>
+            <label>session_key (sk1_...)</label>
+            <input id="ref-sess" type="text" value="sk1_a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"/>
+            <label style="margin-top: var(--s-3)">entry_id</label>
+            <input id="ref-entry" type="text" value="evt-42"/>
+            <label style="margin-top: var(--s-3)">artifact sha256 (64 hex)</label>
+            <input id="ref-sha" type="text" value="deadbeef0000000000000000000000000000000000000000000000000000beef"/>
+          </div>
+          <div class="out" style="align-self: start">
+            <div><span class="k">message ref   </span> <span class="v" id="ref-msg"></span> <button class="copy-btn" data-copy="#ref-msg">copy</button></div>
+            <div><span class="k">session ref   </span> <span class="v" id="ref-ses"></span></div>
+            <div><span class="k">artifact ref  </span> <span class="v" id="ref-art"></span></div>
+            <div style="margin-top: var(--s-2)"><span class="k">parse(msg) returns:</span></div>
+            <div><span class="v" id="ref-parsed"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <details>
+        <summary>The closed sum type, in code</summary>
+        <pre><code>// internal/model/ref.go
+type Ref interface {
+    refVariant()          // unexported; no outside impls
+    Kind() RefKind
+    Valid() bool
+}
+type MessageRef  struct { Session SessionKey; Entry EntryID }
+type SessionRef  struct { Session SessionKey }
+type ArtifactRef struct { SHA SHA256Hex }
+
+func FormatRef(r Ref) string {
+    switch r := r.(type) {
+    case MessageRef:  return "msg:v1:"      + b64(r.Session.String()) + ":" + b64(r.Entry.String())
+    case SessionRef:  return "session:v1:"  + b64(r.Session.String())
+    case ArtifactRef: return "artifact:v1:" + r.SHA.String()
+    }
+    panic("unknown ref variant")
+}</code></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 3: STATE SIG ------------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>The manifest <em>state</em> signature</h3>
+      <div class="where">internal/archive/archive.go</div>
+    </div>
+    <div class="body">
+      <p>
+        <code>refresh</code> needs to answer "is the source state the same as
+        the last bundle I made?" but the bundle SHA changes every time, because
+        <code>bundle_id</code> and <code>captured_at</code> are unique per
+        capture. The fix is a second hash that <em>excludes</em> the volatile
+        fields. If the catalog already has a ref with the same
+        <code>state_sha256</code>, <code>refresh</code> reuses it. Zero fetch.
+      </p>
+
+      <div class="state-sig" id="state-sig">
+        <div class="ss-fields">
+          <div class="ss-row" data-field="schema" data-stable="1">
+            <span class="ss-name">schema</span>
+            <input type="text" data-key="schema" value="aha-manifest/v2"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="machine_id" data-stable="1">
+            <span class="ss-name">machine_id</span>
+            <input type="text" data-key="machine_id" value="ade-mbp"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="source" data-stable="1">
+            <span class="ss-name">source</span>
+            <input type="text" data-key="source" value="{pi,claude,codex}"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="policy" data-stable="1">
+            <span class="ss-name">policy</span>
+            <input type="text" data-key="policy" value="redact=none-v1"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-row" data-field="files" data-stable="1">
+            <span class="ss-name">files[3]</span>
+            <input type="text" data-key="files" value="[a1b2..,c3d4..,e5f6..]"/>
+            <span class="ss-tag stable">stable</span>
+          </div>
+          <div class="ss-divider"></div>
+          <div class="ss-row" data-field="bundle_id" data-stable="0">
+            <span class="ss-name">bundle_id</span>
+            <input type="text" data-key="bundle_id" value="bndl-2024-01-01T10:00:00-abc123"/>
+            <span class="ss-tag volatile">volatile</span>
+          </div>
+          <div class="ss-row" data-field="captured_at" data-stable="0">
+            <span class="ss-name">captured_at</span>
+            <input type="text" data-key="captured_at" value="2024-01-01T10:00:00Z"/>
+            <span class="ss-tag volatile">volatile</span>
+          </div>
+        </div>
+
+        <div class="ss-output">
+          <div class="ss-hash">
+            <div class="ss-hash-label">bundle_sha256 <span class="ss-hash-help">all fields</span></div>
+            <code class="ss-hash-value" id="ss-bundle-sha">computing...</code>
+            <div class="ss-hash-bar"><div id="ss-bundle-bar"></div></div>
+          </div>
+          <div class="ss-hash">
+            <div class="ss-hash-label">state_sha256 <span class="ss-hash-help">stable fields only</span></div>
+            <code class="ss-hash-value" id="ss-state-sha">computing...</code>
+            <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
+          </div>
+          <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> – that's the property <code>refresh</code> relies on to skip re-fetching.</p>
+          <div style="display:flex; gap:var(--s-2); flex-wrap:wrap;">
+            <button class="copy-btn" data-copy-cmd="manifest-full">copy as manifest JSON</button>
+            <button class="copy-btn" data-copy-cmd="manifest-state">copy as state struct JSON</button>
+          </div>
+        </div>
+      </div>
+
+      <details>
+        <summary>Where this lives in the code</summary>
+        <pre><code>// internal/archive/archive.go
+func ManifestStateSHA256(m model.Manifest) string {
+    state := struct {
+        Schema       string
+        MachineID    string
+        MachineLabel string
+        Source       model.ManifestSource
+        Policy       model.ManifestPolicy
+        Adapters     []model.ManifestAdapt
+        Files        []model.ManifestFile
+    }{
+        Schema: m.Schema, MachineID: m.MachineID, ...   // bundle_id and captured_at excluded
+        Files:  m.Files,
+    }
+    b, _ := json.Marshal(state)
+    sum := sha256.Sum256(b)
+    return hex.EncodeToString(sum[:])
+}</code></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 4: APPEND-ONLY ----------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Append-only, with conflict-as-quarantine</h3>
+      <div class="where">internal/corpus/schema.go</div>
+    </div>
+    <div class="body">
+      <p>
+        Two snapshots of the same Pi session can disagree on a previously
+        written line (active JSONL files, edits, replays). A naïve UPSERT
+        loses evidence. The schema makes that impossible: triggers
+        <em>abort</em> every <code>UPDATE</code> and <code>DELETE</code> on
+        the append-only tables, and a conflict trigger quarantines duplicate
+        entry IDs with different hashes. Try it:
+      </p>
+
+      <div class="db-sim" id="db-sim">
+        <div class="db-pane">
+          <h4 class="db-pane-h">entries <span class="db-meta" id="db-entries-count">0 rows</span></h4>
+          <ol class="db-table" id="db-entries"></ol>
+        </div>
+        <div class="db-pane">
+          <h4 class="db-pane-h">conflicts <span class="db-meta" id="db-conflicts-count">0 rows</span></h4>
+          <ol class="db-table" id="db-conflicts"></ol>
+          <h4 class="db-pane-h" style="margin-top: var(--s-4)">ingest_attempts <span class="db-meta" id="db-attempts-count">0 rows</span></h4>
+          <ol class="db-table" id="db-attempts"></ol>
+        </div>
+        <div class="db-actions">
+          <button data-action="insert-new">INSERT a new entry</button>
+          <button data-action="insert-dup-same">INSERT the same entry again (same hash)</button>
+          <button data-action="insert-dup-diff">INSERT entry-1 again with a <em>different</em> hash</button>
+          <button data-action="update" class="forbidden">UPDATE entries SET role=…</button>
+          <button data-action="delete" class="forbidden">DELETE FROM entries</button>
+          <button data-action="reset" class="ghost">↻ reset</button>
+        </div>
+        <div class="db-log" id="db-log">
+          <p class="db-log-hint">click a button. the database state above updates immediately. <span class="forbidden">red</span> buttons exercise the append-only triggers.</p>
+        </div>
+      </div>
+
+      <p style="margin-top: var(--s-5)">
+        Triggers catch runtime drift. A static test under
+        <code>internal/testquality</code> reads production .go files at CI
+        time and fails the build if any of them emits <code>UPDATE</code> or
+        <code>DELETE</code> against the append-only tables. Two independent
+        layers, two different adversaries.
+      </p>
+
+      <h4 style="font-size:var(--t-md); margin: var(--s-5) 0 var(--s-2); color:var(--ink)">Why not just <code>INSERT OR REPLACE</code>?</h4>
+      <p style="font-size:var(--t-sm); color:var(--ink-2); max-width:70ch; line-height:1.6">
+        The obvious shape for a re-ingest path. Two snapshots of the same
+        session, two SQL designs, two different futures:
+      </p>
+      <div class="compare">
+        <div class="pane bad">
+          <h4>Naïve <span class="tag">silent data loss</span></h4>
+<pre><code>INSERT OR REPLACE INTO entries
+       (session_key, entry_id, role, entry_sha256, ...)
+VALUES (?, ?, ?, ?, ...);</code></pre>
+          <p class="outcome">
+            Snapshot A inserts <code>entry-42</code> with hash <code>h1</code>.
+            Snapshot B inserts <code>entry-42</code> with hash <code>h2</code>
+            (the user edited the JSONL line before re-snapshotting).
+            <b>Snapshot A is silently overwritten.</b> The disagreement leaves
+            no evidence behind. Search results change retroactively.
+            Two agents on two machines could even race to overwrite each
+            other's view.
+          </p>
+        </div>
+        <div class="pane good">
+          <h4>aha <span class="tag">append-only + quarantine</span></h4>
+<pre><code>-- attempted INSERT runs the trigger first
+-- existing row stays
+-- new conflicting row is dropped by RAISE(IGNORE)
+-- the disagreement is RECORDED as evidence:
+INSERT INTO conflicts(session_key, entry_id,
+                      first_entry_sha256, second_entry_sha256,
+                      details_json) ...</code></pre>
+          <p class="outcome">
+            The first snapshot wins. The second snapshot's row is dropped,
+            but the disagreement is recorded in <code>conflicts</code> for
+            <code>aha conflicts</code> to surface. <b>Evidence is preserved
+            without overwriting it.</b> Two agents on two machines see the
+            same coherent history; conflicts are explicit, not silent.
+          </p>
+        </div>
+      </div>
+
+      <h4 style="font-size:var(--t-md); margin: var(--s-5) 0 var(--s-2); color:var(--ink)">What the trigger does, line by line</h4>
+      <div class="annotated-code" id="trigger-annot">
+        <pre><code><span class="ln">create trigger entries_conflict_before_insert</span><span class="ln">  before insert on entries</span><span class="ln">  when exists(select 1 from entries</span><span class="ln">              where session_key=new.session_key</span><span class="ln">                and entry_id=new.entry_id) begin</span><span class="ln">    insert into conflicts(session_key, entry_id,</span><span class="ln">                          first_entry_sha256,</span><span class="ln">                          second_entry_sha256,</span><span class="ln">                          details_json)</span><span class="ln">      select new.session_key, new.entry_id,</span><span class="ln">             e.entry_sha256, new.entry_sha256,</span><span class="ln">             json_object('kind','same-session-trigger')</span><span class="ln">        from entries e</span><span class="ln">       where e.session_key=new.session_key</span><span class="ln">         and e.entry_id=new.entry_id</span><span class="ln">         and e.entry_sha256&lt;&gt;new.entry_sha256;</span><span class="ln">    select raise(ignore);</span><span class="ln">  end;</span></code></pre>
+        <div class="annots">
+          <div class="annot" data-lines="2">
+            <span class="annot-h"><span class="line-no">L2</span>BEFORE insert</span>
+            Fire BEFORE the row is written. <code>RAISE(IGNORE)</code> later cancels the insert without aborting the surrounding transaction.
+          </div>
+          <div class="annot" data-lines="3,4,5">
+            <span class="annot-h"><span class="line-no">L3-5</span>Only on a duplicate (session_key, entry_id)</span>
+            <code>WHEN exists(...)</code> means: this trigger doesn't fire for fresh entries. First insert wins straight through.
+          </div>
+          <div class="annot" data-lines="14,15,16">
+            <span class="annot-h"><span class="line-no">L14-16</span>Only record when hashes differ</span>
+            <code>e.entry_sha256 &lt;&gt; new.entry_sha256</code> filters the SELECT feeding the conflicts insert. Duplicate INSERT of the same content is recorded silently in <code>ingest_attempts</code> elsewhere; only true disagreement reaches <code>conflicts</code>.
+          </div>
+          <div class="annot" data-lines="17">
+            <span class="annot-h"><span class="line-no">L17</span>RAISE(IGNORE) – the original wins</span>
+            Drops the new row without raising an error. The transaction continues. The earlier insert remains the canonical truth.
+          </div>
+        </div>
+      </div>
+
+      <div class="callout warning">
+        <div class="callout-h">Tradeoff</div>
+        <b>First-write wins</b> is a deliberate choice. If snapshot A ingested
+        on Monday and snapshot B (with edits) on Tuesday, B's edits sit in
+        <code>conflicts</code> rather than overwriting A in <code>entries</code>.
+        That's correct for evidence preservation, but it means the canonical
+        <code>aha read</code> result reflects the older snapshot until you
+        explicitly inspect <code>aha conflicts</code>.
+      </div>
+
+      <details>
+        <summary>The actual triggers</summary>
+        <pre><code>create trigger entries_conflict_before_insert
+  before insert on entries
+  when exists(select 1 from entries
+              where session_key=new.session_key and entry_id=new.entry_id) begin
+    insert into conflicts(session_key, entry_id,
+                          first_entry_sha256, second_entry_sha256, details_json)
+      select new.session_key, new.entry_id,
+             e.entry_sha256, new.entry_sha256,
+             json_object('kind','same-session-trigger')
+        from entries e
+       where e.session_key=new.session_key and e.entry_id=new.entry_id
+         and e.entry_sha256&lt;&gt;new.entry_sha256;
+    select raise(ignore);   -- drop the new row; keep the original
+  end;
+
+create trigger entries_no_update before update on entries
+  begin select raise(abort,'entries are append-only'); end;
+create trigger entries_no_delete before delete on entries
+  begin select raise(abort,'entries are append-only'); end;</code></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 5: TRIGGER FTS ---------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Trigger-maintained FTS, with one shared predicate</h3>
+      <div class="where">internal/corpus/fts_reconcile.go</div>
+    </div>
+    <div class="body">
+      <p>
+        FTS5 virtual tables are <em>derived</em>, but they're maintained
+        synchronously by triggers on the source tables. Normal writes never
+        drift. Verification compares rowid identity (cheap query plan); a
+        public <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds from source rows
+        when external SQL has scrambled things.
+      </p>
+      <pre><code>-- on every message insert, mirror text into FTS:
+create trigger messages_ai after insert on messages
+  when trim(coalesce(new.text,''))&lt;&gt;'' begin
+    insert into fts_messages(rowid, session_key, entry_id, text)
+      values(new.rowid, new.session_key, new.entry_id, new.text);
+  end;
+
+-- ftsMessageTextPredicate("")  ==  trim(coalesce(text,''))&lt;&gt;''
+-- the SAME expression is reused in:
+--   * the schema trigger above
+--   * corpus.Verify        (which messages SHOULD have FTS rows?)
+--   * ReconcileFTS         (which rows to re-insert)
+-- verify and repair can never disagree on what counts as indexable.</code></pre>
+      <p>
+        The cleanup that made this honest: until migration v7 the artifact
+        trigger used a slightly different predicate from the verifier, so
+        <code>verify</code> would flag missing FTS rows that
+        <code><span>-</span><span>-</span>repair-fts</code> wouldn't repair. The duplication-refactor
+        pass moved both to a shared helper, and migration v7 recreates the
+        trigger on existing corpora.
+      </p>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 6: KNOWN-SHA HANDOFF ---------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Known-SHA handoff: trust the bytes once</h3>
+      <div class="where">internal/archive + depot + corpus</div>
+    </div>
+    <div class="body">
+      <p>
+        A naïve pipeline computes the bundle SHA three times: once when
+        writing, once when publishing, once when ingesting.
+        <code>archive.WriteWithInfo</code> threads a single
+        <code>WriteInfo{BundleSHA256, SizeBytes, ManifestSHA256, StateSHA256}</code>
+        down to <code>depot.PutBundleKnown</code> and
+        <code>corpus.IngestBundleWithExpectedSHA</code>. The integrity boundary
+        stays at staging, where untrusted bytes first land, but redundant
+        rehashes go away.
+      </p>
+      <pre><code>// archive.Write computes the compressed SHA <em>while</em> writing.
+info, _ := archive.WriteWithInfo(manifest, files, path)
+
+// depot trusts that identity, no re-read of the finished bundle:
+ref, created, _ := depot.PutBundleKnown(ctx, driver, path,
+    depot.BundleRefFromWriteInfo(manifest, info, filepath.Base(path)))
+
+// ingest verifies an <em>expected</em> SHA on the staged copy, not after the fact:
+rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.BundleSHA256)</code></pre>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 7: SEARCH MERGE --------------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Search: two FTS tables, merged in Go</h3>
+      <div class="where">internal/search/search.go</div>
+    </div>
+    <div class="body">
+      <p>
+        Messages and artifacts live in two separate FTS5 tables. A single
+        search runs both with the same filters, each capped at the limit,
+        then merges and re-sorts in Go by <code>bm25</code> score (lower is
+        better) with deterministic tiebreakers down to <code>entry_id</code>,
+        and caps the merged result once more. The Go-side stable sort makes
+        ranking reproducible across runs, which is verified by golden tests.
+      </p>
+      <p>
+        The other half is <code>ftsQuery</code>. Arbitrary human text is never
+        handed to FTS5 raw. Each whitespace-separated term is double-quoted
+        (with embedded quotes doubled), which neutralizes FTS5 operators like
+        <code>AND</code>, <code>NEAR</code>, <code>*</code>, and column
+        filters. Type below; this widget mirrors the Go.
+      </p>
+
+      <div class="widget" id="fts-play">
+        <label>your query</label>
+        <input id="fts-in" type="text" value='migration bug OR "drop table"'/>
+        <div class="out" style="margin-top: var(--s-3)">
+          <div><span class="k">FTS5 MATCH string  </span> <span class="v" id="fts-out"></span> <button class="copy-btn" data-copy="#fts-out">copy</button></div>
+          <div style="margin-top: var(--s-1)"><span class="k">terms              </span> <span class="v" id="fts-terms"></span></div>
+        </div>
+        <p class="hint">Try <code>foo AND bar</code>, <code>title:secret</code>, or <code>he said "hi"</code>. Operators get quoted into literals.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ----------------------------------- 8: PATH-TOKEN INDEX ----------- -->
+  <div class="mech">
+    <div class="side">
+      <h3>Hand-rolled inverted index for paths</h3>
+      <div class="where">internal/corpus/path_tokens.go</div>
+    </div>
+    <div class="body">
+      <p>
+        SQLite handles the obvious data structures (B-trees, hash indexes).
+        The interesting one in <code>aha</code> is the inverted index built
+        by hand on top of SQLite so the <code><span>-</span><span>-</span>path-token</code> filter has
+        a real query plan instead of <code>LIKE '%foo%'</code>.
+      </p>
+      <p>
+        At ingest, each session's <code>raw_cwd</code> is tokenized:
+        lowercased, slash-normalized, split on <code>/</code>, then each
+        segment is also split on <code>-</code>, <code>_</code>,
+        <code>.</code>, and whitespace. Every distinct token becomes a row
+        in a side table:
+      </p>
+      <pre><code>create table session_path_tokens (
+  session_key text,
+  token       text,
+  primary key (session_key, token),
+  foreign key (session_key) references sessions(session_key)
+);
+create index idx_session_path_tokens_token_session
+  on session_path_tokens(token, session_key);</code></pre>
+      <p>
+        Search then asks SQLite to use the index by name, not by hope:
+      </p>
+      <pre><code>where exists (
+  select 1 from session_path_tokens spt
+    <em>indexed by idx_session_path_tokens_token_session</em>
+   where spt.token=? and spt.session_key=s.session_key
+)</code></pre>
+      <p>
+        The <code>INDEXED BY</code> hint is paired with an actual
+        <code>EXPLAIN QUERY PLAN</code> test that fails CI if the plan stops
+        using it. So the algorithmic claim ("path-token search is sublinear in
+        sessions") is encoded as a test, not a comment.
+        <code>artifact_path_tokens</code> mirrors this for artifact raw paths.
+      </p>
+      <p>
+        The result is a hand-rolled inverted index inside a relational
+        store, with an indexed-only query plan, and a test that fails if
+        the planner stops using it. The algorithmic claim and the test that
+        defends it live in the same package.
+      </p>
+    </div>
+  </div>
+
+</section>
+
+
+<!-- ===================================================== INGEST ======== -->
+<section id="ingest">
+  <div class="section-head">
+    <h2>Ingest</h2>
+    <p>
+      Ingest is the only path that takes untrusted bytes into the corpus.
+      Three roles run in order: a planner stages and validates the bundle, a
+      writer holds an open transaction while inserting rows, and a publisher
+      atomically renames the bundle blob into place before
+      <code>tx.Commit()</code>. The commit-after-publish ordering is the
+      contract that prevents orphans on either side of a crash.
+    </p>
+  </div>
+
+
+  <h3 class="sub">Stages, fully spelled out</h3>
+  <div class="ingest-stages">
+    <div class="stage">
+      <div class="role">bundlePlanner.Prepare</div>
+      <h4>Plan</h4>
+      <ol>
+        <li>stage tar.zst into a temp file</li>
+        <li>compute actual SHA-256</li>
+        <li>compare to expectedSHA if given</li>
+        <li>read &amp; validate manifest.json</li>
+        <li>budget checks (entries, bytes, per-file)</li>
+        <li>plan = { staging, sha, manifest }</li>
+      </ol>
+      <div class="end good">on failure: nothing in corpus changes</div>
+    </div>
+    <div class="stage">
+      <div class="role">corpusWriter</div>
+      <h4>Write (one tx)</h4>
+      <ol>
+        <li>recordBundleAttempt; duplicate ⇒ skip + commit</li>
+        <li>PrepareStatements (transaction-scoped)</li>
+        <li>InsertMachineAndSources</li>
+        <li>StreamManifestFiles, per-session prefetch</li>
+        <li>insert entries, messages, artifacts, images</li>
+        <li>triggers mirror FTS, quarantine conflicts</li>
+      </ol>
+      <div class="end warn">tx held open; not yet committed</div>
+    </div>
+    <div class="stage">
+      <div class="role">blobPublisher.PromoteBundle</div>
+      <h4>Publish, then commit</h4>
+      <ol>
+        <li>atomic rename staging → blobs/bundles/&lt;sha&gt;.tar.zst</li>
+        <li>tx.Commit()</li>
+      </ol>
+      <div class="end good">on success: bundle &amp; rows become visible together</div>
+      <div class="end bad" style="margin-top: var(--s-2); border-top: 0;">on commit-fail: promoted blob removed; no orphans</div>
+    </div>
+  </div>
+
+  <div class="hooks">
+    <h4>Failure-injection hooks (test only)</h4>
+    <div class="pair"><code>afterManifestFiles</code><span>simulate a crash between writes and promote</span></div>
+    <div class="pair"><code>afterBundlePromoteBeforeCommit</code><span>simulate a crash after blob promote but before commit</span></div>
+    <p>
+      Tests assert: corpus rows roll back, the promoted blob is removed, no
+      orphans, <code>ingest_attempts</code> records the duplicate. On
+      <code>SQLITE_BUSY</code> the ingestor retries up to 20 times with a
+      pluggable <code>clock.Sleeper</code> / <code>clock.Backoff</code>, so
+      contention tests are deterministic.
+    </p>
+  </div>
+
+  <div class="mech" style="border-top: 1px solid var(--line); margin-top: var(--s-7); padding-top: var(--s-7)">
+    <div class="side">
+      <h3>Read-visibility invariant</h3>
+      <div class="where">corpus.IngestVisibility test</div>
+    </div>
+    <div class="body">
+      <p>
+        A reader on another connection must <b>not</b> see uncommitted ingest
+        rows. The paired property test holds a writer at
+        <code>afterManifestFiles</code>, then a separate reader calls
+        <code>search.Query</code> and <code>corpus.ReadContext</code>. Both
+        see zero rows until commit, then full rows after. This is the
+        contract that makes <em>search-then-read</em> coherent for agents.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===================================================== DEDUP ========= -->
+<section id="dedup">
+  <div class="section-head">
+    <h2>Deduplication</h2>
+    <p>
+      Three different keys catch three different kinds of duplication, and
+      the layers compose. Two additional set-shaped tricks below short-circuit
+      work that would otherwise look like duplication but cost a fetch. Rows
+      are ordered by where duplicate work is stopped; hover only adds the
+      operational detail.
+    </p>
+  </div>
+
+  <!-- Tufte C6: one supertable. Rows ordered as a story: byte-identical at
+       the depot, identical SHA in the corpus, shared file blobs across
+       bundles, then the two cleverer set-shaped shortcuts. -->
+  <table class="supertable" id="dedup-table">
+    <thead>
+      <tr><th></th><th>Mechanism</th><th>Key</th><th>Where</th><th>Effect</th><th>Scope</th></tr>
+    </thead>
+    <tbody>
+      <tr class="topical" data-info="If two captures produce byte-identical tar.zst, the depot stores one object. Local checks the target path exists; R2 uses S3 object existence.">
+        <th class="row-num">1</th>
+        <td class="row-name">Bundle object</td>
+        <td><code>bundle_sha256</code></td>
+        <td>depot <code>bundles/v1/&lt;sha&gt;.tar.zst</code></td>
+        <td>identical bytes share one object</td>
+        <td>cross-machine</td>
+      </tr>
+      <tr data-info="The corpus.bundles table has UNIQUE(bundle_sha256). Re-ingest of the same SHA records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
+        <th class="row-num">2</th>
+        <td class="row-name">Corpus bundle row</td>
+        <td><code>bundle_sha256 UNIQUE</code></td>
+        <td>corpus <code>bundles</code>, <code>ingest_attempts</code></td>
+        <td>duplicate ingest is recorded, not done</td>
+        <td>per corpus</td>
+      </tr>
+      <tr data-info="Different bundles often share file contents. When a Claude session file grew between two captures, the new version is one blob; the old shared blob is reused.">
+        <th class="row-num">3</th>
+        <td class="row-name">File blob</td>
+        <td><code>file_sha256</code></td>
+        <td>corpus <code>blobs/&lt;sha&gt;</code></td>
+        <td>raw bytes reused across bundles</td>
+        <td>per corpus</td>
+      </tr>
+      <tr class="topical" data-info="Catalog refs carry state_sha256 which excludes the volatile bundle_id and captured_at fields. Equal state hash means unchanged source state.">
+        <th class="row-num">4</th>
+        <td class="row-name">State equivalence</td>
+        <td><code>state_sha256</code></td>
+        <td>catalog refs</td>
+        <td>unchanged source reuses a ref without fetch</td>
+        <td>per machine</td>
+      </tr>
+      <tr data-info="No-arg ingest computes the set difference between catalog and corpus.">
+        <th class="row-num">5</th>
+        <td class="row-name">Pending set</td>
+        <td><code>catalog − corpus</code></td>
+        <td><code>aha ingest</code> (no args)</td>
+        <td>fetches only new refs; scales by new bundles, not catalog size</td>
+        <td>per ingest</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="dedup-info" id="dedup-info">Static read: duplicate work is rejected first by bundle SHA, then corpus bundle row, then file blob SHA; state and pending sets avoid unnecessary fetches. Hover a row for the operational detail.</div>
+</section>
+
+
+<!-- ===================================================== HOTSPOTS ====== -->
+<section id="hotspots">
+  <div class="section-head">
+    <h2>Hotspots</h2>
+    <p>
+      Each dot is either a deliberate simplification we have not validated
+      against real data, or a tradeoff the current test net does not actually
+      prove out. The horizontal axis is how grounded the design is. The
+      vertical axis is how much it would hurt to be wrong.
+    </p>
+  </div>
+
+  <div class="hot-intro">
+    <p class="cli-note" style="margin:0;max-width:62ch">
+      Severity is printed directly on every row as <code>doubt</code>, <code>warn</code>, or <code>solid</code>; color only echoes that text as a secondary cue.
+    </p>
+    <aside class="sidenote">
+      <b>Ranking rule.</b> The table is sorted by attention score: <code>stakes × (1 − grounded)</code>. That puts risky unvalidated assumptions above safe known limits.
+    </aside>
+  </div>
+
+  <h3 class="sub">Ranked evidence table</h3>
+  <p class="cli-note">Rows are directly readable; the scatter below is a secondary spatial view. Click any row or dot to pin the same detail panel.</p>
+  <div class="ranked-hotspots" id="hotspot-rank" aria-label="ranked architecture hotspots"></div>
+
+  <div class="scatter-wrap">
+    <div class="axis-label axis-label-y">stakes</div>
+    <div class="scatter-host" id="scatter">
+      <div class="quad tl"><span class="qlabel" style="left:0;top:0">validate next</span></div>
+      <div class="quad tr"><span class="qlabel" style="right:0;top:0;text-align:right">proven</span></div>
+      <div class="quad bl"><span class="qlabel" style="left:0;bottom:0">backlog</span></div>
+      <div class="quad br"><span class="qlabel" style="right:0;bottom:0;text-align:right">fine</span></div>
+      <div class="midline-v"></div>
+      <div class="midline-h"></div>
+      <!-- Tufte range-frame axes -->
+      <div class="frame-x"></div>
+      <div class="frame-y"></div>
+      <div class="tick-label" style="left:-10px; bottom:-18px;">0</div>
+      <div class="tick-label" style="right:-6px; bottom:-18px;">1</div>
+      <div class="tick-label" style="left:-18px; top:-6px;">1</div>
+      <div class="tick-label" style="left:-18px; bottom:-6px;">0</div>
+    </div>
+    <div class="axis-label axis-label-x">grounded ➞</div>
+  </div>
+
+  <div class="hot-detail" id="hot-detail">
+    <h4>Top-ranked hotspot loads here</h4>
+    <div class="where">each hotspot has a where, a state, and a falsifier</div>
+    <p style="color: var(--ink-2);">
+      The table above is the primary reading order; row and dot clicks only pin the detail panel.
+    </p>
+  </div>
+</section>
+
+
+<!-- ===================================================== MAP =========== -->
+<section id="map">
+  <div class="section-head">
+    <h2>Codebase map</h2>
+    <p>
+      The production-code <code>internal/*</code> tree, sorted by approximate
+      line count. Click a package on the left to see what it owns and what to
+      read first.
+    </p>
+  </div>
+
+  <h3 class="sub">Packages, sized by production-code lines</h3>
+  <p class="cli-note" style="margin-bottom: var(--s-4)">Tests omitted. Click any row.</p>
+  <div class="map-grid">
+    <figure class="figure">
+      <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
+      <figcaption><b>Figure.</b> Cleveland dot plot: one encoding (position) plus direct numeric labels, without bars, legends, or redundant grid.</figcaption>
+    </figure>
+    <div class="pkg-detail" id="pkg-detail">
+      <h3>internal/corpus</h3>
+      <p class="why">Largest package and highest-risk reading target. JavaScript fills this with package-specific read-first notes; click any name or dot to switch.</p>
+    </div>
+  </div>
+
+  <h3 class="sub">Package maintenance matrix</h3>
+  <p class="cli-note">Small multiples over the same package list: size, direct imports, and importers. These make centrality visible without a separate legend.</p>
+  <div class="package-matrix" id="package-matrix" aria-label="package size, dependency, and reading matrix"></div>
+
+  <div class="section-head" style="margin-top: var(--s-9)">
+    <h2 style="font-size: var(--t-2xl)">Reading order</h2>
+    <p>If you want to read the entire codebase in one sitting, in order:</p>
+  </div>
+  <ol class="reading-order">
+    <li><code>cmd/aha/main.go</code> &middot; 11 lines. It just calls <code>cli.Run</code>.</li>
+    <li><code>internal/model/ref.go</code> and <code>identity.go</code> &middot; the sealed types every other package consumes.</li>
+    <li><code>internal/archive/archive.go</code> &middot; capture, manifest, tar.zst, plus the state signature.</li>
+    <li><code>internal/depot/depot.go</code> + <code>local.go</code> / <code>r2.go</code> &middot; bundle store, catalog merge.</li>
+    <li><code>internal/corpus/schema.go</code> &middot; the most opinionated 270 lines: triggers do the heavy lifting.</li>
+    <li><code>internal/corpus/ingest.go</code> &middot; planner, writer, publisher.</li>
+    <li><code>internal/search/search.go</code> &middot; FTS5 query construction. Tiny on purpose.</li>
+    <li><code>internal/cli/*.go</code> &middot; thin orchestration over the above; flag specs are shared metadata.</li>
+  </ol>
+
+  <div class="checklist-gate" aria-label="pre-merge visual checklist">
+    <h3 class="sub">Pre-merge visual checklist</h3>
+    <p class="cli-note">The Tufte gate used for this file. Run the drift test, then read the page with interaction disabled in your head: the claims should still stand.</p>
+    <ol>
+      <li>Every diagram has direct labels; hover only adds secondary explanation.</li>
+      <li>Color is semantic: sage = grounded/canonical, clay = risk, sand = accepted limit.</li>
+      <li>Facts are sorted by reader decision: attention, dependency, or reading order.</li>
+      <li>No chart border, shadow, gradient, legend detour, or decorative data mark survived.</li>
+      <li>Each risky claim names a falsifier or a next measurement.</li>
+      <li>Generated/code-derived facts are covered by the architecture drift test.</li>
+    </ol>
+    <pre><code>go test ./internal/cli -run ArchitectureHTML
+open docs/interactive/architecture.html</code></pre>
+  </div>
+
+  <footer>
+    Source: <code>docs/interactive/architecture.html</code>. Open in any
+    browser, with no build step or external assets.
+  </footer>
+</section>
+
+</main>
+</div>
+
+<script>
+/* ============================================================
+   Tab routing
+   ============================================================ */
+const tabButtons = document.querySelectorAll('nav.tabs button');
+const sections = document.querySelectorAll('main > section');
+let initialTabRoute = false;
+tabButtons.forEach(btn => btn.addEventListener('click', () => {
+  const tab = btn.dataset.tab;
+  if (!initialTabRoute) document.body.classList.add('has-switched');
+  tabButtons.forEach(b => b.classList.toggle('active', b === btn));
+  sections.forEach(s => s.classList.toggle('active', s.id === tab));
+  history.replaceState(null, '', '#' + tab);
+  if (!initialTabRoute) window.scrollTo({top: 0, behavior: 'smooth'});
+}));
+if (location.hash) {
+  const t = location.hash.slice(1);
+  const btn = document.querySelector(`nav.tabs button[data-tab="${t}"]`);
+  if (btn) {
+    initialTabRoute = true;
+    btn.click();
+    initialTabRoute = false;
+  }
+}
+
+/* ============================================================
+   Pipeline hover
+   ============================================================ */
+const pkgInfo = document.getElementById('pkg-info');
+document.querySelectorAll('#pipeline .grp').forEach(g => {
+  const set = () => { pkgInfo.innerHTML = `<b>${g.dataset.pkg}</b>. ${g.dataset.info}`; };
+  g.addEventListener('mouseenter', set);
+  g.addEventListener('click', set);
+});
+document.querySelectorAll('#dedup [data-info]').forEach(g => {
+  const set = () => { document.getElementById('dedup-info').textContent = g.dataset.info; };
+  g.addEventListener('mouseenter', set);
+});
+
+/* ============================================================
+   SHA-256 (small impl; the file must stand alone offline)
+   ============================================================ */
+const sha256 = (() => {
+  const K=new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  const rotr = (x,n) => (x>>>n)|(x<<(32-n));
+  return function(bytes) {
+    let l = bytes.length;
+    let padLen = ((l+9+63) & ~63);
+    let m = new Uint8Array(padLen);
+    m.set(bytes); m[l] = 0x80;
+    let bitLen = l*8;
+    new DataView(m.buffer).setUint32(padLen-4, bitLen >>> 0, false);
+    new DataView(m.buffer).setUint32(padLen-8, Math.floor(bitLen/0x100000000), false);
+    let H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    let W = new Uint32Array(64);
+    for (let i=0; i<padLen; i+=64) {
+      for (let j=0; j<16; j++) W[j] = new DataView(m.buffer).getUint32(i+j*4, false);
+      for (let j=16; j<64; j++) {
+        const s0 = rotr(W[j-15],7)^rotr(W[j-15],18)^(W[j-15]>>>3);
+        const s1 = rotr(W[j-2],17)^rotr(W[j-2],19)^(W[j-2]>>>10);
+        W[j] = (W[j-16] + s0 + W[j-7] + s1) >>> 0;
+      }
+      let [a,b,c,d,e,f,g,h] = H;
+      for (let j=0; j<64; j++) {
+        const S1 = rotr(e,6)^rotr(e,11)^rotr(e,25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[j] + W[j]) >>> 0;
+        const S0 = rotr(a,2)^rotr(a,13)^rotr(a,22);
+        const mj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + mj) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+    }
+    let out = '';
+    for (let i=0; i<8; i++) out += H[i].toString(16).padStart(8,'0');
+    return out;
+  };
+})();
+
+const encUtf8 = s => new TextEncoder().encode(s);
+
+/* length-prefixed concat: 8 BE bytes of length, then bytes; matches identity.go */
+function lengthPrefixedBytes(parts) {
+  const segs = parts.map(p => encUtf8(p));
+  const total = segs.reduce((n, s) => n + 8 + s.length, 0);
+  const out = new Uint8Array(total);
+  const view = new DataView(out.buffer);
+  let i = 0;
+  for (const s of segs) {
+    view.setUint32(i, 0, false); i += 4;
+    view.setUint32(i, s.length, false); i += 4;
+    out.set(s, i); i += s.length;
+  }
+  return out;
+}
+
+function bytesHex(b) {
+  let s = '';
+  for (const x of b) s += x.toString(16).padStart(2,'0');
+  return s;
+}
+
+/* ============================================================
+   Session key playground
+   ============================================================ */
+function updateSK() {
+  const src = document.getElementById('sk-source').value;
+  const mac = document.getElementById('sk-machine').value;
+  const sess = document.getElementById('sk-sess').value;
+  const bytes = lengthPrefixedBytes([src, mac, sess]);
+  document.getElementById('sk-bytes').textContent = bytesHex(bytes);
+  const hash = sha256(bytes);
+  document.getElementById('sk-hash').textContent = hash;
+  document.getElementById('sk-key').textContent = 'sk1_' + hash;
+
+  const X = sess || 'X';
+  const ha = sha256(lengthPrefixedBytes(["pi","abc",X]));
+  const hb = sha256(lengthPrefixedBytes(["pia","bc",X]));
+  document.getElementById('sk-col1').textContent = 'sk1_' + ha;
+  document.getElementById('sk-col2').textContent = 'sk1_' + hb;
+  const m = document.getElementById('sk-col-match');
+  m.textContent = ha === hb ? 'collides; design broken' : 'distinct (length-prefix worked)';
+  m.classList.toggle('miss', ha === hb);
+  m.classList.toggle('match', ha !== hb);
+}
+['sk-source','sk-machine','sk-sess'].forEach(id => document.getElementById(id).addEventListener('input', updateSK));
+updateSK();
+
+/* ============================================================
+   Ref playground
+   ============================================================ */
+function b64url(s) {
+  const bytes = encUtf8(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
+}
+function unb64url(s) {
+  s = s.replace(/-/g,'+').replace(/_/g,'/');
+  while (s.length % 4) s += '=';
+  try { return atob(s); } catch { return null; }
+}
+function isValidSessionKey(s) { return /^sk1_[0-9a-f]{64}$/.test(s); }
+function isValidSha256(s) { return /^[0-9a-f]{64}$/.test(s); }
+function updateRef() {
+  const sess = document.getElementById('ref-sess').value.trim();
+  const entry = document.getElementById('ref-entry').value;
+  const sha = document.getElementById('ref-sha').value.trim();
+  const goodSess = isValidSessionKey(sess);
+  const goodSha = isValidSha256(sha);
+  const msg = goodSess && entry ? 'msg:v1:' + b64url(sess) + ':' + b64url(entry) : (goodSess ? '(need entry_id)' : '(invalid session_key)');
+  const ses = goodSess ? 'session:v1:' + b64url(sess) : '(invalid session_key)';
+  const art = goodSha ? 'artifact:v1:' + sha : '(invalid sha256)';
+  document.getElementById('ref-msg').textContent = msg;
+  document.getElementById('ref-ses').textContent = ses;
+  document.getElementById('ref-art').textContent = art;
+
+  let parsed = '(not a ref)';
+  if (msg.startsWith('msg:v1:')) {
+    const parts = msg.slice('msg:v1:'.length).split(':');
+    if (parts.length === 2) {
+      const s = unb64url(parts[0]); const e = unb64url(parts[1]);
+      if (s && e && isValidSessionKey(s)) parsed = 'kind=message  session=' + s.slice(0,16) + '…  entry=' + e;
+    }
+  }
+  document.getElementById('ref-parsed').textContent = parsed;
+}
+['ref-sess','ref-entry','ref-sha'].forEach(id => document.getElementById(id).addEventListener('input', updateRef));
+updateRef();
+
+/* ============================================================
+   State-signature explorable.
+   Two hashes of the same manifest, computed from different field sets,
+   so editing a volatile field moves bundle_sha but NOT state_sha.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('state-sig');
+  if (!root) return;
+  const rows = [...root.querySelectorAll('.ss-row')];
+  const bundleEl = document.getElementById('ss-bundle-sha');
+  const stateEl  = document.getElementById('ss-state-sha');
+  const bundleBar = document.getElementById('ss-bundle-bar');
+  const stateBar  = document.getElementById('ss-state-bar');
+  let last = { bundle: '', state: '' };
+
+  function gather(stableOnly) {
+    const obj = {};
+    for (const row of rows) {
+      const stable = row.dataset.stable === '1';
+      if (stableOnly && !stable) continue;
+      const inp = row.querySelector('input');
+      obj[inp.dataset.key] = inp.value;
+    }
+    return JSON.stringify(obj);
+  }
+  // We re-use the page's sha256 implementation (defined earlier in this script).
+  function hash(s) {
+    const bytes = new TextEncoder().encode(s);
+    return sha256(bytes);
+  }
+  function flash(el) {
+    el.classList.remove('flash');
+    void el.offsetWidth;        // force reflow so the class re-applies
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 700);
+  }
+  function setBar(bar, hex) {
+    // map the first byte of the hash to a 0..1 fill so the bar visibly
+    // moves whenever the hash changes (cheap fingerprint visualization)
+    const v = parseInt(hex.slice(0,2), 16) / 255;
+    bar.style.transform = `scaleX(${v})`;
+  }
+  function update() {
+    const b = hash(gather(false));
+    const s = hash(gather(true));
+    bundleEl.textContent = b;
+    stateEl.textContent  = s;
+    setBar(bundleBar, b);
+    setBar(stateBar,  s);
+    if (b !== last.bundle) flash(bundleEl);
+    if (s !== last.state)  flash(stateEl);
+    last = { bundle: b, state: s };
+  }
+  for (const row of rows) {
+    row.querySelector('input').addEventListener('input', update);
+  }
+  update();
+})();
+
+/* ============================================================
+   Append-only + conflict-as-quarantine simulator.
+   Mirrors the schema triggers in internal/corpus/schema.go:
+     entries_conflict_before_insert  → quarantine on differing hash
+     entries_no_update / entries_no_delete → ABORT
+   plus the bundle-attempt duplicate-tracking in ingest.go.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('db-sim');
+  if (!root) return;
+  const entriesEl = document.getElementById('db-entries');
+  const conflictsEl = document.getElementById('db-conflicts');
+  const attemptsEl = document.getElementById('db-attempts');
+  const entriesCount = document.getElementById('db-entries-count');
+  const conflictsCount = document.getElementById('db-conflicts-count');
+  const attemptsCount = document.getElementById('db-attempts-count');
+  const log = document.getElementById('db-log');
+
+  let state = { entries: [], conflicts: [], attempts: [], nextId: 1 };
+  let nextEntryNum = 1;
+
+  function shortHash() {
+    const chars = '0123456789abcdef';
+    let s = '';
+    for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random()*16)];
+    return s;
+  }
+
+  function render() {
+    const rowKeys = new Set();
+    function rerender(el, rows, fmt) {
+      const existing = new Set([...el.children].map(c => c.dataset.k));
+      el.innerHTML = '';
+      for (const r of rows) {
+        const li = document.createElement('li');
+        li.dataset.k = r._k;
+        li.innerHTML = fmt(r);
+        if (r.conflict) li.classList.add('conflict-row');
+        if (!existing.has(r._k)) li.classList.add('fresh');
+        el.appendChild(li);
+      }
+    }
+    rerender(entriesEl, state.entries, r =>
+      `<span class="key">${r.entry_id}</span>` +
+      `<span class="role">role=${r.role}</span>` +
+      `<span class="hash">sha=${r.hash}</span>`
+    );
+    rerender(conflictsEl, state.conflicts, r =>
+      `<span class="key">${r.entry_id}</span>` +
+      `<span class="note">first=${r.first} vs second=${r.second}</span>` +
+      `<span class="hash">${r.note}</span>`
+    );
+    rerender(attemptsEl, state.attempts, r =>
+      `<span class="key">${r.bundle_id || r.entry_id}</span>` +
+      `<span class="note">${r.kind}</span>` +
+      `<span class="hash">${r.flag}</span>`
+    );
+    entriesCount.textContent = `${state.entries.length} row${state.entries.length===1?'':'s'}`;
+    conflictsCount.textContent = `${state.conflicts.length} row${state.conflicts.length===1?'':'s'}`;
+    attemptsCount.textContent = `${state.attempts.length} row${state.attempts.length===1?'':'s'}`;
+  }
+
+  function logLine(text, cls, sql) {
+    if (log.querySelector('.db-log-hint')) log.innerHTML = '';
+    if (sql) {
+      const p = document.createElement('p');
+      p.className = 'sql';
+      p.innerHTML = `<code>${sql}</code>`;
+      log.appendChild(p);
+    }
+    const p = document.createElement('p');
+    p.className = cls || '';
+    p.textContent = text;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function lastInsertedEntryId() {
+    // pick the most recent entry to demo duplicates against
+    return state.entries.length ? state.entries[state.entries.length-1].entry_id : null;
+  }
+
+  function action(name) {
+    if (name === 'insert-new') {
+      const id = `entry-${nextEntryNum++}`;
+      const h = shortHash();
+      state.entries.push({ _k: id+'/'+h, entry_id: id, role: 'user', hash: h });
+      logLine(`accepted: ${id} (sha=${h})`, 'ok',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${id}','user','${h}…');`);
+      render();
+      return;
+    }
+    if (name === 'insert-dup-same') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to duplicate; insert one first.', 'warn'); return; }
+      const orig = state.entries.find(e => e.entry_id === last);
+      const h = orig.hash;
+      // bundle-attempt-style duplicate tracking (mirrors recordBundleAttempt
+      // in corpus/ingest.go: existing SHA + same id ⇒ duplicate row, skip).
+      state.attempts.push({ _k: 'att-'+(state.attempts.length+1), entry_id: last, kind: `re-insert ${last}`, flag: 'duplicate=1' });
+      logLine(`silent dedup: ${last} already exists with hash ${h}; recorded as duplicate attempt.`, 'ok',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${last}','user','${h}…');`);
+      render();
+      return;
+    }
+    if (name === 'insert-dup-diff') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to conflict with; insert one first.', 'warn'); return; }
+      const orig = state.entries.find(e => e.entry_id === last);
+      const h2 = shortHash();
+      state.conflicts.push({ _k: 'c-'+(state.conflicts.length+1), entry_id: last, first: orig.hash, second: h2, note: 'same-session-trigger', conflict: true });
+      logLine(`conflict trigger fired: ${last} arrived with sha=${h2}, but ${orig.hash} is already there. original kept; conflict row added; RAISE(IGNORE) dropped the new row.`, 'warn',
+        `INSERT INTO entries(entry_id, role, entry_sha256) VALUES('${last}','assistant','${h2}…');`);
+      render();
+      return;
+    }
+    if (name === 'update') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to update; insert one first.', 'warn'); return; }
+      logLine(`DENIED by trigger entries_no_update: "entries are append-only". no rows changed.`, 'deny',
+        `UPDATE entries SET role='assistant' WHERE entry_id='${last}';`);
+      return;
+    }
+    if (name === 'delete') {
+      const last = lastInsertedEntryId();
+      if (!last) { logLine('no entry to delete; insert one first.', 'warn'); return; }
+      logLine(`DENIED by trigger entries_no_delete: "entries are append-only". no rows changed.`, 'deny',
+        `DELETE FROM entries WHERE entry_id='${last}';`);
+      return;
+    }
+    if (name === 'reset') {
+      state = { entries: [], conflicts: [], attempts: [], nextId: 1 };
+      nextEntryNum = 1;
+      log.innerHTML = '<p class="db-log-hint">click a button. the database state above updates immediately. <span class="forbidden">red</span> buttons exercise the append-only triggers.</p>';
+      render();
+      return;
+    }
+  }
+
+  root.querySelectorAll('.db-actions button').forEach(b =>
+    b.addEventListener('click', () => action(b.dataset.action)));
+  render();
+})();
+
+/* ============================================================
+   FTS query escaping playground; mirrors search.ftsQuery
+   ============================================================ */
+function ftsQuery(q) {
+  const fields = q.split(/\s+/).filter(Boolean);
+  if (fields.length === 0) return { out: q, terms: [] };
+  const out = [];
+  for (let f of fields) {
+    f = f.replaceAll('\\\\', ' ');
+    f = f.replaceAll('"', '""');
+    f = f.trim();
+    if (f === '') continue;
+    out.push('"' + f + '"');
+  }
+  return { out: out.join(' '), terms: out };
+}
+function updateFTS() {
+  const q = document.getElementById('fts-in').value;
+  const r = ftsQuery(q);
+  document.getElementById('fts-out').textContent = r.out || '(empty)';
+  document.getElementById('fts-terms').textContent = r.terms.length ? r.terms.join('  ·  ') : '(none)';
+}
+document.getElementById('fts-in').addEventListener('input', updateFTS);
+updateFTS();
+
+/* ============================================================
+   Hotspots data + scatter + cards
+   ============================================================ */
+const HOTSPOTS = [
+  { id:'projectkey', name:'project_key = basename(cwd)',
+    severity:'doubt', stakes:0.78, grounded:0.18,
+    where:'internal/corpus/util.go:23 · projectKey()',
+    state:'`filepath.Base(cwd)` is the entire derivation. Two repos called "foo" collide. One repo at /a/foo vs /b/foo collides (intentional?). Same repo at /Users/x/work/foo vs ~/foo on another machine may or may not collide, depending on how the source recorded cwd.',
+    needs:'Either accept the simplification with regression tests over real anonymized fixtures showing acceptable hit rate, or move to configurable project-rewrite rules (called out as v2). A single counter-example users complain about flips the priority.' },
+
+  { id:'pathfilter', name:'--path uses LIKE %…%',
+    severity:'warn', stakes:0.55, grounded:0.55,
+    where:'internal/search/search.go · contains-style filter',
+    state:'Indexed alternatives exist (`--project`, `--path-token`) and are documented, but `--path` is still the obvious flag, and contains-LIKE has no useful query plan on large corpora.',
+    needs:'Either deprecate `--path` in favor of indexed forms, or rewrite the filter to a token search with explicit "contains" escape. Behavior is correct; cost is the question.' },
+
+  { id:'toolout', name:'tool output preserved but not indexed',
+    severity:'warn', stakes:0.4, grounded:0.7,
+    where:'docs/agent-history-aggregator-spec.md + ingest policy',
+    state:'Deliberate v1 default. Search cannot find a thing an agent typed into a shell. Raw bytes are preserved, so a future migration can index them.',
+    needs:'Real agent-retrieval evals (docs/eval-rubric.md) where the gold answer lives in tool output. Until then, "off by default" is a guess about user need.' },
+
+  { id:'readwindow', name:'read = file-order context, not branch/thread',
+    severity:'warn', stakes:0.5, grounded:0.7,
+    where:'internal/corpus/read.go',
+    state:'`aha read &lt;ref&gt; --before N --after N` returns linear file context. Agent transcripts are trees (parent_id), so the context can include sibling branches the user never saw.',
+    needs:'A user journey test showing branch reconstruction beats file order on a real Claude session. Until that exists, the simpler implementation wins.' },
+
+  { id:'pi-shape', name:'Pi adapter: synthetic fixtures masked real shape',
+    severity:'doubt', stakes:0.7, grounded:0.45,
+    where:'internal/adapters/pi.go + testdata',
+    state:'The lessons doc records that early synthetic fixtures used top-level role; real Pi uses nested message.role. We fixed that one. The lesson is "we don\'t know what else the synthetic fixtures got wrong."',
+    needs:'Anonymized real-history fixtures for each source, ideally one per major Pi, Claude, Codex version. Currently we have one anonymized fixture per source.' },
+
+  { id:'r2-real', name:'R2 driver: fake S3 only in test suite',
+    severity:'doubt', stakes:0.75, grounded:0.4,
+    where:'internal/depot/r2.go + r2_fake_test.go + r2_integration_test.go (build tag)',
+    state:'Property tests and fake-S3 cover the API surface. The integration test against real R2 sits behind a build tag and is not part of CI. No real release has hit a scratch bucket.',
+    needs:'Run integration tests against a scratch bucket end-to-end (snapshot, ingest, verify, compact, repair) before any R2-focused release claim. Explicitly listed as post-v1 hardening.' },
+
+  { id:'large-corpus', name:'large real corpora untested',
+    severity:'warn', stakes:0.65, grounded:0.4,
+    where:'docs/performance-results.md',
+    state:'Pathological benchmarks exist for verify, ingest, search, depot, plus rowid query-plan guards. Wall-clock numbers come from one machine. No years-long real corpus has been ingested.',
+    needs:'A real Pi user with multi-year history (or a generated 100k-message corpus) walking through search, refresh, verify. Listed as release-hardening.' },
+
+  { id:'secrets', name:'no secret redaction',
+    severity:'warn', stakes:0.95, grounded:0.95,
+    where:'docs/trust.md · V1 explicit',
+    state:'Deliberate v1 stance: do not silently lose data by guessing what is a secret. Bundles and corpora are private. The privacy warning is in README, init, doctor.',
+    needs:'Redaction-as-export pipeline for v2 (called out). The accepted state is grounded, but if anyone treats a bundle as shareable the blast radius is enormous.' },
+
+  { id:'multi-row', name:'multi-row ingest insert not measured',
+    severity:'warn', stakes:0.3, grounded:0.55,
+    where:'docs/performance-scalability-plan.md',
+    state:'Prepared statements + per-session prefetch landed. True multi-row inserts may be a further constant-factor win, but the pprof said SQLite VDBE + pwrite, and we cannot tell without measuring.',
+    needs:'A package benchmark comparing single-row prepared vs multi-row insert at 5k, 50k, 100k entries. Decide based on data, not intuition.' },
+
+  { id:'branch-recon', name:'branch/thread reconstruction',
+    severity:'warn', stakes:0.45, grounded:0.65,
+    where:'V2 ledger',
+    state:'Adapters preserve parent_id and entry_id; ingest stores them. Reads ignore the tree.',
+    needs:'A read mode that walks parent links. The data is there. Likely smaller than it looks; deferred because no user has hit it.' },
+
+  { id:'subagent', name:'subagent parent linkage',
+    severity:'doubt', stakes:0.45, grounded:0.45,
+    where:'internal/adapters/claude.go:22 · CanLinkSubagents: false',
+    state:'`agent-*.jsonl` files are detected (is_subagent=true) and ingested as their own sessions, but the Claude adapter declares CanLinkSubagents=false, so parent_session_key is left null today. A subagent run is searchable but disconnected from the conversation that spawned it.',
+    needs:'A real multi-agent Claude fixture where the parent link is inferable, plus a measure of how often inference would be wrong. Until then "no link" is a safe default but a real gap in retrieval.' },
+
+  { id:'windows', name:'Windows path / FS support',
+    severity:'warn', stakes:0.3, grounded:0.5,
+    where:'all of internal/*',
+    state:'v2 explicit non-goal. Path helpers are mostly portable; tar/zstd are; SQLite via modernc.org/sqlite is. Symlink-and-NOFOLLOW behavior in `archive.openRegularNoFollow` is unix syscalls.',
+    needs:'Pick when to do it. The longer we wait, the more drift seeps in.' },
+
+  { id:'append-only-static', name:'append-only is triggers + static guards',
+    severity:'solid', stakes:0.85, grounded:0.9,
+    where:'internal/corpus/schema.go + internal/testquality/static_test.go',
+    state:'Triggers abort updates and deletes on append-only tables. A static test fails CI if any production .go file emits UPDATE or DELETE against those tables. Two independent layers.',
+    needs:'Grounded. Watch for ORM-style helpers that could bypass; current code uses raw prepared statements only.' },
+
+  { id:'rowid-fts', name:'rowid FTS verify: query-plan guarded',
+    severity:'solid', stakes:0.7, grounded:0.92,
+    where:'internal/corpus/verify.go + internal/corpus/verify_query_plan_test.go',
+    state:'The verifier scaled superlinearly until we changed the join shape. A test pins EXPLAIN QUERY PLAN to ensure we use indexed rowid identity, and the pathological 5k-message verify dropped from ~7.7s to ~15ms.',
+    needs:'Grounded. The query-plan test guards regressions; benchmarks track magnitude.' },
+];
+
+const scatter = document.getElementById('scatter');
+const ptEls = {};
+/* Tufte B4 (direct labels): permanently label the dots that anchor each
+   quadrant – the highest-stakes ungrounded item ("validate next"), the
+   most-grounded high-stakes item ("proven"), the lowest-stakes item,
+   and one item near the origin. Other dots reveal their name on hover. */
+function scoreCorner(h, gx, sy) {
+  // gx, sy are target grounded and stakes coordinates (0..1)
+  return -((h.grounded - gx) ** 2 + (h.stakes - sy) ** 2);
+}
+const anchors = new Set();
+const corners = [[0,1],[1,1],[0,0],[1,0]];
+for (const [gx, sy] of corners) {
+  const winner = HOTSPOTS.slice().sort((a,b) => scoreCorner(b,gx,sy) - scoreCorner(a,gx,sy))[0];
+  if (winner) anchors.add(winner.id);
+}
+function placeHotspot(h) {
+  const pt = document.createElement('div');
+  const stake = 1 - h.stakes;
+  const x = (4 + h.grounded * 92);
+  const y = (4 + stake * 88);
+  pt.className = 'pt s-' + (h.severity === 'doubt' ? 'hot' : h.severity === 'warn' ? 'warn' : h.severity === 'solid' ? 'solid' : 'novel');
+  pt.style.left = x + '%';
+  pt.style.top = y + '%';
+  pt.title = h.name;
+  const label = document.createElement('div');
+  label.className = 'pt-label';
+  label.style.left = x + '%';
+  label.style.top = y + '%';
+  if (x > 60) label.style.transform = 'translate(-90%, 10px)';
+  label.textContent = h.name;
+  const anchor = anchors.has(h.id);
+  if (anchor) label.classList.add('show', 'anchor');
+  pt.addEventListener('mouseenter', () => label.classList.add('show'));
+  pt.addEventListener('mouseleave', () => { if (!pt.classList.contains('selected') && !anchor) label.classList.remove('show'); });
+  pt.addEventListener('click', () => showHotspot(h.id, true));
+  scatter.appendChild(pt);
+  scatter.appendChild(label);
+  ptEls[h.id] = { pt, label };
+}
+HOTSPOTS.forEach(placeHotspot);
+
+function showHotspot(id, scroll) {
+  const h = HOTSPOTS.find(x => x.id === id);
+  if (!h) return;
+  Object.entries(ptEls).forEach(([k, e]) => {
+    const on = k === id;
+    e.pt.classList.toggle('selected', on);
+    e.label.classList.toggle('show', on);
+  });
+  document.querySelectorAll('.hotspot-rank-row[data-hotspot]').forEach(r =>
+    r.classList.toggle('active', r.dataset.hotspot === id));
+  const cls = h.severity === 'solid' ? 'grounded' : 'doubt';
+  document.getElementById('hot-detail').innerHTML = `
+    <h4>${h.name} <span class="tag-chip ${h.severity === 'solid' ? 'solid' : h.severity === 'warn' ? 'warn' : 'hot'}">${h.severity}</span></h4>
+    <div class="where">${h.where}</div>
+    <div class="${cls}">
+      <p><b>State.</b> ${h.state}</p>
+      <p><b>What would change our mind.</b> ${h.needs}</p>
+    </div>`;
+  if (scroll) document.getElementById('hot-detail')?.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function attentionScore(h) { return h.stakes * (1 - h.grounded); }
+function escHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function shortText(s, n) {
+  s = String(s).replace(/`/g, '');
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+}
+function renderHotspotRank() {
+  const host = document.getElementById('hotspot-rank');
+  if (!host) return;
+  const rows = HOTSPOTS.slice().sort((a, b) => attentionScore(b) - attentionScore(a));
+  host.innerHTML = `
+    <div class="hotspot-rank-row header">
+      <div></div><div>Hotspot</div><div>Attention</div><div>Evidence</div><div>Next falsifier / action</div>
+    </div>` + rows.map((h, i) => {
+      const score = attentionScore(h);
+      const sev = h.severity === 'doubt' ? 'hot' : h.severity === 'warn' ? 'warn' : 'solid';
+      return `
+        <div class="hotspot-rank-row" data-hotspot="${h.id}" tabindex="0">
+          <div class="rank">${i + 1}</div>
+          <div class="issue">${escHTML(h.name)} <span class="tag-chip ${sev}">${h.severity}</span></div>
+          <div class="score"><span class="range-bar ${sev}" style="--p:${(score * 100).toFixed(1)}%"></span><span class="score-num">${score.toFixed(2)}</span></div>
+          <div class="where"><code>${escHTML(h.where)}</code></div>
+          <div class="next">${escHTML(shortText(h.needs, 190))}</div>
+        </div>`;
+    }).join('');
+  host.querySelectorAll('[data-hotspot]').forEach(row => {
+    row.addEventListener('click', () => showHotspot(row.dataset.hotspot, true));
+    row.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showHotspot(row.dataset.hotspot, true); }
+    });
+  });
+  if (rows[0]) showHotspot(rows[0].id, false);
+}
+renderHotspotRank();
+
+/* hotspot card-list removed; the ranked table + scatter + detail panel carry the same data without duplication. */
+
+/* ============================================================
+   Codebase map
+   ============================================================ */
+const PACKAGES = [
+  { name: 'internal/corpus',  lines: '~2900', why: 'SQLite schema, append-only triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.', read: ['schema.go (270 lines, mostly DDL)', 'ingest.go (866 lines; the three-phase machine)', 'verify.go + fts_reconcile.go (derived FTS, repairable)'] },
+  { name: 'internal/cli',     lines: '~2500', why: 'Command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over corpus, depot, archive.', read: ['cli.go (router)', 'flag_specs.go (shared metadata)', 'command_*.go (one file per command)'] },
+  { name: 'internal/archive', lines: '~935',  why: 'Bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.', read: ['archive.go: Capture, Write, WriteWithInfo, ManifestStateSHA256', 'state_signature_*.go for the property tests'] },
+  { name: 'internal/depot',   lines: '~1240', why: 'Local + R2 driver, bundle key validation, catalog merge, repair, compaction, marker schema.', read: ['depot.go (drivers, refs, MergeBundleRefs)', 'local.go (filesystem lock + atomic catalog write)', 'r2.go (S3 conditional writes + retry-on-conflict)'] },
+  { name: 'internal/adapters',lines: '~1100', why: 'Source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures.', read: ['parser.go (common JSONL stream)', 'claude.go, codex.go, pi.go (source quirks)', 'adapter_conformance_test.go'] },
+  { name: 'internal/model',   lines: '~280',  why: 'Sealed types: SessionKey, EntryID, SHA256Hex; Ref variants; Manifest shape; enums.', read: ['identity.go (smart constructors)', 'ref.go (closed sum type + codec)'] },
+  { name: 'internal/search',  lines: '~250',  why: 'FTS5 query construction. Indexed --project and --path-token. Result mapping.', read: ['search.go (filter predicates, capped limits)', 'query_plan_test.go (EXPLAIN guards)'] },
+  { name: 'internal/safety',  lines: '~250',  why: 'Path containment + source root validation. Shared between adapters, archive, depot.', read: ['paths.go', 'roots.go'] },
+  { name: 'internal/fileutil',lines: '~120',  why: 'Atomic temp create + rename with ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.', read: ['Look for AtomicWriteBytes, AtomicCopyFile'] },
+  { name: 'internal/clock',   lines: '~60',   why: 'Clock, Sleeper, Backoff seams so ingest busy-retry is deterministic in tests.', read: ['clock.go'] },
+  { name: 'internal/config',  lines: '~250',  why: 'JSONC config load and write, defaults, redaction-free.', read: ['config.go'] },
+  { name: 'internal/hash',    lines: '~30',   why: 'SHA-256 helpers (bytes and streaming).', read: ['hash.go'] },
+  { name: 'internal/paths',   lines: '~35',   why: 'Tilde expansion and one or two stable helpers.', read: ['paths.go'] },
+  { name: 'internal/media',   lines: '~80',   why: 'Image and text artifact classification.', read: ['media.go'] },
+  { name: 'internal/testquality', lines: '~270', why: 'Static debt inventory. Fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.', read: ['cbc_debt_test.go', 'static_test.go'] },
+];
+
+function loadPkg(name) {
+  const p = PACKAGES.find(x => x.name === name);
+  if (!p) return;
+  document.getElementById('pkg-detail').innerHTML = `
+    <h3>${p.name} <span class="tag-chip">${p.lines}</span></h3>
+    <p class="why">${p.why}</p>
+    <b style="color:var(--ink-3);font-size:var(--t-xs);letter-spacing:.08em;text-transform:uppercase">Read these first</b>
+    <ul>${p.read.map(r => `<li><code>${r}</code></li>`).join('')}</ul>`;
+}
+
+/* ============================================================
+   Cleveland dot plot of package sizes (Tufte B4 + B5)
+   ============================================================ */
+function renderPackageChart() {
+  const svg = document.getElementById('pkg-chart');
+  if (!svg) return;
+  const rows = PACKAGES.map(p => ({
+    name: p.name.replace('internal/',''),
+    full: p.name,
+    n: parseInt(String(p.lines).replace(/[^0-9]/g,''), 10),
+  })).sort((a,b) => b.n - a.n);
+  const W = 720, H = 380;
+  const padL = 130, padR = 80, padT = 16, padB = 24;
+  const xmax = Math.max(...rows.map(r => r.n));
+  const xmin = Math.min(...rows.map(r => r.n));
+  const rowH = (H - padT - padB) / rows.length;
+  const x = v => padL + ((v - 0) / xmax) * (W - padL - padR);
+  let out = '';
+  // range-frame x-axis: hairline from min to max value, end-labels only
+  const xAxisY = H - padB + 4;
+  out += `<line x1="${x(xmin)}" y1="${xAxisY}" x2="${x(xmax)}" y2="${xAxisY}" stroke="var(--ink-3)" stroke-width="1"/>`;
+  out += `<text x="${x(xmin)}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="start">${xmin.toLocaleString()}</text>`;
+  out += `<text x="${x(xmax)}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="end">${xmax.toLocaleString()}</text>`;
+  out += `<text x="${(x(xmin)+x(xmax))/2}" y="${xAxisY + 14}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)" text-anchor="middle">lines</text>`;
+  // rows
+  rows.forEach((r, i) => {
+    const cy = padT + rowH * (i + 0.5);
+    // direct label (left)
+    out += `<text x="${padL - 10}" y="${cy + 4}" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="var(--ink-2)" text-anchor="end" data-pkg="${r.full}" class="pkg-row">${r.name}</text>`;
+    // Tufte's dot-plot leader: subtle line from label to dot
+    out += `<line x1="${padL}" y1="${cy}" x2="${x(r.n)}" y2="${cy}" stroke="var(--line)" stroke-width="1"/>`;
+    // the dot itself (the data-ink)
+    out += `<circle cx="${x(r.n)}" cy="${cy}" r="3.5" fill="var(--sage)" data-pkg="${r.full}" class="pkg-row" style="cursor:pointer"/>`;
+    // value label (right of dot)
+    out += `<text x="${x(r.n) + 8}" y="${cy + 4}" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="var(--ink-3)">${r.n.toLocaleString()}</text>`;
+  });
+  svg.innerHTML = out;
+  svg.style.height = H + 'px';
+  svg.querySelectorAll('.pkg-row').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => loadPkg(el.dataset.pkg));
+    el.addEventListener('mouseenter', () => loadPkg(el.dataset.pkg));
+  });
+}
+renderPackageChart();
+loadPkg('internal/corpus');
+
+function renderPackageMatrix() {
+  const host = document.getElementById('package-matrix');
+  if (!host || typeof PKG_GRAPH === 'undefined' || typeof REVERSE_DEPS === 'undefined') return;
+  const rows = PACKAGES.map(p => {
+    const short = p.name.replace('internal/', '');
+    return {
+      ...p,
+      short,
+      n: parseInt(String(p.lines).replace(/[^0-9]/g,''), 10),
+      imports: (PKG_GRAPH[short]?.deps || []).length,
+      importers: (REVERSE_DEPS[short] || []).length,
+      first: p.read[0] || ''
+    };
+  }).sort((a, b) => b.n - a.n);
+  const maxLOC = Math.max(...rows.map(r => r.n));
+  const maxImports = Math.max(...rows.map(r => r.imports), 1);
+  const maxImporters = Math.max(...rows.map(r => r.importers), 1);
+  const metric = (v, max, cls='') => `<span class="metric"><span class="range-bar ${cls}" style="--p:${((v / max) * 100).toFixed(1)}%"></span><b>${v.toLocaleString()}</b></span>`;
+  host.innerHTML = `
+    <div class="package-matrix-row header">
+      <div>Package</div><div>Lines</div><div>Imports</div><div>Imported by</div><div>Read first</div>
+    </div>` + rows.map(r => `
+      <div class="package-matrix-row" data-pkg="${r.name}" tabindex="0">
+        <div class="pkg-name">${r.short}</div>
+        <div>${metric(r.n, maxLOC)}</div>
+        <div>${metric(r.imports, maxImports, r.imports > 7 ? 'warn' : '')}</div>
+        <div>${metric(r.importers, maxImporters, r.importers > 4 ? 'hot' : '')}</div>
+        <div class="first-read"><code>${escHTML(r.first)}</code></div>
+      </div>`).join('');
+  host.querySelectorAll('[data-pkg]').forEach(row => {
+    row.addEventListener('click', () => loadPkg(row.dataset.pkg));
+    row.addEventListener('mouseenter', () => loadPkg(row.dataset.pkg));
+    row.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadPkg(row.dataset.pkg); }
+    });
+  });
+}
+
+/* ============================================================
+   Copy buttons. The Anthropic article calls this out as the link
+   between explorables and real workflows: an HTML artifact ends in
+   an "export" that you can paste back into Claude Code, into Go
+   source, or into a shell command.
+   ============================================================ */
+(function () {
+  async function writeClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    // Fallback: a hidden textarea + execCommand for non-secure contexts
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function flashBtn(btn) {
+    const orig = btn.textContent;
+    btn.classList.add('copied');
+    btn.textContent = '✓ copied';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = orig; }, 1200);
+  }
+  function gatherManifest(stableOnly) {
+    const obj = {};
+    document.querySelectorAll('.ss-row').forEach(row => {
+      const stable = row.dataset.stable === '1';
+      if (stableOnly && !stable) return;
+      const inp = row.querySelector('input');
+      obj[inp.dataset.key] = inp.value;
+    });
+    return JSON.stringify(obj, null, 2);
+  }
+  function buildExport(kind) {
+    if (kind === 'sk') {
+      const src  = document.getElementById('sk-source').value;
+      const mac  = document.getElementById('sk-machine').value;
+      const sess = document.getElementById('sk-sess').value;
+      const key  = document.getElementById('sk-key').textContent;
+      return (
+`// Reconstruct this SessionKey in Go:
+sk, _ := model.NewSessionKey(${JSON.stringify(src)}, ${JSON.stringify(mac)}, ${JSON.stringify(sess)})
+// sk.String() == ${JSON.stringify(key)}
+
+// Or address it in a CLI command:
+//   aha read --session ${key}`);
+    }
+    if (kind === 'manifest-full')  return gatherManifest(false);
+    if (kind === 'manifest-state') return gatherManifest(true);
+    return '';
+  }
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const sel = btn.dataset.copy;
+    const kind = btn.dataset.copyCmd;
+    let text = '';
+    if (sel) {
+      const el = document.querySelector(sel);
+      text = el ? (el.textContent || '').trim() : '';
+    } else if (kind) {
+      text = buildExport(kind);
+    }
+    if (!text) return;
+    const ok = await writeClipboard(text);
+    if (ok) flashBtn(btn);
+  });
+})();
+
+/* ============================================================
+   Annotated-code: hovering a side annotation highlights the matching
+   lines in the code block (Willison: inline margin annotations).
+   ============================================================ */
+(function () {
+  const root = document.getElementById('trigger-annot');
+  if (!root) return;
+  const lines = [...root.querySelectorAll('pre .ln')];
+  const annots = [...root.querySelectorAll('.annot')];
+  function highlight(set) {
+    lines.forEach((l, i) => l.classList.toggle('hl', set.has(i + 1)));
+  }
+  for (const a of annots) {
+    const nums = new Set((a.dataset.lines || '').split(',').map(s => parseInt(s, 10)));
+    a.addEventListener('mouseenter', () => { highlight(nums); a.classList.add('active'); });
+    a.addEventListener('mouseleave', () => { highlight(new Set()); a.classList.remove('active'); });
+  }
+})();
+
+/* ============================================================
+   Architecture: nouns map.
+   Hover any noun to highlight its direct relations; click to pin
+   its definition + a concrete example.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('nouns');
+  if (!root) return;
+  const detail = document.getElementById('noun-detail');
+  const nouns = [...root.querySelectorAll('.noun')];
+  const byId = Object.fromEntries(nouns.map(n => [n.dataset.id, n]));
+  let pinned = null;
+  function show(n) {
+    nouns.forEach(x => { x.classList.remove('active'); x.classList.remove('related'); });
+    n.classList.add('active');
+    (n.dataset.rel || '').split(',').filter(Boolean).forEach(id => {
+      if (byId[id]) byId[id].classList.add('related');
+    });
+    detail.innerHTML = `
+      <h4>${n.querySelector('.noun-name').textContent}</h4>
+      <p class="ndef">${n.dataset.def}</p>
+      <div class="nex">${n.dataset.example}</div>
+      <div class="nrel">
+        <span>relates to:</span>
+        ${(n.dataset.rel || '').split(',').filter(Boolean).map(id => `<code>${id}</code>`).join('') || '<span style="color:var(--ink-3);font-style:italic">(top of the graph)</span>'}
+      </div>`;
+  }
+  for (const n of nouns) {
+    n.addEventListener('mouseenter', () => { if (!pinned) show(n); });
+    n.addEventListener('mouseleave', () => {
+      if (!pinned) {
+        nouns.forEach(x => { x.classList.remove('active'); x.classList.remove('related'); });
+      }
+    });
+    n.addEventListener('click', () => {
+      if (pinned === n) { pinned = null; show(n); /* unpin */ }
+      else { pinned = n; show(n); }
+    });
+  }
+})();
+
+/* ============================================================
+   Architecture: layered dependency diagram.
+   Sources of truth, extracted directly from the codebase via:
+     grep '"github.com/adewale/aha/internal/' internal/<pkg>/*.go
+   ============================================================ */
+const PKG_GRAPH = {
+  // bottom: zero-import leaves
+  'model':       { deps: [],                              role: 'sealed types: SessionKey, EntryID, SHA256Hex, Ref variants; the Manifest struct and enums everyone consumes.' },
+  'hash':        { deps: [],                              role: 'SHA-256 helpers (bytes and streaming). Used wherever identity is computed.' },
+  'paths':       { deps: [],                              role: 'tilde expansion and a couple of stable path helpers.' },
+  'clock':       { deps: [],                              role: 'Clock / Sleeper / Backoff seams so ingest busy-retry is deterministic in tests.' },
+  'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
+  'media':       { deps: [],                              role: 'image and text artifact classification.' },
+  'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
+
+  'safety':      { deps: ['model','paths'],               role: 'path containment + source-root validation. Imported by adapters, archive, depot.' },
+  'config':      { deps: ['model','paths','adapters'],    role: 'JSONC config load/write, defaults; reads adapter capabilities to validate.' },
+
+  'adapters':    { deps: ['model','hash'],                role: 'source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures. The only place source-specific behaviour lives.' },
+  'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.' },
+  'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 driver, bundle key validation, catalog merge/repair/compaction. The only package that may import network packages.' },
+
+  'corpus':      { deps: ['model','adapters','archive','clock','fileutil','hash','media','paths'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
+  'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
+
+  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','paths','safety','search'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
+};
+const LAYERS = [
+  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality'] },
+  { label: 'L2 · helpers',         pkgs: ['safety','config'] },
+  { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
+  { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },
+  { label: 'L5 · entry point',     pkgs: ['cli'] },
+];
+const REVERSE_DEPS = (() => {
+  const r = {};
+  for (const p of Object.keys(PKG_GRAPH)) r[p] = [];
+  for (const [p, info] of Object.entries(PKG_GRAPH)) for (const d of info.deps) r[d] && r[d].push(p);
+  return r;
+})();
+renderPackageMatrix();
+(function () {
+  const root = document.getElementById('layer-diagram');
+  if (!root) return;
+  root.innerHTML = LAYERS.map(L => `
+    <div class="layer-row">
+      <div class="layer-no">${L.label}</div>
+      <div class="layer-pkgs">
+        ${L.pkgs.map(p => `<span class="pkg-chip" data-pkg="${p}">${p} <span class="dep-count">${REVERSE_DEPS[p].length}↑</span></span>`).join('')}
+      </div>
+    </div>`).join('');
+  const detail = document.getElementById('layer-detail');
+  function show(name) {
+    const info = PKG_GRAPH[name];
+    const deps = info.deps;
+    const imps = REVERSE_DEPS[name];
+    root.querySelectorAll('.pkg-chip').forEach(c => {
+      c.classList.toggle('active', c.dataset.pkg === name);
+      c.classList.toggle('depended', imps.includes(c.dataset.pkg));
+    });
+    detail.innerHTML = `
+      <h4>${name}</h4>
+      <p>${info.role}</p>
+      <div class="imp-list">
+        <span style="color:var(--ink-3)">imports →</span>
+        ${deps.length ? deps.map(d => `<code class="dep">${d}</code>`).join('') : '<span class="none">none</span>'}
+      </div>
+      <div class="imp-list">
+        <span style="color:var(--ink-3)">imported by →</span>
+        ${imps.length ? imps.map(d => `<code style="color:var(--sand)">${d}</code>`).join('') : '<span class="none">none (top of the graph)</span>'}
+      </div>`;
+  }
+  root.querySelectorAll('.pkg-chip').forEach(c => {
+    c.addEventListener('mouseenter', () => show(c.dataset.pkg));
+    c.addEventListener('click',      () => show(c.dataset.pkg));
+  });
+})();
+
+/* ============================================================
+   Bundle anatomy: hover any tar row to see what's in it.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('bundle-anatomy');
+  if (!root) return;
+  const tree = root.querySelector('.tar-tree');
+  // Inject an info bar below the tree
+  const info = document.createElement('div');
+  info.className = 'tar-info';
+  info.textContent = 'Hover a file to see what it contains and why aha treats it that way.';
+  tree.parentElement.insertBefore(info, tree.nextSibling);
+  tree.querySelectorAll('.tar-row').forEach(r => {
+    r.addEventListener('mouseenter', () => {
+      tree.querySelectorAll('.tar-row').forEach(x => x.classList.toggle('active', x === r));
+      info.textContent = r.dataset.info;
+    });
+  });
+})();
+
+/* ============================================================
+   Schema ER: click a table to reveal its columns.
+   ============================================================ */
+(function () {
+  const root = document.getElementById('schema-er');
+  if (!root) return;
+  root.querySelectorAll('.er-table').forEach(t => {
+    const cols = document.createElement('div');
+    cols.className = 'er-cols';
+    cols.innerHTML = (t.dataset.cols || '').split(/,\s*/).map(c => `· ${c}`).join('<br>');
+    t.appendChild(cols);
+    t.addEventListener('click', () => t.classList.toggle('active'));
+  });
+})();
+</script>
+</body>
+</html>

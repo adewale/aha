@@ -268,6 +268,7 @@ For coding agents using `aha`:
 - `docs/onboarding.md` — verifiable local-first onboarding, troubleshooting, and optional R2 setup.
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
+- `docs/interactive/architecture.html` — single-file interactive explorer (open in any browser; no build). Major-abstractions overview, mechanism explorables, hotspots, schema ER, dependency layers. Source-grounded; drift-tested by `internal/cli/architecture_html_drift_test.go`.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
