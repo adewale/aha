@@ -227,7 +227,8 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 - Source adapters are read-only.
 - Default depot and corpus are local.
 - R2 is explicit opt-in through `--depot r2...` or config.
-- Only `internal/depot` may import network packages.
+- Network imports are confined to `internal/depot` (outbound R2/S3), `internal/server` (the inbound loopback dashboard), and the `internal/cli/command_serve.go` wrapper that constructs it; a static test enforces this allowlist. Search, read, and ingest remain network-free.
+- The dashboard (`aha serve`) binds to loopback by default, validates the `Host` header against a loopback allowlist on every request, requires `application/json` on POST routes, and is read-only; non-loopback binds require explicit `--allow-remote`.
 - R2 credentials are not stored in bundles, catalogs, config output, command JSON, or logs.
 - v1 does not redact secrets; bundles and corpora are private artifacts.
 
@@ -236,6 +237,7 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | Package | Responsibility |
 |---|---|
 | `cmd/aha` | Thin executable entry point. |
+| `cmd/aha-gen-ts` | Regenerates the TypeScript client surface from the Go result types. |
 | `internal/cli` | Command parsing, JSON errors, renderers, registry/docs generation, command orchestration. |
 | `internal/config` | JSONC defaults/load/write. |
 | `internal/adapters` | Source discovery/parsing for Pi, Claude Code, and Codex. |
@@ -243,9 +245,17 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | `internal/depot` | Local/R2 depot drivers, catalog merge/list/fetch/verify/repair. |
 | `internal/corpus` | SQLite schema, ingest transaction, read/status/conflict APIs. |
 | `internal/search` | FTS5 query construction and result mapping. |
+| `internal/mcp` | Read-only MCP server. Wire format, lifecycle, tool registration, schema derivation, strict `additionalProperties:false` input validation, and result envelopes are owned by [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) v1.6+. This package holds the typed input structs, the pure `do<Tool>` business functions, the `CallTool` dispatch the HTTP server reuses (with a `decodeInput` strict-decode that mirrors the SDK's unknown-key rejection on the non-SDK path), and `codegen/` for the TypeScript surface. |
+| `internal/server` | Read-only HTTP dashboard: routes the MCP tool surface plus a `go:embed` UI, with loopback/Host/Content-Type/CSP hardening. |
 | `internal/model` | Shared config, manifest, parsed-session, result/ref types. |
 | `internal/safety` | Path and source-root safety checks. |
 | `internal/media` | Image/artifact classification helpers. |
+
+The CLI, the MCP server, and the HTTP dashboard are three skins over one
+JSON contract: `internal/mcp.CallTool` is the single dispatch point, so adding
+or changing a read tool updates all three surfaces at once. `cmd/aha-gen-ts`
+projects the Go result types into `clients/typescript/aha-mcp.ts` for
+code-mode agent runtimes.
 
 ## Design invariants
 

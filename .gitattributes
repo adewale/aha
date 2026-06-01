@@ -1,0 +1,4 @@
+# Mark the generated TypeScript surface as generated so GitHub collapses it
+# in PR diffs and excludes it from code-search by default. Re-run
+# `go run ./cmd/aha-gen-ts` after changing the Go types it mirrors.
+clients/typescript/aha-mcp.ts linguist-generated=true

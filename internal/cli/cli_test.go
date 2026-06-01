@@ -590,3 +590,41 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 		t.Fatalf("verify --repair-fts did not repair drift or emit counters: %s", out.String())
 	}
 }
+
+// TestCLIMcpDryRunSmokeChecksRegistration proves --dry-run opens the corpus,
+// registers tools, prints a one-line summary, and exits 0 — without serving
+// stdio. Hosts use this to confirm their `aha mcp` wiring is correct before
+// connecting a real MCP client.
+func TestCLIMcpDryRunSmokeChecksRegistration(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	outDir := filepath.Join(root, "out")
+	corpusDir := filepath.Join(root, "corpus")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "mcp-dry"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	bundle := snapshotPathFromOutput(t, out.String())
+	out.Reset()
+	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, bundle}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	if err := cli.Run([]string{"mcp", "--dry-run", "--corpus", corpusDir}, io.Discard, &stderr); err != nil {
+		t.Fatalf("mcp --dry-run failed: %v\n%s", err, stderr.String())
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "dry-run ok") {
+		t.Fatalf("dry-run summary missing 'dry-run ok': %q", got)
+	}
+	for _, name := range []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"} {
+		if !strings.Contains(got, name) {
+			t.Fatalf("dry-run summary missing tool %q in %q", name, got)
+		}
+	}
+
+	if err := cli.Run([]string{"mcp", "--dry-run", "--corpus", filepath.Join(root, "missing")}, io.Discard, io.Discard); err == nil {
+		t.Fatal("dry-run should fail when corpus is missing")
+	}
+}

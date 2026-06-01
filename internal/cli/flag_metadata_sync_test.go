@@ -103,7 +103,7 @@ func parseCommandFlags(t *testing.T) map[string][]string {
 				}
 				argIndex := 0
 				switch sel.Sel.Name {
-				case "String", "Bool", "Int":
+				case "String", "Bool", "Int", "Int64", "Float64", "Uint", "Uint64", "Duration":
 					argIndex = 0
 				case "Var":
 					argIndex = 1

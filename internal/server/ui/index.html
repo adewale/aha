@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>aha</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>aha</h1>
+  <div id="status-strip" class="muted">loading status…</div>
+</header>
+
+<main>
+  <section id="search">
+    <form id="search-form">
+      <input id="query" placeholder="search messages and artifacts" autofocus>
+      <input id="project" placeholder="project (optional)">
+      <input id="source" placeholder="source (optional)">
+      <input id="machine" placeholder="machine (optional)">
+      <button type="submit">search</button>
+    </form>
+    <ol id="results"></ol>
+  </section>
+
+  <section id="reader">
+    <h2>read</h2>
+    <p class="muted">select a result to load surrounding context</p>
+    <pre id="reader-body"></pre>
+  </section>
+
+  <section id="conflicts-section">
+    <h2>conflicts</h2>
+    <ul id="conflicts"></ul>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

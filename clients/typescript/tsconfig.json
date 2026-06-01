@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["**/*.ts"],
+  "//exclude": "test/ is verified at runtime via `node --test` (it needs @types/node and .ts-extension imports); tsc typechecks only the shippable client surface.",
+  "exclude": ["test"]
+}

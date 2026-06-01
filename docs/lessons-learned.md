@@ -86,6 +86,18 @@ Current counts after cycle 10:
 - Lightweight formal sketches are not useful unless they are executable or checked. Prefer Go state machines/properties already run by CI over standalone model notes that can drift.
 - Open-world agent data should not get strict enum `CHECK` constraints too early. Typed role helpers can centralize decisions without rejecting future roles from raw histories.
 
+## Agent-facing surface lessons (MCP, dashboard, code-mode)
+
+- Do not own the wire format. The first MCP server hand-rolled JSON-RPC framing and inherited tracebase's `Content-Length:` framing, which real MCP clients cannot decode (the spec mandates newline-delimited JSON). Migrating to the official `github.com/modelcontextprotocol/go-sdk` deleted the framer/protocol/fuzz code (~350 lines) and made spec-version drift, structured output, tool annotations, and lifecycle someone else's problem.
+- Cross-SDK conformance finds what spec-reading and self-testing cannot. Testing a framer against itself proves nothing. Driving `aha mcp` from three independent SDK clients (Python, TypeScript, Go) and driving our TS client against three SDK servers — six legs in both directions — surfaced bugs invisible to one implementation: empty Go slices marshalling to `null` instead of `[]`, and the Python SDK's Pydantic model rejecting array `structuredContent` as a type error. A bug visible to only one SDK is still a real bug.
+- Read what the library actually does before writing a workaround for it. Two helpers (`rejectExtras`, `objectResult`) existed to enforce `additionalProperties:false` and to build dual text+structured results — both of which the SDK already does on every call (`applySchema` validation; auto-fill of content and structuredContent from a non-nil typed return). Tracing the SDK source deleted both helpers with no behaviour change.
+- A generated client surface needs a drift test or it rots silently. `clients/typescript/aha-mcp.ts` is reflected from the Go types; a byte-comparison test regenerates it in CI and fails when the checked-in file is stale, so the typed surface cannot diverge from the server it describes.
+- One dispatch, many transports. CLI, MCP (stdio), and the HTTP dashboard all route through a single `mcp.CallTool`. An in-process consistency test sends the same tool+args through both the HTTP and MCP paths against one backend and asserts equal payloads, so a change to one skin cannot silently diverge from the others.
+- Read-only is strongest by construction, not by flag. The MCP server simply never registers write tools; there is no "disable writes" toggle to misconfigure. An agent cannot reach `ingest`/`snapshot`/`refresh` over MCP because those handlers were never added.
+- Dashboard security is defense-in-depth and fail-closed. Loopback bind by default; non-loopback refused at `Listen` time unless `--allow-remote` and a bearer token are both set; Host-header allowlist with numeric-port enforcement (blunts DNS-rebinding); JSON content-type enforcement on POST; strict CSP. Each layer landed with a hostile-input regression test (IMDS hostnames, IDN homographs, malformed IPv6 brackets).
+- Position honestly: substrate versus product. The README originally promised pattern detection ("spot patterns, turn them into skills"). This branch ships the substrate that makes that cheap, not the detection itself. Walking the claim back to "examine your behaviour today; pattern detection is the next layer" keeps the front door truthful.
+- CI is a contract, and a silent shell bug makes it a lie. A global bash `RETURN` trap referencing a function-local `$tmpdir` re-fired when an outer function returned and tripped `set -u`, so `verify.sh ci` had been failing since the conformance suite landed while `verify.sh mcp` passed. Mode-specific green is not whole-suite green; run the exact mode CI runs before claiming the build is fixed.
+
 ## Testing lessons
 
 Invariant tests should come before feature breadth. The non-negotiable invariants are:
@@ -175,3 +187,6 @@ Additional testing lessons:
 - Conflict display/search policy can be improved later.
 - More real anonymized Claude Code image/attachment fixtures are still needed before a broader release claim.
 - Performance validation on very large real corpora remains release-hardening work.
+- Pattern detection over the corpus is documented (`docs/research/agent-trace-tools.md`) but not built; this branch ships only the substrate that makes it cheap.
+- The HTTP transport throws plain `Error("<code>: <message>")` while the stdio client throws a typed `AhaMcpError`; symmetric typed errors across both transports are deferred.
+- There is no batch-read MCP primitive; code-mode callers fan out with `Promise.all(refs.map(read))` instead, which already collapses to one model turn.

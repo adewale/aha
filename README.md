@@ -1,20 +1,31 @@
 # aha — Agent History Aggregator
 
-`aha` is local search and retrieval for coding-agent history. It turns scattered Pi, Claude Code, and Codex transcripts into a private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and agent-friendly refs.
+`aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-Use it when agent conversations are becoming project memory and you want one local archive across tools and machines.
+It captures Pi, Claude Code, and Codex sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. Pattern detection and skill-candidate generation are documented as the next layer; they're not in the box today.
+
+Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
 ## Who is this for?
 
-`aha` is for developers who use coding agents heavily and want past agent conversations to become searchable project memory.
+`aha` is for developers who:
 
-It is especially useful if you:
-
-- use multiple tools such as Pi, Claude Code, and Codex;
-- work across multiple machines;
+- use multiple coding agents (Pi, Claude Code, Codex — more adapters later) and want one place to examine everything they've done;
+- work across multiple machines and want a portable, content-addressed history that follows them;
+- want to *manually* find patterns in their own prompts and agent behaviour today, and want the substrate that automated pattern detection will be built on tomorrow;
+- want their agents to *read* the depot today via MCP, with the "agent proposes new skills" loop tracked but not yet built;
 - need private local search over agent transcripts;
-- want agents/scripts to retrieve prior context with stable JSON and refs;
 - are currently using `rg`, ad hoc scripts, or tool-specific history search.
+
+## What ships today
+
+The substrate is built. The pattern-detection layer the substrate is for is documented, not implemented:
+
+- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results and reading full session context. Today: search box, results list, read pane, status strip, conflicts panel. Tomorrow (tracked in `docs/research/agent-trace-tools.md`): recurring-command rollups, retried-prompt views, costly-loop detection. Today's view is "browse"; tomorrow's view is "diagnose".
+- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?" or "which prompts do I keep repeating?" *via search queries you write*. The agent can't yet author skills from what it finds — that's the next layer.
+- **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can fan out (`search → filter → Promise.all(read)`) over the corpus in one round trip. See `clients/typescript/README.md` for concrete examples.
+
+The longer-term direction is the pattern-detection layer in `docs/research/agent-trace-tools.md`: skill-candidate detection, recurring-failure rollups, cross-machine "what was I doing last Tuesday across all my agents". Nothing in there ships in this release.
 
 ## What does it replace?
 
@@ -30,18 +41,19 @@ Many users start with:
 
 ## Why use it?
 
-- **One corpus for multiple agents**: Pi, Claude Code, and Codex today; more adapters later.
+- **One corpus for multiple agents on multiple machines**: Pi, Claude Code, and Codex today across every machine you work from; more adapters later.
+- **Built for pattern-finding**: a stable schema and a typed retrieval surface so you (or an agent on your behalf) can ask "what do I keep doing", "where did this go wrong before", "have I asked this already".
 - **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
-- **Portable history**: share a depot, copy a bundle from another machine, or `aha ingest` it.
-- **Better than snippets**: search finds leads; read retrieves full context so humans and agents do not answer from snippets alone.
-- **Agent-friendly retrieval**: JSON, refs, Markdown, and stable `search → read` workflows.
-- **Auditable trust claims**: read-only source access, local-by-default behavior, and network boundaries are tested.
+- **Portable history**: deterministic `tar.zst` bundles + a local-or-R2 depot; share a depot, copy a bundle from another machine, or `aha ingest` it.
+- **Better than snippets**: search finds leads; `read` retrieves full context so humans and agents do not answer from fragments.
+- **Agent-friendly retrieval**: JSON, refs, Markdown, a read-only MCP server, and a typed TypeScript client for code-mode runtimes.
+- **Auditable trust claims**: read-only source access, local-by-default behaviour, and network boundaries are tested.
 
 ## Privacy warning
 
 V1 does **not** redact secrets. Bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-See `docs/trust.md` for the trust model and verification commands.
+Redaction at ingest is the next planned change; see `docs/redaction-spec.md` for the design and `docs/trust.md` for the current trust model and verification commands.
 
 ## Install / build
 
@@ -180,6 +192,8 @@ aha conflicts [--repo DIR] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
+aha mcp [--config PATH] [--repo DIR] [--dry-run]
+aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
 ```
 
 Command roles:
@@ -196,6 +210,8 @@ Command roles:
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
+- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
+- `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Loopback binds need no auth; passing `--allow-remote` (or setting `AHA_ALLOW_REMOTE=1`) requires a shared-secret bearer token via `--token` (or `AHA_DASHBOARD_TOKEN`). Hostnames accepted via `Host:` are restricted to the loopback allowlist by default; extend with `--allowed-hosts`.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
 
@@ -268,7 +284,11 @@ For coding agents using `aha`:
 - `docs/onboarding.md` — verifiable local-first onboarding, troubleshooting, and optional R2 setup.
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
-- `docs/interactive/architecture.html` — single-file interactive explorer (open in any browser; no build). Major-abstractions overview, mechanism explorables, hotspots, schema ER, dependency layers. Source-grounded; drift-tested by `internal/cli/architecture_html_drift_test.go`.
+- `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
+- `docs/redaction-spec.md` — secret-redaction design (v1.1, in design).
+- `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
+- `docs/research/openinference.md` — OpenInference semantic-convention reference.
+- `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec.
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.

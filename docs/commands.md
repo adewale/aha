@@ -158,6 +158,28 @@ aha init [--config PATH] [--accept-secrets] [--json]
 
 **JSON contract:** `object{config,accepted_secrets}`
 
+## aha mcp
+
+run a read-only stdio MCP server over the corpus
+
+```txt
+aha mcp [--config PATH] [--repo DIR] [--dry-run]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--dry-run`
+- `--repo`
+
+**Examples:**
+
+- `aha mcp`
+- `aha mcp --dry-run`
+
+**JSON contract:** `jsonrpc:tools/list|tools/call (stdio MCP)`
+
 ## aha read
 
 retrieve source context for a search result
@@ -248,6 +270,33 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `aha search needle --refs`
 
 **JSON contract:** `array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>`
+
+## aha serve
+
+run a read-only local dashboard over the corpus on loopback
+
+```txt
+aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
+```
+
+**Flags:**
+
+- `--addr`
+- `--allow-remote`
+- `--allowed-hosts`
+- `--config`
+- `--corpus`
+- `--repo`
+- `--timeout`
+- `--token`
+
+**Examples:**
+
+- `aha serve`
+- `aha serve --addr 127.0.0.1:18428`
+- `aha serve --allow-remote --token $(openssl rand -hex 32)`
+
+**JSON contract:** `http://HOST:PORT/api/{search,read,status,verify,conflicts,corpus_size,doctor}`
 
 ## aha snapshot
 

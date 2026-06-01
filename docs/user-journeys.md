@@ -111,6 +111,42 @@ Rationale:
 - Explicit flags should override every default.
 - Privacy acknowledgement can come from `AHA_ACCEPT_SECRETS=1` in controlled scripts.
 
+## Journey 6: an agent queries history as tools
+
+User goal: “Let my coding agent search and read prior sessions without shelling out per call.”
+
+```bash
+# Register once in the MCP host's config:
+#   { "mcpServers": { "aha": { "command": "aha", "args": ["mcp"] } } }
+aha mcp
+
+# Smoke-test the wiring before connecting a host:
+aha mcp --dry-run
+```
+
+Rationale:
+
+- Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
+- It reuses the same corpus/search code as the CLI, so results match `--json` output exactly.
+- It is read-only by construction: snapshot/refresh/ingest are not reachable, so an agent cannot mutate the corpus.
+- `--dry-run` opens the corpus, registers tools, prints a one-line summary, and exits — confirms a host config before stdio carries protocol traffic.
+- For code-mode runtimes, the typed surface in `clients/typescript/` lets the agent fan out (`search` → filter → `read`) in one round trip. See `docs/mcp-spec.md`.
+
+## Journey 7: browse the corpus locally
+
+User goal: “Give me a quick local UI to search, read, and see conflicts.”
+
+```bash
+aha serve
+# → aha dashboard listening on http://127.0.0.1:18428
+```
+
+Rationale:
+
+- Same read tools as `mcp`, served as HTTP/JSON plus a tiny embedded UI; no Node runtime on the host.
+- Loopback-only and read-only by default; the `Host` header is validated to blunt DNS-rebinding, and non-loopback binds require `--allow-remote`.
+- Result clicks deep-link the ref into the URL fragment so a view is reloadable and shareable.
+
 ## Defaults chosen from the journeys
 
 | Command | No-flag behavior |
@@ -138,6 +174,8 @@ Rationale:
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
 | `depot` | Initialize, list, and verify the durable bundle store. |
 | `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |
+| `mcp` | Expose read tools to coding agents over stdio MCP without per-call subprocesses. |
+| `serve` | Read-only local dashboard over the same tool surface for human browsing. |
 | `init` | Optional: materialize editable defaults and one-time privacy acknowledgement. |
 
 ## When to use flags
