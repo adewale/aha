@@ -2090,8 +2090,8 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">8,399</span> production lines</dd>
-    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">15</span> in <code>internal/</code></dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">9,921</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">17</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num">12</span></dd>
@@ -4352,14 +4352,18 @@ const PKG_GRAPH = {
   'corpus':      { deps: ['model','adapters','archive','clock','fileutil','hash','media','paths'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
   'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
 
-  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','paths','safety','search'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
+  'mcp':         { deps: ['adapters','config','corpus','model','search'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
+  'server':      { deps: ['mcp','model'],                 role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON content-type enforcement, request timeout.' },
+
+  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
 };
 const LAYERS = [
   { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality'] },
   { label: 'L2 · helpers',         pkgs: ['safety','config'] },
   { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
   { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },
-  { label: 'L5 · entry point',     pkgs: ['cli'] },
+  { label: 'L5 · agent surfaces',  pkgs: ['mcp','server'] },
+  { label: 'L6 · entry point',     pkgs: ['cli'] },
 ];
 const REVERSE_DEPS = (() => {
   const r = {};
