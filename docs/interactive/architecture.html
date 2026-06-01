@@ -7,30 +7,48 @@
 <style>
 /* ---------- design tokens ---------------------------------------------- */
 :root {
-  /* warm-graphite neutrals tinted toward 80° amber (chroma 0.012-0.018) */
-  --bg:          oklch(14% 0.012 80);
-  --surface:     oklch(17.5% 0.013 80);
-  --surface-2:   oklch(21% 0.014 80);
-  --line:        oklch(29% 0.015 80);
-  --line-strong: oklch(38% 0.018 80);
-  --ink:         oklch(94% 0.008 80);
-  --ink-2:       oklch(76% 0.014 80);
-  --ink-3:       oklch(66% 0.014 80);
+  /* cool porcelain neutrals: light without the default cream/beige AI surface */
+  --bg:          oklch(96.5% 0.006 240);
+  --surface:     oklch(99% 0.003 240);
+  --surface-2:   oklch(93.5% 0.007 240);
+  --surface-3:   oklch(89.5% 0.008 240);
+  --code-bg:     oklch(94% 0.006 240);
+  --tooltip-bg:  oklch(99% 0.003 240 / 0.96);
+  --bg-glass:    oklch(96.5% 0.006 240 / 0.92);
+  --line:        oklch(83% 0.008 240);
+  --line-strong: oklch(68% 0.012 240);
+  --ink:         oklch(20% 0.018 240);
+  --ink-2:       oklch(32% 0.018 240);
+  --ink-3:       oklch(44% 0.016 240);
 
   /* sage: archival, deliberate, canonical (175° green) */
-  --sage:        oklch(78% 0.115 175);
-  --sage-deep:   oklch(64% 0.12 175);
-  --sage-soft:   oklch(78% 0.115 175 / 0.14);
-  --sage-line:   oklch(78% 0.115 175 / 0.42);
+  --sage:        oklch(45% 0.09 172);
+  --sage-deep:   oklch(35% 0.085 172);
+  --sage-soft:   oklch(88% 0.055 172 / 0.45);
+  --sage-wash:   oklch(90% 0.045 172 / 0.24);
+  --sage-line:   oklch(52% 0.09 172 / 0.34);
+  --sage-flash:  oklch(78% 0.08 172 / 0.32);
 
   /* clay: doubt, hotspots (40° terracotta) */
-  --clay:        oklch(74% 0.14 40);
-  --clay-soft:   oklch(74% 0.14 40 / 0.14);
-  --clay-line:   oklch(74% 0.14 40 / 0.42);
+  --clay:        oklch(49% 0.13 40);
+  --clay-soft:   oklch(89% 0.075 40 / 0.48);
+  --clay-wash:   oklch(91% 0.055 40 / 0.24);
+  --clay-line:   oklch(55% 0.12 40 / 0.34);
 
   /* sand: accepted limit (85° muted gold) */
-  --sand:        oklch(82% 0.12 85);
-  --sand-soft:   oklch(82% 0.12 85 / 0.14);
+  --sand:        oklch(52% 0.105 82);
+  --sand-soft:   oklch(90% 0.08 82 / 0.48);
+  --sand-line:   oklch(58% 0.105 82 / 0.34);
+
+  /* light-mode shadow rings; dividers still use borders */
+  --shadow-border:
+    0 0 0 1px rgba(0, 0, 0, 0.055),
+    0 1px 2px -1px rgba(0, 0, 0, 0.08),
+    0 12px 28px -24px rgba(74, 55, 24, 0.28);
+  --shadow-border-hover:
+    0 0 0 1px rgba(0, 0, 0, 0.085),
+    0 2px 5px -2px rgba(0, 0, 0, 0.12),
+    0 18px 34px -24px rgba(74, 55, 24, 0.34);
 
   --accent: var(--sage);
   --accent-2: var(--sage-deep);  /* JS pipeline label color */
@@ -49,8 +67,8 @@
   --s-1: 4px; --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 24px;
   --s-6: 32px; --s-7: 48px; --s-8: 64px; --s-9: 96px; --s-10: 128px;
 
-  --radius:    6px;
-  --radius-lg: 10px;
+  --radius:    8px;
+  --radius-lg: 16px;
 
   --ease:      cubic-bezier(0.25, 1, 0.5, 1);   /* ease-out-quart */
   --ease-soft: cubic-bezier(0.33, 1, 0.68, 1);
@@ -62,13 +80,19 @@
 
 /* ---------- base ------------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--ink); }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 body {
   font: 400 var(--t-md)/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI",
         system-ui, "Helvetica Neue", Arial, sans-serif;
   font-feature-settings: "kern", "liga", "calt", "ss01";
-  -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  background: var(--bg);
 }
 p { text-wrap: pretty; }
 .mono, code, pre, input.mono {
@@ -78,14 +102,15 @@ p { text-wrap: pretty; }
 }
 code {
   background: var(--surface-2);
-  padding: 1px 6px;
+  padding: 0.08em 0.42em;
   border-radius: 4px;
   font-size: 90%;
-  color: oklch(86% 0.012 80);
+  color: var(--ink);
 }
 pre {
-  background: oklch(11% 0.011 80);
-  border: 1px solid var(--line);
+  background: var(--code-bg);
+  border: 0;
+  box-shadow: var(--shadow-border);
   padding: var(--s-4) var(--s-5);
   border-radius: var(--radius-lg);
   overflow-x: auto;
@@ -104,7 +129,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .mono, code, pre, .nums { font-variant-numeric: tabular-nums; }
 
 ::selection { background: var(--sage-soft); color: var(--ink); }
-:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; border-radius: 6px; }
 
 /* ---------- layout: sidebar + main -------------------------------------- */
 .layout {
@@ -142,7 +167,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
     border-right: 0;
     border-bottom: 1px solid var(--line);
     z-index: 30;
-    background: oklch(14% 0.012 80 / 0.95);
+    background: var(--bg-glass);
     backdrop-filter: saturate(140%) blur(8px);
     -webkit-backdrop-filter: saturate(140%) blur(8px);
   }
@@ -242,7 +267,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
 /* main content area */
 main.content {
   padding: var(--s-7) var(--s-7) var(--s-10);
-  max-width: 1000px;
+  max-width: 1160px;
   min-width: 0;
 }
 @media (max-width: 880px) {
@@ -278,10 +303,114 @@ section.active { display: block; }
   margin: 0;
 }
 
+/* ---------- Tufte primitives ------------------------------------------ */
+.figure {
+  margin: var(--s-5) 0 var(--s-7);
+}
+.figure > svg,
+.figure > .figure-body {
+  margin: 0;
+}
+.figcaption {
+  max-width: 78ch;
+  margin-top: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+.figcaption b { color: var(--ink); font-weight: 600; }
+.sidenote {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  border-top: 1px solid var(--sage-line);
+  padding-top: var(--s-3);
+  max-width: 34ch;
+}
+.sidenote b { color: var(--ink); font-weight: 600; }
+.sidenote code { background: transparent; padding: 0; color: var(--ink-2); }
+.pull-note {
+  float: right;
+  width: min(260px, 32%);
+  margin: 0 0 var(--s-5) var(--s-6);
+}
+.margin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  gap: var(--s-6);
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .pull-note { float: none; width: auto; margin: 0 0 var(--s-5); max-width: 70ch; }
+  .margin-grid { grid-template-columns: 1fr; }
+  .sidenote { max-width: 70ch; }
+}
+.evidence-note {
+  margin: var(--s-5) 0;
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--sage-line);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  max-width: 78ch;
+}
+.evidence-note b { color: var(--ink); }
+.sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 80px;
+  height: 18px;
+  color: var(--sage);
+}
+.sparkline polyline { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.sparkline circle { fill: var(--sage); }
+.range-bar {
+  --p: 0%;
+  position: relative;
+  display: inline-block;
+  width: 110px;
+  height: 18px;
+  vertical-align: middle;
+}
+.range-bar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--line-strong);
+}
+.range-bar::after {
+  content: "";
+  position: absolute;
+  left: var(--p);
+  top: 50%;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--sage);
+  transform: translate(-50%, -50%);
+}
+.range-bar.warn::after { background: var(--sand); }
+.range-bar.hot::after { background: var(--clay); }
+
 /* ---------- pipeline (Tufte: minimal ink, no box chartjunk) ------------ */
 .pipeline-wrap {
   margin: 0 0 var(--s-7);
   padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  gap: var(--s-6);
+  align-items: start;
+}
+.pipeline-wrap .figure { grid-column: 1; margin-top: 0; }
+.pipeline-wrap .pull-note { grid-column: 2; float: none; width: auto; margin: var(--s-5) 0 0; }
+.pipeline-wrap .pkg-info { grid-column: 1 / -1; }
+@media (max-width: 980px) {
+  .pipeline-wrap { grid-template-columns: 1fr; }
+  .pipeline-wrap .figure,
+  .pipeline-wrap .pull-note,
+  .pipeline-wrap .pkg-info { grid-column: 1; }
+  .pipeline-wrap .pull-note { margin-top: 0; }
 }
 h3.sub {
   font-size: var(--t-md);
@@ -300,11 +429,11 @@ h3.sub {
   font-size: var(--t-md);
   line-height: 1.55;
   min-height: 1.6em;
-  padding: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
   max-width: 75ch;
-  border-left: 2px solid var(--sage-line);
-  background: var(--sage-soft);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-top: 1px solid var(--sage-line);
+  background: transparent;
+  border-radius: 0;
   transition: background .18s var(--ease);
 }
 .pkg-info b { color: var(--sage); font-weight: 600; }
@@ -334,7 +463,8 @@ svg .arrow {
 }
 svg .arrow.thick { stroke: var(--sage); stroke-width: 1.6; }
 svg .grp { cursor: pointer; transition: opacity .15s var(--ease); }
-svg .grp:hover { opacity: 0.8; }
+svg .grp:hover { opacity: 1; }
+svg .grp:hover text.title { fill: var(--sage-deep); }
 svg .grp:hover .rule { stroke: var(--sage); }
 
 /* ---------- key facts (typographic list, not card grid) ---------------- */
@@ -452,7 +582,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   padding: 0;
   font-family: ui-monospace, Menlo, monospace;
   font-size: var(--t-sm);
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   min-height: 100px;
@@ -460,7 +590,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   overflow-y: auto;
 }
 .db-table:empty::before {
-  content: "— empty —";
+  content: "– empty –";
   display: block;
   color: var(--ink-3);
   padding: var(--s-3);
@@ -468,7 +598,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-size: var(--t-xs);
 }
 .db-table li {
-  padding: 4px var(--s-3);
+  padding: var(--s-1) var(--s-3);
   color: var(--ink-2);
   border-bottom: 1px solid var(--line);
   display: grid;
@@ -484,7 +614,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   animation: dbflash .5s var(--ease);
 }
 @keyframes dbflash {
-  0%   { background: oklch(74% 0.115 175 / 0.35); }
+  0%   { background: var(--sage-flash); }
   100% { background: transparent; }
 }
 .db-table li.conflict-row { color: var(--clay); }
@@ -506,7 +636,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   color: var(--ink-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 6px var(--s-3);
+  padding: var(--s-2) var(--s-3);
   font: inherit;
   font-size: var(--t-sm);
   cursor: pointer;
@@ -520,7 +650,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 
 .db-log {
   grid-column: 1 / span 2;
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--s-3) var(--s-4);
@@ -565,7 +695,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 5px 8px;
+  padding: var(--s-1) var(--s-2);
   font: 13px ui-monospace, Menlo, monospace;
   min-width: 0;
   width: 100%;
@@ -593,7 +723,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-size: var(--t-xs);
   word-break: break-all;
   color: var(--sage);
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   padding: var(--s-2) var(--s-3);
   border-radius: var(--radius);
   border: 1px solid var(--line);
@@ -602,13 +732,12 @@ svg .grp:hover .rule { stroke: var(--sage); }
 }
 .ss-hash-value.flash {
   border-color: var(--sage);
-  background: oklch(74% 0.115 175 / 0.12);
+  background: var(--sage-soft);
 }
 .ss-hash-bar {
   height: 4px;
   background: var(--line);
   border-radius: 999px;
-  overflow: hidden;
   position: relative;
 }
 .ss-hash-bar > div {
@@ -660,7 +789,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .widget .row.two { grid-template-columns: 1fr 1fr; align-items: start; }
 @media (max-width: 720px) { .widget .row, .widget .row.two { grid-template-columns: 1fr; } }
 .widget .out {
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--s-4) var(--s-4);
@@ -710,15 +839,15 @@ svg .grp:hover .rule { stroke: var(--sage); }
   box-sizing: border-box;
 }
 /* very faint tints; encode quadrant meaning without competing with the data */
-.scatter-host .quad.tl { left: 0; top: 0; background: oklch(74% 0.14 40 / 0.05); }
-.scatter-host .quad.tr { right: 0; top: 0; background: oklch(78% 0.115 175 / 0.05); }
+.scatter-host .quad.tl { left: 0; top: 0; background: var(--clay-wash); }
+.scatter-host .quad.tr { right: 0; top: 0; background: var(--sage-wash); }
 .scatter-host .quad.bl { left: 0; bottom: 0; background: transparent; }
 .scatter-host .quad.br { right: 0; bottom: 0; background: transparent; }
 .scatter-host .quad .qlabel {
   position: absolute;
   font-size: var(--t-sm);
   color: var(--ink-3);
-  padding: 6px var(--s-3);
+  padding: var(--s-2) var(--s-3);
   max-width: 26ch;
   font-style: italic;
 }
@@ -779,7 +908,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   cursor: pointer;
   z-index: 5;
   border: 2px solid var(--bg);
-  /* transform + border-color only — never width/height (layout-driving) */
+  /* transform + border-color only – never width/height (layout-driving) */
   transition: transform .2s var(--ease), border-color .2s var(--ease);
 }
 .scatter-host .pt:hover {
@@ -797,7 +926,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   position: absolute;
   transform: translate(-50%, 10px);
   color: var(--ink-2);
-  padding: 2px 6px;
+  padding: 0.15em 0.45em;
   font-size: var(--t-xs);
   white-space: nowrap;
   pointer-events: none;
@@ -810,7 +939,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .scatter-host .pt-label.show {
   opacity: 1;
   color: var(--ink);
-  background: oklch(11% 0.011 80 / 0.92);
+  background: var(--tooltip-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
@@ -859,11 +988,65 @@ svg .grp:hover .rule { stroke: var(--sage); }
   border-bottom: 1px solid var(--line);
 }
 
+.ranked-hotspots {
+  margin: var(--s-4) 0 var(--s-7);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.hotspot-rank-row {
+  display: grid;
+  grid-template-columns: 34px minmax(180px, 1.05fr) 150px minmax(180px, 1.05fr) minmax(220px, 1.45fr);
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.hotspot-rank-row:hover,
+.hotspot-rank-row.active { background: var(--sage-wash); }
+.hotspot-rank-row.active .issue { color: var(--sage); }
+.hotspot-rank-row.header {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.hotspot-rank-row.header:hover { background: transparent; }
+.hotspot-rank-row .rank {
+  color: var(--ink-3);
+  font-family: ui-monospace, Menlo, monospace;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hotspot-rank-row .issue { color: var(--ink); font-weight: 600; }
+.hotspot-rank-row .where,
+.hotspot-rank-row .next { line-height: 1.45; }
+.hotspot-rank-row .where code { background: transparent; padding: 0; color: var(--ink-3); }
+.hotspot-rank-row .score {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  align-items: center;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.hotspot-rank-row .score-num { color: var(--ink-2); }
+@media (max-width: 980px) {
+  .hotspot-rank-row { grid-template-columns: 34px 1fr; }
+  .hotspot-rank-row.header { display: none; }
+  .hotspot-rank-row .score,
+  .hotspot-rank-row .where,
+  .hotspot-rank-row .next { grid-column: 2; }
+}
+
 /* tag chips */
 .tag-chip {
   display: inline-block;
   font-size: var(--t-sm);
-  padding: 2px 9px;
+  padding: 0.15em 0.65em;
   border-radius: 999px;
   border: 1px solid var(--line);
   color: var(--ink-2);
@@ -875,7 +1058,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .tag-chip.novel { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
 .tag-chip.solid { color: var(--sage); border-color: var(--sage-line); background: var(--sage-soft); }
 .tag-chip.hot   { color: var(--clay); border-color: var(--clay-line); background: var(--clay-soft); }
-.tag-chip.warn  { color: var(--sand); border-color: oklch(82% 0.12 85 / 0.42); background: var(--sand-soft); }
+.tag-chip.warn  { color: var(--sand); border-color: var(--sand-line); background: var(--sand-soft); }
 
 /* ---------- codebase map ---------------------------------------------- */
 .map-grid {
@@ -898,6 +1081,54 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .pkg-detail li { margin-bottom: var(--s-2); color: var(--ink-2); line-height: 1.55; }
 .pkg-detail code { font-size: var(--t-sm); }
 
+.package-matrix {
+  margin-top: var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.package-matrix-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) 150px 150px 150px minmax(220px, 1.6fr);
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.package-matrix-row:hover { background: var(--sage-wash); }
+.package-matrix-row.header {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+}
+.package-matrix-row.header:hover { background: transparent; }
+.package-matrix-row .pkg-name {
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, monospace;
+  font-weight: 600;
+}
+.package-matrix-row .metric {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  align-items: center;
+  font-family: ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.package-matrix-row .metric b { color: var(--ink-2); font-weight: 500; }
+.package-matrix-row .first-read { line-height: 1.45; color: var(--ink-2); }
+.package-matrix-row .first-read code { background: transparent; padding: 0; color: var(--ink-2); }
+@media (max-width: 980px) {
+  .package-matrix-row { grid-template-columns: minmax(140px, 1fr) 1fr; }
+  .package-matrix-row.header { display: none; }
+  .package-matrix-row .metric,
+  .package-matrix-row .first-read { grid-column: 2; }
+}
+
 /* reading order list */
 .reading-order {
   list-style: none;
@@ -917,7 +1148,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 }
 .reading-order li:first-child { border-top: 0; }
 .reading-order li::before {
-  content: counter(step, decimal-leading-zero);
+  content: counter(step);
   position: absolute;
   left: 0; top: var(--s-4);
   font-family: ui-monospace, Menlo, monospace;
@@ -1003,7 +1234,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   color: var(--ink-3);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 3px var(--s-3);
+  padding: 0.2em var(--s-3);
   font: inherit;
   font-size: var(--t-xs);
   font-family: ui-monospace, Menlo, monospace;
@@ -1028,8 +1259,8 @@ svg .grp:hover .rule { stroke: var(--sage); }
   border-radius: var(--radius-lg);
   padding: var(--s-5);
 }
-.compare .pane.bad   { border-left: 3px solid var(--clay); }
-.compare .pane.good  { border-left: 3px solid var(--sage); }
+.compare .pane.bad   { box-shadow: inset 0 2px 0 var(--clay); }
+.compare .pane.good  { box-shadow: inset 0 2px 0 var(--sage); }
 .compare .pane h4 {
   margin: 0 0 var(--s-3);
   font-size: var(--t-md);
@@ -1071,8 +1302,8 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-size: var(--t-xs);
   color: var(--ink-2);
   line-height: 1.55;
-  padding-left: var(--s-3);
-  border-left: 2px solid var(--sage-line);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--sage-line);
   cursor: pointer;
   transition: border-color .15s var(--ease), color .15s var(--ease);
 }
@@ -1089,12 +1320,12 @@ svg .grp:hover .rule { stroke: var(--sage); }
   display: block;
   color: var(--ink);
   font-weight: 600;
-  margin-bottom: 2px;
+  margin-bottom: var(--s-1);
 }
 .annotated-code pre {
   position: relative;
   counter-reset: lno;
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
 }
 .annotated-code pre .ln {
   display: block;
@@ -1124,13 +1355,13 @@ svg .grp:hover .rule { stroke: var(--sage); }
 
 /* ---------- callout boxes (Willison: severity-coded callouts) -------- */
 .callout {
-  border-left: 3px solid var(--line);
+  border-top: 1px solid var(--line);
   background: var(--surface);
-  padding: var(--s-3) var(--s-4);
+  padding: var(--s-3) 0;
   margin: var(--s-4) 0;
   font-size: var(--t-sm);
   line-height: 1.55;
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0;
 }
 .callout.note     { border-color: var(--sage-line); background: var(--sage-soft); }
 .callout.warning  { border-color: var(--sand);      background: var(--sand-soft); }
@@ -1140,7 +1371,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--s-1);
 }
 .callout.note .callout-h     { color: var(--sage); }
 .callout.warning .callout-h  { color: var(--sand); }
@@ -1183,10 +1414,10 @@ svg .grp:hover .rule { stroke: var(--sage); }
   transition: border-color .15s var(--ease), background .15s var(--ease), transform .15s var(--ease);
 }
 .noun:hover, .noun.active { border-color: var(--sage); background: var(--sage-soft); }
-.noun.primary { border-left: 3px solid var(--sage); }
+.noun.primary { box-shadow: inset 0 2px 0 var(--sage); }
 .noun.related {
   border-color: var(--sand);
-  background: oklch(82% 0.12 85 / 0.10);
+  background: var(--sand-soft);
 }
 .noun-name {
   font-size: var(--t-md);
@@ -1195,7 +1426,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   letter-spacing: -0.005em;
 }
 .noun-tag {
-  margin-top: 2px;
+  margin-top: var(--s-1);
   font-size: var(--t-xs);
   font-family: ui-monospace, Menlo, monospace;
   color: var(--ink-3);
@@ -1234,11 +1465,11 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-family: ui-monospace, Menlo, monospace;
   font-size: var(--t-xs);
   color: var(--sand);
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   padding: var(--s-2) var(--s-3);
   border-radius: var(--radius);
   word-break: break-all;
-  border-left: 2px solid var(--sand);
+  box-shadow: inset 0 1px 0 var(--sand-line);
 }
 .noun-detail .nrel {
   margin-top: var(--s-3);
@@ -1296,7 +1527,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .layer-diagram {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--s-1);
   background: var(--line);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -1326,7 +1557,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
   display: inline-flex;
   align-items: baseline;
   gap: var(--s-2);
-  padding: 4px var(--s-3);
+  padding: var(--s-1) var(--s-3);
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--surface);
@@ -1343,7 +1574,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 }
 .pkg-chip.depended {
   border-color: var(--sand);
-  background: oklch(82% 0.12 85 / 0.12);
+  background: var(--sand-soft);
   color: var(--sand);
 }
 .pkg-chip .dep-count {
@@ -1387,7 +1618,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 }
 @media (max-width: 880px) { .bundle-anatomy { grid-template-columns: 1fr; } }
 .tar-tree {
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: var(--s-3);
@@ -1411,18 +1642,18 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .tar-size { color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
 .tar-info {
   margin-top: var(--s-3);
-  padding: var(--s-3) var(--s-4);
-  background: var(--surface);
-  border-left: 2px solid var(--sage-line);
+  padding: var(--s-3) 0;
+  background: transparent;
+  border-top: 1px solid var(--sage-line);
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: var(--t-sm);
   color: var(--ink-2);
   line-height: 1.55;
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0;
   min-height: 60px;
 }
 .manifest-view {
-  background: oklch(11% 0.011 80);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: var(--s-3);
@@ -1474,12 +1705,12 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-size: var(--t-xs);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--s-1);
   cursor: pointer;
   transition: border-color .15s var(--ease);
 }
 .er-table:hover, .er-table.active { border-color: var(--sage); }
-.er-table.primary { border-left: 3px solid var(--sage); }
+.er-table.primary { box-shadow: inset 0 2px 0 var(--sage); }
 .er-table.derived { border-style: dashed; }
 .er-table .er-name {
   color: var(--ink);
@@ -1489,7 +1720,7 @@ svg .grp:hover .rule { stroke: var(--sage); }
 .er-table .er-pk { color: var(--sage); }
 .er-table .er-uk { color: var(--sand); }
 .er-table .er-fk { color: var(--ink-3); }
-.er-table .er-note { color: var(--ink-3); font-family: inherit; font-style: italic; margin-top: 2px; }
+.er-table .er-note { color: var(--ink-3); font-family: inherit; font-style: italic; margin-top: var(--s-1); }
 .er-table code { background: transparent; padding: 0; color: var(--ink-2); font-size: 100%; }
 .er-cols {
   margin-top: var(--s-2);
@@ -1568,6 +1799,217 @@ svg .grp:hover .rule { stroke: var(--sage); }
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 
+/* Tufte de-chroming pass: detail panels are annotations, not dashboard cards. */
+.pkg-info,
+.dedup-info,
+.noun-detail,
+.layer-detail,
+.hot-detail,
+.pkg-detail {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--sage-line);
+  border-radius: 0;
+  padding: var(--s-3) 0;
+}
+.hot-detail { border-top-color: var(--clay-line); }
+.hot-detail .doubt,
+.hot-detail .grounded { border-left: 0; padding-left: 0; }
+
+/* ---------- interface polish: surfaces, hit targets, motion ----------- */
+.db-sim,
+.state-sig,
+.widget,
+.hooks,
+.compare .pane,
+.tar-tree,
+.manifest-view,
+.er-family,
+.er-table,
+.noun-tier,
+.noun,
+.layer-diagram,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  border: 0;
+  box-shadow: var(--shadow-border);
+}
+.db-sim,
+.state-sig,
+.widget,
+.hooks,
+.compare .pane,
+.tar-tree,
+.manifest-view,
+.er-family,
+.layer-diagram {
+  background: var(--surface);
+}
+.er-table,
+.noun,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  background: var(--code-bg);
+}
+.db-actions button,
+.copy-btn,
+.pkg-chip,
+.tag-chip {
+  border: 0;
+  box-shadow: var(--shadow-border);
+}
+.db-actions button:hover,
+.copy-btn:hover,
+.pkg-chip:hover,
+.tag-chip:hover,
+.er-table:hover,
+.noun:hover {
+  box-shadow: var(--shadow-border-hover);
+}
+.noun,
+.er-table,
+.db-table,
+.db-log,
+.ss-hash-value,
+.widget .out {
+  box-shadow: none;
+}
+.noun.primary .noun-name,
+.er-table.primary .er-name { color: var(--sage-deep); }
+.er-table.derived .er-name { color: var(--ink-2); }
+.compare .pane.bad  { box-shadow: var(--shadow-border), inset 0 2px 0 var(--clay); }
+.compare .pane.good { box-shadow: var(--shadow-border), inset 0 2px 0 var(--sage); }
+.noun:hover,
+.er-table:hover,
+.noun.active,
+.er-table.active { box-shadow: none; }
+.noun.related { background: var(--sand-soft); }
+.er-table.active { background: var(--sage-wash); }
+.sidebar nav.tabs button,
+.db-actions button,
+.copy-btn,
+.pkg-chip,
+.noun,
+.tar-row,
+.er-table,
+.hotspot-rank-row,
+.package-matrix-row {
+  -webkit-tap-highlight-color: transparent;
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease);
+}
+.sidebar nav.tabs button,
+.db-actions button,
+.copy-btn,
+.pkg-chip {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+.sidebar nav.tabs button { width: 100%; }
+@media (max-width: 880px) {
+  .sidebar nav.tabs button { width: auto; padding: var(--s-2) var(--s-1); }
+}
+.sidebar nav.tabs button:active,
+.db-actions button:active,
+.copy-btn:active,
+.pkg-chip:active {
+  transform: scale(0.96);
+}
+.noun,
+.tar-row,
+.er-table,
+.hotspot-rank-row,
+.package-matrix-row {
+  min-height: 40px;
+}
+.widget input[type=text],
+.ss-row input[type=text] {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.widget input[type=text]:focus,
+.ss-row input[type=text]:focus {
+  box-shadow: inset 0 0 0 1px var(--sage-line), var(--shadow-border);
+}
+/* Flatten the inside of any elevated surface. This keeps depth at one layer
+   instead of card-inside-card stacks. */
+.db-sim *,
+.state-sig *,
+.widget *,
+.hooks *,
+.compare .pane *,
+.noun-tier *,
+.er-family *,
+.layer-diagram *,
+.tar-tree *,
+.manifest-view * {
+  box-shadow: none !important;
+}
+
+/* Page-level slop cleanup for #novel: the mechanisms page should feel like
+   an annotated technical paper, not a stack of cards with accent tabs. */
+#novel .widget,
+#novel .state-sig,
+#novel .db-sim,
+#novel .compare .pane,
+#novel .callout {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: var(--s-4) 0;
+}
+#novel .compare .pane.bad,
+#novel .compare .pane.good {
+  box-shadow: none;
+}
+#novel .widget .out,
+#novel .db-table,
+#novel .db-log,
+#novel .ss-hash-value {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+#novel .ss-row[data-stable="1"] input,
+#novel .ss-row[data-stable="0"] input {
+  border-left: 0;
+}
+#novel .callout.note,
+#novel .callout.warning,
+#novel .callout.danger {
+  background: transparent;
+}
+.scatter-host .pt::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 40px; height: 40px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+body.has-switched section.active > * {
+  animation: section-enter 260ms var(--ease-soft) both;
+}
+body.has-switched section.active > *:nth-child(2) { animation-delay: 60ms; }
+body.has-switched section.active > *:nth-child(3) { animation-delay: 120ms; }
+body.has-switched section.active > *:nth-child(n+4) { animation-delay: 160ms; }
+@keyframes section-enter {
+  from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.has-switched section.active > * { animation: none; }
+}
+
 /* ---------- key-value helper ------------------------------------------ */
 .kv {
   display: grid;
@@ -1576,9 +2018,41 @@ svg .grp:hover .rule { stroke: var(--sage); }
   font-size: var(--t-sm);
   margin-top: var(--s-3);
 }
-.kv b { color: var(--ink-3); font-weight: 500; font-size: var(--t-xs); letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px; }
+.kv b { color: var(--ink-3); font-weight: 500; font-size: var(--t-xs); letter-spacing: 0.08em; text-transform: uppercase; padding-top: var(--s-1); }
 .kv span { color: var(--ink-2); }
 .kv span b { color: var(--ink); font-size: inherit; letter-spacing: 0; text-transform: none; }
+
+.checklist-gate {
+  margin-top: var(--s-8);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line);
+}
+.checklist-gate h3 { margin-top: 0; }
+.checklist-gate ol {
+  list-style: none;
+  padding: 0;
+  margin: var(--s-3) 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--s-7);
+}
+.checklist-gate li {
+  border-top: 1px solid var(--line);
+  padding: var(--s-3) 0 var(--s-3) var(--s-6);
+  position: relative;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+.checklist-gate li::before {
+  content: "□";
+  position: absolute;
+  left: 0;
+  color: var(--sage);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.checklist-gate pre { margin-top: var(--s-4); font-size: var(--t-xs); }
+@media (max-width: 880px) { .checklist-gate ol { grid-template-columns: 1fr; } }
 
 /* ---------- footer ---------------------------------------------------- */
 footer {
@@ -1633,12 +2107,17 @@ footer a:hover { color: var(--ink-2); }
     <p>
       Local histories become snapshot bundles, which land in a depot, which an
       ingest step compiles into a corpus, which search and read query. Each
-      box owns one thing; hover for the package, click for what it owns.
+      labeled stage owns one thing; the package names are printed directly,
+      and hover/click only reveals secondary notes.
     </p>
   </div>
 
   <div class="pipeline-wrap">
-    <svg viewBox="0 0 1180 240" role="img" aria-label="aha pipeline">
+    <aside class="sidenote pull-note">
+      <b>Static-first rule.</b> The flow, package ownership, and transition verbs are visible without hovering. Hover only reveals secondary implementation notes.
+    </aside>
+    <figure class="figure">
+      <svg viewBox="0 0 1180 240" role="img" aria-label="aha pipeline">
       <defs>
         <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
           <path d="M0,0 L9,5 L0,10 z" fill="currentColor"/>
@@ -1695,7 +2174,7 @@ footer a:hover { color: var(--ink-2); }
       </g>
 
       <!-- Stage 5: search + read forks -->
-      <g class="grp" data-pkg="internal/search" data-info="Local FTS5 query construction, indexed --project and --path-token filters, capped limits. Search never contacts the depot.">
+      <g class="grp" data-pkg="internal/search" data-info="Local FTS5 query construction, indexed <span>-</span><span>-</span>project and <span>-</span><span>-</span>path-token filters, capped limits. Search never contacts the depot.">
         <text x="1100" y="62" class="title" text-anchor="middle">search</text>
         <text x="1100" y="80" text-anchor="middle" class="lbl">FTS5</text>
       </g>
@@ -1709,14 +2188,18 @@ footer a:hover { color: var(--ink-2); }
       <text x="240" y="195" class="lbl" text-anchor="middle">discover / parse</text>
       <text x="505" y="195" class="lbl" text-anchor="middle">PutBundle</text>
       <text x="775" y="195" class="lbl" text-anchor="middle">ingest pending</text>
-    </svg>
+      </svg>
+      <figcaption>
+      <b>Figure.</b> Bundle bytes are the durable evidence. Catalogs and the corpus are deliberately rebuildable; search and read only query the local corpus.
+    </figcaption>
+    </figure>
 
-    <div class="pkg-info" id="pkg-info">Hover a stage to see what it owns.</div>
+    <div class="pkg-info" id="pkg-info">Static read: local sources → deterministic bundle → depot → derived corpus → search/read. Hover or click a stage for the package-level ownership note.</div>
   </div>
 
   <h3 class="sub">CLI surface</h3>
   <p class="cli-line"><code>snapshot</code> · <code>refresh</code> · <code>ingest</code> · <code>search</code> · <code>read</code> · <code>status</code> · <code>verify</code> · <code>conflicts</code> · <code>corpus</code> · <code>depot</code> · <code>doctor</code> · <code>init</code></p>
-  <p class="cli-note">Every command emits <code>--json</code>; refs round-trip; search emits copy-pastable <code>ref_text</code>; read accepts <code>msg:v1</code>, <code>session:v1</code>, <code>artifact:v1</code>.</p>
+  <p class="cli-note">Every command emits <code><span>-</span><span>-</span>json</code>; refs round-trip; search emits copy-pastable <code>ref_text</code>; read accepts <code>msg:v1</code>, <code>session:v1</code>, <code>artifact:v1</code>.</p>
 
   <h3 class="sub">Invariants</h3>
   <dl class="facts">
@@ -1727,7 +2210,7 @@ footer a:hover { color: var(--ink-2); }
     <dd>Bundle bytes are truth. Catalog shards and corpus are derived and repairable from those bytes.</dd>
 
     <dt>Identity</dt>
-    <dd>SHA-256 over length-prefixed tuples, returned as opaque sealed types. No raw string concatenation at the boundary.</dd>
+    <dd>SHA-256 over length-prefixed tuples, returned as opaque sealed types, with raw string concatenation kept out of the boundary.</dd>
 
     <dt>Determinism</dt>
     <dd>Sorted manifest, normalized tar metadata, fixed zstd encoder. Repeat and shuffle byte-equality are property tests, not promises.</dd>
@@ -1748,13 +2231,16 @@ footer a:hover { color: var(--ink-2); }
     </p>
   </div>
 
+  <aside class="sidenote pull-note">
+    <b>Margin-note convention.</b> Side notes carry the invariant or falsifier that makes a diagram useful. The diagram names the thing; the margin explains why the thing is safe to trust.
+  </aside>
   <h3 class="sub">The major abstractions</h3>
   <p class="cli-note">
     Five tiers from outside-in: where data lives in the world, how
     <code>aha</code> snapshots it into evidence, where that evidence is
     stored, how it's unpacked for query, and how users and agents address it.
-    Hover any noun to highlight its connections; click for the precise
-    definition and example.
+    The noun labels, examples, and relationships are readable before any
+    hover; hover/click only deepens the definition.
   </p>
 
   <div class="nouns" id="nouns">
@@ -1828,7 +2314,7 @@ footer a:hover { color: var(--ink-2); }
     <div class="noun-tier">
       <div class="noun-tier-h">query  ·  derived, rebuildable</div>
       <div class="noun primary" data-id="corpus"
-           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth — entirely rebuildable from depot bundles."
+           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth – entirely rebuildable from depot bundles."
            data-example="~/.aha/corpus.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
            data-rel="depot,session,entry,artifact">
         <div class="noun-name">Corpus</div>
@@ -1842,7 +2328,7 @@ footer a:hover { color: var(--ink-2); }
         <div class="noun-tag">sk1_&lt;sha256&gt;</div>
       </div>
       <div class="noun" data-id="entry"
-           data-def="One event in a session: a message, a tool call, an event. Identified by (session_key, entry_id). Append-only — UPDATE/DELETE trigger ABORT, duplicate with different hash → conflict row."
+           data-def="One event in a session: a message, a tool call, an event. Identified by (session_key, entry_id). Append-only – UPDATE/DELETE trigger ABORT, duplicate with different hash → conflict row."
            data-example="(session_key, entry_id)  ·  e.g. (sk1_…, &quot;evt-42&quot;)"
            data-rel="session,message,artifact,asset">
         <div class="noun-name">Entry</div>
@@ -1900,7 +2386,7 @@ footer a:hover { color: var(--ink-2); }
   </div>
 
   <div class="noun-detail" id="noun-detail">
-    <p class="cli-note" style="margin:0">Hover any noun above. Click to pin.</p>
+    <p class="cli-note" style="margin:0">Static read: evidence flows from read-only sources to immutable bundles to durable depot bytes to a rebuildable corpus to sealed refs. Hover any noun to deepen; click to pin.</p>
   </div>
 
   <h3 class="sub">The same message, through every abstraction</h3>
@@ -1909,19 +2395,19 @@ footer a:hover { color: var(--ink-2); }
     above. Same data, different shapes.
   </p>
   <ol class="trace" id="msg-trace">
-    <li><span class="trace-step">1</span><span class="trace-noun">Source file</span><code class="trace-val">~/.claude/projects/aha/session.jsonl, line 42</code></li>
-    <li><span class="trace-step">2</span><span class="trace-noun">Adapter parses</span><code class="trace-val">ParsedEntry{ entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
-    <li><span class="trace-step">3</span><span class="trace-noun">Bundle contains</span><code class="trace-val">files/claude-code/projects/aha/session.jsonl   (file_sha256: e5f60123…)</code></li>
-    <li><span class="trace-step">4</span><span class="trace-noun">Manifest lists it</span><code class="trace-val">{ source:"claude-code", path:"files/…/session.jsonl", sha256:"e5f60123…", bytes:38912 }</code></li>
-    <li><span class="trace-step">5</span><span class="trace-noun">Depot stores bundle</span><code class="trace-val">bundles/v1/b5ce6ccd…f47.tar.zst</code></li>
-    <li><span class="trace-step">6</span><span class="trace-noun">Catalog ref</span><code class="trace-val">{ bundle_sha256:"b5ce6c…", machine_id:"ade-mbp", state_sha256:"78bf99…" }</code></li>
-    <li><span class="trace-step">7</span><span class="trace-noun">Corpus sessions row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", source:"claude-code", project_key:"aha" }</code></li>
-    <li><span class="trace-step">8</span><span class="trace-noun">Corpus entries row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", line_no:42, entry_sha256:"f1e2…" }</code></li>
-    <li><span class="trace-step">9</span><span class="trace-noun">Corpus messages row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
-    <li><span class="trace-step">10</span><span class="trace-noun">fts_messages mirror</span><code class="trace-val">rowid=9001  text="migrate db…"   ← inserted by trigger messages_ai</code></li>
-    <li><span class="trace-step">11</span><span class="trace-noun">Search hit</span><code class="trace-val">{ score:-8.2, ref:MessageRef{…}, snippet:"…[migrate] db…" }</code></li>
-    <li><span class="trace-step">12</span><span class="trace-noun">Canonical ref</span><code class="trace-val">msg:v1:c2sxX2ExYjJjMy4uLg:ZXZ0LTQy</code></li>
-    <li><span class="trace-step">13</span><span class="trace-noun">aha read &lt;ref&gt;</span><code class="trace-val">window of entries from line_no=40..44 returned to the agent</code></li>
+    <li><span class="trace-step">A</span><span class="trace-noun">Source file</span><code class="trace-val">~/.claude/projects/aha/session.jsonl, line 42</code></li>
+    <li><span class="trace-step">B</span><span class="trace-noun">Adapter parses</span><code class="trace-val">ParsedEntry{ entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">C</span><span class="trace-noun">Bundle contains</span><code class="trace-val">files/claude-code/projects/aha/session.jsonl   (file_sha256: e5f60123…)</code></li>
+    <li><span class="trace-step">D</span><span class="trace-noun">Manifest lists it</span><code class="trace-val">{ source:"claude-code", path:"files/…/session.jsonl", sha256:"e5f60123…", bytes:38912 }</code></li>
+    <li><span class="trace-step">E</span><span class="trace-noun">Depot stores bundle</span><code class="trace-val">bundles/v1/b5ce6ccd…f47.tar.zst</code></li>
+    <li><span class="trace-step">F</span><span class="trace-noun">Catalog ref</span><code class="trace-val">{ bundle_sha256:"b5ce6c…", machine_id:"ade-mbp", state_sha256:"78bf99…" }</code></li>
+    <li><span class="trace-step">G</span><span class="trace-noun">Corpus sessions row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", source:"claude-code", project_key:"aha" }</code></li>
+    <li><span class="trace-step">H</span><span class="trace-noun">Corpus entries row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", line_no:42, entry_sha256:"f1e2…" }</code></li>
+    <li><span class="trace-step">I</span><span class="trace-noun">Corpus messages row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
+    <li><span class="trace-step">J</span><span class="trace-noun">fts_messages mirror</span><code class="trace-val">rowid=9001  text="migrate db…"   ← inserted by trigger messages_ai</code></li>
+    <li><span class="trace-step">K</span><span class="trace-noun">Search hit</span><code class="trace-val">{ score:-8.2, ref:MessageRef{…}, snippet:"…[migrate] db…" }</code></li>
+    <li><span class="trace-step">L</span><span class="trace-noun">Canonical ref</span><code class="trace-val">msg:v1:c2sxX2ExYjJjMy4uLg:ZXZ0LTQy</code></li>
+    <li><span class="trace-step">M</span><span class="trace-noun">aha read &lt;ref&gt;</span><code class="trace-val">window of entries from line_no=40..44 returned to the agent</code></li>
   </ol>
 
   <h3 class="sub">Layered dependencies</h3>
@@ -1932,7 +2418,7 @@ footer a:hover { color: var(--ink-2); }
   </p>
   <div id="layer-diagram" class="layer-diagram"></div>
   <div class="layer-detail" id="layer-detail">
-    <p class="cli-note" style="margin:0">Hover a package above for its responsibility and a list of importers.</p>
+    <p class="cli-note" style="margin:0">Static read: leaves define identity and helpers; I/O packages preserve evidence; corpus/search are derived stores; cli is the only top-level orchestrator. Hover a package for importers.</p>
   </div>
 
   <h3 class="sub">Anatomy of a bundle</h3>
@@ -2004,7 +2490,7 @@ footer a:hover { color: var(--ink-2); }
     Twelve tables. Three families: <em>bundle metadata</em> at the top
     (immutable provenance), <em>agent content</em> in the middle (append-only,
     where the data lives), and <em>derived indexes</em> at the bottom
-    (FTS, path tokens — rebuildable from above).
+    (FTS, path tokens – rebuildable from above).
   </p>
   <div class="schema-er" id="schema-er">
     <div class="er-family">
@@ -2078,7 +2564,7 @@ footer a:hover { color: var(--ink-2); }
     </div>
 
     <div class="er-family">
-      <div class="er-family-h">derived indexes <span class="cli-note">rebuildable with <code>aha verify --repair-fts</code></span></div>
+      <div class="er-family-h">derived indexes <span class="cli-note">rebuildable with <code>aha verify <span>-</span><span>-</span>repair-fts</code></span></div>
       <div class="er-tables">
         <div class="er-table derived" data-cols="rowid==messages.rowid, session_key unindexed, entry_id unindexed, text">
           <div class="er-name">fts_messages</div>
@@ -2090,7 +2576,7 @@ footer a:hover { color: var(--ink-2); }
         </div>
         <div class="er-table derived" data-cols="(session_key, token) PK; INDEXED BY (token, session_key)">
           <div class="er-name">session_path_tokens</div>
-          <div class="er-note">hand-rolled inverted index for --path-token search</div>
+          <div class="er-note">hand-rolled inverted index for <span>-</span><span>-</span>path-token search</div>
         </div>
         <div class="er-table derived" data-cols="(artifact_id, token) PK">
           <div class="er-name">artifact_path_tokens</div>
@@ -2133,7 +2619,7 @@ footer a:hover { color: var(--ink-2); }
         <td class="row-name">corpus</td>
         <td>bundle → SQLite</td>
         <td>derived; rebuildable</td>
-        <td>append-only triggers; <code>aha verify</code> +  <code>--repair-fts</code> reconstructs</td>
+        <td>append-only triggers; <code>aha verify</code> +  <code><span>-</span><span>-</span>repair-fts</code> reconstructs</td>
       </tr>
       <tr>
         <td class="row-name">search / read</td>
@@ -2158,7 +2644,7 @@ footer a:hover { color: var(--ink-2); }
       <tr>
         <td class="row-name"><code>DELETE FROM entries WHERE …</code></td>
         <td>Trigger <code>entries_no_delete</code> aborts with <em>"entries are append-only"</em>. The transaction rolls back. A static test in <code>internal/testquality</code> also blocks this from production code at CI time.</td>
-        <td class="col-right">If the row is wrong, <code>aha verify --repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and re-ingest from depot bundles selectively.</td>
+        <td class="col-right">If the row is wrong, <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and re-ingest from depot bundles selectively.</td>
       </tr>
       <tr>
         <td class="row-name"><code>UPDATE entries SET role=…</code></td>
@@ -2166,9 +2652,9 @@ footer a:hover { color: var(--ink-2); }
         <td class="col-right">If two snapshots disagree, the second goes into <code>conflicts</code> automatically. Inspect with <code>aha conflicts</code>.</td>
       </tr>
       <tr class="topical">
-        <td class="row-name">Pass <code>--depot</code> to <code>aha search</code> or <code>aha read</code></td>
+        <td class="row-name">Pass <code><span>-</span><span>-</span>depot</code> to <code>aha search</code> or <code>aha read</code></td>
         <td>Search and read are corpus-only operations. The flag isn't accepted; you get a parse error.</td>
-        <td class="col-right">If you need a different corpus, use <code>--repo DIR</code>. If you need a different depot, run <code>aha refresh --depot …</code> first, then search the corpus that ingest produced.</td>
+        <td class="col-right">If you need a different corpus, use <code><span>-</span><span>-</span>repo DIR</code>. If you need a different depot, run <code>aha refresh <span>-</span><span>-</span>depot …</code> first, then search the corpus that ingest produced.</td>
       </tr>
       <tr>
         <td class="row-name">Query <code>fts_messages MATCH ?</code> with raw user text</td>
@@ -2377,7 +2863,7 @@ func FormatRef(r Ref) string {
             <code class="ss-hash-value" id="ss-state-sha">computing...</code>
             <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
           </div>
-          <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> — that's the property <code>refresh</code> relies on to skip re-fetching.</p>
+          <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> – that's the property <code>refresh</code> relies on to skip re-fetching.</p>
           <div style="display:flex; gap:var(--s-2); flex-wrap:wrap;">
             <button class="copy-btn" data-copy-cmd="manifest-full">copy as manifest JSON</button>
             <button class="copy-btn" data-copy-cmd="manifest-state">copy as state struct JSON</button>
@@ -2472,8 +2958,8 @@ VALUES (?, ?, ?, ?, ...);</code></pre>
             Snapshot A inserts <code>entry-42</code> with hash <code>h1</code>.
             Snapshot B inserts <code>entry-42</code> with hash <code>h2</code>
             (the user edited the JSONL line before re-snapshotting).
-            <b>Snapshot A is silently overwritten.</b> No evidence the
-            disagreement ever existed. Search results change retroactively.
+            <b>Snapshot A is silently overwritten.</b> The disagreement leaves
+            no evidence behind. Search results change retroactively.
             Two agents on two machines could even race to overwrite each
             other's view.
           </p>
@@ -2514,7 +3000,7 @@ INSERT INTO conflicts(session_key, entry_id,
             <code>e.entry_sha256 &lt;&gt; new.entry_sha256</code> filters the SELECT feeding the conflicts insert. Duplicate INSERT of the same content is recorded silently in <code>ingest_attempts</code> elsewhere; only true disagreement reaches <code>conflicts</code>.
           </div>
           <div class="annot" data-lines="17">
-            <span class="annot-h"><span class="line-no">L17</span>RAISE(IGNORE) — the original wins</span>
+            <span class="annot-h"><span class="line-no">L17</span>RAISE(IGNORE) – the original wins</span>
             Drops the new row without raising an error. The transaction continues. The earlier insert remains the canonical truth.
           </div>
         </div>
@@ -2566,7 +3052,7 @@ create trigger entries_no_delete before delete on entries
         FTS5 virtual tables are <em>derived</em>, but they're maintained
         synchronously by triggers on the source tables. Normal writes never
         drift. Verification compares rowid identity (cheap query plan); a
-        public <code>aha verify --repair-fts</code> rebuilds from source rows
+        public <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds from source rows
         when external SQL has scrambled things.
       </p>
       <pre><code>-- on every message insert, mirror text into FTS:
@@ -2586,7 +3072,7 @@ create trigger messages_ai after insert on messages
         The cleanup that made this honest: until migration v7 the artifact
         trigger used a slightly different predicate from the verifier, so
         <code>verify</code> would flag missing FTS rows that
-        <code>--repair-fts</code> wouldn't repair. The duplication-refactor
+        <code><span>-</span><span>-</span>repair-fts</code> wouldn't repair. The duplication-refactor
         pass moved both to a shared helper, and migration v7 recreates the
         trigger on existing corpora.
       </p>
@@ -2667,7 +3153,7 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
       <p>
         SQLite handles the obvious data structures (B-trees, hash indexes).
         The interesting one in <code>aha</code> is the inverted index built
-        by hand on top of SQLite so the <code>--path-token</code> filter has
+        by hand on top of SQLite so the <code><span>-</span><span>-</span>path-token</code> filter has
         a real query plan instead of <code>LIKE '%foo%'</code>.
       </p>
       <p>
@@ -2806,8 +3292,9 @@ create index idx_session_path_tokens_token_session
     <p>
       Three different keys catch three different kinds of duplication, and
       the layers compose. Two additional set-shaped tricks below short-circuit
-      work that would otherwise look like duplication but cost a fetch.
-      Hover any layer for the operational detail.
+      work that would otherwise look like duplication but cost a fetch. Rows
+      are ordered by where duplicate work is stopped; hover only adds the
+      operational detail.
     </p>
   </div>
 
@@ -2862,7 +3349,7 @@ create index idx_session_path_tokens_token_session
     </tbody>
   </table>
 
-  <div class="dedup-info" id="dedup-info">Hover a row for the operational detail.</div>
+  <div class="dedup-info" id="dedup-info">Static read: duplicate work is rejected first by bundle SHA, then corpus bundle row, then file blob SHA; state and pending sets avoid unnecessary fetches. Hover a row for the operational detail.</div>
 </section>
 
 
@@ -2879,15 +3366,17 @@ create index idx_session_path_tokens_token_session
   </div>
 
   <div class="hot-intro">
-    <div class="legend">
-      <span><span class="dot" style="background: var(--clay)"></span>doubt or ungrounded</span>
-      <span><span class="dot" style="background: var(--sand)"></span>known limit, accepted</span>
-      <span><span class="dot" style="background: var(--sage)"></span>grounded by tests</span>
-    </div>
-    <p style="color: var(--ink-3); font-size: var(--t-sm); margin: 0;">
-      Hover a dot for its name. Click to pin the detail panel.
+    <p class="cli-note" style="margin:0;max-width:62ch">
+      Severity is printed directly on every row as <code>doubt</code>, <code>warn</code>, or <code>solid</code>; color only echoes that text as a secondary cue.
     </p>
+    <aside class="sidenote">
+      <b>Ranking rule.</b> The table is sorted by attention score: <code>stakes × (1 − grounded)</code>. That puts risky unvalidated assumptions above safe known limits.
+    </aside>
   </div>
+
+  <h3 class="sub">Ranked evidence table</h3>
+  <p class="cli-note">Rows are directly readable; the scatter below is a secondary spatial view. Click any row or dot to pin the same detail panel.</p>
+  <div class="ranked-hotspots" id="hotspot-rank" aria-label="ranked architecture hotspots"></div>
 
   <div class="scatter-wrap">
     <div class="axis-label axis-label-y">stakes</div>
@@ -2910,10 +3399,10 @@ create index idx_session_path_tokens_token_session
   </div>
 
   <div class="hot-detail" id="hot-detail">
-    <h4>Pick a dot</h4>
+    <h4>Top-ranked hotspot loads here</h4>
     <div class="where">each hotspot has a where, a state, and a falsifier</div>
     <p style="color: var(--ink-2);">
-      Click any dot in the chart to pin its detail panel.
+      The table above is the primary reading order; row and dot clicks only pin the detail panel.
     </p>
   </div>
 </section>
@@ -2933,12 +3422,19 @@ create index idx_session_path_tokens_token_session
   <h3 class="sub">Packages, sized by production-code lines</h3>
   <p class="cli-note" style="margin-bottom: var(--s-4)">Tests omitted. Click any row.</p>
   <div class="map-grid">
-    <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
+    <figure class="figure">
+      <svg id="pkg-chart" viewBox="0 0 720 380" role="img" aria-label="package line counts"></svg>
+      <figcaption><b>Figure.</b> Cleveland dot plot: one encoding (position) plus direct numeric labels, without bars, legends, or redundant grid.</figcaption>
+    </figure>
     <div class="pkg-detail" id="pkg-detail">
-      <h3>Pick a package</h3>
-      <p class="why">Click any name or dot on the left.</p>
+      <h3>internal/corpus</h3>
+      <p class="why">Largest package and highest-risk reading target. JavaScript fills this with package-specific read-first notes; click any name or dot to switch.</p>
     </div>
   </div>
+
+  <h3 class="sub">Package maintenance matrix</h3>
+  <p class="cli-note">Small multiples over the same package list: size, direct imports, and importers. These make centrality visible without a separate legend.</p>
+  <div class="package-matrix" id="package-matrix" aria-label="package size, dependency, and reading matrix"></div>
 
   <div class="section-head" style="margin-top: var(--s-9)">
     <h2 style="font-size: var(--t-2xl)">Reading order</h2>
@@ -2955,9 +3451,24 @@ create index idx_session_path_tokens_token_session
     <li><code>internal/cli/*.go</code> &middot; thin orchestration over the above; flag specs are shared metadata.</li>
   </ol>
 
+  <div class="checklist-gate" aria-label="pre-merge visual checklist">
+    <h3 class="sub">Pre-merge visual checklist</h3>
+    <p class="cli-note">The Tufte gate used for this file. Run the drift test, then read the page with interaction disabled in your head: the claims should still stand.</p>
+    <ol>
+      <li>Every diagram has direct labels; hover only adds secondary explanation.</li>
+      <li>Color is semantic: sage = grounded/canonical, clay = risk, sand = accepted limit.</li>
+      <li>Facts are sorted by reader decision: attention, dependency, or reading order.</li>
+      <li>No chart border, shadow, gradient, legend detour, or decorative data mark survived.</li>
+      <li>Each risky claim names a falsifier or a next measurement.</li>
+      <li>Generated/code-derived facts are covered by the architecture drift test.</li>
+    </ol>
+    <pre><code>go test ./internal/cli -run ArchitectureHTML
+open docs/interactive/architecture.html</code></pre>
+  </div>
+
   <footer>
     Source: <code>docs/interactive/architecture.html</code>. Open in any
-    browser. No build, no external assets.
+    browser, with no build step or external assets.
   </footer>
 </section>
 
@@ -2970,17 +3481,23 @@ create index idx_session_path_tokens_token_session
    ============================================================ */
 const tabButtons = document.querySelectorAll('nav.tabs button');
 const sections = document.querySelectorAll('main > section');
+let initialTabRoute = false;
 tabButtons.forEach(btn => btn.addEventListener('click', () => {
   const tab = btn.dataset.tab;
+  if (!initialTabRoute) document.body.classList.add('has-switched');
   tabButtons.forEach(b => b.classList.toggle('active', b === btn));
   sections.forEach(s => s.classList.toggle('active', s.id === tab));
   history.replaceState(null, '', '#' + tab);
-  window.scrollTo({top: 0, behavior: 'smooth'});
+  if (!initialTabRoute) window.scrollTo({top: 0, behavior: 'smooth'});
 }));
 if (location.hash) {
   const t = location.hash.slice(1);
   const btn = document.querySelector(`nav.tabs button[data-tab="${t}"]`);
-  if (btn) btn.click();
+  if (btn) {
+    initialTabRoute = true;
+    btn.click();
+    initialTabRoute = false;
+  }
 }
 
 /* ============================================================
@@ -3457,7 +3974,7 @@ const HOTSPOTS = [
 const scatter = document.getElementById('scatter');
 const ptEls = {};
 /* Tufte B4 (direct labels): permanently label the dots that anchor each
-   quadrant — the highest-stakes ungrounded item ("validate next"), the
+   quadrant – the highest-stakes ungrounded item ("validate next"), the
    most-grounded high-stakes item ("proven"), the lowest-stakes item,
    and one item near the origin. Other dots reveal their name on hover. */
 function scoreCorner(h, gx, sy) {
@@ -3504,9 +4021,11 @@ function showHotspot(id, scroll) {
     e.pt.classList.toggle('selected', on);
     e.label.classList.toggle('show', on);
   });
+  document.querySelectorAll('.hotspot-rank-row[data-hotspot]').forEach(r =>
+    r.classList.toggle('active', r.dataset.hotspot === id));
   const cls = h.severity === 'solid' ? 'grounded' : 'doubt';
   document.getElementById('hot-detail').innerHTML = `
-    <h4>${h.name} <span class="tag-chip ${h.severity === 'solid' ? 'solid' : 'hot'}">${h.severity}</span></h4>
+    <h4>${h.name} <span class="tag-chip ${h.severity === 'solid' ? 'solid' : h.severity === 'warn' ? 'warn' : 'hot'}">${h.severity}</span></h4>
     <div class="where">${h.where}</div>
     <div class="${cls}">
       <p><b>State.</b> ${h.state}</p>
@@ -3515,7 +4034,44 @@ function showHotspot(id, scroll) {
   if (scroll) document.getElementById('hot-detail')?.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
-/* hotspot card-list removed; the scatter + detail panel carry the same data without duplication. */
+function attentionScore(h) { return h.stakes * (1 - h.grounded); }
+function escHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function shortText(s, n) {
+  s = String(s).replace(/`/g, '');
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+}
+function renderHotspotRank() {
+  const host = document.getElementById('hotspot-rank');
+  if (!host) return;
+  const rows = HOTSPOTS.slice().sort((a, b) => attentionScore(b) - attentionScore(a));
+  host.innerHTML = `
+    <div class="hotspot-rank-row header">
+      <div></div><div>Hotspot</div><div>Attention</div><div>Evidence</div><div>Next falsifier / action</div>
+    </div>` + rows.map((h, i) => {
+      const score = attentionScore(h);
+      const sev = h.severity === 'doubt' ? 'hot' : h.severity === 'warn' ? 'warn' : 'solid';
+      return `
+        <div class="hotspot-rank-row" data-hotspot="${h.id}" tabindex="0">
+          <div class="rank">${i + 1}</div>
+          <div class="issue">${escHTML(h.name)} <span class="tag-chip ${sev}">${h.severity}</span></div>
+          <div class="score"><span class="range-bar ${sev}" style="--p:${(score * 100).toFixed(1)}%"></span><span class="score-num">${score.toFixed(2)}</span></div>
+          <div class="where"><code>${escHTML(h.where)}</code></div>
+          <div class="next">${escHTML(shortText(h.needs, 190))}</div>
+        </div>`;
+    }).join('');
+  host.querySelectorAll('[data-hotspot]').forEach(row => {
+    row.addEventListener('click', () => showHotspot(row.dataset.hotspot, true));
+    row.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showHotspot(row.dataset.hotspot, true); }
+    });
+  });
+  if (rows[0]) showHotspot(rows[0].id, false);
+}
+renderHotspotRank();
+
+/* hotspot card-list removed; the ranked table + scatter + detail panel carry the same data without duplication. */
 
 /* ============================================================
    Codebase map
@@ -3593,6 +4149,45 @@ function renderPackageChart() {
   });
 }
 renderPackageChart();
+loadPkg('internal/corpus');
+
+function renderPackageMatrix() {
+  const host = document.getElementById('package-matrix');
+  if (!host || typeof PKG_GRAPH === 'undefined' || typeof REVERSE_DEPS === 'undefined') return;
+  const rows = PACKAGES.map(p => {
+    const short = p.name.replace('internal/', '');
+    return {
+      ...p,
+      short,
+      n: parseInt(String(p.lines).replace(/[^0-9]/g,''), 10),
+      imports: (PKG_GRAPH[short]?.deps || []).length,
+      importers: (REVERSE_DEPS[short] || []).length,
+      first: p.read[0] || ''
+    };
+  }).sort((a, b) => b.n - a.n);
+  const maxLOC = Math.max(...rows.map(r => r.n));
+  const maxImports = Math.max(...rows.map(r => r.imports), 1);
+  const maxImporters = Math.max(...rows.map(r => r.importers), 1);
+  const metric = (v, max, cls='') => `<span class="metric"><span class="range-bar ${cls}" style="--p:${((v / max) * 100).toFixed(1)}%"></span><b>${v.toLocaleString()}</b></span>`;
+  host.innerHTML = `
+    <div class="package-matrix-row header">
+      <div>Package</div><div>Lines</div><div>Imports</div><div>Imported by</div><div>Read first</div>
+    </div>` + rows.map(r => `
+      <div class="package-matrix-row" data-pkg="${r.name}" tabindex="0">
+        <div class="pkg-name">${r.short}</div>
+        <div>${metric(r.n, maxLOC)}</div>
+        <div>${metric(r.imports, maxImports, r.imports > 7 ? 'warn' : '')}</div>
+        <div>${metric(r.importers, maxImporters, r.importers > 4 ? 'hot' : '')}</div>
+        <div class="first-read"><code>${escHTML(r.first)}</code></div>
+      </div>`).join('');
+  host.querySelectorAll('[data-pkg]').forEach(row => {
+    row.addEventListener('click', () => loadPkg(row.dataset.pkg));
+    row.addEventListener('mouseenter', () => loadPkg(row.dataset.pkg));
+    row.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadPkg(row.dataset.pkg); }
+    });
+  });
+}
 
 /* ============================================================
    Copy buttons. The Anthropic article calls this out as the link
@@ -3772,6 +4367,7 @@ const REVERSE_DEPS = (() => {
   for (const [p, info] of Object.entries(PKG_GRAPH)) for (const d of info.deps) r[d] && r[d].push(p);
   return r;
 })();
+renderPackageMatrix();
 (function () {
   const root = document.getElementById('layer-diagram');
   if (!root) return;
