@@ -132,7 +132,13 @@ mcp_conformance() {
 
   # Populate a fixture corpus the Python+TS+Go clients can drive against.
   local tmpdir; tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' RETURN
+  # Bake the path into the trap so it survives the local going out of
+  # scope, and clear the RETURN trap once it fires. A bare
+  # `trap 'rm -rf "$tmpdir"' RETURN` is global: it re-fires when an outer
+  # caller (full() -> mcp_conformance) returns, by which point $tmpdir is
+  # unset and `set -u` aborts the whole run. That is the CI failure this
+  # guards against.
+  trap "rm -rf '$tmpdir'; trap - RETURN" RETURN
   local pi="$tmpdir/pi/--Users-me-proj--"
   mkdir -p "$pi"
   cat > "$pi/2026.jsonl" <<'JSONL'
