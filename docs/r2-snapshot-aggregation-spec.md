@@ -356,7 +356,8 @@ once); any depot-touching command can override it for one invocation with
 | Command | Depot | Corpus | Network | Behavior |
 |---|---|---|---|---|
 | `aha init` | — | — | no | scaffolds config; records your depot choice |
-| `aha depot init <depot>` | create/bind | — | yes (r2) | creates or connects the depot, writes it to config |
+| `aha depot init <depot>` | create/bind | — | yes (r2) | creates or connects the depot, writes it to config as the default, and persists the non-secret r2 account id |
+| `aha depot use <depot>` | bind/select | — | yes (r2) | switches the default depot to an already-initialized one; refuses an uninitialized target and points at `aha depot init` |
 | `aha snapshot` | **write** | — | yes (r2) | builds a bundle, pushes it to the depot |
 | `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
 | `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |

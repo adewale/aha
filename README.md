@@ -282,6 +282,7 @@ For coding agents using `aha`:
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
 - `docs/onboarding.md` — verifiable local-first onboarding, troubleshooting, and optional R2 setup.
+- `docs/depot-lifecycle.md` — depot states, transitions, and how the default depot is chosen and switched.
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.

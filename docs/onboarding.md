@@ -179,6 +179,9 @@ Do this only after local onboarding works. Local stays the default until you
 configure a depot here — this step **opts into R2 as your default depot**, and
 you can switch back to local at any time.
 
+> For the full set of depot states and transitions — init, use, snapshot,
+> verify, compact — see [`depot-lifecycle.md`](depot-lifecycle.md).
+
 R2 requires two separate things:
 
 1. A private R2 bucket. `aha depot init` creates it for you if it doesn't exist
