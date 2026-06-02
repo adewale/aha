@@ -47,6 +47,9 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "aha: %s\nconfig: %s\n", model.Version, config.DefaultPath())
 	fmt.Fprintf(stdout, "corpus: %s ok=%v\n", corpusDiag["path"], corpusDiag["ok"])
 	fmt.Fprintf(stdout, "depot: %s:%s ok=%v\n", depotDiag["type"], depotDiag["location"], depotDiag["ok"])
+	if depotDiag["initialized"] == false {
+		fmt.Fprintf(stdout, "  depot not initialized; run `aha depot init %s:%s`\n", depotDiag["type"], depotDiag["location"])
+	}
 	for _, name := range names {
 		ad := adapters.Builtins()[name]
 		fmt.Fprintf(stdout, "adapter: %s version=%s capabilities=%s\n", name, ad.Version(), mustJSON(ad.Capabilities()))
@@ -193,9 +196,18 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
-	out["ok"] = len(report.Problems) == 0
 	out["bundles"] = report.Bundles
 	out["catalogs"] = report.Catalogs
+	if depotUninitialized(report) {
+		// Reachable with valid credentials, just not provisioned yet: guide the
+		// user to initialize it rather than reporting it as broken.
+		out["ok"] = true
+		out["initialized"] = false
+		out["next"] = []string{fmt.Sprintf("aha depot init %s:%s", addr.Type, addr.Location)}
+		return out
+	}
+	out["initialized"] = true
+	out["ok"] = len(report.Problems) == 0
 	if len(report.Problems) > 0 {
 		out["problems"] = report.Problems
 	}

@@ -70,10 +70,10 @@ aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 
 ## aha depot
 
-initialize, list, verify, or compact a bundle depot
+initialize a depot, switch the default depot, list, verify, or compact a bundle depot
 
 ```txt
-aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
+aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 ```
 
 **Flags:**
@@ -86,6 +86,8 @@ aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 **Examples:**
 
 - `aha depot init local:~/.aha/depot`
+- `aha depot init r2:aha-depot`
+- `aha depot use r2:aha-depot`
 - `aha depot ls --json`
 - `aha depot verify --deep`
 - `aha depot verify --repair`
