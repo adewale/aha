@@ -23,8 +23,10 @@ adapter converts the database to deterministic, lossless JSONL *during
 Remaining follow-up: the fixtures are schema-tolerant but synthetic; verify the
 `message`/`part` `data` shapes against a real current `anomalyco/opencode`
 install (images, subtask/agent parts, compaction summaries, fork/parent
-semantics) and commit a real-DB fixture. The notes below capture the original
-research.
+semantics) and commit a real-DB fixture. Run `scripts/smoketest.sh opencode` on a
+machine with OpenCode for a safe, read-only end-to-end check (it dumps the live
+schema when `sqlite3` is present, which is the fastest way to confirm the
+table/column assumptions hold). The notes below capture the original research.
 
 ## Scope
 

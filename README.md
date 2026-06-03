@@ -226,6 +226,15 @@ Optional profiling: any command can write local Go pprof profiles with `--cpupro
 
 A source is read-only during snapshot. For JSONL sources, raw files are copied into the bundle and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the bundle stores those JSONL files; the database is copied (with any WAL/SHM sidecars) before reading and is never written to. `$OPENCODE_DB` overrides the database path, and release-channel databases (`opencode-*.db`) beside the default are picked up automatically.
 
+### Verifying an adapter against a real machine
+
+`scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` runs a safe, read-only end-to-end check (discovery → snapshot → ingest → search → read) against your real history. Every artifact it generates goes under a single `/tmp` directory — a throwaway corpus, depot, config, cache, and (for OpenCode) the JSONL export — so your real `~/.aha`/`~/.config/aha` are untouched and there is nothing to clean up. It also fingerprints the source before and after (plus a content hash + `integrity_check` of the OpenCode database) and fails if anything changed, proving the run was read-only.
+
+```bash
+scripts/smoketest.sh opencode          # uses the default root
+scripts/smoketest.sh codex ~/.codex/sessions
+```
+
 ## Defaults
 
 | Setting | Default |

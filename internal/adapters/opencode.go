@@ -101,13 +101,18 @@ func openCodeDBPaths(root string) []string {
 // openCodeExportDir returns a stable per-database directory for the generated
 // JSONL files. Stability matters: the snapshot reuse fingerprint includes each
 // file's path, so a non-deterministic location would defeat unchanged-state
-// detection and re-upload on every refresh.
+// detection and re-upload on every refresh. AHA_OPENCODE_EXPORT_DIR overrides
+// the base location (used by the smoketest to keep all artifacts under /tmp).
 func openCodeExportDir(dbPath string) (string, error) {
-	base, err := os.UserCacheDir()
-	if err != nil || base == "" {
-		base = filepath.Join(os.TempDir(), "aha-cache")
+	base := strings.TrimSpace(os.Getenv("AHA_OPENCODE_EXPORT_DIR"))
+	if base == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil || cache == "" {
+			cache = filepath.Join(os.TempDir(), "aha-cache")
+		}
+		base = filepath.Join(cache, "aha", "opencode-export")
 	}
-	return filepath.Join(base, "aha", "opencode-export", hash.SHA256Bytes([]byte(dbPath))[:12]), nil
+	return filepath.Join(base, hash.SHA256Bytes([]byte(dbPath))[:12]), nil
 }
 
 func parseOpenCode(file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
