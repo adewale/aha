@@ -6,7 +6,7 @@
 - Add explicit agent documentation/skill for `aha`:
   - teach the required `search -> read -> answer` workflow;
   - state that snippets are leads, not evidence;
-  - list read-only commands (`search`, `read`, `status`, `verify`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `depot init`, `depot verify --repair`);
+  - list read-only commands (`search`, `read`, `status`, `verify`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `depot init`, `depot use`, `depot verify --repair`, `depot compact`);
   - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, `verify --json`, and JSON error envelopes;
   - explain privacy caveats: v1 does not redact secrets, R2 is opt-in upload, and bundles/corpora are private;
   - show how an agent should cite/quote refs in its own notes;

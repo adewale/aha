@@ -356,7 +356,8 @@ once); any depot-touching command can override it for one invocation with
 | Command | Depot | Corpus | Network | Behavior |
 |---|---|---|---|---|
 | `aha init` | — | — | no | scaffolds config; records your depot choice |
-| `aha depot init <depot>` | create/bind | — | yes (r2) | creates or connects the depot, writes it to config |
+| `aha depot init <depot>` | create/bind | — | yes (r2) | creates or connects the depot, writes it to config as the default, and persists the non-secret r2 account id |
+| `aha depot use <depot>` | bind/select | — | yes (r2) | switches the default depot to an already-initialized one; refuses an uninitialized target and points at `aha depot init` |
 | `aha snapshot` | **write** | — | yes (r2) | builds a bundle, pushes it to the depot |
 | `aha ingest` | **read** | write | yes (r2) | pulls bundles new to you, merges into local corpus |
 | `aha refresh` | **read+write** | write | yes (r2) | `snapshot`→depot, then `ingest`←depot |
@@ -403,8 +404,8 @@ ade-mbp$ export R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
 ade-mbp$ aha depot init r2                 # opinionated default bucket "aha-depot"
 created depot r2:aha-depot  (account ...e91)
 
-work-mac$  aha depot init r2:aha-depot     # bucket exists → connect
-linux-box$ aha depot init r2:aha-depot
+work-mac$  aha depot use r2:aha-depot      # bucket exists → select it
+linux-box$ aha depot use r2:aha-depot
 ```
 
 Daily use is just `aha refresh` on each machine — it publishes your new snapshot
@@ -443,7 +444,7 @@ What this makes concrete:
   rebuilt from the depot:
 
 ```console
-new-box$ aha depot init r2:aha-depot
+new-box$ aha depot use r2:aha-depot
 new-box$ aha ingest                 # pull everything; full history reconstructed
 ```
 
@@ -523,7 +524,7 @@ and per-op costs low.
   implementations. The R2 driver uses a mature S3-compatible client; `aha` does
   **not** hand-roll request signing or other S3 authentication details.
 - `depot` config block (`type` + `location`, with remote/R2 off by default) plus
-  optional non-secret R2 account/endpoint fields; `aha depot init/ls/verify/compact`; and
+  optional non-secret R2 account/endpoint fields; `aha depot init/use/ls/verify/compact`; and
   `--depot` on the depot-touching commands.
 - Per-machine catalog shard reader/writer; content-addressed `bundles/v1/<sha>`
   keys; catalog refs carrying `manifest_sha256` and `state_sha256`; `depot verify
@@ -681,7 +682,7 @@ network in the default suite**.
 
 | Type | Coverage for the depot feature |
 |---|---|
-| Smoke | `aha depot --help`, `aha depot init/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
+| Smoke | `aha depot --help`, `aha depot init/use/ls/verify`, and a `snapshot --depot local:…` → `ingest --depot local:…` → `search` round trip all run. |
 | Contract / differential | One suite asserts **identical** observable behavior for the `local` driver, the S3 fake, and (tagged) real R2. |
 | Unit | depot address parsing (`type:location`), catalog shard read/write/merge, content-hash key derivation, pending-ingest delta computation. |
 | Golden | `bundles/v1/` key layout, `aha-depot/v1` marker, `aha-depot-catalog/v1` shard, depot `--json` output, and canonical bundle bytes for the current bundle schema. |
@@ -861,7 +862,7 @@ contradictions.
   the intentional `--depot`/local-depot default is documented and golden-tested.
 - `internal/depot` is the only package importing a network package, enforced by
   the reworked static test.
-- `snapshot`/`ingest`/`refresh` + `aha depot init/ls/verify` work through the
+- `snapshot`/`ingest`/`refresh` + `aha depot init/use/ls/verify` work through the
   depot-driver contract suite against the `local` driver and an in-process S3
   fake; real-R2 tests exist behind a build tag.
 - Integrity verification rejects tampered/truncated objects (regression test).

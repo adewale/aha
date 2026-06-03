@@ -89,6 +89,14 @@ func markerProblem(err error) string {
 	return "invalid depot marker: " + err.Error()
 }
 
+func markerProblemOrError(err error) (string, error) {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) && !isS3NotFound(err) {
+		return "", err
+	}
+	return markerProblem(err), nil
+}
+
 func isS3NotFound(err error) bool {
 	var apiErr smithy.APIError
 	if !errors.As(err, &apiErr) {
@@ -288,16 +296,27 @@ func (d *R2) Compact(ctx context.Context) (CompactReport, error) {
 func (d *R2) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	report := VerifyReport{Deep: false}
 	if err := d.readMarker(ctx); err != nil {
-		report.Problems = append(report.Problems, markerProblem(err))
+		problem, err := markerProblemOrError(err)
+		if err != nil {
+			return report, err
+		}
+		report.Problems = append(report.Problems, problem)
 	}
 	catalogRefs, err := d.List(ctx)
 	if err != nil {
 		return report, err
 	}
 	report.Catalogs = len(catalogRefs)
-	bundles, problems, err := verifyCatalogRefs(catalogRefs, func(key string) (bool, error) {
+	bundleKeys, err := d.quickBundleKeys(ctx)
+	if err != nil {
+		return report, err
+	}
+	bundles, problems, err := quickVerifyCatalogAndBundleKeys(catalogRefs, bundleKeys, func(key string) (bool, error) {
 		if _, err := d.Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(d.Bucket), Key: aws.String(key)}); err != nil {
-			return false, nil
+			if isS3NotFound(err) {
+				return false, nil
+			}
+			return false, err
 		}
 		return true, nil
 	})
@@ -309,10 +328,32 @@ func (d *R2) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	return report, nil
 }
 
+func (d *R2) quickBundleKeys(ctx context.Context) ([]string, error) {
+	var keys []string
+	p := s3.NewListObjectsV2Paginator(d.Client, &s3.ListObjectsV2Input{Bucket: aws.String(d.Bucket), Prefix: aws.String("bundles/v1/")})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range page.Contents {
+			if obj.Key == nil || !strings.HasSuffix(*obj.Key, ".tar.zst") {
+				continue
+			}
+			keys = append(keys, *obj.Key)
+		}
+	}
+	return keys, nil
+}
+
 func (d *R2) Verify(ctx context.Context, repair bool) (VerifyReport, error) {
 	report := VerifyReport{Deep: true}
 	if err := d.readMarker(ctx); err != nil {
-		report.Problems = append(report.Problems, markerProblem(err))
+		problem, markerErr := markerProblemOrError(err)
+		if markerErr != nil {
+			return report, markerErr
+		}
+		report.Problems = append(report.Problems, problem)
 		if repair && errors.Is(err, errR2MarkerMissing) {
 			if err := d.putMarker(ctx, true); err != nil {
 				return report, err

@@ -86,6 +86,50 @@ func TestLocalDepotPutListFetchVerifyRepair(t *testing.T) {
 	}
 }
 
+func TestLocalQuickVerifyReportsOrphanBundleWithoutMarker(t *testing.T) {
+	root := t.TempDir()
+	bundlePath := writeDepotTestBundle(t, filepath.Join(root, "src"))
+	ref, err := depot.BundleRefFromPath(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := depot.NewLocal(filepath.Join(root, "depot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bundleDst := filepath.Join(root, "depot", filepath.FromSlash(depot.BundleKey(ref.BundleSHA256)))
+	if err := os.MkdirAll(filepath.Dir(bundleDst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bundleDst, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "depot", "depot.json")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Deep {
+		t.Fatalf("quick verify reported deep: %+v", report)
+	}
+	if report.Bundles != 1 {
+		t.Fatalf("quick verify should count raw bundle objects, got %+v", report)
+	}
+	problems := strings.Join(report.Problems, "\n")
+	if !strings.Contains(problems, "missing depot marker") || !strings.Contains(problems, "catalog missing bundle "+ref.BundleSHA256) {
+		t.Fatalf("quick verify did not report degraded orphan bundle: %+v", report)
+	}
+}
+
 func TestLocalDepotCompactDedupe(t *testing.T) {
 	root := t.TempDir()
 	d, err := depot.NewLocal(filepath.Join(root, "depot"))

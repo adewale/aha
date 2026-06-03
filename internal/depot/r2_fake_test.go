@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -161,6 +162,79 @@ func TestR2VerifyQuickDeepAndRepairOperationBudgets(t *testing.T) {
 	}
 }
 
+func TestR2QuickVerifyReportsOrphanBundleWithoutMarker(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := writeDepotTestBundle(t, filepath.Join(t.TempDir(), "src"))
+	ref, err := depot.BundleRefFromPath(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.put(ref.Key, b)
+	fake.mu.Lock()
+	delete(fake.objects, "depot.json")
+	delete(fake.etags, "depot.json")
+	fake.mu.Unlock()
+	fake.resetCounts()
+	report, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Deep {
+		t.Fatalf("quick verify reported deep: %+v", report)
+	}
+	if report.Bundles != 1 {
+		t.Fatalf("quick verify should count raw bundle objects, got %+v", report)
+	}
+	problems := strings.Join(report.Problems, "\n")
+	if !strings.Contains(problems, "missing depot marker") || !strings.Contains(problems, "catalog missing bundle "+ref.BundleSHA256) {
+		t.Fatalf("quick verify did not report degraded orphan bundle: %+v", report)
+	}
+	if got := fake.count(http.MethodGet, ref.Key); got != 0 {
+		t.Fatalf("quick verify downloaded orphan bundle count=%d", got)
+	}
+}
+
+func TestR2QuickVerifySurfacesMarkerReadErrors(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	fake.failGet = map[string]int{"depot.json": http.StatusInternalServerError}
+	_, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err == nil {
+		t.Fatal("quick verify swallowed marker read server error")
+	}
+}
+
+func TestR2QuickVerifySurfacesHeadObjectErrors(t *testing.T) {
+	fake := newFakeS3(t)
+	defer fake.Close()
+	d := fake.Depot("bucket")
+	if err := d.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("e", 64)
+	shard := depot.CatalogShard{Schema: depot.CatalogSchema, MachineID: "m1", Bundles: []depot.BundleRef{{BundleSHA256: sha, MachineID: "m1", Key: depot.BundleKey(sha)}}}
+	b, _ := json.Marshal(shard)
+	fake.put("catalog/v1/m1.json", b)
+	fake.failHead = map[string]int{depot.BundleKey(sha): http.StatusInternalServerError}
+	_, err := depot.VerifyWithOptions(t.Context(), d, depot.VerifyOptions{})
+	if err == nil {
+		t.Fatal("quick verify swallowed HeadObject server error")
+	}
+}
+
 func TestR2ListOperationBudgetDoesNotTouchBundles(t *testing.T) {
 	fake := newFakeS3(t)
 	defer fake.Close()
@@ -239,6 +313,8 @@ type fakeS3 struct {
 	etags      map[string]string
 	counts     map[string]int
 	byteCounts map[string]int64
+	failHead   map[string]int
+	failGet    map[string]int
 }
 
 func newFakeS3(t *testing.T) *fakeS3 {
@@ -324,6 +400,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	switch r.Method {
 	case http.MethodHead:
+		if code := f.failHead[key]; code != 0 {
+			w.WriteHeader(code)
+			return
+		}
 		if _, ok := f.objects[key]; !ok {
 			http.NotFound(w, r)
 			return
@@ -331,6 +411,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", f.etags[key])
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
+		if code := f.failGet[key]; code != 0 {
+			w.WriteHeader(code)
+			return
+		}
 		b, ok := f.objects[key]
 		if !ok {
 			http.NotFound(w, r)

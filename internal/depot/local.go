@@ -193,7 +193,11 @@ func (d *Local) verifyQuick(ctx context.Context) (VerifyReport, error) {
 		return report, err
 	}
 	report.Catalogs = len(catalogRefs)
-	bundles, problems, err := verifyCatalogRefs(catalogRefs, func(key string) (bool, error) {
+	bundleKeys, err := d.quickBundleKeys()
+	if err != nil {
+		return report, err
+	}
+	bundles, problems, err := quickVerifyCatalogAndBundleKeys(catalogRefs, bundleKeys, func(key string) (bool, error) {
 		if _, err := os.Stat(filepath.Join(d.Root, filepath.FromSlash(key))); err != nil {
 			if os.IsNotExist(err) {
 				return false, nil
@@ -208,6 +212,31 @@ func (d *Local) verifyQuick(ctx context.Context) (VerifyReport, error) {
 	report.Bundles = bundles
 	report.Problems = append(report.Problems, problems...)
 	return report, nil
+}
+
+func (d *Local) quickBundleKeys() ([]string, error) {
+	bundleRoot := filepath.Join(d.Root, "bundles", "v1")
+	var keys []string
+	if err := filepath.WalkDir(bundleRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".tar.zst") {
+			return nil
+		}
+		rel, err := filepath.Rel(d.Root, path)
+		if err != nil {
+			return err
+		}
+		keys = append(keys, filepath.ToSlash(rel))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 func (d *Local) Verify(ctx context.Context, repair bool) (VerifyReport, error) {

@@ -82,6 +82,8 @@ catalog/v1/<safe-machine-id>.json
 
 The catalog filename uses a sanitized machine ID for path safety; the JSON body preserves the real `machine_id`. The catalog is an acceleration/provenance layer. `aha depot verify --repair` can rebuild it by listing `bundles/v1/*`, reading each embedded manifest, and writing fresh shards.
 
+See [`depot-lifecycle.md`](depot-lifecycle.md) for the states a depot moves through and the commands that move it (`init`, `use`, `snapshot`/`refresh`, `verify`, `compact`).
+
 ### Corpus
 
 Default corpus: `~/.aha`.

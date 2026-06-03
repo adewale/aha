@@ -676,7 +676,7 @@ aha status
 aha verify
 aha conflicts
 aha corpus <size|vacuum|prune-orphans>
-aha depot <init|ls|verify|compact>
+aha depot <init|use|ls|verify|compact>
 aha doctor
 ```
 

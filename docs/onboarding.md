@@ -173,13 +173,19 @@ aha refresh
 aha search "what changed in the parser" --refs
 ```
 
-## 8. Optional R2 setup for backup or multi-machine sync
+## 8. Optional R2 depot for backup or multi-machine sync
 
-Do this only after local onboarding works.
+Do this only after local onboarding works. Local stays the default until you
+configure a depot here — this step **opts into R2 as your default depot**, and
+you can switch back to local at any time.
+
+> For the full set of depot states and transitions — init, use, snapshot,
+> verify, compact — see [`depot-lifecycle.md`](depot-lifecycle.md).
 
 R2 requires two separate things:
 
-1. A private R2 bucket.
+1. A private R2 bucket. `aha depot init` creates it for you if it doesn't exist
+   (or you can pre-create one — see below).
 2. R2 **S3-compatible** credentials: Access Key ID + Secret Access Key.
 
 A Wrangler OAuth login can list/create buckets, but `aha` does not use Wrangler OAuth. `aha` talks to the R2 S3-compatible API.
@@ -224,24 +230,68 @@ The secret is shown only once. If you did not save it, create a new token.
 
 Recommended token: Object Read & Write, scoped to the depot bucket when bucket scoping is available.
 
-### Configure env and verify
+### Configure R2 as the default depot
+
+Export the credentials. The two **secret** keys always stay in the environment,
+never in config. The account ID is only needed in the environment for this
+first `init` — it gets persisted to config afterward:
 
 ```bash
-export AHA_R2_ACCOUNT_ID="<account-id>"
 export AHA_R2_ACCESS_KEY_ID="<r2-access-key-id>"
 export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
-
-aha doctor --depot r2:aha-depot --json
-aha snapshot --depot r2:aha-depot --accept-secrets --json
-aha depot verify r2:aha-depot --json
+export AHA_R2_ACCOUNT_ID="<account-id>"
 ```
 
-Passes if doctor can reach the depot, snapshot uploads a bundle, and verify reports the depot catalog/object checks succeeded.
-
-For a full byte-hash check, run explicitly because it downloads/reads bundle bytes:
+Now configure the depot. `aha depot init` creates the bucket (if needed), writes
+the depot marker, **sets R2 as your default depot**, and persists the non-secret
+`depot.r2.account_id` into config:
 
 ```bash
-aha depot verify r2:aha-depot --deep --json
+aha depot init r2:aha-depot
+aha doctor            # default is now r2:aha-depot — reachable and initialized
+aha refresh           # snapshots + ingests against R2, no --depot flag needed
+```
+
+Because the account ID is now in config, later shells only need the two secret
+keys exported. A direnv `.envrc` is a convenient home for them:
+
+```bash
+# .envrc
+export AHA_R2_ACCESS_KEY_ID="<r2-access-key-id>"
+export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
+```
+
+### Switch the default depot
+
+Configuring a depot sets the default; switch between configured depots anytime:
+
+```bash
+aha depot use local:~/.aha/depot   # back to local
+aha depot use r2:aha-depot         # back to R2
+```
+
+`aha depot use` only switches to a depot that is already initialized. If an
+empty bucket has no depot marker yet, it points you at `aha depot init`; if a
+populated depot is missing its marker or has catalog drift, it points you at
+`aha depot verify --repair` instead.
+
+### Add another machine
+
+On a second machine, export the same two secret keys (plus `AHA_R2_ACCOUNT_ID`
+the first time), then connect to the existing, already-initialized bucket:
+
+```bash
+aha depot use r2:aha-depot   # switch the default to the shared R2 depot
+aha refresh                  # share history through R2
+```
+
+### Deep verification
+
+`aha depot verify` is quick by default. For a full byte-hash check — it downloads
+and reads bundle bytes — run it explicitly:
+
+```bash
+aha depot verify --deep --json
 ```
 
 ## Troubleshooting
@@ -304,7 +354,11 @@ Local onboarding is complete when all are true:
 R2 onboarding is complete when all are true:
 
 - The bucket is private.
-- `AHA_R2_ACCOUNT_ID`, `AHA_R2_ACCESS_KEY_ID`, and `AHA_R2_SECRET_ACCESS_KEY` are set in the shell or secret manager.
-- `aha doctor --depot r2:<bucket> --json` runs without credential/bucket errors.
-- `aha snapshot --depot r2:<bucket> --accept-secrets --json` uploads a bundle.
-- `aha depot verify r2:<bucket> --json` passes.
+- `AHA_R2_ACCESS_KEY_ID` and `AHA_R2_SECRET_ACCESS_KEY` are set in the shell or
+  secret manager (these two always stay in the environment).
+- `aha depot init r2:<bucket>` reported the depot ready and wrote config, so
+  `depot.r2.account_id` is now persisted.
+- `aha doctor` shows the default depot as `r2:<bucket>` with `ok=true`.
+- `aha refresh` (no `--depot` flag) snapshots and ingests against R2.
+- `aha depot use local:~/.aha/depot` switches the default back to local, and
+  `aha depot use r2:<bucket>` switches it back to R2.
