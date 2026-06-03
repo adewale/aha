@@ -37,11 +37,11 @@ func TestAgentsDocStatesImplementationPrinciples(t *testing.T) {
 }
 
 func TestClaudeDocLoadsAgentsDoc(t *testing.T) {
-	claude := strings.ToLower(repoFile(t, "claude.me"))
-	if !strings.Contains(claude, "agents.md") {
-		t.Fatal("claude.me must reference agents.md")
-	}
-	if !strings.Contains(claude, "load") {
-		t.Fatal("claude.me must instruct loading agents.md")
+	// The file must be named CLAUDE.md (case-sensitive) so Claude Code auto-loads
+	// it, and it must use the @import syntax so agents.md is pulled into context
+	// automatically rather than only mentioned in prose.
+	claude := repoFile(t, "CLAUDE.md")
+	if !strings.Contains(claude, "@agents.md") {
+		t.Fatal("CLAUDE.md must @import agents.md so it auto-loads")
 	}
 }
