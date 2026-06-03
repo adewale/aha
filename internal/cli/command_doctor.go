@@ -49,6 +49,17 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "depot: %s:%s ok=%v\n", depotDiag["type"], depotDiag["location"], depotDiag["ok"])
 	if depotDiag["initialized"] == false {
 		fmt.Fprintf(stdout, "  depot not initialized; run `aha depot init %s:%s`\n", depotDiag["type"], depotDiag["location"])
+	} else {
+		if problems, ok := depotDiag["problems"].([]string); ok {
+			for _, p := range problems {
+				fmt.Fprintf(stdout, "  depot problem: %s\n", p)
+			}
+		}
+		if next, ok := depotDiag["next"].([]string); ok {
+			for _, n := range next {
+				fmt.Fprintf(stdout, "  next: %s\n", n)
+			}
+		}
 	}
 	for _, name := range names {
 		ad := adapters.Builtins()[name]
@@ -190,7 +201,7 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
-	report, err := drv.Verify(context.Background(), false)
+	report, err := verifyDepotQuick(context.Background(), drv)
 	if err != nil {
 		out["error"] = err.Error()
 		out["hints"] = depotErrorHints(err)
@@ -210,6 +221,7 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 	out["ok"] = len(report.Problems) == 0
 	if len(report.Problems) > 0 {
 		out["problems"] = report.Problems
+		out["next"] = []string{fmt.Sprintf("aha depot verify %s:%s --repair", addr.Type, addr.Location)}
 	}
 	return out
 }

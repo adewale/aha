@@ -270,8 +270,10 @@ aha depot use local:~/.aha/depot   # back to local
 aha depot use r2:aha-depot         # back to R2
 ```
 
-`aha depot use` only switches to a depot that is already initialized; if the
-bucket has no depot marker yet, it points you at `aha depot init`.
+`aha depot use` only switches to a depot that is already initialized. If an
+empty bucket has no depot marker yet, it points you at `aha depot init`; if a
+populated depot is missing its marker or has catalog drift, it points you at
+`aha depot verify --repair` instead.
 
 ### Add another machine
 

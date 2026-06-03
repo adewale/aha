@@ -30,7 +30,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 	jsonOut := fs.Bool("json", false, "JSON output")
 	repair := fs.Bool("repair", false, "repair catalog from bundle objects")
 	deep := fs.Bool("deep", false, "deep verify bundle bytes/manifests")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(interspersedDepotFlagArgs(args[1:])); err != nil {
 		return err
 	}
 	cfg, err := config.Load(*configPath)
@@ -40,6 +40,9 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 	addr := ""
 	if fs.NArg() > 0 {
 		addr = fs.Arg(0)
+	}
+	if sub == "use" && addr == "" {
+		return errors.New("depot use requires a depot address, e.g. `aha depot use r2:aha-depot` or `aha depot use local:~/.aha/depot`")
 	}
 	drv, err := depotDriverForConfig(cfg, addr)
 	if err != nil {
@@ -110,10 +113,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "catalogs=%d refs_before=%d refs_after=%d duplicate_refs=%d catalogs_written=%d\n", report.Catalogs, report.RefsBefore, report.RefsAfter, report.DuplicateRefs, report.CatalogsWritten)
 		return nil
 	case "use":
-		if addr == "" {
-			return errors.New("depot use requires a depot address, e.g. `aha depot use r2:aha-depot` or `aha depot use local:~/.aha/depot`")
-		}
-		report, err := drv.Verify(ctx, false)
+		report, err := verifyDepotQuick(ctx, drv)
 		if err != nil {
 			for _, h := range depotErrorHints(err) {
 				fmt.Fprintln(stderr, "hint:", h)
@@ -149,6 +149,24 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 // captureDepotR2Config persists the non-secret R2 settings into config so a
 // configured R2 default keeps working in a new shell with only the two secret
 // keys exported. The access key id and secret are never written to config.
+func interspersedDepotFlagArgs(args []string) []string {
+	var flags []string
+	var positionals []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			if (arg == "--config" || arg == "-config") && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+	return append(flags, positionals...)
+}
+
 func captureDepotR2Config(cfg *model.Config) error {
 	if cfg.Depot.Type != "r2" {
 		return nil
@@ -163,7 +181,9 @@ func captureDepotR2Config(cfg *model.Config) error {
 	if endpoint := firstNonEmpty(os.Getenv("AHA_R2_ENDPOINT"), os.Getenv("R2_ENDPOINT"), cfg.Depot.R2.Endpoint); endpoint != "" {
 		cfg.Depot.R2.Endpoint = endpoint
 	}
-	if rc.Region != "" && rc.Region != "auto" {
+	if rc.Region == "" || rc.Region == "auto" {
+		cfg.Depot.R2.Region = ""
+	} else {
 		cfg.Depot.R2.Region = rc.Region
 	}
 	return nil
@@ -173,5 +193,9 @@ func captureDepotR2Config(cfg *model.Config) error {
 // reachable but not yet provisioned (its depot.json marker is absent), as
 // opposed to one with real problems (an invalid marker, missing bundles, ...).
 func depotUninitialized(report depot.VerifyReport) bool {
-	return len(report.Problems) == 1 && report.Problems[0] == "missing depot marker"
+	return report.Bundles == 0 && report.Catalogs == 0 && len(report.Problems) == 1 && report.Problems[0] == "missing depot marker"
+}
+
+func verifyDepotQuick(ctx context.Context, drv depot.Driver) (depot.VerifyReport, error) {
+	return depot.VerifyWithOptions(ctx, drv, depot.VerifyOptions{Deep: false})
 }

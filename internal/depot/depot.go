@@ -139,6 +139,35 @@ func VerifyWithOptions(ctx context.Context, d Driver, opts VerifyOptions) (Verif
 	return report, err
 }
 
+func quickVerifyCatalogAndBundleKeys(catalogRefs []BundleRef, bundleKeys []string, exists func(string) (bool, error)) (int, []string, error) {
+	catalogBundles, problems, err := verifyCatalogRefs(catalogRefs, exists)
+	if err != nil {
+		return 0, nil, err
+	}
+	catalogBySHA := map[string]bool{}
+	for _, ref := range catalogRefs {
+		catalogBySHA[ref.BundleSHA256] = true
+	}
+	bundleBySHA := map[string]bool{}
+	for _, key := range bundleKeys {
+		if err := ValidateBundleKey(key); err != nil {
+			problems = append(problems, err.Error())
+			continue
+		}
+		sha := strings.TrimSuffix(strings.TrimPrefix(key, "bundles/v1/"), ".tar.zst")
+		bundleBySHA[sha] = true
+	}
+	for sha := range bundleBySHA {
+		if !catalogBySHA[sha] {
+			problems = append(problems, "catalog missing bundle "+sha)
+		}
+	}
+	if len(bundleBySHA) > catalogBundles {
+		return len(bundleBySHA), problems, nil
+	}
+	return catalogBundles, problems, nil
+}
+
 func ParseAddress(s string) (Address, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

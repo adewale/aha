@@ -13,7 +13,8 @@ call.
   functions the CLI already calls.
 - Stay read-only by default. State-changing operations (`init`, `refresh`,
   `snapshot`, `ingest`, `verify --repair-fts`, `corpus vacuum`,
-  `corpus prune-orphans --force`, `depot init/compact/repair`) are
+  `corpus prune-orphans --force`, `depot init/use/compact`,
+  `depot verify --repair`) are
   deliberately not exposed.
 - Ship as a single user-facing subcommand: `aha mcp`.
 

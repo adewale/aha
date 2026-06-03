@@ -62,20 +62,21 @@ Selection — which initialized depot is the default (a config pointer)
 
 ### Provisioning states
 
-1. **Uninitialized** — the backing store has no `depot.json` marker: a brand-new
-   local default, or a bucket created in the dashboard but never provisioned.
-   `aha doctor` reports it reachable with `initialized: false` (`ok: true`) and a
-   `next` hint, not as an error.
+1. **Uninitialized** — the backing store has no `depot.json` marker **and no
+   bundle/catalog evidence**: a brand-new local default, or a bucket created in
+   the dashboard but never provisioned. `aha doctor` reports it reachable with
+   `initialized: false` (`ok: true`) and an `aha depot init ...` next-action
+   hint, not as an error.
 2. **Initialized** — the `depot.json` marker is present (`schema: aha-depot/v1`,
    `layout: v1`). Reached by `aha depot init` **or implicitly by the first
    `aha snapshot` / `aha refresh`**, which auto-create the dir/bucket and marker
    before writing.
 3. **Populated** — at least one bundle under `bundles/v1/<sha>.tar.zst` is
    recorded in a per-machine catalog shard `catalog/v1/<machine>.json`.
-4. **Degraded** (a sub-state of Initialized/Populated) — the marker is missing or
-   the catalog and bundle objects have drifted. `aha depot verify` flags it and
-   `aha depot verify --repair` heals it by rebuilding the catalog/marker from the
-   bundle objects.
+4. **Degraded** (a sub-state of Initialized/Populated) — populated depot evidence
+   exists but the marker is missing, or the catalog and bundle objects have
+   drifted. `aha depot verify` flags it and `aha depot verify --repair` heals it
+   by rebuilding the catalog/marker from the bundle objects.
 5. **Decommissioned** — the backing store was removed **outside `aha`** (`rm` the
    directory, or delete the bucket and revoke its token). A default *local* depot
    then reads as Uninitialized again.

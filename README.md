@@ -190,7 +190,7 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
-aha depot <init|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
+aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
 aha mcp [--config PATH] [--repo DIR] [--dry-run]
 aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
@@ -208,7 +208,7 @@ Command roles:
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
-- `depot`: initialize, list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
+- `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
 - `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
 - `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Loopback binds need no auth; passing `--allow-remote` (or setting `AHA_ALLOW_REMOTE=1`) requires a shared-secret bearer token via `--token` (or `AHA_DASHBOARD_TOKEN`). Hostnames accepted via `Host:` are restricted to the loopback allowlist by default; extend with `--allowed-hosts`.
