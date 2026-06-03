@@ -1,0 +1,21 @@
+{
+  "name": "opencode realish",
+  "adapter": "opencode",
+  "fixture": "testdata/opencode_realish.jsonl",
+  "session_file": {
+    "source": "opencode",
+    "session_id": "path-fallback",
+    "cwd": ""
+  },
+  "want": {
+    "source": "opencode",
+    "source_session_id": "ses_realish",
+    "cwd": "/Users/me/work",
+    "entries": 2,
+    "contains_text": "opencode fixture needle",
+    "roles_by_index": {"0": "user", "1": "assistant"},
+    "tool_by_entry_id": {"msg_asst1": "bash"},
+    "model_by_index": {"1": "opencode-test-model"},
+    "tokens_by_index": {"1": 19}
+  }
+}

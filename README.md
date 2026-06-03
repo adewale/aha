@@ -222,8 +222,9 @@ Optional profiling: any command can write local Go pprof profiles with `--cpupro
 | Pi | `~/.pi/agent/sessions` | JSONL session files |
 | Claude Code | `~/.claude/projects` | JSONL project/session files, including `agent-*` subagents |
 | Codex | `~/.codex/sessions` | JSONL rollout/session files |
+| OpenCode | `~/.local/share/opencode` | SQLite database (`opencode.db`), converted to JSONL during discovery |
 
-A source is read-only during snapshot. Raw files are copied into the bundle and preserved for provenance.
+A source is read-only during snapshot. For JSONL sources, raw files are copied into the bundle and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the bundle stores those JSONL files; the database is copied (with any WAL/SHM sidecars) before reading and is never written to. `$OPENCODE_DB` overrides the database path, and release-channel databases (`opencode-*.db`) beside the default are picked up automatically.
 
 ## Defaults
 
@@ -244,6 +245,7 @@ Config is JSONC; flags override config.
   "sources": [
     { "type": "claude-code", "root": "~/.claude/projects", "enabled": true },
     { "type": "codex", "root": "~/.codex/sessions", "enabled": true },
+    { "type": "opencode", "root": "~/.local/share/opencode", "enabled": true },
     { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
   "corpus_dir": "~/.aha",

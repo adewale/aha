@@ -2090,9 +2090,9 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">10,147</span> production lines</dd>
-    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">17</span> in <code>internal/</code></dd>
-    <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">10,606</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">18</span> in <code>internal/</code></dd>
+    <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num">12</span></dd>
   </dl>
@@ -4341,11 +4341,12 @@ const PKG_GRAPH = {
   'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
   'media':       { deps: [],                              role: 'image and text artifact classification.' },
   'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
+  'opencodeexport': { deps: [],                           role: 'converts the OpenCode SQLite database into deterministic, lossless JSONL session files (DB+WAL copied first, never mutated). Kept out of adapters so source adapters stay free of filesystem-mutation calls.' },
 
   'safety':      { deps: ['model','paths'],               role: 'path containment + source-root validation. Imported by adapters, archive, depot.' },
   'config':      { deps: ['model','paths','adapters'],    role: 'JSONC config load/write, defaults; reads adapter capabilities to validate.' },
 
-  'adapters':    { deps: ['model','hash'],                role: 'source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures. The only place source-specific behaviour lives.' },
+  'adapters':    { deps: ['model','hash','opencodeexport','paths'], role: 'source-specific discovery and parsing for Pi, Claude Code, Codex (JSONL) and OpenCode (SQLite, converted to JSONL in Discover). Adapter conformance fixtures. The only place source-specific behaviour lives.' },
   'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.' },
   'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 driver, bundle key validation, catalog merge/repair/compaction. The only package that may import network packages.' },
 
@@ -4358,7 +4359,7 @@ const PKG_GRAPH = {
   'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
 };
 const LAYERS = [
-  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality'] },
+  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality','opencodeexport'] },
   { label: 'L2 · helpers',         pkgs: ['safety','config'] },
   { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
   { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },

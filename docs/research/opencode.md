@@ -1,6 +1,30 @@
 # OpenCode adapter research
 
-Status: viable with caveats.
+Status: implemented (see below) — originally viable with caveats.
+
+## Implementation note
+
+A read-only `opencode` adapter now ships. Rather than generalize the snapshot
+pipeline to ingest SQLite directly (the pipeline assumes one JSONL file per
+session, parsed from an `io.Reader`, with raw bytes copied into the bundle), the
+adapter converts the database to deterministic, lossless JSONL *during
+`Discover`* and lets the unchanged downstream handle the JSONL:
+
+- The DB and any `-wal`/`-shm` sidecars are copied into a stable per-database
+  export directory before reading, giving a consistent view of a live WAL
+  database without writing to the source.
+- Each `session`/`message`/`part` row is dumped with its full `data` JSON
+  preserved verbatim (`json.RawMessage`), so the conversion is lossless rather
+  than a lossy projection. Output is byte-stable for identical DB contents, so
+  the snapshot unchanged-state fingerprint still avoids re-uploading.
+- The file-writing lives in `internal/opencodeexport`, not `internal/adapters`,
+  so the source adapters keep their textual read-only invariant.
+
+Remaining follow-up: the fixtures are schema-tolerant but synthetic; verify the
+`message`/`part` `data` shapes against a real current `anomalyco/opencode`
+install (images, subtask/agent parts, compaction summaries, fork/parent
+semantics) and commit a real-DB fixture. The notes below capture the original
+research.
 
 ## Scope
 
