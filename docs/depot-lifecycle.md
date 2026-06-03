@@ -16,61 +16,94 @@ on-disk/object layout and per-command data flows see
 [`r2-bucket-settings.md`](r2-bucket-settings.md); for full command metadata see
 [`commands.md`](commands.md).
 
-## The model in one paragraph
+## The model in two dimensions
 
-There is exactly **one default depot** at a time, recorded in config
-(`depot.type` / `depot.location`). Out of the box it is **local** —
-`~/.aha/depot` — and nothing touches the network. *Configuring* a depot
-overrides the default, and two commands configure it: `aha depot init` (create
-and select) and `aha depot use` (switch to an already-initialized one). A
-`--depot <addr>` flag on any command is a one-off override and never changes the
-default.
+Keeping these two **independent** dimensions separate is the whole model:
 
-## States
+- **Provisioning lifecycle of a depot** — its backing store moves through
+  **Uninitialized → Initialized → Populated**. `aha` provisions it for you on the
+  first write, so you rarely run `aha depot init` by hand.
+- **Selection** — exactly one depot is the **default** at a time, recorded as a
+  config pointer (`depot.type` / `depot.location`). Out of the box it points at a
+  local depot (`~/.aha/depot`) that is not yet provisioned; nothing touches the
+  network until you use a remote.
+
+A depot can be fully Initialized and Populated *without* being the default.
+*Configuring* a depot moves the pointer — `aha depot init <addr>` (provision and
+select) or `aha depot use <addr>` (switch to an already-initialized depot). A
+`--depot <addr>` flag is a one-off override: it targets a depot for a single
+command without moving the pointer (and may still auto-initialize that target).
+
+## State machine
+
+![Depot lifecycle: provisioning lifecycle × selection](depot-lifecycle.svg)
+
+Text version of the diagram:
 
 ```text
-  unconfigured ──init──▶ initialized ──snapshot/refresh──▶ populated
-  (local default,        (depot.json                        (bundles +
-   no depot.json)         marker written)                    catalog shards)
+Provisioning lifecycle of a single depot
+----------------------------------------
+                aha depot init                  snapshot / refresh
+  Uninitialized ───────────────▶ Initialized ────────────────▶ Populated
+   (no depot.json)                (depot.json marker)            (bundles + catalog)
+        │                          ↺ init (idempotent)           ↺ snapshot · ls · verify · compact
+        │  first snapshot / refresh  →  auto-init + populate
+        └────────────────────────────────────────────────────────▶ Populated
 
-        ▲                       │                                  │
-        └───── depot use ───────┴──── depot use / ls / verify ─────┘
-               (switch the default depot, inspect, maintain — in place)
+  Populated ⇄ Degraded   — marker missing / catalog drift; heal with `verify --repair`
+  any state → (rm dir / delete bucket — external, not aha) → Uninitialized
+
+Selection — which initialized depot is the default (a config pointer)
+--------------------------------------------------------------------
+  config default ──(aha depot init <addr> | aha depot use <addr>)──▶ { local depot, r2 depot, … }
+  --depot <addr>  = one-off override; never moves the pointer (may still auto-init <addr>)
+  Only an Initialized depot may be selected; aha depot use refuses an uninitialized target.
 ```
 
-1. **Unconfigured** — the default `local:~/.aha/depot`, before anything is
-   written. There is no `depot.json` marker yet. `aha doctor` reports this depot
-   as reachable but `initialized: false` (`ok: true`) with a `next` hint to run
-   `aha depot init`, rather than as an error.
-2. **Initialized** — `aha depot init <addr>` has created the backing store
-   (a directory for `local`, a bucket for `r2`) and written the `depot.json`
-   marker (`schema: aha-depot/v1`, `layout: v1`). The depot is now also the
-   configured default.
-3. **Default / selected** — the depot the config points at; every flagless
-   command (`snapshot`, `refresh`, `ingest`, `status`, `doctor`, `depot …`)
-   targets it. `aha depot use <addr>` moves this selection between initialized
-   depots.
-4. **Populated** — `aha snapshot` / `aha refresh` have stored one or more
-   bundles under `bundles/v1/<sha>.tar.zst` and recorded them in the
-   per-machine catalog shard `catalog/v1/<machine>.json`.
-5. **Maintained** — kept healthy in place with `aha depot verify` /
-   `verify --repair` / `aha depot compact`; inspected with `aha depot ls`.
+### Provisioning states
+
+1. **Uninitialized** — the backing store has no `depot.json` marker: a brand-new
+   local default, or a bucket created in the dashboard but never provisioned.
+   `aha doctor` reports it reachable with `initialized: false` (`ok: true`) and a
+   `next` hint, not as an error.
+2. **Initialized** — the `depot.json` marker is present (`schema: aha-depot/v1`,
+   `layout: v1`). Reached by `aha depot init` **or implicitly by the first
+   `aha snapshot` / `aha refresh`**, which auto-create the dir/bucket and marker
+   before writing.
+3. **Populated** — at least one bundle under `bundles/v1/<sha>.tar.zst` is
+   recorded in a per-machine catalog shard `catalog/v1/<machine>.json`.
+4. **Degraded** (a sub-state of Initialized/Populated) — the marker is missing or
+   the catalog and bundle objects have drifted. `aha depot verify` flags it and
+   `aha depot verify --repair` heals it by rebuilding the catalog/marker from the
+   bundle objects.
+5. **Decommissioned** — the backing store was removed **outside `aha`** (`rm` the
+   directory, or delete the bucket and revoke its token). A default *local* depot
+   then reads as Uninitialized again.
+
+### Selection (orthogonal to the states above)
+
+Selection is **not** a provisioning state — it is the config pointer naming the
+default depot. `aha depot init` and `aha depot use` move it (only ever to an
+Initialized depot); `--depot <addr>` overrides it for a single command. Switching
+the default leaves every depot's data untouched.
 
 ## Transitions (commands)
 
-| Command | From → To | Network (r2) | Effect |
-|---|---|---|---|
-| `aha depot init <addr>` | unconfigured/uninitialized → **initialized + default** | yes | Creates the dir/bucket if needed, writes the `depot.json` marker, sets `<addr>` as the default depot, and for r2 persists the non-secret `depot.r2.account_id`. Idempotent: re-running against an existing depot connects to it. |
-| `aha depot use <addr>` | initialized → **default** (switch) | yes | Switches the default depot to an already-initialized `<addr>`. Refuses a reachable-but-uninitialized target and points you at `aha depot init`; for r2 it persists the non-secret `depot.r2.account_id`. Creates nothing. |
-| `aha snapshot` | initialized → **populated** | yes | Builds a bundle from local sources and pushes it (`bundles/v1/<sha>.tar.zst` + catalog), atomic write, skip-if-present. Does not touch the corpus. |
-| `aha refresh` | initialized → **populated** | yes | `snapshot` into the depot (or reuse unchanged state), then `ingest` pending depot bundles into the local corpus. |
-| `aha ingest` | populated → (corpus) | yes | Reads bundles new to this machine from the depot and merges them into the local corpus. |
-| `aha depot ls` | populated (inspect) | yes | Lists the catalog refs across all machines' shards. |
-| `aha depot verify [--deep] [--repair]` | any (check/heal) | yes | Quick: marker + catalog↔object metadata. `--deep`: re-hashes/downloads bundle bytes. `--repair`: rebuilds catalog/marker from the bundle objects. |
-| `aha depot compact` | populated (optimize) | yes | Deduplicates repairable catalog refs by bundle SHA without downloading bundle bytes. |
+| Command | Provisioning | Selection | Net (r2) | Effect |
+|---|---|---|---|---|
+| `aha depot init <addr>` | Uninitialized → Initialized (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
+| `aha depot use <addr>` | requires Initialized | sets default = `<addr>` | yes | Switches the default to an already-initialized `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
+| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then builds a bundle and pushes it (`bundles/v1/<sha>.tar.zst` + catalog), atomic write, skip-if-present. Does not touch the corpus. |
+| `aha refresh` | same as `snapshot` → Populated | unchanged | yes | `snapshot` (auto-init + push, or reuse unchanged state), then `ingest` pending depot bundles into the local corpus. |
+| `aha ingest` | reads Populated (no provisioning) | unchanged | yes | Reads bundles new to this machine from the depot and merges them into the local corpus. |
+| `aha depot ls` | reads Initialized/Populated | unchanged | yes | Lists the catalog refs across all machines' shards. |
+| `aha depot verify [--deep] [--repair]` | Degraded → Initialized/Populated (with `--repair`) | unchanged | yes | Quick: marker + catalog↔object metadata. `--deep`: re-hashes/downloads bundle bytes. `--repair`: rebuilds catalog/marker from the bundle objects. |
+| `aha depot compact` | Populated (in place) | unchanged | yes | Deduplicates repairable catalog refs by bundle SHA without downloading bundle bytes. |
 
-`--depot <addr>` on `snapshot` / `refresh` / `ingest` / `status` / `doctor`
-runs that single command against `<addr>` without changing the default.
+`--depot <addr>` on `snapshot` / `refresh` / `ingest` / `status` / `doctor` runs
+that one command against `<addr>` without moving the default pointer. Because the
+write commands auto-initialize their target, a one-off `snapshot --depot
+r2:other` can create/initialize `r2:other` as a side effect.
 
 ## What lives in a depot
 
@@ -96,9 +129,12 @@ runs that single command against `<addr>` without changing the default.
 
 ```bash
 aha init --accept-secrets   # writes config with the local depot default
-aha refresh                 # creates ~/.aha/depot on first use, snapshots + ingests
+aha refresh                 # auto-initializes ~/.aha/depot, then snapshots + ingests
 aha doctor                  # depot: local:~/.aha/depot ok=true, initialized=true
 ```
+
+No `aha depot init` is needed for the local default — the first `refresh`
+provisions it.
 
 ### Promote to R2
 
