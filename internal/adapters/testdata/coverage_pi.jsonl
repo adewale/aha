@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"pi-coverage","timestamp":"2026-05-21T10:00:00Z","cwd":"/Users/me/work"}
+{"id":"u1","parentId":"","type":"message","timestamp":"2026-05-21T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"coverage pi entry"}]}}
+{"id":"tc1","parent_id":"u1","type":"message","timestamp":"2026-05-21T10:00:02Z","toolName":"Bash","model":"pi-fallback-model","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_001","name":"Bash","input":{"command":"ls","file_path":"/tmp/x","pattern":"foo"}}]}}
+{"id":"tr1","parentId":"tc1","type":"message","timestamp":"2026-05-21T10:00:03Z","message":{"role":"toolResult","toolName":"Bash","content":[{"type":"tool_result","tool_use_id":"tu_001","content":"sample stdout","is_error":false}]}}
+{"id":"bs1","parentId":"tr1","type":"branch_summary","timestamp":"2026-05-21T10:00:04Z","role":"branchSummary","fromId":"tr1","summary":"branch closed: experiment abandoned"}
+{"id":"cs1","parentId":"bs1","type":"compaction","timestamp":"2026-05-21T10:00:05Z","role":"compactionSummary","summary":"context compacted","firstKeptEntryId":"u1","tokensBefore":40000}
+{"id":"st1","parentId":"cs1","type":"summary","timestamp":"2026-05-21T10:00:06Z","text":"top-level text field on a summary entry"}
