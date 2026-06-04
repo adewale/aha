@@ -16,6 +16,10 @@
 #   * Because all artifacts live in /tmp, there is nothing to clean up; /tmp is
 #     reclaimed by the OS. (You may `rm -rf` the printed directory if you like.)
 #
+# Compatibility: portable to macOS's default bash 3.2 (no associative arrays)
+# and BSD/GNU coreutils. `sqlite3` is optional — when present it adds an
+# OpenCode schema check; when absent that single check is skipped.
+#
 set -u -o pipefail
 
 # ---- arguments -------------------------------------------------------------
@@ -154,7 +158,10 @@ SRC_FP_BEFORE="$(fingerprint_tree "$SOURCE_ROOT")"
 note "tree fingerprint: $SRC_FP_BEFORE"
 
 # OpenCode: also content-hash the database file(s) and integrity-check them.
+# Parallel indexed arrays (OC_DBS[i] <-> OC_HASH_BEFORE[i]) — associative arrays
+# need bash 4+, but macOS ships bash 3.2.
 OC_DBS=()
+OC_HASH_BEFORE=()
 if [ "$SOURCE" = "opencode" ]; then
   if [ -f "$SOURCE_ROOT" ]; then OC_DBS+=("$SOURCE_ROOT")
   else
@@ -164,12 +171,12 @@ if [ "$SOURCE" = "opencode" ]; then
   fi
   if [ "${#OC_DBS[@]}" -eq 0 ]; then
     bad "no opencode.db found under $SOURCE_ROOT"
+  else
+    for i in "${!OC_DBS[@]}"; do
+      OC_HASH_BEFORE[$i]="$(sha256_file "${OC_DBS[$i]}")"
+      note "db ${OC_DBS[$i]}: ${OC_HASH_BEFORE[$i]}"
+    done
   fi
-  declare -A OC_HASH_BEFORE=()
-  for d in "${OC_DBS[@]}"; do
-    OC_HASH_BEFORE["$d"]="$(sha256_file "$d")"
-    note "db $d: ${OC_HASH_BEFORE["$d"]}"
-  done
 fi
 echo
 
@@ -234,15 +241,18 @@ if [ "$SOURCE" = "opencode" ]; then
   if command -v sqlite3 >/dev/null 2>&1 && [ "${#OC_DBS[@]}" -gt 0 ]; then
     # Open a private read-only copy so we never touch the live DB.
     cp "${OC_DBS[0]}" "$WORK/tmp/inspect.db"
+    # `.tables` lists bare, unquoted names — robust to how the DDL quotes them
+    # (sqlite3 may emit "session", `session`, [session], or session).
+    OC_TABLES="$(sqlite3 "$WORK/tmp/inspect.db" '.tables' 2>/dev/null)"
     {
-      echo "# tables"; sqlite3 "$WORK/tmp/inspect.db" ".tables"
+      echo "# tables"; printf '%s\n' "$OC_TABLES"
       for t in session message part; do
         echo "# schema $t"; sqlite3 "$WORK/tmp/inspect.db" ".schema $t"
         echo "# count $t"; sqlite3 "$WORK/tmp/inspect.db" "select count(*) from $t;" 2>/dev/null
       done
     } > "$LOGS/opencode-schema.txt" 2>&1
     for t in session message part; do
-      if grep -qi "CREATE TABLE \"\?$t\"\?" "$LOGS/opencode-schema.txt"; then
+      if printf '%s\n' "$OC_TABLES" | tr -s ' \t' '\n' | grep -qx "$t"; then
         ok "schema has expected table: $t"
       else
         bad "schema MISSING expected table: $t (adapter assumptions may need updating — see $LOGS/opencode-schema.txt)"
@@ -252,8 +262,11 @@ if [ "$SOURCE" = "opencode" ]; then
   else
     note "sqlite3 not on PATH — skipping schema dump (install sqlite3 for the schema check)"
   fi
-  # Generated JSONL export must live under /tmp.
-  if find "$WORK/export" -name '*.jsonl' 2>/dev/null | grep -q .; then
+  # Generated JSONL export must live under /tmp. Count via wc rather than piping
+  # find into `grep -q`: grep -q closes the pipe early, which under pipefail
+  # surfaces find's SIGPIPE as a spurious failure.
+  EXPORT_COUNT="$(find "$WORK/export" -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${EXPORT_COUNT:-0}" -gt 0 ]; then
     ok "opencode JSONL export written under /tmp ($WORK/export)"
   else
     note "no JSONL export found (expected only if sessions were discovered)"
@@ -273,16 +286,17 @@ fi
 
 if [ "$SOURCE" = "opencode" ] && [ "${#OC_DBS[@]}" -gt 0 ]; then
   changed=0
-  for d in "${OC_DBS[@]}"; do
-    after="$(sha256_file "$d")"
-    [ "$after" = "${OC_HASH_BEFORE["$d"]}" ] || { changed=1; bad "database content changed: $d"; }
+  for i in "${!OC_DBS[@]}"; do
+    after="$(sha256_file "${OC_DBS[$i]}")"
+    [ "$after" = "${OC_HASH_BEFORE[$i]}" ] || { changed=1; bad "database content changed: ${OC_DBS[$i]}"; }
   done
   if [ "$changed" -eq 0 ]; then
     ok "opencode database content unchanged (sha256 identical)"
     note "if this ever fails while OpenCode is running, re-run with OpenCode closed"
   fi
   if command -v sqlite3 >/dev/null 2>&1; then
-    for d in "${OC_DBS[@]}"; do
+    for i in "${!OC_DBS[@]}"; do
+      d="${OC_DBS[$i]}"
       res="$(sqlite3 "file:$d?mode=ro" 'pragma integrity_check;' 2>/dev/null | head -1)"
       [ "$res" = "ok" ] && ok "integrity_check ok: $(basename "$d")" || bad "integrity_check NOT ok: $d ($res)"
     done
