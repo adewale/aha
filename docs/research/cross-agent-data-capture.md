@@ -109,6 +109,63 @@ canonical `session-format.md` because the canonical spec describes
 inside the `message.content` block-type space (`toolCall`, `thinking`,
 Pi-image). Running the corpus audit was the only way to find it.
 
+## Codex-native projection: a second discovered gap
+
+The same corpus audit applied to `cfahlgren1/codex-sessions` surfaced
+that **Codex CLI's modern rollout format** wraps every entry in a
+`payload` envelope instead of the `message` envelope our parser
+assumes. A modern Codex rollout entry looks like:
+
+```json
+{"type":"response_item","timestamp":"...","payload":{"type":"agent_message","content":[{"type":"text","text":"..."}],"model":"gpt-5-codex","role":"assistant"}}
+```
+
+Our `parseGenericJSONL` reads `message.role`, `message.model`,
+`message.content[].*` and `message.usage.*`. None of these are
+populated for modern Codex rollouts, because the data lives under
+`payload.*`. Concretely, for a modern Codex rollout the corpus today
+produces:
+
+- `entries.role` = "" (parser fell back to `entry_type` since
+  `role`/`message.role` are absent).
+- `messages.text` = "" (the parser walked `message.content`, which is
+  absent).
+- `messages.model` = "" (same).
+- `messages.tokens` = 0 (Codex emits `payload.info.last_token_usage.*`
+  and `payload.info.total_token_usage.*`; the parser sums Anthropic
+  `input_tokens` / `output_tokens`).
+- `messages.tool_name` / `messages.command` / `messages.files_json` =
+  "" (function calls are `payload.type = "function_call"` with
+  `payload.name` and `payload.arguments`; the parser handles
+  `tool_use` blocks under `message.content[]`, not function-call
+  entries).
+
+The Codex `payload.type` discriminates `session_meta`, `user_input`,
+`agent_message`, `function_call`, `function_call_output`,
+`reasoning`, `rate_limits`, and `token_count`. None of these route
+through projection today.
+
+The fix mirrors the Pi-native projection follow-up: after the generic
+parse, the Codex adapter (`adapters/codex.go`) should detect the
+`payload` envelope and populate the columns from there. Field-by-field
+this is mechanical; the schema additions are the same as priorities
+2 and 4 (cache/reasoning tokens, typed state-transition data).
+
+Two Pi-style follow-ups, then, share scope and are best landed
+together as a single "native projection layer" pass that:
+
+1. Detects the source-native envelope shape per adapter (`message.*`
+   for Anthropic/Claude Code legacy, `payload.*` for Codex modern,
+   Pi's `content[].type = "toolCall"` blocks for Pi tool calls).
+2. Routes each into the existing typed-column projections.
+3. Maintains backward compatibility for the Anthropic-style format
+   that today's parser handles natively.
+
+Estimated cost (parallel to Pi-native projection): ~400 LOC and a
+property test that asserts `messages.{text, role, model, tokens,
+tool_name}` are populated for every entry in
+`testdata/corpora/codex-sample/`.
+
 ## Where we lose data, ranked
 
 1. **Pi alternate-timeline branches (high impact, lossless-on-disk).**

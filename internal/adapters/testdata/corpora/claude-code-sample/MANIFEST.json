@@ -1,0 +1,11 @@
+{
+  "source": "https://huggingface.co/datasets/JohnBeanerson/claude-code-sessions-test",
+  "doc": "Public Claude Code session vendored 2026-06 for adapter fidelity testing. Single test session (~3KB) \u2014 this is the only Claude Code session corpus we found on HF. Plan to expand if more become available.",
+  "files": [
+    {
+      "path": "6b2bb1c0-445d-4678-88bf-72a31d128fec.jsonl",
+      "dataset": "JohnBeanerson/claude-code-sessions-test",
+      "size": 3314
+    }
+  ]
+}
