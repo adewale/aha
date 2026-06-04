@@ -70,6 +70,9 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 		}
 		if usage, ok := nestedMap(m, "message", "usage"); ok {
 			pe.Tokens = int64(numField(usage, "input_tokens") + numField(usage, "output_tokens") + numField(usage, "cache_creation_input_tokens") + numField(usage, "cache_read_input_tokens"))
+			pe.CacheReadTokens = int64(numField(usage, "cache_read_input_tokens"))
+			pe.CacheWriteTokens = int64(numField(usage, "cache_creation_input_tokens"))
+			pe.ReasoningTokens = int64(numField(usage, "reasoning_output_tokens") + numField(usage, "reasoning_tokens"))
 		}
 		if pe.Text == "" && (role == "branchSummary" || role == "compactionSummary" || typ == "summary") {
 			pe.Text = firstNonEmpty(stringField(m, "summary"), stringField(m, "text"))

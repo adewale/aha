@@ -78,23 +78,26 @@ type ParsedSession struct {
 }
 
 type ParsedEntry struct {
-	EntryID   string
-	ParentID  string
-	LineNo    int
-	EntryType string
-	Timestamp string
-	Role      string
-	RawJSON   string
-	Text      string
-	ToolName  string
-	Command   string
-	FilesJSON string
-	Model     string
-	Provider  string
-	Tokens    int64
-	Cost      float64
-	Assets    []ParsedAsset
-	Metadata  map[string]any
+	EntryID          string
+	ParentID         string
+	LineNo           int
+	EntryType        string
+	Timestamp        string
+	Role             string
+	RawJSON          string
+	Text             string
+	ToolName         string
+	Command          string
+	FilesJSON        string
+	Model            string
+	Provider         string
+	Tokens           int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	Cost             float64
+	Assets           []ParsedAsset
+	Metadata         map[string]any
 }
 
 type ParsedAsset struct {
