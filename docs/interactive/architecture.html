@@ -2560,6 +2560,11 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-name">conflicts</div>
           <div class="er-note">where the conflict trigger writes; append-only itself</div>
         </div>
+        <div class="er-table" data-cols="session_key, entry_id, pattern, count">
+          <div class="er-name">redactions</div>
+          <div class="er-fk">→ entries</div>
+          <div class="er-note">v1.1 per-pattern hit counts; populated by ingest when <code>redaction</code> ≠ <code>none-v1</code></div>
+        </div>
       </div>
     </div>
 
@@ -4350,17 +4355,18 @@ const PKG_GRAPH = {
   'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.' },
   'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 driver, bundle key validation, catalog merge/repair/compaction. The only package that may import network packages.' },
 
-  'corpus':      { deps: ['model','adapters','archive','clock','fileutil','hash','media','paths'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
+  'corpus':      { deps: ['model','adapters','archive','clock','fileutil','hash','media','paths','redact'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
   'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
 
+  'redact':      { deps: ['model'], role: 'v1.1 redaction pipeline: 14 built-in regex patterns plus user extras, idempotent and property-tested. Wired into corpus ingest to scrub messages.text, entries.raw_json, artifacts.text_* before insertion.' },
   'mcp':         { deps: ['adapters','config','corpus','model','search'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
   'server':      { deps: ['mcp','model'],                 role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON content-type enforcement, request timeout.' },
 
-  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
+  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','redact','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
 };
 const LAYERS = [
   { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality','opencodeexport'] },
-  { label: 'L2 · helpers',         pkgs: ['safety','config'] },
+  { label: 'L2 · helpers',         pkgs: ['safety','config','redact'] },
   { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
   { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },
   { label: 'L5 · agent surfaces',  pkgs: ['mcp','server'] },

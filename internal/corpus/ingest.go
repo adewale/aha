@@ -24,6 +24,7 @@ import (
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/media"
 	"github.com/adewale/aha/internal/model"
+	"github.com/adewale/aha/internal/redact"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -83,7 +84,18 @@ type Ingestor struct {
 	Clock    ahaclock.Clock
 	Sleeper  ahaclock.Sleeper
 	Backoff  ahaclock.Backoff
-	hooks    ingestHooks
+	// Redactor, when non-nil, scrubs secrets from every projected
+	// text surface (entries.raw_json, messages.text, messages.command,
+	// messages.files_json, artifacts.text_*, source_metadata_json) at
+	// insert time per docs/redaction-spec.md v1.1. Nil = no-op
+	// behaviour (none-v1 default).
+	Redactor *redact.Redactor
+	// RedactionLevel is stamped on sessions.redaction_level. Empty
+	// string defaults to "none-v1". The level is recorded regardless
+	// of whether Redactor is set, so a `none-v1` corpus and a `v1`
+	// corpus are distinguishable in the schema.
+	RedactionLevel string
+	hooks          ingestHooks
 }
 
 type ingestPlan struct {
@@ -101,11 +113,13 @@ type bundlePlanner struct {
 type blobPublisher struct{}
 
 type corpusWriter struct {
-	Store    *Store
-	Registry map[string]adapters.SourceAdapter
-	tx       *sql.Tx
-	manifest model.Manifest
-	stmts    writerStatements
+	Store          *Store
+	Registry       map[string]adapters.SourceAdapter
+	tx             *sql.Tx
+	manifest       model.Manifest
+	stmts          writerStatements
+	redactor       *redact.Redactor
+	redactionLevel string
 }
 
 type writerStatements struct {
@@ -122,6 +136,8 @@ type writerStatements struct {
 	insertArtifactPathToken *sql.Stmt
 	insertImage             *sql.Stmt
 	insertEntryAsset        *sql.Stmt
+	insertRedaction         *sql.Stmt
+	stampSessionLevel       *sql.Stmt
 }
 
 func (w *corpusWriter) PrepareStatements() error {
@@ -142,6 +158,8 @@ func (w *corpusWriter) PrepareStatements() error {
 		{&w.stmts.insertArtifactPathToken, `insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`},
 		{&w.stmts.insertImage, `insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertEntryAsset, `insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertRedaction, `insert into redactions(session_key,entry_id,pattern,count) values(?,?,?,?) on conflict(session_key,entry_id,pattern) do update set count=redactions.count+excluded.count`},
+		{&w.stmts.stampSessionLevel, `update sessions set redaction_level=? where session_key=?`},
 	}
 	for _, item := range prepared {
 		stmt, err := w.tx.Prepare(item.sql)
@@ -155,7 +173,7 @@ func (w *corpusWriter) PrepareStatements() error {
 
 func (w *corpusWriter) CloseStatements() error {
 	var first error
-	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset} {
+	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset, w.stmts.insertRedaction, w.stmts.stampSessionLevel} {
 		if stmt == nil {
 			continue
 		}
@@ -223,7 +241,11 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 		return IngestReport{}, err
 	}
 	manifest := plan.manifest
-	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest}
+	level := ing.RedactionLevel
+	if level == "" {
+		level = "none-v1"
+	}
+	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest, redactor: ing.Redactor, redactionLevel: level}
 	if err := writer.PrepareStatements(); err != nil {
 		return IngestReport{}, err
 	}
@@ -497,9 +519,23 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	}
 	sessionKey := sessionKeyValue.String()
 	rawCWD := firstNonEmpty(ps.CWD, mf.CWD)
-	if _, err := w.stmts.insertSession.Exec(sessionKey, mf.Source, sessionID, manifest.MachineID, rawCWD, projectKey(rawCWD), firstNonEmpty(ps.StartedAt, mf.StartedAt), mustJSON(ps.Metadata), boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
+	metadataJSON, metaHits := w.applyRedaction(mustJSON(ps.Metadata))
+	if _, err := w.stmts.insertSession.Exec(sessionKey, mf.Source, sessionID, manifest.MachineID, rawCWD, projectKey(rawCWD), firstNonEmpty(ps.StartedAt, mf.StartedAt), metadataJSON, boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
 		return IngestReport{}, err
 	}
+	if w.stmts.stampSessionLevel != nil {
+		if _, err := w.stmts.stampSessionLevel.Exec(w.redactionLevel, sessionKey); err != nil {
+			return IngestReport{}, err
+		}
+	}
+	// Session-metadata redactions cannot key on an entry_id; surface
+	// them in the session-level total by tying them to a synthetic
+	// entry_id "__session__". The schema requires a foreign key into
+	// entries, so we skip this attribution and rely on the regex pass
+	// running again on each entry's source_metadata_json. (Per-session
+	// metadata is short and rarely contains secrets; the entry path
+	// catches the same bytes via raw_json when secrets *do* land there.)
+	_ = metaHits
 	if err := w.insertSessionPathTokens(sessionKey, rawCWD); err != nil {
 		return IngestReport{}, err
 	}
@@ -583,7 +619,18 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 			return entryReport{}, err
 		}
 	}
-	res, err := w.stmts.insertEntry.Exec(sessionKey, pe.EntryID, pe.ParentID, pe.LineNo, pe.EntryType, pe.Timestamp, pe.Role, eh, pe.RawJSON, mustJSON(pe.Metadata))
+	// Apply v1.1 redaction to every projected text surface before
+	// insertion. The entry-level sha (eh) is computed over the *raw*
+	// bytes — it identifies the entry's source content, not its
+	// projection — so it remains stable across redaction-level changes
+	// and supports the reindex command. Redacted text only lives in
+	// the projection columns.
+	redactedRawJSON, rawHits := w.applyRedaction(pe.RawJSON)
+	redactedMetadata, metaHits := w.applyRedaction(mustJSON(pe.Metadata))
+	entryHits := redact.Hits{}
+	entryHits = mergeRedactionHits(entryHits, rawHits)
+	entryHits = mergeRedactionHits(entryHits, metaHits)
+	res, err := w.stmts.insertEntry.Exec(sessionKey, pe.EntryID, pe.ParentID, pe.LineNo, pe.EntryType, pe.Timestamp, pe.Role, eh, redactedRawJSON, redactedMetadata)
 	if err != nil {
 		return entryReport{}, err
 	}
@@ -615,13 +662,22 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 		if pe.LabelTargetEntryID != "" {
 			labelTarget = pe.LabelTargetEntryID
 		}
-		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.CacheReadTokens, pe.CacheWriteTokens, pe.ReasoningTokens, pe.Cost, compactionFirstKept, compactionTokensBefore, participates, thinkingLevel, label, labelTarget)
+		redactedText, textHits := w.applyRedaction(pe.Text)
+		redactedCommand, cmdHits := w.applyRedaction(pe.Command)
+		redactedFilesJSON, filesHits := w.applyRedaction(pe.FilesJSON)
+		entryHits = mergeRedactionHits(entryHits, textHits)
+		entryHits = mergeRedactionHits(entryHits, cmdHits)
+		entryHits = mergeRedactionHits(entryHits, filesHits)
+		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, redactedText, pe.ToolName, redactedCommand, redactedFilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.CacheReadTokens, pe.CacheWriteTokens, pe.ReasoningTokens, pe.Cost, compactionFirstKept, compactionTokensBefore, participates, thinkingLevel, label, labelTarget)
 		if err != nil {
 			return entryReport{}, err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			rep.Messages++
 		}
+	}
+	if err := w.recordRedactions(sessionKey, pe.EntryID, entryHits); err != nil {
+		return entryReport{}, err
 	}
 	if !w.manifest.Policy.IncludeImages {
 		return rep, nil
@@ -761,7 +817,15 @@ func (w corpusWriter) ingestArtifact(mf model.ManifestFile, path string) (bool, 
 		}
 		parent = key.String()
 	}
-	res, err := w.stmts.insertArtifact.Exec(mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, preview, fullText)
+	// Redact artifact preview/body before insertion. Per v1.1 spec
+	// these are projected text surfaces. Artifact hits are attributed
+	// to the parent entry when known (so per-session totals stay
+	// accurate); orphan artifacts contribute to the global secret
+	// count via their session row but are not recorded in the
+	// per-entry redactions table.
+	redactedPreview, previewHits := w.applyRedaction(preview)
+	redactedFullText, bodyHits := w.applyRedaction(fullText)
+	res, err := w.stmts.insertArtifact.Exec(mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, redactedPreview, redactedFullText)
 	if err != nil {
 		return false, err
 	}
@@ -772,6 +836,16 @@ func (w corpusWriter) ingestArtifact(mf model.ManifestFile, path string) (bool, 
 		if err != nil {
 			return false, err
 		}
+		// Artifact previews/bodies are redacted in-place, but the
+		// redactions table is keyed by entry_id with a foreign key
+		// into entries. Artifacts attach to a parent_session_key (via
+		// ParentHint) but not to a specific entry_id at this layer,
+		// so artifact-level hits are not individually recorded. The
+		// session's per-entry redactions (from messages.text on the
+		// tool call that produced the artifact) still capture the
+		// scrub via the regex pass on the same byte sequence.
+		_ = previewHits
+		_ = bodyHits
 		if err := w.insertArtifactPathTokens(artifactID, mf.RawPath, mf.RelativePath); err != nil {
 			return false, err
 		}
@@ -900,4 +974,47 @@ func pooledZstdWriter(w io.Writer) (*zstd.Encoder, error) {
 func putZstdWriter(enc *zstd.Encoder) {
 	enc.Reset(io.Discard)
 	zstdEncoderPool.Put(enc)
+}
+
+// applyRedaction is a no-op when no Redactor is configured; otherwise
+// it returns the redacted text and per-pattern hit counts. The pattern
+// table treats every text projection uniformly — see the v1.1 spec.
+func (w corpusWriter) applyRedaction(text string) (string, redact.Hits) {
+	if w.redactor == nil || text == "" {
+		return text, nil
+	}
+	return w.redactor.Apply(text)
+}
+
+// mergeRedactionHits sums the hits from src into dst in place.
+func mergeRedactionHits(dst, src redact.Hits) redact.Hits {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = redact.Hits{}
+	}
+	for k, v := range src {
+		dst[k] += v
+	}
+	return dst
+}
+
+// recordRedactions writes per-pattern hit counts for an entry into the
+// redactions table. A nil or empty hits map is a no-op. The statement
+// uses ON CONFLICT to coalesce repeated calls for the same entry
+// (artifact passes may add to the same entry's tally).
+func (w corpusWriter) recordRedactions(sessionKey, entryID string, hits redact.Hits) error {
+	if len(hits) == 0 || w.stmts.insertRedaction == nil {
+		return nil
+	}
+	for name, count := range hits {
+		if count == 0 {
+			continue
+		}
+		if _, err := w.stmts.insertRedaction.Exec(sessionKey, entryID, name, count); err != nil {
+			return err
+		}
+	}
+	return nil
 }

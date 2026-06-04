@@ -4,17 +4,26 @@ const Version = "0.1.0"
 const BundleSchema = "agent-session-snapshot-bundle/v2"
 
 type Config struct {
-	MachineID            string         `json:"machine_id"`
-	MachineLabel         string         `json:"machine_label,omitempty"`
-	Sources              []SourceConfig `json:"sources"`
-	CorpusDir            string         `json:"corpus_dir"`
-	Depot                DepotConfig    `json:"depot"`
-	PathMode             string         `json:"path_mode"`
-	IncludeSubagents     bool           `json:"include_subagents"`
-	IncludeImages        bool           `json:"include_images"`
-	IndexToolOutput      bool           `json:"index_tool_output"`
-	Redaction            string         `json:"redaction"`
-	AcceptSecretsWarning bool           `json:"accept_secrets_warning"`
+	MachineID              string                  `json:"machine_id"`
+	MachineLabel           string                  `json:"machine_label,omitempty"`
+	Sources                []SourceConfig          `json:"sources"`
+	CorpusDir              string                  `json:"corpus_dir"`
+	Depot                  DepotConfig             `json:"depot"`
+	PathMode               string                  `json:"path_mode"`
+	IncludeSubagents       bool                    `json:"include_subagents"`
+	IncludeImages          bool                    `json:"include_images"`
+	IndexToolOutput        bool                    `json:"index_tool_output"`
+	Redaction              string                  `json:"redaction"`
+	RedactionExtraPatterns []RedactionExtraPattern `json:"redaction_extra_patterns,omitempty"`
+	AcceptSecretsWarning   bool                    `json:"accept_secrets_warning"`
+}
+
+// RedactionExtraPattern is a user-supplied regex added to the
+// built-in pattern list per docs/redaction-spec.md. Validation
+// happens in the redact package at Redactor construction.
+type RedactionExtraPattern struct {
+	Name  string `json:"name"`
+	Regex string `json:"regex"`
 }
 
 type SourceConfig struct {

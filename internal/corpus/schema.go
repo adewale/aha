@@ -171,6 +171,33 @@ var migrations = []migration{
 		}
 		return nil
 	}},
+	// Migration 11: v1.1 redaction. Adds the per-session
+	// redaction_level stamp and the redactions hit-count table per
+	// docs/redaction-spec.md. Existing sessions backfill to the
+	// 'none-v1' default — they were indexed under no-redaction
+	// semantics, and the operator must explicitly run `aha reindex`
+	// to upgrade.
+	{version: 11, apply: func(db *sql.DB) error {
+		exists, err := columnExists(db, "sessions", "redaction_level")
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.Exec(`alter table sessions add column redaction_level text default 'none-v1'`); err != nil {
+				return err
+			}
+			if _, err := db.Exec(`update sessions set redaction_level='none-v1' where redaction_level is null`); err != nil {
+				return err
+			}
+		}
+		if _, err := db.Exec(`create table if not exists redactions(session_key text,entry_id text,pattern text,count integer check(count>=0),primary key(session_key,entry_id,pattern),foreign key(session_key,entry_id) references entries(session_key,entry_id))`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`create index if not exists idx_redactions_session_pattern on redactions(session_key,pattern)`); err != nil {
+			return err
+		}
+		return nil
+	}},
 }
 
 func migratePathTokens(db *sql.DB) error {

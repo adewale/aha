@@ -13,6 +13,12 @@ import (
 )
 
 func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, jsonOut bool) ([]map[string]any, error) {
+	ing := corpus.NewIngestor(store, adapters.Builtins())
+	return ingestFromDepotWith(stdout, ing, drv, jsonOut)
+}
+
+func ingestFromDepotWith(stdout io.Writer, ing corpus.Ingestor, drv depot.Driver, jsonOut bool) ([]map[string]any, error) {
+	store := ing.Store
 	refs, err := drv.List(context.Background())
 	if err != nil {
 		return nil, err
@@ -42,7 +48,7 @@ func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, js
 			}
 			fetched = true
 		}
-		rep, err := corpus.IngestBundleWithExpectedSHA(store, adapters.Builtins(), path, ref.BundleSHA256)
+		rep, err := ing.IngestBundleWithExpectedSHA(path, ref.BundleSHA256)
 		if err != nil {
 			return nil, err
 		}

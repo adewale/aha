@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-
-	"github.com/adewale/aha/internal/adapters"
-	"github.com/adewale/aha/internal/corpus"
 )
 
 func cmdIngest(args []string, stdout, stderr io.Writer) error {
@@ -29,13 +26,17 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
+	ing, err := ingestorForConfig(store, cfg)
+	if err != nil {
+		return err
+	}
 	var reports []map[string]any
 	if len(bundles) == 0 {
 		drv, err := depotDriverForConfig(cfg, *depotAddr)
 		if err != nil {
 			return err
 		}
-		reports, err = ingestFromDepot(stdout, store, drv, *jsonOut)
+		reports, err = ingestFromDepotWith(stdout, ing, drv, *jsonOut)
 		if err != nil {
 			return err
 		}
@@ -50,7 +51,7 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 			matches = []string{pattern}
 		}
 		for _, path := range matches {
-			rep, err := corpus.IngestBundle(store, adapters.Builtins(), path)
+			rep, err := ing.IngestBundle(path)
 			if err != nil {
 				return err
 			}
