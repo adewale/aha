@@ -64,8 +64,9 @@ Passes if the command exits successfully and reports source diagnostics. Typical
 | Pi | `~/.pi/agent/sessions` |
 | Claude Code | `~/.claude/projects` |
 | Codex | `~/.codex/sessions` |
+| OpenCode | `$XDG_DATA_HOME/opencode` when set, otherwise `~/.local/share/opencode`; `$OPENCODE_DB` can point at one DB file |
 
-A missing source is not fatal if you do not use that tool. For example, a machine with Pi but no Codex should still onboard successfully.
+A missing source is not fatal if you do not use that tool. For example, a machine with Pi but no Codex/OpenCode should still onboard successfully.
 
 For a human-readable quick check:
 

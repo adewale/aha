@@ -43,5 +43,5 @@
 ## Future adapters
 
 - Research and prototype adapters for local stores from Aider, Cline/Roo Code, Continue, Gemini CLI, Cursor, Windsurf/Codeium, Zed, and Goose.
-- Punt OpenCode support unless/until users provide current fixtures or specifically request it. Research is parked in `docs/research/opencode.md`.
+- OpenCode support shipped: the `opencode` adapter converts the SQLite database to deterministic, lossless JSONL during discovery (see `internal/opencodeexport` and `docs/research/opencode.md`). Current tests cover synthetic SQLite fixtures, image file parts, duplicate release-channel DB IDs, and real-machine smoketest support. Remaining follow-up is additive: capture anonymized fixtures only when real current `anomalyco/opencode` installs reveal new `message`/`part` `data` shapes (subtask/agent parts, compaction summaries, fork/parent semantics).
 - Prefer raw-preserving, read-only adapters first; treat Electron/VS Code state DB adapters as experimental until backed by fixtures from real current versions.

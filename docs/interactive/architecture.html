@@ -2090,9 +2090,9 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">10,147</span> production lines</dd>
-    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">17</span> in <code>internal/</code></dd>
-    <dt>Adapters</dt><dd><span class="num">3</span> Pi · Claude · Codex</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">11,397</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">18</span> in <code>internal/</code></dd>
+    <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num">12</span></dd>
   </dl>
@@ -2130,7 +2130,7 @@ footer a:hover { color: var(--ink-2); }
       </g>
 
       <!-- Stage 1: sources -->
-      <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery and parse. Read-only. Source-specific behavior stays here; everything downstream is source-agnostic.">
+      <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery/parse and OpenCode SQLite discovery via private JSONL export. Source-specific behavior stays here; everything downstream is source-agnostic.">
         <text x="115" y="40" class="title" text-anchor="middle">local sources</text>
         <text x="115" y="62" text-anchor="middle" class="lbl">~/.pi/agent/sessions</text>
         <text x="115" y="80" text-anchor="middle" class="lbl">~/.claude/projects</text>
@@ -3914,7 +3914,7 @@ const HOTSPOTS = [
     severity:'doubt', stakes:0.7, grounded:0.45,
     where:'internal/adapters/pi.go + testdata',
     state:'The lessons doc records that early synthetic fixtures used top-level role; real Pi uses nested message.role. We fixed that one. The lesson is "we don\'t know what else the synthetic fixtures got wrong."',
-    needs:'Anonymized real-history fixtures for each source, ideally one per major Pi, Claude, Codex version. Currently we have one anonymized fixture per source.' },
+    needs:'Anonymized real-history fixtures for each source, ideally one per major Pi, Claude, Codex, and OpenCode version. Current coverage includes committed parser fixtures and synthetic OpenCode SQLite fixtures; add real OpenCode shapes when they differ.' },
 
   { id:'r2-real', name:'R2 driver: fake S3 only in test suite',
     severity:'doubt', stakes:0.75, grounded:0.4,
@@ -4081,7 +4081,7 @@ const PACKAGES = [
   { name: 'internal/cli',     lines: '~2500', why: 'Command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over corpus, depot, archive.', read: ['cli.go (router)', 'flag_specs.go (shared metadata)', 'command_*.go (one file per command)'] },
   { name: 'internal/archive', lines: '~935',  why: 'Bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.', read: ['archive.go: Capture, Write, WriteWithInfo, ManifestStateSHA256', 'state_signature_*.go for the property tests'] },
   { name: 'internal/depot',   lines: '~1240', why: 'Local + R2 driver, bundle key validation, catalog merge, repair, compaction, marker schema.', read: ['depot.go (drivers, refs, MergeBundleRefs)', 'local.go (filesystem lock + atomic catalog write)', 'r2.go (S3 conditional writes + retry-on-conflict)'] },
-  { name: 'internal/adapters',lines: '~1100', why: 'Source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures.', read: ['parser.go (common JSONL stream)', 'claude.go, codex.go, pi.go (source quirks)', 'adapter_conformance_test.go'] },
+  { name: 'internal/adapters',lines: '~1200', why: 'Source-specific discovery and parsing for Pi, Claude Code, Codex, and OpenCode. OpenCode delegates SQLite export to internal/opencodeexport. Adapter conformance fixtures.', read: ['parser.go (common JSONL stream)', 'claude.go, codex.go, pi.go, opencode.go (source quirks)', 'adapter_fixture_test.go'] },
   { name: 'internal/model',   lines: '~280',  why: 'Sealed types: SessionKey, EntryID, SHA256Hex; Ref variants; Manifest shape; enums.', read: ['identity.go (smart constructors)', 'ref.go (closed sum type + codec)'] },
   { name: 'internal/search',  lines: '~250',  why: 'FTS5 query construction. Indexed --project and --path-token. Result mapping.', read: ['search.go (filter predicates, capped limits)', 'query_plan_test.go (EXPLAIN guards)'] },
   { name: 'internal/safety',  lines: '~250',  why: 'Path containment + source root validation. Shared between adapters, archive, depot.', read: ['paths.go', 'roots.go'] },
@@ -4341,11 +4341,12 @@ const PKG_GRAPH = {
   'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
   'media':       { deps: [],                              role: 'image and text artifact classification.' },
   'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
+  'opencodeexport': { deps: [],                           role: 'converts the OpenCode SQLite database into deterministic, lossless JSONL session files in a private locked cache (DB/WAL/SHM copied before query; source never mutated). Kept out of adapters so source adapters stay free of filesystem-mutation calls.' },
 
   'safety':      { deps: ['model','paths'],               role: 'path containment + source-root validation. Imported by adapters, archive, depot.' },
   'config':      { deps: ['model','paths','adapters'],    role: 'JSONC config load/write, defaults; reads adapter capabilities to validate.' },
 
-  'adapters':    { deps: ['model','hash'],                role: 'source-specific JSONL discovery and parsing for Pi, Claude Code, Codex. Adapter conformance fixtures. The only place source-specific behaviour lives.' },
+  'adapters':    { deps: ['model','hash','opencodeexport','paths'], role: 'source-specific discovery and parsing for Pi, Claude Code, Codex (JSONL) and OpenCode (SQLite, converted to JSONL in Discover). Adapter conformance fixtures. The only place source-specific behaviour lives.' },
   'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'bundle capture, deterministic tar.zst write, state signature, manifest validation, streaming reader.' },
   'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 driver, bundle key validation, catalog merge/repair/compaction. The only package that may import network packages.' },
 
@@ -4358,7 +4359,7 @@ const PKG_GRAPH = {
   'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
 };
 const LAYERS = [
-  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality'] },
+  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality','opencodeexport'] },
   { label: 'L2 · helpers',         pkgs: ['safety','config'] },
   { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
   { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },

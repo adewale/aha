@@ -592,7 +592,7 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 		rep.Entries++
 		existing[pe.EntryID] = eh
 	}
-	if shouldIndexText(pe, w.manifest.Policy.IndexToolOutput) {
+	if shouldPersistMessage(pe, w.manifest.Policy.IndexToolOutput) {
 		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.Cost)
 		if err != nil {
 			return entryReport{}, err
@@ -632,6 +632,13 @@ func (w corpusWriter) insertArtifactPathTokens(artifactID int64, paths ...string
 		}
 	}
 	return nil
+}
+
+func shouldPersistMessage(pe model.ParsedEntry, indexToolOutput bool) bool {
+	if shouldIndexText(pe, indexToolOutput) {
+		return true
+	}
+	return strings.TrimSpace(pe.ToolName) != "" || strings.TrimSpace(pe.Command) != "" || strings.TrimSpace(pe.FilesJSON) != "" || strings.TrimSpace(pe.Model) != "" || strings.TrimSpace(pe.Provider) != "" || pe.Tokens != 0 || pe.Cost != 0
 }
 
 func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {

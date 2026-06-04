@@ -13,13 +13,14 @@
                ▼                              ▼
       ┌────────────────┐             ┌─────────────────────┐
       │ internal/config │             │ internal/adapters   │
-      │ JSONC defaults  │             │ Pi / Claude / Codex │
+      │ JSONC defaults  │             │ Pi/Claude/Codex/OpenCode │
       └───────┬────────┘             └──────────┬──────────┘
               │                                 │ read-only discovery/parse
               │                                 ▼
               │                     ┌─────────────────────────┐
               │                     │ Local agent history roots│
               │                     │ ~/.pi ~/.claude ~/.codex│
+              │                     │ + OpenCode SQLite DBs   │
               │                     └──────────┬──────────────┘
               │                                │ stable copies
               ▼                                ▼
@@ -52,7 +53,7 @@
 
 | Noun | Meaning | Durable? |
 |---|---|---|
-| Source root | A local history directory for Pi, Claude Code, or Codex. | External input; `aha` treats it read-only. |
+| Source root | A local history directory/DB for Pi, Claude Code, Codex, or OpenCode. | External input; `aha` treats it read-only. |
 | Bundle | Immutable deterministic `tar.zst` snapshot containing `manifest.json` and copied raw files. | Yes. Bundle bytes are durable truth. |
 | Depot | Bundle store addressed as `local:PATH` or `r2:BUCKET`. | Yes. Stores content-addressed bundle objects. |
 | Catalog shard | Repairable JSON listing of bundle refs for one machine. | No. It is rebuilt from bundle objects. |
@@ -116,7 +117,7 @@ config + flags
   → catalog shard is merged/updated
 ```
 
-Snapshot creates durable evidence and writes only to the depot; it does not touch the corpus.
+Snapshot creates durable evidence and writes to the depot; it does not touch the corpus. If OpenCode is enabled, discovery may also refresh the private OpenCode JSONL export cache before archive capture.
 
 ### `aha ingest`
 
@@ -226,7 +227,7 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 
 ## Trust boundaries
 
-- Source adapters are read-only.
+- Source histories are read-only. JSONL adapters never write source roots; OpenCode copies its SQLite DB/WAL/SHM into a private export cache before parsing generated JSONL.
 - Default depot and corpus are local.
 - R2 is explicit opt-in through `--depot r2...` or config.
 - Network imports are confined to `internal/depot` (outbound R2/S3), `internal/server` (the inbound loopback dashboard), and the `internal/cli/command_serve.go` wrapper that constructs it; a static test enforces this allowlist. Search, read, and ingest remain network-free.
@@ -242,8 +243,9 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | `cmd/aha-gen-ts` | Regenerates the TypeScript client surface from the Go result types. |
 | `internal/cli` | Command parsing, JSON errors, renderers, registry/docs generation, command orchestration. |
 | `internal/config` | JSONC defaults/load/write. |
-| `internal/adapters` | Source discovery/parsing for Pi, Claude Code, and Codex. |
+| `internal/adapters` | Source discovery/parsing for Pi, Claude Code, Codex, and OpenCode. |
 | `internal/archive` | Snapshot capture, deterministic archive writing, bundle validation, state signature. |
+| `internal/opencodeexport` | Private OpenCode SQLite-to-JSONL export cache: serialized DB/WAL/SHM copy, deterministic JSONL writes, stale-export pruning. |
 | `internal/depot` | Local/R2 depot drivers, catalog merge/list/fetch/verify/repair. |
 | `internal/corpus` | SQLite schema, ingest transaction, read/status/conflict APIs. |
 | `internal/search` | FTS5 query construction and result mapping. |

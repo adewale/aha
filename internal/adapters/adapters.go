@@ -22,5 +22,6 @@ func Builtins() map[string]SourceAdapter {
 		"pi":          Pi{},
 		"claude-code": ClaudeCode{},
 		"codex":       CodexCLI{},
+		"opencode":    OpenCode{},
 	}
 }

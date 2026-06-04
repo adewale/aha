@@ -85,7 +85,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		}
 		if !ok {
 			item["error"] = "unknown source adapter"
-			item["hints"] = []string{"Check the source type; built-ins are claude-code, codex, and pi."}
+			item["hints"] = []string{"Check the source type; built-ins are claude-code, codex, opencode, and pi."}
 			out = append(out, item)
 			continue
 		}
@@ -106,11 +106,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		}
 		item["exists"] = true
 		item["is_dir"] = st.IsDir()
-		if !st.IsDir() {
-			item["error"] = "source root is not a directory"
-			out = append(out, item)
-			continue
-		}
+		item["is_file"] = st.Mode().IsRegular()
 		found, err := ad.Discover(context.Background(), model.SourceConfig{Type: sc.Type, Root: root, Enabled: true})
 		if err != nil {
 			item["error"] = err.Error()

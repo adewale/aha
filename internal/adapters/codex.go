@@ -1,13 +1,18 @@
 package adapters
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 )
 
@@ -66,5 +71,241 @@ func (CodexCLI) DiscoverArtifacts(ctx context.Context, session model.SessionFile
 	return nil, nil
 }
 func (CodexCLI) ParseSession(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
-	return parseGenericJSONL("codex", file, r)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseCodex(ctx, file, r)
+}
+
+// parseCodex handles both Codex rollout formats. The current Codex CLI wraps
+// every line in a {timestamp, type, payload} envelope (type "session_meta",
+// "response_item", "event_msg", ...), with the conversation living inside
+// response_item payloads — so the generic JSONL parser, which looks for
+// top-level role / message.content, extracts nothing. Older rollouts use the
+// flat {type:"session"|"message", role, message:{content}} shape the generic
+// parser already understands, so those are delegated unchanged.
+func parseCodex(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
+	modern, replay, err := probeCodexFormat(r)
+	if err != nil {
+		return nil, err
+	}
+	if modern {
+		return parseCodexModern(ctx, file, replay)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseGenericJSONL("codex", file, replay)
+}
+
+// looksModernCodex reports whether the rollout uses the enveloped format,
+// detected by a line carrying a "payload" object under one of the known
+// rollout line types.
+func probeCodexFormat(r io.Reader) (bool, io.Reader, error) {
+	br := bufio.NewReader(r)
+	var probe bytes.Buffer
+	buf := make([]byte, 4096)
+	for countNonEmptyLines(probe.Bytes()) < 50 && probe.Len() < 1<<20 {
+		want := len(buf)
+		if remain := (1 << 20) - probe.Len(); remain < want {
+			want = remain
+		}
+		if want <= 0 {
+			break
+		}
+		n, err := br.Read(buf[:want])
+		if n > 0 {
+			_, _ = probe.Write(buf[:n])
+			if looksModernCodex(probe.Bytes()) {
+				return true, io.MultiReader(bytes.NewReader(probe.Bytes()), br), nil
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return false, nil, err
+		}
+	}
+	return looksModernCodex(probe.Bytes()), io.MultiReader(bytes.NewReader(probe.Bytes()), br), nil
+}
+
+func countNonEmptyLines(data []byte) int {
+	reader := bufio.NewReader(bytes.NewReader(data))
+	count := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+		if err != nil {
+			break
+		}
+	}
+	return count
+}
+
+func looksModernCodex(data []byte) bool {
+	reader := bufio.NewReader(bytes.NewReader(data))
+	for scanned := 0; scanned < 50; {
+		line, err := reader.ReadString('\n')
+		if raw := strings.TrimSpace(line); raw != "" {
+			scanned++
+			var m map[string]any
+			if json.Unmarshal([]byte(raw), &m) == nil {
+				if _, ok := m["payload"].(map[string]any); ok {
+					switch stringField(m, "type") {
+					case "session_meta", "response_item", "event_msg", "turn_context", "compacted":
+						return true
+					}
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return false
+}
+
+func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
+	ps := &model.ParsedSession{Source: "codex", SourceSessionID: file.SessionID, CWD: file.CWD, StartedAt: file.StartedAt, IsSubagent: file.IsSubagent, Metadata: map[string]any{"relative_path": file.RelativePath}}
+	reader := bufio.NewReader(r)
+	lineNo := 0
+	curModel, curProvider := "", ""
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			ps.Diagnostics = append(ps.Diagnostics, fmt.Sprintf("line %d: %v", lineNo+1, err))
+			break
+		}
+		if err == io.EOF && line == "" {
+			break
+		}
+		lineNo++
+		raw := strings.TrimSpace(line)
+		if raw == "" {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		var m map[string]any
+		if jErr := json.Unmarshal([]byte(raw), &m); jErr != nil {
+			ps.Diagnostics = append(ps.Diagnostics, fmt.Sprintf("line %d: %v", lineNo, jErr))
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		ltype := stringField(m, "type")
+		ts := stringField(m, "timestamp")
+		payload, _ := m["payload"].(map[string]any)
+		entryID := firstNonEmpty(stringField(m, "id"), stringField(payload, "id"))
+		if entryID == "" {
+			entryID = fmt.Sprintf("line-%06d-%s", lineNo, hash.SHA256Bytes([]byte(raw))[:12])
+		}
+		pe := model.ParsedEntry{EntryID: entryID, LineNo: lineNo, EntryType: ltype, Timestamp: ts, RawJSON: raw, Metadata: map[string]any{}}
+		switch ltype {
+		case "session_meta":
+			if id := stringField(payload, "id"); id != "" {
+				ps.SourceSessionID = id
+			}
+			if ps.CWD == "" {
+				ps.CWD = stringField(payload, "cwd")
+			}
+			if ps.StartedAt == "" {
+				ps.StartedAt = firstNonEmpty(ts, stringField(payload, "timestamp"))
+			}
+			curProvider = firstNonEmpty(stringField(payload, "model_provider"), curProvider)
+			ps.Metadata["session_meta"] = raw
+		case "turn_context":
+			curModel = firstNonEmpty(stringField(payload, "model"), curModel)
+			curProvider = firstNonEmpty(stringField(payload, "model_provider"), stringField(payload, "provider"), curProvider)
+		case "response_item":
+			fillCodexResponseItem(&pe, payload, curModel, curProvider)
+		case "event_msg", "compacted":
+			pe.EntryType = firstNonEmpty(stringField(payload, "type"), ltype)
+		}
+		ps.Entries = append(ps.Entries, pe)
+		if err == io.EOF {
+			break
+		}
+	}
+	return ps, nil
+}
+
+// fillCodexResponseItem populates a ParsedEntry from a response_item payload:
+// conversational messages (role + content text), tool calls, and tool output.
+func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curModel, curProvider string) {
+	ptype := stringField(payload, "type")
+	pe.EntryType = firstNonEmpty(ptype, "response_item")
+	switch ptype {
+	case "message":
+		pe.Role = stringField(payload, "role")
+		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(map[string]any{"content": payload["content"]})
+		if pe.Role == "assistant" {
+			pe.Model = curModel
+			pe.Provider = curProvider
+		}
+	case "function_call", "local_shell_call", "custom_tool_call":
+		pe.Role = "toolCall"
+		pe.ToolName = firstNonEmpty(stringField(payload, "name"), ptype)
+		pe.FilesJSON = stringField(payload, "arguments")
+		pe.Command = codexCommandFromArguments(stringField(payload, "arguments"))
+	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
+		pe.Role = "toolResult"
+		pe.Text = codexToolOutputText(payload["output"])
+	case "reasoning":
+		pe.Role = "reasoning"
+		pe.Text, _, _, _, _ = extractContent(map[string]any{"content": firstNonNil(payload["summary"], payload["content"])})
+	}
+}
+
+func codexCommandFromArguments(args string) string {
+	if args == "" {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(args), &m) != nil {
+		return ""
+	}
+	switch c := m["command"].(type) {
+	case string:
+		return c
+	case []any:
+		parts := make([]string, 0, len(c))
+		for _, p := range c {
+			if s, ok := p.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
+func codexToolOutputText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case map[string]any:
+		if s := stringField(x, "content"); s != "" {
+			return s
+		}
+		return stringField(x, "output")
+	}
+	return ""
+}
+
+func firstNonNil(vals ...any) any {
+	for _, v := range vals {
+		if v != nil {
+			return v
+		}
+	}
+	return nil
 }

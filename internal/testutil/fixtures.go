@@ -1,19 +1,29 @@
 package testutil
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
-type FixtureRoots struct{ PiRoot, ClaudeRoot, CodexRoot string }
+// FixtureRoots holds the source roots for each supported coding agent. Each
+// field points at a fake-but-realistic source tree (or, for OpenCode, the
+// directory containing a fake SQLite database) so the same fixtures can drive
+// the whole pipeline end-to-end: discovery -> snapshot -> ingest -> search.
+// Every agent's primary user message contains a distinct "<source> needle"
+// string so tests can assert per-source searchability.
+type FixtureRoots struct{ PiRoot, ClaudeRoot, CodexRoot, OpenCodeRoot string }
 
 func WriteAgentFixtures(t *testing.T, root string) FixtureRoots {
 	t.Helper()
 	piRoot := filepath.Join(root, "pi")
 	claudeRoot := filepath.Join(root, "claude")
 	codexRoot := filepath.Join(root, "codex", "sessions")
+	openCodeRoot := filepath.Join(root, "opencode")
 	mustMkdir(t, filepath.Join(piRoot, "--Users-me-proj--"))
 	mustMkdir(t, filepath.Join(piRoot, "--Users-me-proj--", "subagent-artifacts"))
 	mustMkdir(t, filepath.Join(claudeRoot, "-Users-me-proj"))
@@ -55,7 +65,38 @@ func WriteAgentFixtures(t *testing.T, root string) FixtureRoots {
 	if err := os.WriteFile(filepath.Join(claudeRoot, "-Users-me-proj", "agent-worker.jsonl"), []byte(agent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return FixtureRoots{PiRoot: piRoot, ClaudeRoot: claudeRoot, CodexRoot: codexRoot}
+	mustMkdir(t, openCodeRoot)
+	writeOpenCodeDB(t, filepath.Join(openCodeRoot, "opencode.db"))
+	return FixtureRoots{PiRoot: piRoot, ClaudeRoot: claudeRoot, CodexRoot: codexRoot, OpenCodeRoot: openCodeRoot}
+}
+
+// writeOpenCodeDB creates a fake OpenCode SQLite database matching the
+// session/message/part schema the adapter expects, with one session whose user
+// message carries the "opencode needle" and an assistant turn carrying a model,
+// token usage, and a bash tool call.
+func writeOpenCodeDB(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stmts := []string{
+		`CREATE TABLE session (id TEXT PRIMARY KEY, data TEXT)`,
+		`CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)`,
+		`CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT)`,
+		`INSERT INTO session VALUES ('oc-session', '{"directory":"/Users/me/proj","time":{"created":1716200000000},"title":"opencode fixture"}')`,
+		`INSERT INTO message VALUES ('ocm1', 'oc-session', '{"role":"user","time":{"created":1716200001000}}')`,
+		`INSERT INTO message VALUES ('ocm2', 'oc-session', '{"role":"assistant","modelID":"opencode-test","providerID":"anthropic","tokens":{"input":5,"output":6,"cache":{"read":0,"write":0}},"time":{"created":1716200002000}}')`,
+		`INSERT INTO part VALUES ('ocp1', 'ocm1', 'oc-session', '{"type":"text","text":"opencode needle"}')`,
+		`INSERT INTO part VALUES ('ocp2', 'ocm2', 'oc-session', '{"type":"text","text":"opencode reply"}')`,
+		`INSERT INTO part VALUES ('ocp3', 'ocm2', 'oc-session', '{"type":"tool","tool":"bash","state":{"input":{"command":"ls -la"}}}')`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("seed opencode db: %v", err)
+		}
+	}
 }
 
 func mustMkdir(t *testing.T, p string) {

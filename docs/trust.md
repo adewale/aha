@@ -6,18 +6,19 @@ This document states the trust model and how to verify it. By default `aha` is l
 
 ## Guarantee 1: source histories are not mutated
 
-`aha snapshot` reads Pi, Claude Code, and Codex session roots and writes a separate bundle. It must not modify, delete, or rewrite source session files.
+`aha snapshot` reads Pi, Claude Code, Codex, and OpenCode session roots and writes a separate bundle. It must not modify, delete, or rewrite source session files or OpenCode databases.
 
 How this is enforced:
 
-- source-specific adapters are read-only by design;
-- tests verify snapshot read-only behavior with source hashes/mtimes;
-- static tests reject write/delete/rename calls inside source adapters.
+- JSONL source adapters are read-only by design;
+- OpenCode discovery reads a private copied/exported database snapshot and never opens the source database for writing;
+- tests verify snapshot/read-only behavior with source hashes/mtimes and OpenCode DB content hashes;
+- static tests reject write/delete/rename calls inside source adapters; OpenCode's generated JSONL cache is isolated in `internal/opencodeexport` and documented below.
 
 Verify locally:
 
 ```bash
-go test ./internal/archive ./internal/adapters
+go test ./internal/archive ./internal/adapters ./internal/opencodeexport
 ```
 
 ## Guarantee 2: ingest uses immutable bundles
@@ -80,9 +81,10 @@ Depending on command/configuration, `aha` may write:
 - bundle files under the selected local depot directory;
 - corpus SQLite/blob files under the corpus directory;
 - config JSONC via `aha init`;
+- a private OpenCode JSONL export cache during OpenCode `Discover` (including `doctor`, `snapshot`, and `refresh`): by default under the user cache directory at `aha/opencode-export/<db-hash>/`, or under `AHA_OPENCODE_EXPORT_DIR` when set; directories are forced to `0700` and JSONL/lock files to `0600`; stale JSONL files are pruned after each serialized export;
 - optional local pprof files when `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, or `AHA_MEM_PROFILE` is explicitly set.
 
-It should not write inside Pi, Claude Code, or Codex source-history roots. Treat profiles as local debugging artifacts; do not attach them to public issues without review because they can reveal code paths, filesystem paths, and workload shape.
+It should not write inside Pi, Claude Code, Codex, or OpenCode source-history roots. Treat the OpenCode export cache, profiles, bundles, and corpora as local private artifacts; do not attach them to public issues without review because they can reveal prompts, source snippets, filesystem paths, and workload shape.
 
 ## Quick verification checklist
 
