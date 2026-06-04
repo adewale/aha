@@ -145,6 +145,12 @@ const readArgsUnion = `/**
  * a ` + "`session`" + ` (plus optional ` + "`entry`" + `), never both. The wire form is the
  * same in either case; the union is documented to push callers toward
  * one mode.
+ *
+ * The session form also accepts ` + "`mode`" + `: 'window' (default, file-order
+ * context around the entry), 'branch' (walk the Pi parent_id tree from the
+ * entry leaf to the root), or 'live' (branch plus compaction collapse and
+ * non-participating entries filtered). branch/live require ` + "`entry`" + ` as the
+ * leaf to walk back from.
  */
 export type ReadArgs =
   | {
@@ -157,6 +163,8 @@ export type ReadArgs =
       /** Session key. Use with optional entry to target a specific message; omit entry for the whole session. */
       session: string;
       entry?: string;
+      /** Read mode. 'branch'/'live' walk the parent_id tree from the entry leaf; both require entry. */
+      mode?: "window" | "branch" | "live";
       before?: number;
       after?: number;
     };

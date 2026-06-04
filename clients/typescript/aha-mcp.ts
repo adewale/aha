@@ -160,6 +160,12 @@ export interface SearchArgs {
  * a `session` (plus optional `entry`), never both. The wire form is the
  * same in either case; the union is documented to push callers toward
  * one mode.
+ *
+ * The session form also accepts `mode`: 'window' (default, file-order
+ * context around the entry), 'branch' (walk the Pi parent_id tree from the
+ * entry leaf to the root), or 'live' (branch plus compaction collapse and
+ * non-participating entries filtered). branch/live require `entry` as the
+ * leaf to walk back from.
  */
 export type ReadArgs =
   | {
@@ -172,6 +178,8 @@ export type ReadArgs =
       /** Session key. Use with optional entry to target a specific message; omit entry for the whole session. */
       session: string;
       entry?: string;
+      /** Read mode. 'branch'/'live' walk the parent_id tree from the entry leaf; both require entry. */
+      mode?: "window" | "branch" | "live";
       before?: number;
       after?: number;
     };
@@ -189,7 +197,7 @@ export function aha(transport: Transport) {
     /** Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read. */
     search: (args: SearchArgs) =>
       transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
-    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. */
+    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
     read: (args: ReadArgs) =>
       transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
     /** Return corpus health summary: counts and disk usage. */

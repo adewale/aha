@@ -220,7 +220,8 @@ func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) 
 			if ps.StartedAt == "" {
 				ps.StartedAt = firstNonEmpty(ts, stringField(payload, "timestamp"))
 			}
-			curProvider = firstNonEmpty(stringField(payload, "model_provider"), curProvider)
+			curModel = firstNonEmpty(stringField(payload, "model"), curModel)
+			curProvider = firstNonEmpty(stringField(payload, "model_provider"), stringField(payload, "provider"), curProvider)
 			ps.Metadata["session_meta"] = raw
 		case "turn_context":
 			curModel = firstNonEmpty(stringField(payload, "model"), curModel)
@@ -244,6 +245,14 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 	ptype := stringField(payload, "type")
 	pe.EntryType = firstNonEmpty(ptype, "response_item")
 	switch ptype {
+	case "user_message":
+		pe.Role = "user"
+		pe.Text = stringField(payload, "message")
+	case "agent_message":
+		pe.Role = "assistant"
+		pe.Text = stringField(payload, "message")
+		pe.Model = curModel
+		pe.Provider = curProvider
 	case "message":
 		pe.Role = stringField(payload, "role")
 		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(map[string]any{"content": payload["content"]})
@@ -256,12 +265,23 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 		pe.ToolName = firstNonEmpty(stringField(payload, "name"), ptype)
 		pe.FilesJSON = stringField(payload, "arguments")
 		pe.Command = codexCommandFromArguments(stringField(payload, "arguments"))
+	case "web_search_call":
+		pe.Role = "toolCall"
+		pe.ToolName = "web_search"
+		if action, ok := payload["action"].(map[string]any); ok {
+			pe.Command = stringField(action, "query")
+		}
 	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
 		pe.Role = "toolResult"
 		pe.Text = codexToolOutputText(payload["output"])
 	case "reasoning":
 		pe.Role = "reasoning"
 		pe.Text, _, _, _, _ = extractContent(map[string]any{"content": firstNonNil(payload["summary"], payload["content"])})
+	case "token_count":
+		applyCodexTokenCount(pe, payload)
+	}
+	if curProvider != "" && pe.Provider == "" {
+		pe.Provider = curProvider
 	}
 }
 
@@ -273,7 +293,11 @@ func codexCommandFromArguments(args string) string {
 	if json.Unmarshal([]byte(args), &m) != nil {
 		return ""
 	}
-	switch c := m["command"].(type) {
+	return codexCommandValue(firstNonNil(m["command"], m["cmd"]))
+}
+
+func codexCommandValue(v any) string {
+	switch c := v.(type) {
 	case string:
 		return c
 	case []any:
@@ -292,6 +316,9 @@ func codexToolOutputText(v any) string {
 	switch x := v.(type) {
 	case string:
 		return x
+	case []any:
+		text, _, _, _, _ := extractContent(map[string]any{"content": x})
+		return text
 	case map[string]any:
 		if s := stringField(x, "content"); s != "" {
 			return s
@@ -299,6 +326,33 @@ func codexToolOutputText(v any) string {
 		return stringField(x, "output")
 	}
 	return ""
+}
+
+func applyCodexTokenCount(e *model.ParsedEntry, payload map[string]any) {
+	info, ok := payload["info"].(map[string]any)
+	if !ok {
+		return
+	}
+	usage, ok := info["last_token_usage"].(map[string]any)
+	if !ok {
+		return
+	}
+	total := int64(numField(usage, "total_tokens"))
+	if total == 0 {
+		total = int64(numField(usage, "input_tokens") + numField(usage, "output_tokens"))
+	}
+	if total > 0 {
+		e.Tokens = total
+	}
+	if cached := int64(numField(usage, "cached_input_tokens")); cached > 0 {
+		e.CacheReadTokens = cached
+	}
+	if written := int64(numField(usage, "cache_creation_input_tokens")); written > 0 {
+		e.CacheWriteTokens = written
+	}
+	if reasoning := int64(numField(usage, "reasoning_output_tokens")); reasoning > 0 {
+		e.ReasoningTokens = reasoning
+	}
 }
 
 func firstNonNil(vals ...any) any {
