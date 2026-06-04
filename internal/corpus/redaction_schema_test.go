@@ -48,9 +48,25 @@ func TestRedactionSchemaIsPresent(t *testing.T) {
 		}
 	}
 
-	// Primary key (session_key, entry_id, pattern). Insert a duplicate and
-	// confirm INSERT OR IGNORE behaviour (the migration didn't add a
-	// trigger that aborts).
-	// Skipping the FK test because we'd need a real session row; the PK
-	// constraint is what matters at schema level.
+	// Primary key (session_key, entry_id, pattern) plus append-only
+	// triggers are what prevent duplicate ingest from mutating counts.
+
+	eventRows, err := store.DB.Query(`select name from pragma_table_info('redaction_events')`)
+	if err != nil {
+		t.Fatalf("redaction_events table query failed: %v", err)
+	}
+	defer eventRows.Close()
+	eventCols := map[string]bool{}
+	for eventRows.Next() {
+		var name string
+		if err := eventRows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		eventCols[name] = true
+	}
+	for _, c := range []string{"redaction_id", "session_key", "subject_kind", "subject_id", "entry_id", "artifact_id", "surface", "pattern", "count", "created_at"} {
+		if !eventCols[c] {
+			t.Fatalf("redaction_events.%s missing; got columns=%v", c, eventCols)
+		}
+	}
 }

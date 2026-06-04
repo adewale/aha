@@ -572,7 +572,7 @@ and per-op costs low.
 | Dimension | Local-only v1 (today) | With a depot (proposed) |
 |---|---|---|
 | Trust model | "Everything stays on your machine." Mechanically proven no-network. | Histories leave the machine; no-network becomes "local-only by default." Biggest cost. |
-| Secrets | Bundles never uploaded; v1 does not redact. | Unredacted content lands in third-party storage → mitigated by a private bucket + TLS + scoped tokens + R2 at-rest encryption, with redaction/review as a later add-on. |
+| Secrets | Bundles never uploaded by default; `redaction:"v1"` redacts corpus projections, but bundles remain raw when uploaded. | Unredacted content lands in third-party storage → mitigated by a private bucket + TLS + scoped tokens + R2 at-rest encryption, with redaction/review as a later add-on. |
 | Setup | Zero credentials. | Cloudflare account, bucket, scoped tokens. |
 | Dependencies | Pure-Go, tiny dep set. | Adds a mature S3-compatible client for R2 transport. |
 | Multi-machine | Manual bundle copy + `ingest`. | One shared depot; `refresh` converges automatically. |

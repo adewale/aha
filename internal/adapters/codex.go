@@ -186,8 +186,8 @@ func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) 
 			break
 		}
 		lineNo++
-		raw := strings.TrimSpace(line)
-		if raw == "" {
+		raw := strings.TrimRight(line, "\r\n")
+		if strings.TrimSpace(raw) == "" {
 			if err == io.EOF {
 				break
 			}
@@ -208,7 +208,7 @@ func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) 
 		if entryID == "" {
 			entryID = fmt.Sprintf("line-%06d-%s", lineNo, hash.SHA256Bytes([]byte(raw))[:12])
 		}
-		pe := model.ParsedEntry{EntryID: entryID, LineNo: lineNo, EntryType: ltype, Timestamp: ts, RawJSON: raw, Metadata: map[string]any{}}
+		pe := model.ParsedEntry{EntryID: entryID, LineNo: lineNo, EntryType: ltype, Timestamp: ts, RawJSON: raw, ParticipatesInContext: true, Metadata: map[string]any{}}
 		switch ltype {
 		case "session_meta":
 			if id := stringField(payload, "id"); id != "" {
@@ -229,7 +229,11 @@ func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) 
 		case "response_item":
 			fillCodexResponseItem(&pe, payload, curModel, curProvider)
 		case "event_msg", "compacted":
-			pe.EntryType = firstNonEmpty(stringField(payload, "type"), ltype)
+			if stringField(payload, "type") != "" {
+				fillCodexResponseItem(&pe, payload, curModel, curProvider)
+			} else {
+				pe.EntryType = ltype
+			}
 		}
 		ps.Entries = append(ps.Entries, pe)
 		if err == io.EOF {
@@ -263,8 +267,8 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 	case "function_call", "local_shell_call", "custom_tool_call":
 		pe.Role = "toolCall"
 		pe.ToolName = firstNonEmpty(stringField(payload, "name"), ptype)
-		pe.FilesJSON = stringField(payload, "arguments")
-		pe.Command = codexCommandFromArguments(stringField(payload, "arguments"))
+		pe.FilesJSON = codexArgumentsJSON(payload["arguments"])
+		pe.Command = codexCommandFromArguments(payload["arguments"])
 	case "web_search_call":
 		pe.Role = "toolCall"
 		pe.ToolName = "web_search"
@@ -285,12 +289,28 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 	}
 }
 
-func codexCommandFromArguments(args string) string {
-	if args == "" {
-		return ""
+func codexArgumentsJSON(args any) string {
+	switch x := args.(type) {
+	case string:
+		return x
+	case map[string]any, []any:
+		if b, err := json.Marshal(x); err == nil {
+			return string(b)
+		}
 	}
+	return ""
+}
+
+func codexCommandFromArguments(args any) string {
 	var m map[string]any
-	if json.Unmarshal([]byte(args), &m) != nil {
+	switch x := args.(type) {
+	case string:
+		if x == "" || json.Unmarshal([]byte(x), &m) != nil {
+			return ""
+		}
+	case map[string]any:
+		m = x
+	default:
 		return ""
 	}
 	return codexCommandValue(firstNonNil(m["command"], m["cmd"]))
@@ -335,7 +355,7 @@ func applyCodexTokenCount(e *model.ParsedEntry, payload map[string]any) {
 	}
 	usage, ok := info["last_token_usage"].(map[string]any)
 	if !ok {
-		return
+		usage = info
 	}
 	total := int64(numField(usage, "total_tokens"))
 	if total == 0 {

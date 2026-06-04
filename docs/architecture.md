@@ -233,7 +233,7 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 - Network imports are confined to `internal/depot` (outbound R2/S3), `internal/server` (the inbound loopback dashboard), and the `internal/cli/command_serve.go` wrapper that constructs it; a static test enforces this allowlist. Search, read, and ingest remain network-free.
 - The dashboard (`aha serve`) binds to loopback by default, validates the `Host` header against a loopback allowlist on every request, requires `application/json` on POST routes, and is read-only; non-loopback binds require explicit `--allow-remote`.
 - R2 credentials are not stored in bundles, catalogs, config output, command JSON, or logs.
-- v1 does not redact secrets; bundles and corpora are private artifacts.
+- default `none-v1` does not redact; `redaction:"v1"` redacts corpus projections, while bundles remain raw/private.
 
 ## Package map
 
@@ -263,7 +263,7 @@ code-mode agent runtimes.
 
 ## Design invariants
 
-- Preserve raw data; do not redact in v1.
+- Preserve raw bundles; optionally redact derived corpus projections with `redaction:"v1"`.
 - Bundles are immutable and content-addressed by SHA-256.
 - The corpus is derived and rebuildable from depot bundles.
 - SQLite + FTS5 is the search engine; no custom search index.

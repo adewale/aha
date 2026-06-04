@@ -14,11 +14,13 @@ type VerifyProblem struct {
 }
 
 type VerifyStats struct {
-	Messages     int `json:"messages"`
-	Artifacts    int `json:"artifacts"`
-	FTSMessages  int `json:"fts_messages"`
-	FTSArtifacts int `json:"fts_artifacts"`
-	Bundles      int `json:"bundles"`
+	Messages        int `json:"messages"`
+	Artifacts       int `json:"artifacts"`
+	FTSMessages     int `json:"fts_messages"`
+	FTSArtifacts    int `json:"fts_artifacts"`
+	Bundles         int `json:"bundles"`
+	Redactions      int `json:"redactions"`
+	RedactionEvents int `json:"redaction_events"`
 }
 
 type VerifyReport struct {
@@ -47,6 +49,8 @@ func Verify(store *Store) (VerifyReport, error) {
 		{&report.Stats.FTSMessages, `select count(*) from fts_messages`},
 		{&report.Stats.FTSArtifacts, `select count(*) from fts_artifacts`},
 		{&report.Stats.Bundles, `select count(*) from bundles`},
+		{&report.Stats.Redactions, `select count(*) from redactions`},
+		{&report.Stats.RedactionEvents, `select count(*) from redaction_events`},
 	}
 	for _, stat := range stats {
 		count, err := verifyCount(store.DB, stat.query)
@@ -67,6 +71,9 @@ func Verify(store *Store) (VerifyReport, error) {
 		{"missing_fts_messages", "messages without fts_messages rows", missingFTSMessagesQuery},
 		{"orphan_fts_artifacts", "fts_artifacts rows without backing artifacts", `select count(*) from fts_artifacts f left join artifacts a on a.artifact_id=f.rowid where a.artifact_id is null`},
 		{"missing_fts_artifacts", "artifacts without fts_artifacts rows", missingFTSArtifactsQuery},
+		{"orphan_redactions", "redactions without backing entries", `select count(*) from redactions r left join entries e on e.session_key=r.session_key and e.entry_id=r.entry_id where e.session_key is null`},
+		{"orphan_redaction_events", "redaction events with missing subjects", `select count(*) from redaction_events r where (r.subject_kind='session' and not exists(select 1 from sessions s where s.session_key=r.subject_id)) or (r.subject_kind='entry' and not exists(select 1 from entries e where e.session_key=r.session_key and e.entry_id=r.entry_id)) or (r.subject_kind='artifact' and r.artifact_id is not null and not exists(select 1 from artifacts a where a.artifact_id=r.artifact_id))`},
+		{"unknown_redaction_levels", "sessions with unknown redaction_level", `select count(*) from sessions where coalesce(redaction_level,'none-v1') not in ('none-v1','v1')`},
 	}
 	for _, check := range checks {
 		count, err := verifyCount(store.DB, check.query)

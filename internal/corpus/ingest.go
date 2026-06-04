@@ -137,6 +137,7 @@ type writerStatements struct {
 	insertImage             *sql.Stmt
 	insertEntryAsset        *sql.Stmt
 	insertRedaction         *sql.Stmt
+	insertRedactionEvent    *sql.Stmt
 	stampSessionLevel       *sql.Stmt
 }
 
@@ -158,7 +159,8 @@ func (w *corpusWriter) PrepareStatements() error {
 		{&w.stmts.insertArtifactPathToken, `insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`},
 		{&w.stmts.insertImage, `insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertEntryAsset, `insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`},
-		{&w.stmts.insertRedaction, `insert into redactions(session_key,entry_id,pattern,count) values(?,?,?,?) on conflict(session_key,entry_id,pattern) do update set count=redactions.count+excluded.count`},
+		{&w.stmts.insertRedaction, `insert or ignore into redactions(session_key,entry_id,pattern,count) values(?,?,?,?)`},
+		{&w.stmts.insertRedactionEvent, `insert into redaction_events(session_key,subject_kind,subject_id,entry_id,artifact_id,surface,pattern,count) values(?,?,?,?,?,?,?,?)`},
 		{&w.stmts.stampSessionLevel, `update sessions set redaction_level=? where session_key=?`},
 	}
 	for _, item := range prepared {
@@ -173,7 +175,7 @@ func (w *corpusWriter) PrepareStatements() error {
 
 func (w *corpusWriter) CloseStatements() error {
 	var first error
-	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset, w.stmts.insertRedaction, w.stmts.stampSessionLevel} {
+	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset, w.stmts.insertRedaction, w.stmts.insertRedactionEvent, w.stmts.stampSessionLevel} {
 		if stmt == nil {
 			continue
 		}
@@ -520,22 +522,24 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	sessionKey := sessionKeyValue.String()
 	rawCWD := firstNonEmpty(ps.CWD, mf.CWD)
 	metadataJSON, metaHits := w.applyRedaction(mustJSON(ps.Metadata))
-	if _, err := w.stmts.insertSession.Exec(sessionKey, mf.Source, sessionID, manifest.MachineID, rawCWD, projectKey(rawCWD), firstNonEmpty(ps.StartedAt, mf.StartedAt), metadataJSON, boolInt(ps.IsSubagent || mf.IsSubagent), nil); err != nil {
+	sessionRes, err := w.stmts.insertSession.Exec(sessionKey, mf.Source, sessionID, manifest.MachineID, rawCWD, projectKey(rawCWD), firstNonEmpty(ps.StartedAt, mf.StartedAt), metadataJSON, boolInt(ps.IsSubagent || mf.IsSubagent), nil)
+	if err != nil {
 		return IngestReport{}, err
 	}
-	if w.stmts.stampSessionLevel != nil {
+	sessionInserted := false
+	if n, _ := sessionRes.RowsAffected(); n > 0 {
+		sessionInserted = true
+	}
+	if sessionInserted && w.stmts.stampSessionLevel != nil {
 		if _, err := w.stmts.stampSessionLevel.Exec(w.redactionLevel, sessionKey); err != nil {
 			return IngestReport{}, err
 		}
 	}
-	// Session-metadata redactions cannot key on an entry_id; surface
-	// them in the session-level total by tying them to a synthetic
-	// entry_id "__session__". The schema requires a foreign key into
-	// entries, so we skip this attribution and rely on the regex pass
-	// running again on each entry's source_metadata_json. (Per-session
-	// metadata is short and rarely contains secrets; the entry path
-	// catches the same bytes via raw_json when secrets *do* land there.)
-	_ = metaHits
+	if sessionInserted {
+		if err := w.recordRedactionEvents(sessionKey, "session", sessionKey, "", nil, "source_metadata_json", metaHits); err != nil {
+			return IngestReport{}, err
+		}
+	}
 	if err := w.insertSessionPathTokens(sessionKey, rawCWD); err != nil {
 		return IngestReport{}, err
 	}
@@ -641,7 +645,7 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 	}
 	if shouldPersistMessage(pe, w.manifest.Policy.IndexToolOutput) {
 		participates := 1
-		if !pe.ParticipatesInContext {
+		if source == "pi" && !pe.ParticipatesInContext {
 			participates = 0
 		}
 		var compactionFirstKept any
@@ -676,8 +680,10 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 			rep.Messages++
 		}
 	}
-	if err := w.recordRedactions(sessionKey, pe.EntryID, entryHits); err != nil {
-		return entryReport{}, err
+	if rep.Entries > 0 {
+		if err := w.recordRedactions(sessionKey, pe.EntryID, entryHits); err != nil {
+			return entryReport{}, err
+		}
 	}
 	if !w.manifest.Policy.IncludeImages {
 		return rep, nil
@@ -716,7 +722,7 @@ func shouldPersistMessage(pe model.ParsedEntry, indexToolOutput bool) bool {
 	if shouldIndexText(pe, indexToolOutput) {
 		return true
 	}
-	return strings.TrimSpace(pe.ToolName) != "" || strings.TrimSpace(pe.Command) != "" || strings.TrimSpace(pe.FilesJSON) != "" || strings.TrimSpace(pe.Model) != "" || strings.TrimSpace(pe.Provider) != "" || pe.Tokens != 0 || pe.Cost != 0
+	return strings.TrimSpace(pe.ToolName) != "" || strings.TrimSpace(pe.Command) != "" || strings.TrimSpace(pe.FilesJSON) != "" || strings.TrimSpace(pe.Model) != "" || strings.TrimSpace(pe.Provider) != "" || pe.Tokens != 0 || pe.CacheReadTokens != 0 || pe.CacheWriteTokens != 0 || pe.ReasoningTokens != 0 || pe.Cost != 0 || pe.CompactionFirstKeptEntryID != "" || pe.CompactionTokensBefore != 0 || pe.ThinkingLevel != "" || pe.Label != "" || pe.LabelTargetEntryID != ""
 }
 
 func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
@@ -836,16 +842,14 @@ func (w corpusWriter) ingestArtifact(mf model.ManifestFile, path string) (bool, 
 		if err != nil {
 			return false, err
 		}
-		// Artifact previews/bodies are redacted in-place, but the
-		// redactions table is keyed by entry_id with a foreign key
-		// into entries. Artifacts attach to a parent_session_key (via
-		// ParentHint) but not to a specific entry_id at this layer,
-		// so artifact-level hits are not individually recorded. The
-		// session's per-entry redactions (from messages.text on the
-		// tool call that produced the artifact) still capture the
-		// scrub via the regex pass on the same byte sequence.
-		_ = previewHits
-		_ = bodyHits
+		artifactSubject := fmt.Sprint(artifactID)
+		parentSession, _ := parent.(string)
+		if err := w.recordRedactionEvents(parentSession, "artifact", artifactSubject, "", artifactID, "text_preview", previewHits); err != nil {
+			return false, err
+		}
+		if err := w.recordRedactionEvents(parentSession, "artifact", artifactSubject, "", artifactID, "text_body", bodyHits); err != nil {
+			return false, err
+		}
 		if err := w.insertArtifactPathTokens(artifactID, mf.RawPath, mf.RelativePath); err != nil {
 			return false, err
 		}
@@ -1000,10 +1004,10 @@ func mergeRedactionHits(dst, src redact.Hits) redact.Hits {
 	return dst
 }
 
-// recordRedactions writes per-pattern hit counts for an entry into the
-// redactions table. A nil or empty hits map is a no-op. The statement
-// uses ON CONFLICT to coalesce repeated calls for the same entry
-// (artifact passes may add to the same entry's tally).
+// recordRedactions writes per-pattern hit counts for a newly inserted
+// entry into the redactions table. A nil or empty hits map is a no-op.
+// The table is append-only; duplicate entries are ignored by the caller
+// so repeated bundle ingests cannot inflate counts.
 func (w corpusWriter) recordRedactions(sessionKey, entryID string, hits redact.Hits) error {
 	if len(hits) == 0 || w.stmts.insertRedaction == nil {
 		return nil
@@ -1013,6 +1017,29 @@ func (w corpusWriter) recordRedactions(sessionKey, entryID string, hits redact.H
 			continue
 		}
 		if _, err := w.stmts.insertRedaction.Exec(sessionKey, entryID, name, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w corpusWriter) recordRedactionEvents(sessionKey, subjectKind, subjectID, entryID string, artifactID any, surface string, hits redact.Hits) error {
+	if len(hits) == 0 || w.stmts.insertRedactionEvent == nil {
+		return nil
+	}
+	var sessionArg any
+	if sessionKey != "" {
+		sessionArg = sessionKey
+	}
+	var entryArg any
+	if entryID != "" {
+		entryArg = entryID
+	}
+	for name, count := range hits {
+		if count == 0 {
+			continue
+		}
+		if _, err := w.stmts.insertRedactionEvent.Exec(sessionArg, subjectKind, subjectID, entryArg, artifactID, surface, name, count); err != nil {
 			return err
 		}
 	}

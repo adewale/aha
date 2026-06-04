@@ -60,7 +60,7 @@ Short version:
 | Paths | Preserve raw paths by default |
 | SQLite | Use SQLite as the corpus/query engine; use FTS5, indexes, constraints, transactions, JSON columns/functions where useful; do not reimplement what SQLite does well |
 | Config format | JSONC |
-| Secrets/redaction | Punt to v2; v1 warns but does not redact |
+| Secrets/redaction | `none-v1` default preserves raw projections; `redaction:"v1"` redacts corpus projections; bundles remain raw |
 | Subagents | Include in v1 |
 | Images | Include in v1 and store enough information to recreate image-bearing prompts |
 | Live sync | No |
@@ -83,7 +83,7 @@ V1 does not try to:
 - build a hosted service;
 - support Windows in v1.
 
-The tool is a local archive and search system. Users should treat bundles and corpora as private because v1 does not redact secrets.
+The tool is a local archive and search system. Users should treat bundles as private because they remain raw; corpora are private unless ingested with `redaction:"v1"` and reviewed.
 
 ## What is a `.zst` file?
 
@@ -367,10 +367,10 @@ Responsibilities:
 9. Compute bundle SHA-256.
 10. Emit bundle path/key and SHA in command output / JSON.
 
-V1 does not redact secrets. The command should print a direct warning unless a non-interactive flag accepts it:
+By default (`none-v1`) aha does not redact secrets. The command should print a direct warning unless a non-interactive flag accepts it:
 
 ```txt
-V1 does not redact secrets. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private.
+`none-v1` does not redact secrets, and bundles always remain raw. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private.
 ```
 
 ## Active file handling
@@ -612,7 +612,7 @@ V1 punts secret handling.
 The CLI and README must say plainly:
 
 ```txt
-V1 does not redact secrets. Bundles may contain credentials, private prompts, source code, tool output, images, filesystem paths, and API responses. Do not upload bundles or corpora publicly unless you have reviewed them yourself.
+Bundles remain raw and may contain credentials, private prompts, source code, tool output, images, filesystem paths, and API responses. `redaction:"v1"` only redacts corpus projections. Do not upload bundles or corpora publicly unless you have reviewed them yourself.
 ```
 
 V2 can add redaction, Windows support, and external plugin loading:
@@ -735,7 +735,7 @@ read output with surrounding entries
 - `status` reports machines, bundles, sources, sessions, entries, artifacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--depot` is explicit.
 - `corpus size|vacuum|prune-orphans` exposes explicit local maintenance; `prune-orphans` is dry-run unless `--force`.
 - `depot verify` is quick by default, `--deep`/`--repair` are explicit byte-reading integrity operations, and `depot compact` deduplicates catalog metadata without touching bundle bytes.
-- README states that v1 does not redact secrets.
+- README states that `none-v1` does not redact, `redaction:"v1"` redacts corpus projections, and bundles remain raw.
 - Test suite includes realistic Pi and Claude Code fixtures, including `agent-*.jsonl` and image-bearing prompts.
 - Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, search/read coherence, FTS verifier query shape, indexed search filters, depot operation budgets, and maintenance dry-run safety.
 - CI/local verification runs `go test ./...`, `go test -race ./...`, `go vet ./...`, bounded fuzz/property tests, deterministic archive tests, documentation-code sync checks, and build verification through `scripts/verify.sh full`.
@@ -1192,7 +1192,7 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 | `samfoy/pi-total-recall` | Session search as part of a context stack | Broader memory stack; not snapshot-bundle archival. |
 | `MohammadErfan-Jabbari/pi-session-inspect` | Read-only local session inspection | Local inspection rather than cross-machine bundle ingest. |
 | `Dwsy/pi-session-manager` | Session manager UI, SQLite search, external sessions | Heavier workbench; not a Go CLI archive format. |
-| `badlogic/pi-share-hf` | Incremental collection, redaction, review, upload | Public dataset pipeline; v1 here is private local corpus and does not redact. |
+| `badlogic/pi-share-hf` | Incremental collection, redaction, review, upload | Public dataset pipeline; aha keeps raw bundles private and can redact corpus projections with `redaction:"v1"`. |
 | `adewale/claude-history-explorer` | Concrete Claude Code JSONL discovery/parsing, `agent-*.jsonl`, rich read-only UX, verifiable trust model | Single-machine Python explorer rather than multi-machine immutable bundle corpus; see `docs/comparisons/claude-history-explorer.md`. |
 | `adewale/testing-best-practices` | Table-driven Go tests, real fixtures, golden files, property/fuzz tests, doc-sync tests, test-quality antipatterns | Testing guidance rather than an agent-history product. |
 

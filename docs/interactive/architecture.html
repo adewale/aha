@@ -2090,8 +2090,8 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">11,397</span> production lines</dd>
-    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">18</span> in <code>internal/</code></dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">12,528</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">19</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num">12</span></dd>
@@ -2523,7 +2523,7 @@ footer a:hover { color: var(--ink-2); }
     <div class="er-family">
       <div class="er-family-h">agent content <span class="cli-note">append-only; triggers enforce; conflicts quarantine</span></div>
       <div class="er-tables">
-        <div class="er-table primary" data-cols="session_key sk1_ PK (CHECK), source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, is_subagent, parent_session_key">
+        <div class="er-table primary" data-cols="session_key sk1_ PK (CHECK), source_name, source_session_id, machine_id, raw_cwd, project_key, started_at, redaction_level, is_subagent, parent_session_key">
           <div class="er-name">sessions</div>
           <div class="er-pk">PK <code>session_key</code> (<code>sk1_</code> + sha256)</div>
           <div class="er-fk">→ sessions (self, parent)</div>
@@ -2538,7 +2538,7 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-fk">→ sessions</div>
           <div class="er-note">append-only; conflict trigger</div>
         </div>
-        <div class="er-table" data-cols="(session_key, entry_id) PK, role, text, tool_name, command, files_json, model, provider, tokens, cost">
+        <div class="er-table" data-cols="(session_key, entry_id) PK, role, text, tool_name, command, files_json, model, provider, tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost, compaction_*, participates_in_context, thinking_level, label*">
           <div class="er-name">messages</div>
           <div class="er-fk">→ entries</div>
           <div class="er-note">append-only; insert trigger mirrors text into fts_messages</div>
@@ -2560,10 +2560,14 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-name">conflicts</div>
           <div class="er-note">where the conflict trigger writes; append-only itself</div>
         </div>
-        <div class="er-table" data-cols="session_key, entry_id, pattern, count">
+        <div class="er-table" data-cols="(session_key, entry_id, pattern) PK, count">
           <div class="er-name">redactions</div>
           <div class="er-fk">→ entries</div>
-          <div class="er-note">v1.1 per-pattern hit counts; populated by ingest when <code>redaction</code> ≠ <code>none-v1</code></div>
+          <div class="er-note">append-only v1.1 per-entry pattern hit counts; populated by ingest when <code>redaction</code> ≠ <code>none-v1</code></div>
+        </div>
+        <div class="er-table" data-cols="redaction_id PK, session_key, subject_kind, subject_id, entry_id, artifact_id, surface, pattern, count, created_at">
+          <div class="er-name">redaction_events</div>
+          <div class="er-note">append-only session/artifact redaction events for observability</div>
         </div>
       </div>
     </div>

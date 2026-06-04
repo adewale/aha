@@ -179,7 +179,7 @@ Additional testing lessons:
 
 ## Regrets intentionally accepted or deferred
 
-- V1 does not redact secrets; bundles and corpora are private.
+- Default `none-v1` does not redact; `redaction:"v1"` redacts corpus projections, while bundles remain private/raw.
 - Windows support is v2.
 - Project identity is heuristic in v1.
 - `read` uses file-order context rather than full source-native branch reconstruction.

@@ -219,7 +219,7 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}
-	if !strings.Contains(stderr.String(), "does not redact secrets") {
+	if !strings.Contains(stderr.String(), "Bundles are raw provenance") {
 		t.Fatalf("missing privacy warning: %s", stderr.String())
 	}
 	matches, _ := filepath.Glob(filepath.Join(outDir, "bundles", "v1", "*.tar.zst"))
@@ -329,6 +329,64 @@ func TestCLIRefreshCreatesAggregationCorpus(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "claude-code") {
 		t.Fatalf("refresh did not create searchable corpus: %s", out.String())
+	}
+}
+
+func TestCLIRefreshHonorsRedactionConfig(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	secret := "sk-ant-api03-" + strings.Repeat("q", 30)
+	piFile := filepath.Join(fx.PiRoot, "--Users-me-proj--", "2026_pi.jsonl")
+	f, err := os.OpenFile(piFile, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"id":"p-secret","parentId":"p2","type":"user","role":"user","timestamp":"2026-01-01T00:00:03Z","message":{"content":"` + secret + `"}}` + "\n")
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "bundles")
+	corpusDir := filepath.Join(root, "corpus")
+	configPath := filepath.Join(root, "config.jsonc")
+	cfg := `{
+		"machine_id":"refresh-redaction",
+		"sources":[{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true}],
+		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
+		"redaction":"v1",
+		"accept_secrets_warning":true
+	}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "refresh-redaction"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	store, err := corpus.OpenExisting(corpusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var rawHits, markerHits int
+	if err := store.DB.QueryRow(`select count(*) from messages where text like '%' || ? || '%'`, secret).Scan(&rawHits); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB.QueryRow(`select count(*) from messages where text like '%[REDACTED:anthropic_key]%'`).Scan(&markerHits); err != nil {
+		t.Fatal(err)
+	}
+	if rawHits != 0 || markerHits == 0 {
+		t.Fatalf("refresh did not apply v1 redaction: rawHits=%d markerHits=%d", rawHits, markerHits)
+	}
+	var level string
+	if err := store.DB.QueryRow(`select redaction_level from sessions`).Scan(&level); err != nil {
+		t.Fatal(err)
+	}
+	if level != "v1" {
+		t.Fatalf("redaction_level=%q want v1", level)
 	}
 }
 

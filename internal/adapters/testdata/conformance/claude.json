@@ -2,14 +2,24 @@
   "name": "claude",
   "adapter": "claude-code",
   "fixture": "testdata/claude_realish.jsonl",
-  "session_file": { "source": "claude-code", "session_id": "claude-path", "cwd": "/Users/me/work" },
+  "session_file": {
+    "source": "claude-code",
+    "session_id": "claude-path",
+    "cwd": "/Users/example/work"
+  },
   "want": {
     "source": "claude-code",
     "source_session_id": "claude-path",
     "entries": 2,
     "contains_text": "claude fixture needle",
-    "asset_count_by_index": { "0": 1 },
-    "model_by_index": { "1": "claude-test" },
-    "tokens_by_index": { "1": 19 }
+    "asset_count_by_index": {
+      "0": 1
+    },
+    "model_by_index": {
+      "1": "claude-test"
+    },
+    "tokens_by_index": {
+      "1": 19
+    }
   }
 }

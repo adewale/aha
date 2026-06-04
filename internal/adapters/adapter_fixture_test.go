@@ -67,12 +67,12 @@ func TestAdapterParseSessionCommittedFixtures(t *testing.T) {
 			}
 		}},
 		{name: "codex", adapter: CodexCLI{}, fixture: "testdata/codex_realish.jsonl", file: model.SessionFile{Source: "codex", SessionID: "codex-path"}, wantID: "codex-realish", wantSource: "codex", wantEntries: 3, wantNeedle: "codex fixture needle", check: func(t *testing.T, ps *model.ParsedSession) {
-			if ps.CWD != "/Users/me/work" || ps.StartedAt != "2026-05-20T12:00:00Z" || ps.Entries[1].Role != "user" || ps.Entries[2].Role != "assistant" {
+			if ps.CWD != "/Users/example/work" || ps.StartedAt != "2026-05-20T12:00:00Z" || ps.Entries[1].Role != "user" || ps.Entries[2].Role != "assistant" {
 				t.Fatalf("codex adapter did not preserve session/message metadata: %+v", ps)
 			}
 		}},
 		{name: "codex-modern", adapter: CodexCLI{}, fixture: "testdata/codex_modern_realish.jsonl", file: model.SessionFile{Source: "codex", SessionID: "path-fallback"}, wantID: "codex-modern-id", wantSource: "codex", wantEntries: 7, wantNeedle: "codex modern needle", check: func(t *testing.T, ps *model.ParsedSession) {
-			if ps.CWD != "/Users/me/proj" || ps.Entries[2].Role != "user" || ps.Entries[3].Role != "assistant" || ps.Entries[3].Model != "gpt-5-codex" {
+			if ps.CWD != "/Users/example/proj" || ps.Entries[2].Role != "user" || ps.Entries[3].Role != "assistant" || ps.Entries[3].Model != "gpt-5-codex" {
 				t.Fatalf("codex modern adapter did not unwrap message envelope: %+v", ps)
 			}
 			tool := false
@@ -86,7 +86,7 @@ func TestAdapterParseSessionCommittedFixtures(t *testing.T) {
 			}
 		}},
 		{name: "opencode", adapter: OpenCode{}, fixture: "testdata/opencode_realish.jsonl", file: model.SessionFile{Source: "opencode", SessionID: "path-fallback", CWD: ""}, wantID: "ses_realish", wantSource: "opencode", wantEntries: 2, wantNeedle: "opencode fixture needle", check: func(t *testing.T, ps *model.ParsedSession) {
-			if ps.CWD != "/Users/me/work" || ps.Entries[0].Role != "user" || len(ps.Entries[0].Assets) != 1 || ps.Entries[0].Assets[0].MimeType != "image/png" || ps.Entries[1].Role != "assistant" || ps.Entries[1].Model != "opencode-test-model" || ps.Entries[1].Tokens != 19 || ps.Entries[1].ToolName != "bash" || ps.Entries[1].Command != "ls -la" {
+			if ps.CWD != "/Users/example/work" || ps.Entries[0].Role != "user" || len(ps.Entries[0].Assets) != 1 || ps.Entries[0].Assets[0].MimeType != "image/png" || ps.Entries[1].Role != "assistant" || ps.Entries[1].Model != "opencode-test-model" || ps.Entries[1].Tokens != 19 || ps.Entries[1].ToolName != "bash" || ps.Entries[1].Command != "ls -la" {
 				t.Fatalf("opencode adapter did not preserve session/message/image metadata: %+v", ps)
 			}
 		}},

@@ -198,6 +198,25 @@ var migrations = []migration{
 		}
 		return nil
 	}},
+	{version: 12, apply: migrateRedactionEvents},
+}
+
+func migrateRedactionEvents(db *sql.DB) error {
+	stmts := []string{
+		`create table if not exists redaction_events(redaction_id integer primary key,session_key text,subject_kind text not null,subject_id text not null,entry_id text,artifact_id integer,surface text not null,pattern text not null,count integer not null check(count>0),created_at text default current_timestamp)`,
+		`create index if not exists idx_redaction_events_pattern on redaction_events(pattern)`,
+		`create index if not exists idx_redaction_events_session on redaction_events(session_key,pattern)`,
+		`create trigger if not exists redactions_no_update before update on redactions begin select raise(abort,'redactions are append-only'); end`,
+		`create trigger if not exists redactions_no_delete before delete on redactions begin select raise(abort,'redactions are append-only'); end`,
+		`create trigger if not exists redaction_events_no_update before update on redaction_events begin select raise(abort,'redaction_events are append-only'); end`,
+		`create trigger if not exists redaction_events_no_delete before delete on redaction_events begin select raise(abort,'redaction_events are append-only'); end`,
+	}
+	for _, st := range stmts {
+		if _, err := db.Exec(st); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migratePathTokens(db *sql.DB) error {

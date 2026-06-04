@@ -1,6 +1,6 @@
 # Redaction spec
 
-Status: design, not yet implemented. Targets a `v1.1` change to aha.
+Status: v1.1 implemented for corpus projections. Later sections marked v1.2+ remain deferred designs.
 
 ## Why
 
@@ -137,35 +137,50 @@ Three changes to `internal/corpus/schema.go`:
    Every session records the level it was indexed under. Existing rows
    backfill to `"none-v1"`. New ingests stamp the config's current level.
 
-2. **Add `redactions` table:**
+2. **Add append-only redaction tables:**
    ```sql
    create table redactions(
      session_key text,
      entry_id    text,
-     pattern     text,        -- e.g. "aws_access_key"
+     pattern     text,
      count       integer,
      primary key(session_key, entry_id, pattern),
      foreign key(session_key, entry_id) references entries(session_key, entry_id)
    );
-   ```
-   Append-only; one row per (entry, pattern). Total redactions per session
-   are a simple SUM.
 
-3. **Add `corpus_redaction_level` schema-migration record** so we can detect
-   mixed-level corpora (some sessions ingested under `none-v1`, some under
-   `v1`).
+   create table redaction_events(
+     redaction_id integer primary key,
+     session_key  text,
+     subject_kind text,        -- session | artifact (entry totals stay in redactions)
+     subject_id   text,
+     entry_id     text,
+     artifact_id  integer,
+     surface      text,
+     pattern      text,
+     count        integer,
+     created_at   text default current_timestamp
+   );
+   ```
+   `redactions` stores per-entry aggregate counts. `redaction_events` covers
+   session metadata and artifact surfaces that do not have an entry id.
+   Triggers reject updates/deletes so duplicate ingest cannot inflate counts.
+
+3. **Schema migrations track redaction support** via `schema_migrations` versions
+   11 and 12. Mixed-level corpora are detected by grouping
+   `sessions.redaction_level`.
 
 ## Surface
 
-- `aha status --json` adds `redactions_total` and `redactions_by_pattern`.
-- `aha verify` reports any mismatch between `sessions.redaction_level` and
-  the config's active level (so a user can see "200 sessions are indexed
-  at none-v1; consider re-ingesting").
-- `aha read --json` strips redactions from `raw_json` too (the parsed
-  source projection, not the bundle).
-- `aha doctor` lists the active redaction level and its pattern count.
-- MCP `status` and `doctor` tools surface the same.
-- Dashboard adds a "Redactions" strip in the header (count + breakdown).
+- `aha status --json` / MCP `status` surface `redactions`,
+  `redaction_events`, `redaction_hits`, `redaction_levels`, and
+  `redactions_by_pattern`.
+- `aha verify` reports orphan redaction rows/events and unknown session
+  `redaction_level` values.
+- `aha read --json` returns already-redacted `raw_json` from the corpus
+  projection; bundles remain raw.
+- `aha doctor --json` / MCP `doctor` include the same redaction counts and
+  level breakdown in the corpus diagnostics.
+- Dashboard integration is still follow-up UI work.
 
 ## Configuration
 
@@ -184,7 +199,9 @@ Three changes to `internal/corpus/schema.go`:
 
 Validation:
 - Each extra pattern must compile as a Go RE2 regex (no backreferences).
-- A pattern name collision with a built-in is rejected.
+- A pattern name collision with a built-in or another extra is rejected.
+- Extra patterns that match the empty string or `[REDACTED:*]` markers are
+  rejected to preserve idempotence and bounded output growth.
 - Compiled patterns are cached per process.
 
 ## Re-ingest behaviour
@@ -196,8 +213,8 @@ When the config redaction level changes:
 - A new command `aha reindex [--from-level LEVEL] [--session ID...]`
   rebuilds the corpus projection from the bundles using the *current*
   redaction config. This is the supported migration path.
-- `aha status` warns when the corpus contains sessions at a lower level
-  than the config currently asks for.
+- `aha status` surfaces the per-level counts so operators can see mixed
+  `none-v1` / `v1` corpora before running a reindex workflow.
 
 ## Behaviour details
 

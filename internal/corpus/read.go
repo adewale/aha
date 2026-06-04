@@ -138,6 +138,7 @@ func LiveContext(db *sql.DB, sessionKeyOrID, leafEntryID string) ([]ReadEntry, e
 	// match that ordering. (Verified against
 	// earendil-works/pi session-format.md, 2026-06.)
 	stopAfter := ""
+	anchorSatisfied := false
 	var nonCompaction []ReadEntry // leaf → root order
 	var compactions []ReadEntry   // most-recent first (walk order)
 	seen := map[string]struct{}{}
@@ -162,9 +163,13 @@ func LiveContext(db *sql.DB, sessionKeyOrID, leafEntryID string) ([]ReadEntry, e
 			stopAfter = r.compactionRef
 		}
 		if stopAfter != "" && cur == stopAfter {
+			anchorSatisfied = true
 			break
 		}
 		cur = r.parentID
+	}
+	if stopAfter != "" && !anchorSatisfied {
+		return nil, fmt.Errorf("compaction anchor %q is not on the branch ending at %q in session %q", stopAfter, leafEntryID, sessionKey)
 	}
 	for i, j := 0, len(nonCompaction)-1; i < j; i, j = i+1, j-1 {
 		nonCompaction[i], nonCompaction[j] = nonCompaction[j], nonCompaction[i]

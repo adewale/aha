@@ -51,9 +51,9 @@ Many users start with:
 
 ## Privacy warning
 
-V1 does **not** redact secrets. Bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
+By default, `aha` preserves today's `none-v1` behavior: bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-Redaction at ingest is the next planned change; see `docs/redaction-spec.md` for the design and `docs/trust.md` for the current trust model and verification commands.
+Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `entries.raw_json`, artifacts, and FTS) at ingest. Bundles remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
 
 ## Install / build
 
@@ -244,7 +244,7 @@ scripts/smoketest.sh codex ~/.codex/sessions
 | Depot | `~/.aha/depot` local bundle store |
 | Machine ID | sanitized local hostname |
 | Tool output indexing | off |
-| Redaction | none in v1 |
+| Redaction | `none-v1` (set `v1` to redact indexed projections at ingest) |
 
 Config is JSONC; flags override config.
 
@@ -275,11 +275,11 @@ For coding agents using `aha`:
 2. Use `aha read <ref> --json` to retrieve full source context.
 3. Answer from retrieved context, not from snippets alone.
 4. Prefer query-only commands (`search`, `read`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
-5. Remember v1 does not redact secrets.
+5. Check `aha status --json` for `redaction_levels`; if the corpus is `none-v1`, do not assume secrets are redacted.
 
 ## Accepted v1 limits
 
-- No secret redaction.
+- Redaction is pattern-based and applies to derived corpus projections only; raw bundles remain unredacted.
 - No Windows support until v2.
 - `include_images=false` suppresses normalized image assets/blobs, but raw bundles/session JSON may still contain embedded image bytes.
 - `read` shows file-order context, not source-native branch/thread reconstruction.
@@ -297,7 +297,7 @@ For coding agents using `aha`:
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
-- `docs/redaction-spec.md` — secret-redaction design (v1.1, in design).
+- `docs/redaction-spec.md` — implemented v1.1 corpus-projection redaction plus deferred v1.2+ designs.
 - `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
 - `docs/research/openinference.md` — OpenInference semantic-convention reference.
 - `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.

@@ -1,4 +1,4 @@
-{"type":"session","id":"codex-coverage","timestamp":"2026-05-21T12:00:00Z","cwd":"/Users/me/work"}
+{"type":"session","id":"codex-coverage","timestamp":"2026-05-21T12:00:00Z","cwd":"/Users/example/work"}
 {"id":"cu1","type":"message","role":"user","timestamp":"2026-05-21T12:00:01Z","message":{"content":"top-level content string fallback"}}
 {"id":"cu2","parent_id":"cu1","type":"message","role":"user","timestamp":"2026-05-21T12:00:02Z","message":{"uuid":"msg_codex_b","role":"user","content":[{"type":"text","text":"snake-case parent linkage"}]}}
 {"id":"ca1","parent_id":"cu2","type":"message","role":"assistant","model":"codex-top-level-model","timestamp":"2026-05-21T12:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}

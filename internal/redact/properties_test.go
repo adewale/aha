@@ -101,7 +101,7 @@ func TestExtraPatternsRejectInvalidConfig(t *testing.T) {
 		{"empty name", []redact.ExtraPattern{{Name: "", Regex: `.`}}, "empty name"},
 		{"name collision", []redact.ExtraPattern{{Name: "anthropic_key", Regex: `.`}}, "collides"},
 		{"bad regex", []redact.ExtraPattern{{Name: "x", Regex: `[`}}, "extra pattern \"x\""},
-		{"extra collision", []redact.ExtraPattern{{Name: "dup", Regex: `.`}, {Name: "dup", Regex: `.`}}, "collides"},
+		{"extra collision", []redact.ExtraPattern{{Name: "dup", Regex: `dup-[0-9]+`}, {Name: "dup", Regex: `dup-[0-9]+`}}, "collides"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

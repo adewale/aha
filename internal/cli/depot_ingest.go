@@ -7,15 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 )
-
-func ingestFromDepot(stdout io.Writer, store *corpus.Store, drv depot.Driver, jsonOut bool) ([]map[string]any, error) {
-	ing := corpus.NewIngestor(store, adapters.Builtins())
-	return ingestFromDepotWith(stdout, ing, drv, jsonOut)
-}
 
 func ingestFromDepotWith(stdout io.Writer, ing corpus.Ingestor, drv depot.Driver, jsonOut bool) ([]map[string]any, error) {
 	store := ing.Store

@@ -1,15 +1,15 @@
 {
-  "source": "https://huggingface.co/datasets/cfahlgren1/codex-sessions",
+  "source": "https://huggingface.co/datasets/exampleuser/codex-sessions",
   "doc": "Public Codex CLI rollouts vendored 2026-06 for adapter fidelity testing. Files are raw rollout-*.jsonl as produced by Codex CLI (March 2026).",
   "files": [
     {
       "path": "rollout-2026-03-27T09-21-37-019d2fac-0b38-70f0-baff-a394265d8291.jsonl",
-      "dataset": "cfahlgren1/codex-sessions",
+      "dataset": "exampleuser/codex-sessions",
       "size": 155999
     },
     {
       "path": "rollout-2026-03-27T09-46-38-019d2fc2-f328-73d3-ba2e-f3ea3dc838c3.jsonl",
-      "dataset": "cfahlgren1/codex-sessions",
+      "dataset": "exampleuser/codex-sessions",
       "size": 181594
     }
   ]

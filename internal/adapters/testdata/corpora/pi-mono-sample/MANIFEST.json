@@ -1,6 +1,6 @@
 {
-  "source": "https://huggingface.co/datasets/badlogicgames/pi-mono",
-  "doc": "Diverse sample vendored 2026-06 for adapter fidelity testing. Selection is size-bucketed (4 each from tiny/small/medium/large/xlarge). Sessions are best-effort redacted by pi-share-hf \u2014 see docs/research/pi-observability.md for the pipeline. Do not re-vendor without updating MANIFEST.json.",
+  "source": "https://huggingface.co/datasets/exampleusergames/pi-mono",
+  "doc": "Diverse sample vendored 2026-06 for adapter fidelity testing. Selection is size-bucketed (4 each from tiny/small/medium/large/xlarge). Sessions are best-effort redacted by pi-share-hf — see docs/research/pi-observability.md for the pipeline. Do not re-vendor without updating MANIFEST.json.",
   "files": [
     {
       "path": "2026-01-24T01-23-25-331Z_54984de5-a670-4a48-8af0-07e808fa1b9d.jsonl",

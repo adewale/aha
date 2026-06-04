@@ -163,7 +163,7 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 		return out
 	}
 	out["ok"] = true
-	for _, key := range []string{"bundles", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "index_size_bytes"} {
+	for _, key := range []string{"bundles", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "redactions", "redaction_events", "redaction_hits", "redaction_levels", "redactions_by_pattern", "index_size_bytes"} {
 		out[key] = stats[key]
 	}
 	return out

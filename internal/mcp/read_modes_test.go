@@ -50,6 +50,25 @@ func TestReadToolLiveMode(t *testing.T) {
 // TestReadToolBranchModeRequiresEntry pins that branch/live modes need
 // a leaf entry; without one the tool returns a clear error rather than
 // silently falling back to a window read.
+func TestReadToolWindowHonorsExplicitZeroContext(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	out, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","entry":"p2","before":0,"after":0}`))
+	if err != nil {
+		t.Fatalf("CallTool(read zero window): %v", err)
+	}
+	body, _ := json.Marshal(out)
+	var entries []struct {
+		EntryID string `json:"entry_id"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		t.Fatalf("unexpected read output %T: %s", out, body)
+	}
+	if len(entries) != 1 || entries[0].EntryID != "p2" {
+		t.Fatalf("explicit before=0 after=0 returned %+v, want only p2", entries)
+	}
+}
+
 func TestReadToolBranchModeRequiresEntry(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)

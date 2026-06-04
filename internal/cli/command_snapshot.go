@@ -85,7 +85,11 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reports, err := ingestFromDepot(stdout, store, drv, *snapshotFlags.jsonOut)
+	ing, err := ingestorForConfig(store, req.Config)
+	if err != nil {
+		return err
+	}
+	reports, err := ingestFromDepotWith(stdout, ing, drv, *snapshotFlags.jsonOut)
 	if err != nil {
 		return err
 	}
@@ -123,7 +127,7 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 	flags.machine = fs.String("machine", "", "machine id")
 	flags.depotAddr = fs.String("depot", "", "depot address")
 	flags.configPath = fs.String("config", "", "JSONC config path")
-	flags.acceptSecrets = fs.Bool("accept-secrets", false, "acknowledge v1 does not redact secrets")
+	flags.acceptSecrets = fs.Bool("accept-secrets", false, "acknowledge raw bundle privacy warning")
 	flags.capturedAt = fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
 	flags.bundleID = fs.String("bundle-id", "", "bundle id (advanced deterministic testing)")
 	flags.maxSessions = fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
@@ -176,7 +180,7 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 		cfg.AcceptSecretsWarning = true
 	}
 	if !acceptSecrets && !cfg.AcceptSecretsWarning {
-		fmt.Fprintln(stderr, "V1 does not redact secrets. Bundles may contain prompts, source code, tool output, images, tokens, and private paths. Treat the bundle as private. Pass --accept-secrets to continue.")
+		fmt.Fprintln(stderr, "Bundles are raw provenance and may contain prompts, source code, tool output, images, tokens, and private paths. Treat bundles as private even when corpus redaction is enabled. Pass --accept-secrets to continue.")
 		return snapshotRequest{}, errors.New("secrets warning not acknowledged")
 	}
 	if maxSessions < 0 {

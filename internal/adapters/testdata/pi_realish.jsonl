@@ -1,4 +1,4 @@
-{"type":"session","version":3,"id":"pi-realish","timestamp":"2026-05-20T10:00:00Z","cwd":"/Users/me/work"}
+{"type":"session","version":3,"id":"pi-realish","timestamp":"2026-05-20T10:00:00Z","cwd":"/Users/example/work"}
 {"id":"u1","parentId":"","type":"message","timestamp":"2026-05-20T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"search needle from pi fixture"}]}}
 {"id":"tool1","parentId":"u1","type":"message","timestamp":"2026-05-20T10:00:02Z","message":{"role":"toolResult","toolName":"bash","content":[{"type":"text","text":"tool output hidden by default"}]}}
 {"id":"a1","parentId":"tool1","type":"message","timestamp":"2026-05-20T10:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"assistant answer"}]}}

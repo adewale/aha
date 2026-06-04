@@ -34,7 +34,7 @@ Defaults used:
 - depot: local bundle store at `~/.aha/depot`; remote/R2 depot is opt-in;
 - corpus: `~/.aha`;
 - subagents/images: included;
-- redaction: none in v1.
+- redaction: `none-v1` by default; set `v1` to redact corpus projections at ingest.
 
 ## Journey 2: routine refresh from one to all local sessions
 

@@ -27,6 +27,8 @@ func TestBuiltInPatternsReplace(t *testing.T) {
 		{"aws_access_key", "AKIAIOSFODNN7EXAMPLE", "aws_access_key"},
 		{"google_api_key", "AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI", "google_api_key"},
 		{"stripe_live", "sk" + "_live_" + "abcdefghijklmnopqrstuvwx", "stripe_key"},
+		{"gcp_service_account", "service-account@example-project.iam.gserviceaccount.com", "gcp_service_account"},
+		{"cloudflare_token", "CLOUDFLARE_API_TOKEN=" + strings.Repeat("a", 40), "cloudflare_token"},
 		{"jwt_token", "eyJhbGciOiJIUzI1NiIs.eyJzdWIiOiIxMjM0NTY3.SflKxwRJSMeKKF2QT4f", "jwt_token"},
 		{"auth_bearer", "Authorization: Bearer abc123def456", "authorization_bearer"},
 		{"url_credentials", "https://admin:hunter2@example.com/path", "url_credentials"},
@@ -44,5 +46,26 @@ func TestBuiltInPatternsReplace(t *testing.T) {
 				t.Fatalf("hits[%q]=%d, want >=1; full hits=%v", tc.wantType, hits[tc.wantType], hits)
 			}
 		})
+	}
+}
+
+func TestAdjacentBearerHeaderDoesNotExposeSecretOnSecondPass(t *testing.T) {
+	r := redact.NewDefault()
+	input := "AKIAIOSFODNN7EXAMPL2Authorization: Bearer abc123def456"
+	once, _ := r.Apply(input)
+	twice, _ := r.Apply(once)
+	if once != twice {
+		t.Fatalf("redactor is not idempotent for adjacent auth header:\n  once:  %q\n  twice: %q", once, twice)
+	}
+}
+
+func TestNewWithExtrasRejectsEmptyAndMarkerMatches(t *testing.T) {
+	for _, tc := range []redact.ExtraPattern{
+		{Name: "empty", Regex: `.*`},
+		{Name: "marker", Regex: `\[REDACTED:[^\]]+\]`},
+	} {
+		if _, err := redact.NewWithExtras([]redact.ExtraPattern{tc}); err == nil {
+			t.Fatalf("NewWithExtras accepted unsafe extra pattern %+v", tc)
+		}
 	}
 }

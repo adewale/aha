@@ -108,6 +108,17 @@ func TestCodexTokenCountSumsWhenTotalAbsent(t *testing.T) {
 	}
 }
 
+func TestCodexTokenCountAcceptsInfoDirectUsage(t *testing.T) {
+	input := `{"type":"event_msg","timestamp":"2026-03-27T14:21:48Z","payload":{"type":"token_count","info":{"total_tokens":42}}}`
+	ps, err := CodexCLI{}.ParseSession(t.Context(), model.SessionFile{Source: "codex", SessionID: "s"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps.Entries[0].Tokens != 42 {
+		t.Fatalf("direct info tokens=%d want 42", ps.Entries[0].Tokens)
+	}
+}
+
 // TestCodexNativeProjectionRealCorpus asserts that, after the native
 // projection layer, the vendored Codex rollouts no longer leave the
 // core columns empty: a session that clearly contains a user prompt and

@@ -63,6 +63,29 @@ func TestProjectionTableHasNoStaleEntries(t *testing.T) {
 	}
 }
 
+func TestProjectionTableClassifiesImplementedColumns(t *testing.T) {
+	table := loadProjectionTable(t, "testdata/projection-table.json")
+	wantProjected := []string{
+		"firstKeptEntryId",
+		"tokensBefore",
+		"modelId",
+		"provider",
+		"thinkingLevel",
+		"message.excludeFromContext",
+		"message.content[].mimeType",
+		"message.content[].data",
+	}
+	for _, path := range wantProjected {
+		classification, ok := table[path]
+		if !ok {
+			t.Fatalf("projection table missing %s", path)
+		}
+		if strings.HasPrefix(classification, "raw_only:") {
+			t.Fatalf("projection table says %s is raw_only after implementation: %s", path, classification)
+		}
+	}
+}
+
 func fixtureBasenames() []string {
 	return []string{
 		"pi_realish.jsonl",

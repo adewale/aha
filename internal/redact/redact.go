@@ -68,10 +68,20 @@ var builtInSources = []struct {
 	{"google_api_key", `\bAIza[0-9A-Za-z\-_]{35}\b`},
 	// Stripe live or test secret keys.
 	{"stripe_key", `\bsk_(?:live|test)_[A-Za-z0-9]{24,}\b`},
+	// GCP service-account identifiers. Not credential material by itself,
+	// but it is a stable cloud principal and the spec treats it as context
+	// worth redacting in shared corpora.
+	{"gcp_service_account", `\b[A-Za-z0-9_\-]{6,}@[a-z0-9\-]+\.iam\.gserviceaccount\.com\b`},
+	// Cloudflare API tokens are not lexically distinctive, so require a
+	// nearby Cloudflare/CF token label rather than matching arbitrary
+	// 40-character strings.
+	{"cloudflare_token", `(?i)\b(?:CF_API_TOKEN|CLOUDFLARE(?:_API)?_TOKEN)\s*[:=]\s*(?:"[A-Za-z0-9_\-]{20,}"|'[A-Za-z0-9_\-]{20,}'|[A-Za-z0-9_\-]{20,})`},
 	// Three-segment JWTs.
 	{"jwt_token", `\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b`},
-	// HTTP bearer headers.
-	{"authorization_bearer", `(?i)Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=\-]{8,}`},
+	// HTTP bearer headers. Require a word boundary before Authorization so a
+	// prior redaction cannot expose an adjacent boundary-delimited secret on
+	// a later pass (for example AKIA...Authorization: Bearer ...).
+	{"authorization_bearer", `(?i)\bAuthorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=\-]{8,}`},
 	// scheme://user:pass@host
 	{"url_credentials", `\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^/\s@]+@`},
 	// Generic KEY=value assignment. Matched last so distinctive patterns
@@ -117,6 +127,12 @@ func NewWithExtras(extras []ExtraPattern) (*Redactor, error) {
 		re, err := regexp.Compile(e.Regex)
 		if err != nil {
 			return nil, fmt.Errorf("extra pattern %q: %w", e.Name, err)
+		}
+		if re.MatchString("") {
+			return nil, fmt.Errorf("extra pattern %q: must not match the empty string", e.Name)
+		}
+		if re.MatchString("[REDACTED:"+e.Name+"]") || re.MatchString("[REDACTED:openai_key]") {
+			return nil, fmt.Errorf("extra pattern %q: must not match redaction markers", e.Name)
 		}
 		seen[e.Name] = true
 		r.patterns = append(r.patterns, Pattern{Name: e.Name, Re: re})

@@ -33,8 +33,8 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 			break
 		}
 		lineNo++
-		raw := strings.TrimSpace(line)
-		if raw == "" {
+		raw := strings.TrimRight(line, "\r\n")
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
 		var m map[string]any
@@ -60,7 +60,14 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 		if role == "" {
 			role = typ
 		}
-		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), ParticipatesInContext: typ != "custom", Metadata: map[string]any{}}
+		participates := typ != "custom"
+		if b, ok := firstBool(m, []string{"participatesInContext"}, []string{"participates_in_context"}, []string{"message", "participatesInContext"}, []string{"message", "participates_in_context"}); ok {
+			participates = b
+		}
+		if excluded, ok := firstBool(m, []string{"excludeFromContext"}, []string{"exclude_from_context"}, []string{"message", "excludeFromContext"}, []string{"message", "exclude_from_context"}); ok && excluded {
+			participates = false
+		}
+		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), ParticipatesInContext: participates, Metadata: map[string]any{}}
 		switch typ {
 		case "compaction":
 			pe.CompactionFirstKeptEntryID = stringField(m, "firstKeptEntryId")
@@ -79,6 +86,9 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 			pe.LabelTargetEntryID = stringField(m, "targetId")
 		}
 		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(m)
+		if pe.Role == "user" && contentHasBlockType(m, "tool_result") {
+			pe.Role = "toolResult"
+		}
 		if pe.ToolName == "" {
 			pe.ToolName = firstNonEmpty(stringField(m, "toolName"), nestedString(m, "message", "toolName"))
 		}
@@ -171,6 +181,17 @@ func parseImageAsset(block map[string]any, idx, order int) model.ParsedAsset {
 			}
 		}
 	}
+	if a.MimeType == "" {
+		a.MimeType = firstNonEmpty(stringField(block, "mimeType"), stringField(block, "mime_type"), stringField(block, "media_type"))
+	}
+	if len(a.Data) == 0 {
+		if data := stringField(block, "data"); data != "" {
+			if b, err := base64.StdEncoding.DecodeString(data); err == nil {
+				a.Data = b
+				a.Width, a.Height = imageDimensions(b)
+			}
+		}
+	}
 	if u := stringField(block, "url"); u != "" {
 		a.RawRef = u
 	}
@@ -232,6 +253,72 @@ func numField(m map[string]any, k string) float64 {
 	}
 	return 0
 }
+
+func firstBool(m map[string]any, paths ...[]string) (bool, bool) {
+	for _, path := range paths {
+		if v, ok := nestedValue(m, path...); ok {
+			switch b := v.(type) {
+			case bool:
+				return b, true
+			case string:
+				switch strings.ToLower(strings.TrimSpace(b)) {
+				case "true", "1", "yes":
+					return true, true
+				case "false", "0", "no":
+					return false, true
+				}
+			}
+		}
+	}
+	return false, false
+}
+
+func contentHasBlockType(m map[string]any, want string) bool {
+	msg, _ := m["message"].(map[string]any)
+	content, ok := msg["content"]
+	if !ok {
+		content = m["content"]
+	}
+	var walk func(any) bool
+	walk = func(v any) bool {
+		switch x := v.(type) {
+		case []any:
+			for _, it := range x {
+				if walk(it) {
+					return true
+				}
+			}
+		case map[string]any:
+			if stringField(x, "type") == want {
+				return true
+			}
+			if inner, ok := x["content"]; ok {
+				return walk(inner)
+			}
+		}
+		return false
+	}
+	return walk(content)
+}
+
+func nestedValue(m map[string]any, path ...string) (any, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	cur := any(m)
+	for _, p := range path {
+		mm, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = mm[p]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
 func nestedMap(m map[string]any, path ...string) (map[string]any, bool) {
 	cur := m
 	for i, p := range path {

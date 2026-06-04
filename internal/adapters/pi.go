@@ -123,6 +123,13 @@ func projectPiNativeShapes(ps *model.ParsedSession) {
 		if err := json.Unmarshal([]byte(e.RawJSON), &m); err != nil {
 			continue
 		}
+		if img, ok := m["image"].(map[string]any); ok {
+			block := map[string]any{"type": "image"}
+			for k, v := range img {
+				block[k] = v
+			}
+			e.Assets = append(e.Assets, parseImageAsset(block, len(e.Assets), len(e.Assets)))
+		}
 		msg, _ := m["message"].(map[string]any)
 		if msg == nil {
 			continue

@@ -112,8 +112,8 @@ type ReadInput struct {
 	Session string `json:"session,omitempty" jsonschema:"Session key (used when ref is empty)"`
 	Entry   string `json:"entry,omitempty" jsonschema:"Entry id within the session. In branch/live mode this is the leaf entry to walk back from."`
 	Mode    string `json:"mode,omitempty" jsonschema:"Read mode: 'window' (default, file-order context around the entry), 'branch' (walk parent_id from the entry leaf to the root), or 'live' (branch with Pi compaction collapse and non-participating entries filtered)."`
-	Before  int    `json:"before,omitempty" jsonschema:"Lines of context before the target entry (window mode only, default 3)"`
-	After   int    `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5)"`
+	Before  *int   `json:"before,omitempty" jsonschema:"Lines of context before the target entry (window mode only, default 3; explicit 0 is honored)"`
+	After   *int   `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5; explicit 0 is honored)"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -161,13 +161,13 @@ func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
 	)
 	switch in.Mode {
 	case "", "window":
-		before := in.Before
-		if before == 0 {
-			before = 3
+		before := 3
+		if in.Before != nil {
+			before = *in.Before
 		}
-		after := in.After
-		if after == 0 {
-			after = 5
+		after := 5
+		if in.After != nil {
+			after = *in.After
 		}
 		if in.Ref != "" {
 			ref, perr := model.ParseRef(in.Ref)

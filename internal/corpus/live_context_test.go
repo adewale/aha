@@ -52,6 +52,22 @@ func TestLiveContextSkipsCustomNonParticipatingEntries(t *testing.T) {
 	assertLiveContextEntries(t, got, wantIDs)
 }
 
+func TestLiveContextRejectsCompactionAnchorOutsideBranch(t *testing.T) {
+	lines := []string{
+		`{"type":"session","version":3,"id":"bad-anchor","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"first"}}`,
+		`{"type":"compaction","id":"comp1","parentId":"u1","timestamp":"2026-01-01T00:00:02Z","summary":"bad compaction","firstKeptEntryId":"missing-anchor","tokensBefore":10}`,
+		`{"type":"message","id":"leaf","parentId":"comp1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":"answer"}}`,
+	}
+	store, key := ingestPiLines(t, "bad-anchor", lines)
+	defer store.Close()
+
+	_, err := corpus.LiveContext(store.DB, key.String(), "leaf")
+	if err == nil {
+		t.Fatalf("LiveContext accepted a compaction whose firstKeptEntryId is not on the branch")
+	}
+}
+
 func assertLiveContextEntries(t *testing.T, got []corpus.ReadEntry, wantIDs []string) {
 	t.Helper()
 	if len(got) != len(wantIDs) {
