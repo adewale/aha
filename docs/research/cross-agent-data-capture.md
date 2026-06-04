@@ -95,13 +95,17 @@ projection surfaces for Pi sessions:
 | `message.details.{diff, firstChangedLine, truncation.*}` | Rich edit/truncation annotations that would feed pathology detection — all raw_json-only today. |
 | Pi state-transition entries (`model_change`, `thinking_level_change`, `compaction`, `branch_summary`, `custom`, `custom_message`, `label`, `session_info`) with payload keys (`modelId`, `provider`, `thinkingLevel`, `firstKeptEntryId`, `tokensBefore`, `fromId`, `name`, `excludeFromContext`) | Stored as plain messages; payload keys are raw_json-only. Already itemized as priorities 3 and 4. |
 
-The `testdata/projection-table.json` audit catalogs each of these
-explicitly as `raw_only` with a pointer to the responsible follow-up,
-so the corpus walk passes today without obscuring the gap. The
-follow-up itself — a Pi-native projection layer in `adapters/pi.go`
-that runs after `parseGenericJSONL` and fills in the Pi-shaped columns
-— belongs alongside priorities 2–4 (it has the same scope, similar
-schema impact, and shares the property-test surface).
+**Status: fixed.** `projectPiNativeShapes` in `adapters/pi.go` now runs
+after `parseGenericJSONL` and fills the Pi-shaped columns: `toolCall`
+blocks → `tool_name`/`command`/`files_json`, `thinking` blocks →
+`text` (prepended so reasoning is searchable), and the camelCase
+`usage` schema (`input`/`output`/`cacheRead`/`cacheWrite`/`totalTokens`
+plus `cost.total`) → the token and cost columns. Pinned by
+`TestPiNativeProjectionSynthetic` and a real-corpus assertion
+(`TestPiNativeProjectionRealCorpus`). The corresponding
+`projection-table.json` rows have moved from `raw_only` to
+`projected`. Per-category cost splits (`cost.input`/`output`/…) remain
+`raw_only` pending dedicated columns.
 
 This gap is invisible to anyone reading `parser.go` against the
 canonical `session-format.md` because the canonical spec describes
@@ -145,26 +149,26 @@ The Codex `payload.type` discriminates `session_meta`, `user_input`,
 `reasoning`, `rate_limits`, and `token_count`. None of these route
 through projection today.
 
-The fix mirrors the Pi-native projection follow-up: after the generic
-parse, the Codex adapter (`adapters/codex.go`) should detect the
-`payload` envelope and populate the columns from there. Field-by-field
-this is mechanical; the schema additions are the same as priorities
-2 and 4 (cache/reasoning tokens, typed state-transition data).
+**Status: fixed.** `projectCodexPayloadEnvelope` in `adapters/codex.go`
+runs after the generic parse, detects the `payload` envelope, and
+populates `role` (from `payload.role` and `user_message`/`agent_message`
+inner types), `text` (from `payload.content[].text`, `payload.message`,
+`payload.output`), `model`/`provider` (carried forward from
+`turn_context`/`session_meta`), `tool_name`/`command`/`files_json`
+(from `function_call` and `web_search_call`), and the token columns
+(from `payload.info.last_token_usage.*`). Pinned by
+`TestCodexNativeProjectionSynthetic` and a real-corpus assertion
+(`TestCodexNativeProjectionRealCorpus`) that fails if any vendored
+rollout yields zero user/assistant/text entries. The pass is a no-op
+for legacy `message`-envelope Codex sessions.
 
-Two Pi-style follow-ups, then, share scope and are best landed
-together as a single "native projection layer" pass that:
-
-1. Detects the source-native envelope shape per adapter (`message.*`
-   for Anthropic/Claude Code legacy, `payload.*` for Codex modern,
-   Pi's `content[].type = "toolCall"` blocks for Pi tool calls).
-2. Routes each into the existing typed-column projections.
-3. Maintains backward compatibility for the Anthropic-style format
-   that today's parser handles natively.
-
-Estimated cost (parallel to Pi-native projection): ~400 LOC and a
-property test that asserts `messages.{text, role, model, tokens,
-tool_name}` are populated for every entry in
-`testdata/corpora/codex-sample/`.
+Together the two native-projection layers realise the shape this note
+originally proposed: each adapter detects its source-native envelope
+(`message.*` for Anthropic/Claude Code, `payload.*` for Codex modern,
+`content[].type = "toolCall"` and camelCase usage for Pi) and routes
+into the shared typed-column projections, while the generic
+Anthropic-shaped path stays untouched for the formats it already
+handles.
 
 ## Where we lose data, ranked
 
