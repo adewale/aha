@@ -288,3 +288,325 @@ For a 50,000-entry corpus with average 2 KB of indexable text per entry:
    available? Skip with a warning, or refuse?
 4. Image redaction (OCR of base64 PNG content) is explicitly deferred to
    v2; do we surface a count of images-not-redacted to the user?
+
+## v1.2 — Exact-secret redaction (spec only; deferred implementation)
+
+Prior art: Mario Zechner's `pi-share-hf` runs deterministic exact-secret
+redaction *before* its pattern pass (see
+`docs/research/pi-observability.md`). For secrets that exist on disk in a
+session's `cwd` (env files, dotenv variants, locally-checked credentials),
+literal-string redaction is strictly better than regex: zero false
+positives, and the marker carries the exact key name so an auditor can
+trace what was scrubbed.
+
+### Scope
+
+Read every value from the configured set of env files in the session's
+`cwd` at parse time. For each non-trivial value (≥ 8 chars, not in a
+curated allow-list like `PORT=3000` / `DEBUG=true`), substitute every
+literal occurrence in the indexed text with `[REDACTED:env:<KEY>]`. Run
+this pass *before* the regex pass, so the pattern matcher never sees the
+literal value and a generic `assignment_secret` rule does not double-tag
+it.
+
+### Inputs
+
+```jsonc
+{
+  "redaction": "v1.2",
+  "redaction_env_files": [".env", ".envrc", ".env.local", ".env.${ENV}"],
+  "redaction_env_allowlist": ["PORT", "DEBUG", "NODE_ENV", "LOG_LEVEL"]
+}
+```
+
+The env-file list is glob-expanded against the session's `cwd` (which is
+already in `sessions.raw_cwd`). If a bundle preserves the env file as a
+captured artifact (it currently does not — see open questions below),
+the literal-match table is built from that artifact. Otherwise the
+table is empty and v1.2 collapses to v1.1 behaviour for that session.
+
+### Schema
+
+```sql
+alter table sessions add column exact_redactions_count integer default 0;
+```
+
+The existing `redactions` table tracks per-(entry, pattern) counts;
+exact-secret hits use a synthetic pattern name `env:<KEY>` so they
+share that table without a schema change.
+
+### Surfaces
+
+- `aha status --json` adds `exact_redactions_total` and
+  `exact_redactions_by_env_key`.
+- `aha doctor` reports which env files were read for the most recent
+  session and how many literal substitutions resulted.
+- `aha verify` does not change.
+
+### Test strategy
+
+1. **Golden**: a fixture with a `.env` file containing
+   `STRIPE_KEY=sk_test_redact_me_value_here_1234` plus a session whose
+   raw transcript contains that literal in two messages; assert both
+   are replaced with `[REDACTED:env:STRIPE_KEY]` and the regex pass
+   sees no `stripe_key` hit.
+2. **Property**: for any `.env` file the generator can produce, no
+   literal value survives in indexed text.
+3. **Idempotency**: applying the exact-secret pass twice is a no-op
+   (markers contain no `=` so they don't match
+   `assignment_secret`).
+
+### Open questions
+
+1. The bundle does not currently preserve env files (they live outside
+   the session JSONL). Adding them under
+   `sources/<src>/sessions/<sid>/.env` of the bundle's tar would make
+   them available to the redactor and to `aha reindex`. That's a
+   bundle-format change worth doing alongside this; if not, v1.2 is
+   limited to sessions where the bundle has been re-snapshotted with
+   env support.
+2. Should `redaction_env_files` accept absolute paths (e.g.
+   `~/.config/aha/global-secrets.env`)? Operator-friendly but escalates
+   trust scope.
+
+## v1.3 — Second-opinion scanner (spec only; deferred implementation)
+
+Prior art: pi-share-hf runs **TruffleHog** as a defence-in-depth pass
+after its deterministic redactor; non-empty TruffleHog output **gates
+upload** of the session. The aha analogue runs the scanner
+*post-redaction* on the indexed text and uses its output as a check on
+the existing pipeline, not as the redactor itself.
+
+### Scope
+
+After v1.1 (and v1.2, if enabled) have produced the redacted text, a
+configured second-opinion scanner reviews it. Any non-empty finding
+aborts ingest of that session with a diagnostic; the bundle remains
+in the depot so the user can re-run with `aha reindex --session <id>`
+once the cause is understood.
+
+### Inputs
+
+```jsonc
+{
+  "redaction_second_opinion": "trufflehog",
+  "redaction_second_opinion_path": "/usr/local/bin/trufflehog"
+}
+```
+
+Recognised values: `"none"` (default), `"trufflehog"`,
+`"detect-secrets"`. Custom hooks via `"command:<absolute-path>"` accept
+JSON on stdin and emit a non-empty findings array to exit-1 on hit.
+
+### Schema
+
+```sql
+alter table sessions add column second_opinion_status text
+  default 'unscanned';
+-- 'unscanned' | 'clean' | 'flagged' | 'error'
+```
+
+A separate `second_opinion_findings` table mirrors `redactions`:
+
+```sql
+create table if not exists second_opinion_findings(
+  session_key text,
+  entry_id    text,
+  detector    text,   -- 'trufflehog' | 'detect-secrets' | 'command:<…>'
+  rule_id     text,   -- detector-specific finding id
+  count       integer,
+  primary key(session_key, entry_id, detector, rule_id),
+  foreign key(session_key, entry_id) references entries(session_key, entry_id)
+);
+```
+
+### Surfaces
+
+- `aha status --json` adds `second_opinion_status_counts` (clean /
+  flagged / unscanned / error) and `second_opinion_findings_total`.
+- `aha doctor` reports whether the configured detector is on `$PATH`
+  and what version.
+- `aha verify` flags sessions stamped `second_opinion_status='flagged'`
+  whose entries are still being read.
+
+### Test strategy
+
+1. **Mock detector**: spec a stdin/stdout contract so the test suite
+   can provide a fake scanner without shelling out. Tests assert the
+   correct stdin payload reaches the scanner and the result flows
+   into the schema.
+2. **Live detector** (opt-in, off by default in CI): a verify mode
+   that requires TruffleHog on `$PATH` and asserts the integration
+   against a fixture with a planted secret.
+3. **Idempotency**: re-running the scanner on already-redacted text
+   produces the same findings (deterministic per detector version).
+
+### Open questions
+
+1. Should `second_opinion: "trufflehog"` mandate that ingest fails on
+   `error` (binary missing, exec failure), or silently fall back to
+   `none`? Defaulting to fail-closed matches the trust model but
+   complicates first-run ergonomics.
+2. Detector versions drift; should `aha verify` re-run when the
+   detector version changes, or stamp the detector version into
+   `sessions.second_opinion_status_meta`?
+
+## v1.4 — LLM review gate (spec only; deferred implementation)
+
+Prior art: pi-share-hf's final pipeline step asks an LLM three
+questions over every redacted session before allowing the upload to
+Hugging Face. The aha analogue scopes this strictly to the **sharing
+flow** (`aha snapshot --redact`, depot publication) — not normal
+local ingest, which must stay LLM-free.
+
+### Scope
+
+Add `aha review --session <ref> [--model claude-haiku-4-5]` and gate
+`aha snapshot --redact` (and equivalent depot-publish surfaces)
+behind a passing review. The reviewer reads the *already-redacted*
+session entries and answers three yes/no questions:
+
+1. Is this session about the project the depot covers?
+2. Is anything in it sensitive that survived redaction?
+3. Is the session generally fit to share publicly?
+
+A "no" on (2) or "no" on (3) blocks publication. The review verdict
+plus the model's rationale is recorded per session.
+
+### Inputs
+
+```jsonc
+{
+  "share_review": {
+    "enabled": false,
+    "model": "claude-haiku-4-5",
+    "system_prompt_path": "~/.config/aha/review-prompt.md",
+    "max_tokens": 500
+  }
+}
+```
+
+The review model is a user-installed binary or API call; aha does not
+ship LLM credentials. When `enabled: false` (the default), `aha
+snapshot --redact` and friends fall through with no review gate.
+
+### Schema
+
+```sql
+create table if not exists session_reviews(
+  session_key       text primary key,
+  reviewed_at       text,
+  model             text,
+  verdict           text, -- 'shareable' | 'blocked'
+  rationale         text,
+  prompt_version    text,
+  detector_versions text,
+  foreign key(session_key) references sessions(session_key)
+);
+```
+
+### Surfaces
+
+- `aha review --session <ref>` runs the review; prints verdict +
+  rationale; exits non-zero on `blocked`.
+- `aha snapshot --redact --review-required` refuses to publish a
+  bundle if any included session lacks a passing review.
+- `aha status --json` adds `reviews_by_verdict`.
+- Dashboard adds a "Pending review" lane in the share UI (out of scope
+  for v1.4 itself, listed as a follow-up).
+
+### Test strategy
+
+1. **Mock model**: the reviewer is invoked via a stdin/stdout contract;
+   the test suite plugs a deterministic fake reviewer.
+2. **Live model** (opt-in): a verify mode that runs against a real
+   Claude / OpenAI / local model and asserts a clearly-shareable
+   fixture passes and a planted-secret fixture is blocked.
+3. **Verdict round-trip**: after `aha review --session X`, the
+   recorded verdict is what `aha snapshot --redact --review-required`
+   reads.
+
+### Open questions
+
+1. Should the reviewer see redacted text only, or also a metadata
+   summary (file counts, token totals, tools used)? More context →
+   better verdict but more surface for prompt-injection.
+2. Should the rationale be redacted itself before storage? It could
+   echo back the very secret the reviewer is flagging.
+3. Cost budget: a 50-turn session is ~10 KB after redaction; at
+   Haiku-4.5 prices that is sub-cent per review. Above some threshold
+   (very long sessions), should aha sample / chunk?
+
+## v1.5 — Per-session audit trail for shared depots (spec only; deferred implementation)
+
+Prior art: pi-share-hf keeps a per-session workspace
+(`.pi/hf-sessions/`) with redacted file, raw redactor report,
+second-opinion report, and LLM review side-by-side. An auditor or
+teammate can answer "why was this session published?" months later
+from that one folder.
+
+### Scope
+
+Mirror that workspace into the depot, scoped to bundles that were
+explicitly produced for sharing. For every session in an
+`aha snapshot --redact` bundle, persist alongside the redacted
+session:
+
+- `redactor.json` — per-pattern hit counts (already known from the
+  `redactions` table).
+- `exact-secret.json` — per-env-key counts from v1.2.
+- `second-opinion.json` — verbatim findings from v1.3.
+- `review.json` — verdict + rationale from v1.4.
+
+### Bundle layout
+
+```
+sources/<src>/sessions/<sid>/
+  redacted.jsonl
+  audit/
+    redactor.json
+    exact-secret.json
+    second-opinion.json
+    review.json
+```
+
+The redacted JSONL is the source of truth for downstream readers;
+the `audit/` directory is opt-in evidence.
+
+### Schema
+
+No corpus-side schema change. The audit files live in the bundle
+only; they are not ingested.
+
+### Surfaces
+
+- `aha snapshot --redact --audit-trail` produces the audit directory
+  alongside the redacted session.
+- `aha depot inspect --session <ref>` prints a summary of the audit
+  files inside a depot bundle.
+- `aha verify --audit-trail` confirms every shared session has a
+  complete audit directory and the counts match the redaction
+  configuration recorded in `sessions.redaction_level`.
+
+### Test strategy
+
+1. **Round-trip**: snapshot a session with `--redact --audit-trail`,
+   inspect the bundle, assert each audit file is well-formed JSON
+   matching the per-session counts.
+2. **Tamper detection**: `aha verify --audit-trail` fails when an
+   audit file is missing or its counts disagree with the redaction
+   configuration.
+
+### Open questions
+
+1. Should the audit files be content-addressed inside the bundle the
+   same way session JSONL is, or is filename-addressed (under
+   `<sid>/audit/`) sufficient? Content addressing would defend
+   against silent edits but complicates the layout.
+2. Should `aha ingest` warn (or refuse) when ingesting a bundle whose
+   `audit/` directory is present but incomplete? Currently `audit/`
+   is ignored on ingest.
+3. Should the LLM review's rationale be stored verbatim or hashed?
+   Verbatim is the auditor-friendly default but increases the
+   surface area pi-share-hf's "best-effort redacted" disclaimer is
+   protecting.
