@@ -277,40 +277,7 @@ alter table sessions add column exact_redactions_count integer default 0;
 Surface: `aha status` adds `exact_redactions_total`; `aha doctor` reports
 which env files contributed.
 
-### v1.3: second-opinion scanner (gated)
-
-Add a hook: if `config.redaction_second_opinion = "trufflehog"` (or
-`"detect-secrets"`), shell out post-redaction to the configured tool over
-the redacted text. Any non-empty result aborts the ingest of the affected
-session with a diagnostic. Default is `"none"`; this is opt-in for the
-paranoid.
-
-Why post-redaction and gated: TruffleHog has its own false-positive rate
-and dependency footprint, so we run it as a *check on our work*, not as a
-mandatory pipeline stage.
-
-Schema delta:
-```sql
-alter table sessions add column second_opinion_status text default 'unscanned';
--- "unscanned" | "clean" | "flagged"
-```
-
-### v1.4: LLM review gate (opt-in, per-session)
-
-For users who want pi-share-hf parity:
-
-- A new command `aha review --session <ref> [--model claude-3-5-haiku]`
-  asks an LLM three questions over the redacted session: is this safely
-  shareable, is anything project-irrelevant, did the redactor miss
-  anything?
-- Record the review verdict in a `session_reviews` table; `aha snapshot
-  --review-required` refuses to publish a bundle whose sessions haven't
-  passed review.
-
-This is a sharing-flow feature, not an ingest feature, and lives behind a
-flag. We do not run LLMs during normal ingest.
-
-### v1.5: per-session audit trail
+### v1.3: per-session audit trail
 
 Mirror pi-share-hf's workspace layout for shared depots:
 
@@ -320,6 +287,45 @@ Mirror pi-share-hf's workspace layout for shared depots:
 - Existing redaction observability (`status`, `verify`) already gives the
   *aggregate* numbers; this gives the *evidence trail* a teammate or
   auditor can replay.
+- Two of the four expected outputs (`second-opinion.json`, `review.json`)
+  come from features now indefinitely postponed; the audit-trail layout
+  reserves slots for them so the bundle format does not change if they
+  later ship.
+
+### Indefinitely postponed: second-opinion scanner (TruffleHog)
+
+Was numbered v1.3 in the original `redaction-spec.md`. Postponed
+indefinitely because TruffleHog is a third-party binary aha does not
+vendor and "needs an extra binary on `$PATH`" contradicts the
+zero-extra-dependencies posture of v1.1–v1.3.
+
+The original design: if `config.redaction_second_opinion = "trufflehog"`
+(or `"detect-secrets"`), shell out post-redaction to the configured tool
+over the redacted text. Any non-empty result aborts the ingest of the
+affected session with a diagnostic. Default `"none"`; opt-in for the
+paranoid. Schema delta `alter table sessions add column
+second_opinion_status text default 'unscanned'`.
+
+Why post-redaction and gated: TruffleHog has its own false-positive rate
+and dependency footprint, so we would run it as a *check on our work*,
+not as a mandatory pipeline stage. See the "Indefinitely postponed"
+section of `redaction-spec.md` for the full design.
+
+### Indefinitely postponed: LLM review gate
+
+Was numbered v1.4 in the original `redaction-spec.md`. Postponed
+indefinitely because it requires an LLM endpoint plus credentials
+handling — also out of scope for the zero-dependency posture.
+
+The original design: for users who wanted pi-share-hf parity, a new
+command `aha review --session <ref> [--model claude-haiku-4-5]` would
+ask an LLM three questions over the redacted session — is this safely
+shareable, is anything project-irrelevant, did the redactor miss
+anything? Record the verdict in a `session_reviews` table; `aha
+snapshot --review-required` would refuse to publish a bundle whose
+sessions had not passed review. Strictly a sharing-flow feature; aha
+would never run LLMs during normal ingest. See the "Indefinitely
+postponed" section of `redaction-spec.md` for the full design.
 
 ## Recommended ordering
 
@@ -337,9 +343,11 @@ Priority is set by "how much data are we losing today" × "how much work":
 5. (Exact-secret redaction, redaction v1.2) — strictly safer than regex
    for env-file values.
 6. (Index tool_result content, flag-gated) — once redaction v1.1 lands.
-7. (Second-opinion scanner v1.3) — opt-in.
-8. (LLM review gate v1.4) — opt-in, sharing-flow only.
-9. (Per-session audit trail v1.5) — depot-only, deferred.
+7. (Per-session audit trail, redaction v1.3) — depot-only, deferred.
+8. (Second-opinion scanner) — indefinitely postponed (needs TruffleHog
+   binary; out of zero-dependency posture).
+9. (LLM review gate) — indefinitely postponed (needs LLM endpoint and
+   credentials; sharing-flow only).
 
 Items 1–3 should land before redaction v1.2 because faithful reconstruction
 must be in place before we can confidently say a redacted bundle preserves
