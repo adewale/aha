@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"9fb0998b-dff2-41cf-ae45-69b05785367a","timestamp":"2026-03-07T13:24:39.979Z","cwd":"/Users/badlogic/workspaces/pi-mono"}
+{"type":"model_change","id":"55f5790b","parentId":null,"timestamp":"2026-03-07T13:24:39.979Z","provider":"openai-codex","modelId":"gpt-5.4"}
+{"type":"thinking_level_change","id":"989457fa","parentId":"55f5790b","timestamp":"2026-03-07T13:24:39.979Z","thinkingLevel":"low"}
+{"type":"message","id":"670e33bc","parentId":"989457fa","timestamp":"2026-03-07T13:24:40.007Z","message":{"role":"user","content":[{"type":"text","text":"packages/coding-agent/examples/extensions/provider-payload.ts"}],"timestamp":1772889880003}}
+{"type":"message","id":"103b11cf","parentId":"670e33bc","timestamp":"2026-03-07T13:24:42.619Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":""}],"api":"openai-codex-responses","provider":"openai-codex","model":"gpt-5.4","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"aborted","timestamp":1772889880004,"errorMessage":"Operation aborted"}}

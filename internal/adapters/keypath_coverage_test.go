@@ -18,7 +18,7 @@ import (
 // otherwise pass through unnoticed via entries.raw_json.
 func TestKeyPathCoverage(t *testing.T) {
 	table := loadProjectionTable(t, "testdata/projection-table.json")
-	fixtures := discoverFixturePaths(t, "testdata", fixtureBasenames())
+	fixtures := append(discoverFixturePaths(t, "testdata", fixtureBasenames()), corpusJSONLPaths(t)...)
 	observed := map[string]string{}
 	for _, fx := range fixtures {
 		for _, path := range observedKeyPaths(t, fx) {
@@ -44,7 +44,7 @@ func TestKeyPathCoverage(t *testing.T) {
 // rotate; stale entries become invisible documentation otherwise.
 func TestProjectionTableHasNoStaleEntries(t *testing.T) {
 	table := loadProjectionTable(t, "testdata/projection-table.json")
-	fixtures := discoverFixturePaths(t, "testdata", fixtureBasenames())
+	fixtures := append(discoverFixturePaths(t, "testdata", fixtureBasenames()), corpusJSONLPaths(t)...)
 	observed := map[string]struct{}{}
 	for _, fx := range fixtures {
 		for _, path := range observedKeyPaths(t, fx) {
@@ -72,6 +72,34 @@ func fixtureBasenames() []string {
 		"coverage_claude.jsonl",
 		"coverage_codex.jsonl",
 	}
+}
+
+// corpusJSONLPaths returns every .jsonl file under testdata/corpora/.
+// These come from vendored real-world sessions (pi-mono today, others
+// later) and exercise the projection surface far beyond what hand-
+// crafted fixtures cover.
+func corpusJSONLPaths(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	root := filepath.Join("testdata", "corpora")
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
+			return nil
+		}
+		out = append(out, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func loadProjectionTable(t *testing.T, path string) map[string]string {

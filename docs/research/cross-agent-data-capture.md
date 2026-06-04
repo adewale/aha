@@ -76,6 +76,39 @@ The pattern is consistent: the *parse* preserves more than the *read* and
 the *projection* preserves more than the *search*. We rarely *drop* data
 during ingest; we drop it on every layer above.
 
+## Pi-native projection: a discovered gap
+
+The 2026-06 audit of the pi-mono corpus surfaced a category of data loss
+not predicted by reading `parser.go` alone. The shared
+`parseGenericJSONL` is tuned for **Anthropic / Claude Code**'s naming
+conventions; Pi uses its own, and the parser silently drops several
+projection surfaces for Pi sessions:
+
+| Pi-native shape                                    | What aha does today                                                  |
+| -------------------------------------------------- | -------------------------------------------------------------------- |
+| `content[].type = "toolCall"` + `arguments: {...}` | Falls through `default` case (`parser.go:123`); no `tool_name`/`command`/`files_json` projection. |
+| `content[].type = "thinking"` + `thinking` body    | Falls through `default`; thinking content is not joined into `messages.text`. |
+| `content[].type = "image"` + top-level `data` / `mimeType` (no `source.*`) | `parser.parseImageAsset` reads `source.media_type` / `source.data`; Pi images are not detected as assets. |
+| `message.usage.{input, output, cacheRead, cacheWrite, totalTokens}` (camelCase) | Token sum reads `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` (`parser.go:72`). Pi token totals stay 0. |
+| `message.usage.cost.{input, output, cacheRead, cacheWrite, total}` | `messages.cost` column exists, no adapter populates it. Pi already has the values in source. |
+| `message.{api, provider, model, stopReason, responseId, toolCallId, exitCode, errorMessage, isError, cancelled, fullOutputPath, excludeFromContext, command, output}` | All raw_json-only. `message.model` happens to coincide with the Anthropic-style nesting and reaches `messages.model`; the rest are dropped from projection. |
+| `message.details.{diff, firstChangedLine, truncation.*}` | Rich edit/truncation annotations that would feed pathology detection — all raw_json-only today. |
+| Pi state-transition entries (`model_change`, `thinking_level_change`, `compaction`, `branch_summary`, `custom`, `custom_message`, `label`, `session_info`) with payload keys (`modelId`, `provider`, `thinkingLevel`, `firstKeptEntryId`, `tokensBefore`, `fromId`, `name`, `excludeFromContext`) | Stored as plain messages; payload keys are raw_json-only. Already itemized as priorities 3 and 4. |
+
+The `testdata/projection-table.json` audit catalogs each of these
+explicitly as `raw_only` with a pointer to the responsible follow-up,
+so the corpus walk passes today without obscuring the gap. The
+follow-up itself — a Pi-native projection layer in `adapters/pi.go`
+that runs after `parseGenericJSONL` and fills in the Pi-shaped columns
+— belongs alongside priorities 2–4 (it has the same scope, similar
+schema impact, and shares the property-test surface).
+
+This gap is invisible to anyone reading `parser.go` against the
+canonical `session-format.md` because the canonical spec describes
+**entry types** (`message`, `compaction`, …) while the data-loss is
+inside the `message.content` block-type space (`toolCall`, `thinking`,
+Pi-image). Running the corpus audit was the only way to find it.
+
 ## Where we lose data, ranked
 
 1. **Pi alternate-timeline branches (high impact, lossless-on-disk).**

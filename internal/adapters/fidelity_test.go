@@ -45,6 +45,61 @@ func TestRawJSONIsVerbatimAcrossAdapters(t *testing.T) {
 	}
 }
 
+// TestRawJSONIsVerbatimAcrossCorpora extends the verbatim guarantee to every
+// vendored real-world session under testdata/corpora/. Pi-mono is the corpus
+// today; Claude Code and Codex corpora will be added under the same root.
+// Per-session size is logged so a regression that explodes RawJSON growth is
+// visible.
+func TestRawJSONIsVerbatimAcrossCorpora(t *testing.T) {
+	paths := corpusJSONLPaths(t)
+	if len(paths) == 0 {
+		t.Skip("no corpus fixtures vendored")
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			adapter, file := corpusAdapterFor(t, path)
+			sourceLines := readNonEmptyLines(t, path)
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			ps, err := adapter.ParseSession(t.Context(), file, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preserved := collectPreservedRawJSON(t, ps)
+			assertMultisetEqual(t, preserved, parseJSONLines(t, sourceLines))
+		})
+	}
+}
+
+// corpusAdapterFor returns the adapter to use for a vendored corpus file
+// based on its parent directory under testdata/corpora/.
+func corpusAdapterFor(t *testing.T, path string) (SourceAdapter, model.SessionFile) {
+	t.Helper()
+	rel := path
+	if abs, err := os.Getwd(); err == nil {
+		_ = abs
+	}
+	parts := strings.Split(rel, string(os.PathSeparator))
+	// Find the dirname directly under testdata/corpora.
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == "corpora" && i+1 < len(parts)-1 {
+			switch {
+			case strings.HasPrefix(parts[i+1], "pi-mono"):
+				return Pi{}, model.SessionFile{Source: "pi", SessionID: parts[len(parts)-1]}
+			case strings.HasPrefix(parts[i+1], "claude"):
+				return ClaudeCode{}, model.SessionFile{Source: "claude-code", SessionID: parts[len(parts)-1]}
+			case strings.HasPrefix(parts[i+1], "codex"):
+				return CodexCLI{}, model.SessionFile{Source: "codex", SessionID: parts[len(parts)-1]}
+			}
+		}
+	}
+	t.Fatalf("no adapter mapping for corpus path %s — add a dirname pattern in corpusAdapterFor", path)
+	return nil, model.SessionFile{}
+}
+
 // TestRawJSONIsVerbatimNoHeaderStrip exercises a synthetic input every adapter
 // shares: there is no special "session" entry to strip, so the entire input
 // must round-trip through entries.
