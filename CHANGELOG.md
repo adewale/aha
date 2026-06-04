@@ -4,6 +4,10 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Fixed
+
+- Codex adapter now parses the current (enveloped) rollout format. Modern Codex CLI wraps every line as `{timestamp, type, payload}` — the conversation lives inside `response_item` payloads (`payload.type:"message"`, `payload.role`, `payload.content[]` of `input_text`/`output_text`), `session_meta` carries the session id/cwd, and `turn_context` carries the model. The generic JSONL parser looked for top-level `role`/`message.content`, so it ingested every line as an entry but recognized **zero messages** and indexed nothing for search (confirmed on a real install: 8,693 entries, 0 messages). The adapter now detects the enveloped format and unwraps `payload` — mapping user/assistant messages, tool calls (`function_call` name/arguments/command), tool output, and reasoning — while delegating older flat rollouts to the generic parser unchanged. Verified by new conformance + committed-fixture coverage and by re-running the smoketest against a modern rollout (messages and FTS rows now populate and search/read succeed).
+
 ### Added
 
 - Unified fake-source fixtures for every supported coding agent and an all-sources end-to-end test. `testutil.WriteAgentFixtures` now also seeds a fake OpenCode SQLite database (`opencode.db`, matching the `session`/`message`/`part` schema) alongside the existing Pi/Claude/Codex trees, with `FixtureRoots.OpenCodeRoot`. `TestEndToEndAllSources` (`internal/corpus`) drives all four agents through the full pipeline — discovery → snapshot → bundle → ingest → search → read — and asserts each source's distinctive needle is searchable and reads back to real context, including that OpenCode's model/token/tool metadata survives the SQLite→JSONL conversion. The fixture databases are seeded deterministically from committed SQL (kept readable/reviewable) rather than committed as opaque binaries.

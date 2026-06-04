@@ -34,6 +34,20 @@ func TestAdapterParseSessionCommittedFixtures(t *testing.T) {
 				t.Fatalf("codex adapter did not preserve session/message metadata: %+v", ps)
 			}
 		}},
+		{name: "codex-modern", adapter: CodexCLI{}, fixture: "testdata/codex_modern_realish.jsonl", file: model.SessionFile{Source: "codex", SessionID: "path-fallback"}, wantID: "codex-modern-id", wantSource: "codex", wantEntries: 7, wantNeedle: "codex modern needle", check: func(t *testing.T, ps *model.ParsedSession) {
+			if ps.CWD != "/Users/me/proj" || ps.Entries[2].Role != "user" || ps.Entries[3].Role != "assistant" || ps.Entries[3].Model != "gpt-5-codex" {
+				t.Fatalf("codex modern adapter did not unwrap message envelope: %+v", ps)
+			}
+			tool := false
+			for _, e := range ps.Entries {
+				if e.ToolName == "shell" && e.Command == "bash -lc ls -la" {
+					tool = true
+				}
+			}
+			if !tool {
+				t.Fatalf("codex modern adapter did not extract the function_call tool/command: %+v", ps.Entries)
+			}
+		}},
 		{name: "opencode", adapter: OpenCode{}, fixture: "testdata/opencode_realish.jsonl", file: model.SessionFile{Source: "opencode", SessionID: "path-fallback", CWD: ""}, wantID: "ses_realish", wantSource: "opencode", wantEntries: 2, wantNeedle: "opencode fixture needle", check: func(t *testing.T, ps *model.ParsedSession) {
 			if ps.CWD != "/Users/me/work" || ps.Entries[0].Role != "user" || ps.Entries[1].Role != "assistant" || ps.Entries[1].Model != "opencode-test-model" || ps.Entries[1].Tokens != 19 || ps.Entries[1].ToolName != "bash" || ps.Entries[1].Command != "ls -la" {
 				t.Fatalf("opencode adapter did not preserve session/message metadata: %+v", ps)

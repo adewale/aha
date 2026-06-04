@@ -1,0 +1,7 @@
+{"timestamp":"2026-06-04T00:00:00Z","type":"session_meta","payload":{"id":"codex-modern-id","timestamp":"2026-06-04T00:00:00Z","cwd":"/Users/me/proj","originator":"codex_cli_rs","cli_version":"0.130.0","model_provider":"openai"}}
+{"timestamp":"2026-06-04T00:00:01Z","type":"turn_context","payload":{"model":"gpt-5-codex","model_provider":"openai","approval_policy":"on-request","sandbox_policy":"workspace-write"}}
+{"timestamp":"2026-06-04T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"codex modern needle"}]}}
+{"timestamp":"2026-06-04T00:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex modern reply"}]}}
+{"timestamp":"2026-06-04T00:00:04Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"ls -la\"]}","call_id":"call_1"}}
+{"timestamp":"2026-06-04T00:00:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"total 0"}}
+{"timestamp":"2026-06-04T00:00:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_tokens":42}}}
