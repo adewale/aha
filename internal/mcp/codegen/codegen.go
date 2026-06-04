@@ -95,14 +95,21 @@ export type Ref = MessageRef | SessionRef | ArtifactRef;
 // the canonical ref strings the read tool expects without copying regexes
 // from internal/model/ref.go. The wire format is the source of truth.
 const refHelpers = `// parseRef accepts the canonical ref strings the search/read tools use
-// over the wire ("msg:v1:<sk>:<entry>", "session:v1:<sk>", "artifact:v1:<sha>")
+// over the wire ("msg:v1:<base64url(sk)>:<base64url(entry)>", "session:v1:<base64url(sk)>", "artifact:v1:<sha>")
 // and returns the typed shape, or null on any malformed input.
 export function parseRef(s: string): Ref | null {
   if (typeof s !== "string" || s.length === 0) return null;
-  const m = s.match(/^msg:v1:([^:]+):(.+)$/);
-  if (m) return { kind: "message", session_key: m[1], entry_id: m[2] };
-  const ss = s.match(/^session:v1:([^:]+)$/);
-  if (ss) return { kind: "session", session_key: ss[1] };
+  const m = s.match(/^msg:v1:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/);
+  if (m) {
+    const session = b64urlDecodeText(m[1]);
+    const entry = b64urlDecodeText(m[2]);
+    return session && entry ? { kind: "message", session_key: session, entry_id: entry } : null;
+  }
+  const ss = s.match(/^session:v1:([A-Za-z0-9_-]+)$/);
+  if (ss) {
+    const session = b64urlDecodeText(ss[1]);
+    return session ? { kind: "session", session_key: session } : null;
+  }
   const a = s.match(/^artifact:v1:([a-f0-9]{64})$/);
   if (a) return { kind: "artifact", artifact_sha256: a[1] };
   return null;
@@ -113,9 +120,30 @@ export function parseRef(s: string): Ref | null {
 // pass it to tools.read({ref: ...}).
 export function formatRef(ref: Ref): string {
   switch (ref.kind) {
-    case "message":  return ` + "`msg:v1:${ref.session_key}:${ref.entry_id}`" + `;
-    case "session":  return ` + "`session:v1:${ref.session_key}`" + `;
-    case "artifact": return ` + "`artifact:v1:${ref.artifact_sha256}`" + `;
+    case "message":  return ["msg", "v1", b64urlEncodeText(ref.session_key), b64urlEncodeText(ref.entry_id)].join(":");
+    case "session":  return "session:v1:" + b64urlEncodeText(ref.session_key);
+    case "artifact": return "artifact:v1:" + ref.artifact_sha256;
+  }
+}
+
+function b64urlEncodeText(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function b64urlDecodeText(s: string): string | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(s)) return null;
+  const base64 = s.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = base64 + "===".slice((base64.length + 3) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
   }
 }
 
@@ -145,18 +173,41 @@ const readArgsUnion = `/**
  * a ` + "`session`" + ` (plus optional ` + "`entry`" + `), never both. The wire form is the
  * same in either case; the union is documented to push callers toward
  * one mode.
+ *
+ * The session form also accepts ` + "`mode`" + `: 'window' (default, file-order
+ * context around the entry), 'branch' (walk the Pi parent_id tree from the
+ * entry leaf to the root), or 'live' (branch plus compaction collapse and
+ * non-participating entries filtered). branch/live require ` + "`entry`" + ` as the
+ * leaf to walk back from.
  */
 export type ReadArgs =
   | {
       /** Canonical wire-format ref text. See parseRef/formatRef for ergonomic construction. */
       ref: string;
+      session?: never;
+      entry?: never;
+      mode?: never;
       before?: number;
       after?: number;
     }
   | {
       /** Session key. Use with optional entry to target a specific message; omit entry for the whole session. */
       session: string;
+      ref?: never;
       entry?: string;
+      /** Window mode reads file-order context around entry/session. */
+      mode?: "window";
+      before?: number;
+      after?: number;
+    }
+  | {
+      /** Session key for branch/live reconstruction. */
+      session: string;
+      ref?: never;
+      /** Required leaf entry for branch/live reconstruction. */
+      entry: string;
+      /** Branch/live walk the parent_id tree from this leaf. */
+      mode: "branch" | "live";
       before?: number;
       after?: number;
     };

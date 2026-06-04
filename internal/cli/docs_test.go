@@ -69,8 +69,8 @@ func TestReadmeDocumentsRegisteredCommandsAndPrivacy(t *testing.T) {
 			t.Fatalf("README does not document command %s", name)
 		}
 	}
-	if !strings.Contains(text, "does **not** redact secrets") {
-		t.Fatalf("README privacy warning missing")
+	if !strings.Contains(text, "Set `\"redaction\":\"v1\"`") || !strings.Contains(text, "Bundles remain raw provenance") {
+		t.Fatalf("README privacy/redaction warning missing")
 	}
 	for _, doc := range []string{"docs/commands.md", "docs/trust.md", "docs/user-journeys.md", "docs/comparisons/claude-history-explorer.md", "docs/lessons-learned.md"} {
 		if !strings.Contains(text, doc) {

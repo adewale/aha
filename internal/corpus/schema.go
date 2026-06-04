@@ -19,7 +19,7 @@ func Init(db *sql.DB) error {
 		`create table if not exists sessions(session_key text primary key check(length(session_key)=68 and substr(session_key,1,4)='sk1_' and substr(session_key,5) not glob '*[^0-9a-f]*'),source_name text not null check(source_name<>''),source_session_id text not null check(source_session_id<>''),machine_id text not null check(machine_id<>''),raw_cwd text,project_key text,started_at text,source_metadata_json text,is_subagent integer default 0,parent_session_key text references sessions(session_key))`,
 		`create table if not exists session_versions(session_key text references sessions(session_key),file_sha256 text references files(file_sha256),bundle_id text references bundles(bundle_id),relative_path text,raw_path text,observed_at text,copy_state text,unique(session_key,file_sha256,bundle_id))`,
 		`create table if not exists entries(session_key text,entry_id text,parent_id text,line_no integer,entry_type text,timestamp text,role text,entry_sha256 text,raw_json text,source_metadata_json text,primary key(session_key,entry_id),check(session_key<>'' and entry_id<>''),foreign key(session_key) references sessions(session_key))`,
-		`create table if not exists messages(session_key text,entry_id text,role text,text text,tool_name text,command text,files_json text,model text,provider text,tokens integer,cost real,primary key(session_key,entry_id),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
+		`create table if not exists messages(session_key text,entry_id text,role text,text text,tool_name text,command text,files_json text,model text,provider text,tokens integer,cache_read_tokens integer,cache_write_tokens integer,reasoning_tokens integer,cost real,compaction_first_kept_entry_id text,compaction_tokens_before integer,participates_in_context integer default 1,thinking_level text,label text,label_target_entry_id text,primary key(session_key,entry_id),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
 		`create table if not exists artifacts(artifact_id integer primary key,artifact_sha256 text check(length(artifact_sha256)=64),source_name text,machine_id text,bundle_id text not null references bundles(bundle_id),kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,text_body text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`,
 		`create table if not exists images(image_sha256 text primary key check(length(image_sha256)=64),source_name text,mime_type text,bytes integer check(bytes>=0),width integer,height integer,ext text,blob_path text)`,
 		`create table if not exists entry_assets(session_key text,entry_id text,asset_sha256 text,asset_kind text,content_index integer,prompt_order integer,raw_ref text,mime_type text,metadata_json text,primary key(session_key,entry_id,asset_sha256,content_index,prompt_order),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
@@ -116,6 +116,107 @@ var migrations = []migration{
 		}
 		return rebuildFTSArtifacts(db)
 	}},
+	{version: 8, apply: func(db *sql.DB) error {
+		for _, col := range []string{"cache_read_tokens", "cache_write_tokens", "reasoning_tokens"} {
+			exists, err := columnExists(db, "messages", col)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.Exec(`alter table messages add column ` + col + ` integer`); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}},
+	{version: 9, apply: func(db *sql.DB) error {
+		additions := []struct{ name, decl string }{
+			{"compaction_first_kept_entry_id", "alter table messages add column compaction_first_kept_entry_id text"},
+			{"compaction_tokens_before", "alter table messages add column compaction_tokens_before integer"},
+			{"participates_in_context", "alter table messages add column participates_in_context integer default 1"},
+		}
+		for _, a := range additions {
+			exists, err := columnExists(db, "messages", a.name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.Exec(a.decl); err != nil {
+					return err
+				}
+			}
+		}
+		// Existing rows backfill to 1 (true) via the column default for
+		// participates_in_context; the column defaults to NULL for the
+		// two compaction fields, which is correct (no compaction info).
+		return nil
+	}},
+	{version: 10, apply: func(db *sql.DB) error {
+		additions := []struct{ name, decl string }{
+			{"thinking_level", "alter table messages add column thinking_level text"},
+			{"label", "alter table messages add column label text"},
+			{"label_target_entry_id", "alter table messages add column label_target_entry_id text"},
+		}
+		for _, a := range additions {
+			exists, err := columnExists(db, "messages", a.name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.Exec(a.decl); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}},
+	// Migration 11: v1.1 redaction. Adds the per-session
+	// redaction_level stamp and the redactions hit-count table per
+	// docs/redaction-spec.md. Existing sessions backfill to the
+	// 'none-v1' default — they were indexed under no-redaction
+	// semantics, and the operator must explicitly run `aha reindex`
+	// to upgrade.
+	{version: 11, apply: func(db *sql.DB) error {
+		exists, err := columnExists(db, "sessions", "redaction_level")
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.Exec(`alter table sessions add column redaction_level text default 'none-v1'`); err != nil {
+				return err
+			}
+			if _, err := db.Exec(`update sessions set redaction_level='none-v1' where redaction_level is null`); err != nil {
+				return err
+			}
+		}
+		if _, err := db.Exec(`create table if not exists redactions(session_key text,entry_id text,pattern text,count integer check(count>=0),primary key(session_key,entry_id,pattern),foreign key(session_key,entry_id) references entries(session_key,entry_id))`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`create index if not exists idx_redactions_session_pattern on redactions(session_key,pattern)`); err != nil {
+			return err
+		}
+		return nil
+	}},
+	{version: 12, apply: migrateRedactionEvents},
+}
+
+func migrateRedactionEvents(db *sql.DB) error {
+	stmts := []string{
+		`create table if not exists redaction_events(redaction_id integer primary key,session_key text,subject_kind text not null,subject_id text not null,entry_id text,artifact_id integer,surface text not null,pattern text not null,count integer not null check(count>0),created_at text default current_timestamp)`,
+		`create index if not exists idx_redaction_events_pattern on redaction_events(pattern)`,
+		`create index if not exists idx_redaction_events_session on redaction_events(session_key,pattern)`,
+		`create trigger if not exists redactions_no_update before update on redactions begin select raise(abort,'redactions are append-only'); end`,
+		`create trigger if not exists redactions_no_delete before delete on redactions begin select raise(abort,'redactions are append-only'); end`,
+		`create trigger if not exists redaction_events_no_update before update on redaction_events begin select raise(abort,'redaction_events are append-only'); end`,
+		`create trigger if not exists redaction_events_no_delete before delete on redaction_events begin select raise(abort,'redaction_events are append-only'); end`,
+	}
+	for _, st := range stmts {
+		if _, err := db.Exec(st); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migratePathTokens(db *sql.DB) error {

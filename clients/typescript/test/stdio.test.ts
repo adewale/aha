@@ -169,10 +169,12 @@ test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
 
 test("parseRef + formatRef round-trip every canonical shape", () => {
   const cases: Ref[] = [
-    { kind: "message", session_key: "sk1_abc", entry_id: "p1" },
+    { kind: "message", session_key: "sk1_abc", entry_id: "entry:with/slash" },
     { kind: "session", session_key: "sk1_abc" },
     { kind: "artifact", artifact_sha256: "a".repeat(64) },
   ];
+  assert.equal(formatRef(cases[0]), "msg:v1:c2sxX2FiYw:ZW50cnk6d2l0aC9zbGFzaA");
+  assert.equal(formatRef(cases[1]), "session:v1:c2sxX2FiYw");
   for (const ref of cases) {
     const wire = formatRef(ref);
     const parsed = parseRef(wire);
@@ -181,7 +183,7 @@ test("parseRef + formatRef round-trip every canonical shape", () => {
 });
 
 test("parseRef returns null for malformed input", () => {
-  for (const bad of ["", "msg:abc", "session:v2:sk", "artifact:v1:not-a-sha", "garbage"]) {
+  for (const bad of ["", "msg:abc", "msg:v1:sk1_abc:p1", "session:v1:sk1_abc", "session:v2:sk", "artifact:v1:not-a-sha", "garbage"]) {
     assert.equal(parseRef(bad), null, `expected null for ${JSON.stringify(bad)}`);
   }
 });

@@ -1,0 +1,106 @@
+{
+  "source": "https://huggingface.co/datasets/exampleusergames/pi-mono",
+  "doc": "Diverse sample vendored 2026-06 for adapter fidelity testing. Selection is size-bucketed (4 each from tiny/small/medium/large/xlarge). Sessions are best-effort redacted by pi-share-hf — see docs/research/pi-observability.md for the pipeline. Do not re-vendor without updating MANIFEST.json.",
+  "files": [
+    {
+      "path": "2026-01-24T01-23-25-331Z_54984de5-a670-4a48-8af0-07e808fa1b9d.jsonl",
+      "size": 2315,
+      "oid": "6a74453faeff357cda83a92629e3f0be8bf02e93"
+    },
+    {
+      "path": "2026-03-07T13-24-39-979Z_9fb0998b-dff2-41cf-ae45-69b05785367a.jsonl",
+      "size": 1154,
+      "oid": "42389183249410a65a7988771447a9afd408b03d"
+    },
+    {
+      "path": "2026-03-13T19-33-24-328Z_be5d8844-6169-4ee6-a3b5-ca54a045b712.jsonl",
+      "size": 1080,
+      "oid": "4651bc5750a6b727fd10a403ea596ee957dbcdb7"
+    },
+    {
+      "path": "2026-02-19T15-47-12-339Z_eaef1892-ef60-4e1e-aee1-1749b6e45ebb.jsonl",
+      "size": 2368,
+      "oid": "4cfdbd7cf87d4a6e42f1221f37afbbc7f113b9b4"
+    },
+    {
+      "path": "2026-02-06T17-27-04-316Z_652fc244-c105-48c4-bbe6-7f46dde4c64c.jsonl",
+      "size": 7568,
+      "oid": "5cf74a41cc886cb32661d5f6eb87a3da0eaa1a05"
+    },
+    {
+      "path": "2026-03-13T18-03-19-120Z_8b09bd93-a425-429a-903d-75fe1dbac70c.jsonl",
+      "size": 7055,
+      "oid": "2322579780ef90b3ec0d65b20841f3ef52745dd8"
+    },
+    {
+      "path": "2026-03-31T10-10-41-224Z_5b7fa617-373a-47d9-bab5-dc1f196c86b8.jsonl",
+      "size": 6772,
+      "oid": "5e321c84aba07f63bf00af04e6b8a66d638c8a90"
+    },
+    {
+      "path": "2026-02-03T21-48-00-285Z_4fefdaa5-9b91-453d-9068-5e353e962767.jsonl",
+      "size": 5793,
+      "oid": "bafb94515c426bf0b868b4d091acd319d6ed2fe0"
+    },
+    {
+      "path": "2026-03-22T00-39-30-932Z_561b2036-91dd-48be-b7ce-cd607432e7ec.jsonl",
+      "size": 63307,
+      "oid": "19631c801de961fd5f3dbf940cd4d3b533fb5aad"
+    },
+    {
+      "path": "2026-02-24T23-21-29-733Z_3515c2b0-65d4-440b-9664-c997c8080154.jsonl",
+      "size": 18173,
+      "oid": "63e07db7d0226a9f800aec424a2279924db4a8f1"
+    },
+    {
+      "path": "2026-01-31T23-23-26-265Z_b67c9e64-752f-490a-8e31-ca29e9b2daf2.jsonl",
+      "size": 57703,
+      "oid": "6c749c0655351ea216d5622998d0214b74dd0277"
+    },
+    {
+      "path": "2026-03-14T02-53-28-358Z_fe0eed73-476c-44d4-8230-68619a01e439.jsonl",
+      "size": 73673,
+      "oid": "69949b7c550e29e0e7ee187fd084382ddc84007b"
+    },
+    {
+      "path": "2026-01-31T21-57-51-352Z_76ff8366-4eb0-4e10-8a6c-4451a19d4c09.jsonl",
+      "size": 256804,
+      "oid": "7921d966d53bc23c060dd49d9498f7545175ffd4"
+    },
+    {
+      "path": "2026-02-03T15-52-16-235Z_24cd802c-d6a6-47d1-948e-fbd21bf057a1.jsonl",
+      "size": 106339,
+      "oid": "79ad340d112b2e3451d68f5033ca306353280d4e"
+    },
+    {
+      "path": "2026-01-17T12-23-49-439Z_0be79071-cc59-4ff2-96c6-51a1d7238c35.jsonl",
+      "size": 280146,
+      "oid": "f2c81b35e689cf4762ce77e5491f9f0412d56923"
+    },
+    {
+      "path": "2026-01-16T23-26-15-892Z_79258f4c-347d-446e-bd6b-d98a48c5697d.jsonl",
+      "size": 223732,
+      "oid": "06ac071afadbcb21fb362efd816796c8e9d99d88"
+    },
+    {
+      "path": "2026-02-05T20-37-22-204Z_bb592fc9-de86-428d-a979-583ef9bc35e3.jsonl",
+      "size": 420223,
+      "oid": "f89c9134454b1337ebcbd4b5e08c76744d703f72"
+    },
+    {
+      "path": "2026-03-03T16-33-09-460Z_d7691f2e-fc26-436e-930c-a0c1ae3a4d9b.jsonl",
+      "size": 418373,
+      "oid": "4bbbf4167df151c9c4adc9e021d9d4d25c5ef110"
+    },
+    {
+      "path": "2026-01-31T22-10-19-453Z_90748a5d-9cf8-409c-b858-61e5b6acba20.jsonl",
+      "size": 480988,
+      "oid": "5a31ded8e775cf77b2b4efc726ad92db6ae3e80d"
+    },
+    {
+      "path": "2026-03-18T00-11-58-442Z_d65a417b-0057-405d-bc0f-591a1b5a6ed7.jsonl",
+      "size": 638729,
+      "oid": "9b25c8302cd3f013fd087e488e6d8615b2b5cb2c"
+    }
+  ]
+}

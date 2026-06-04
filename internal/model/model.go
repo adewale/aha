@@ -4,17 +4,26 @@ const Version = "0.1.0"
 const BundleSchema = "agent-session-snapshot-bundle/v2"
 
 type Config struct {
-	MachineID            string         `json:"machine_id"`
-	MachineLabel         string         `json:"machine_label,omitempty"`
-	Sources              []SourceConfig `json:"sources"`
-	CorpusDir            string         `json:"corpus_dir"`
-	Depot                DepotConfig    `json:"depot"`
-	PathMode             string         `json:"path_mode"`
-	IncludeSubagents     bool           `json:"include_subagents"`
-	IncludeImages        bool           `json:"include_images"`
-	IndexToolOutput      bool           `json:"index_tool_output"`
-	Redaction            string         `json:"redaction"`
-	AcceptSecretsWarning bool           `json:"accept_secrets_warning"`
+	MachineID              string                  `json:"machine_id"`
+	MachineLabel           string                  `json:"machine_label,omitempty"`
+	Sources                []SourceConfig          `json:"sources"`
+	CorpusDir              string                  `json:"corpus_dir"`
+	Depot                  DepotConfig             `json:"depot"`
+	PathMode               string                  `json:"path_mode"`
+	IncludeSubagents       bool                    `json:"include_subagents"`
+	IncludeImages          bool                    `json:"include_images"`
+	IndexToolOutput        bool                    `json:"index_tool_output"`
+	Redaction              string                  `json:"redaction"`
+	RedactionExtraPatterns []RedactionExtraPattern `json:"redaction_extra_patterns,omitempty"`
+	AcceptSecretsWarning   bool                    `json:"accept_secrets_warning"`
+}
+
+// RedactionExtraPattern is a user-supplied regex added to the
+// built-in pattern list per docs/redaction-spec.md. Validation
+// happens in the redact package at Redactor construction.
+type RedactionExtraPattern struct {
+	Name  string `json:"name"`
+	Regex string `json:"regex"`
 }
 
 type SourceConfig struct {
@@ -78,23 +87,32 @@ type ParsedSession struct {
 }
 
 type ParsedEntry struct {
-	EntryID   string
-	ParentID  string
-	LineNo    int
-	EntryType string
-	Timestamp string
-	Role      string
-	RawJSON   string
-	Text      string
-	ToolName  string
-	Command   string
-	FilesJSON string
-	Model     string
-	Provider  string
-	Tokens    int64
-	Cost      float64
-	Assets    []ParsedAsset
-	Metadata  map[string]any
+	EntryID                    string
+	ParentID                   string
+	LineNo                     int
+	EntryType                  string
+	Timestamp                  string
+	Role                       string
+	RawJSON                    string
+	Text                       string
+	ToolName                   string
+	Command                    string
+	FilesJSON                  string
+	Model                      string
+	Provider                   string
+	Tokens                     int64
+	CacheReadTokens            int64
+	CacheWriteTokens           int64
+	ReasoningTokens            int64
+	Cost                       float64
+	CompactionFirstKeptEntryID string
+	CompactionTokensBefore     int64
+	ParticipatesInContext      bool
+	ThinkingLevel              string
+	Label                      string
+	LabelTargetEntryID         string
+	Assets                     []ParsedAsset
+	Metadata                   map[string]any
 }
 
 type ParsedAsset struct {

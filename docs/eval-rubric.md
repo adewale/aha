@@ -7,7 +7,7 @@ Use this rubric to confirm `aha` is still on track as an agent-history aggregato
 | Area | What to evaluate | Score guide |
 |---|---|---|
 | First-run journey | A new user can run `init --accept-secrets`, `refresh`, `search`, then `read` without understanding internals. | 0 broken; 1 works with hidden caveats; 2 documented and tested. |
-| Privacy honesty | Docs and CLI accurately state that v1 preserves raw private data and does not redact secrets. | 0 misleading; 1 caveats buried; 2 explicit and verified. |
+| Privacy honesty | Docs and CLI accurately state that bundles stay raw, default `none-v1` does not redact, and `redaction:"v1"` redacts corpus projections. | 0 misleading; 1 caveats buried; 2 explicit and verified. |
 | Immutable provenance | Snapshot/ingest identity and raw data come from bundled bytes, not mutable live paths. | 0 mutable; 1 mixed; 2 regression-tested. |
 | Deterministic snapshots | Same inputs/pinned metadata produce identical bundles. | 0 not deterministic; 1 mostly; 2 tested. |
 | Safe local IO | Read-only source adapters; no network imports; symlink/output path escapes blocked. | 0 unsafe; 1 partial; 2 tested. |

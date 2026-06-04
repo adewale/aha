@@ -98,5 +98,104 @@ func (Pi) ParseSession(ctx context.Context, file model.SessionFile, r io.Reader)
 		}
 		ps.Entries = ps.Entries[1:]
 	}
+	projectPiNativeShapes(ps)
 	return ps, nil
+}
+
+// projectPiNativeShapes fills typed projection columns from Pi's own
+// content-block and usage conventions, which differ from the
+// Anthropic-shaped schema the generic parser understands:
+//
+//   - content blocks use type "toolCall" (name + arguments) rather than
+//     "tool_use" (name + input), and "thinking" rather than reasoning
+//     embedded in text;
+//   - message.usage uses camelCase keys (input/output/cacheRead/
+//     cacheWrite/totalTokens) and a nested cost object.
+//
+// Without this pass, Pi tool calls project no tool_name/command and Pi
+// assistant turns project zero tokens. The data survives in raw_json;
+// this makes it queryable. No-op for entries already populated by the
+// generic parser (Anthropic-shaped Pi entries, if any).
+func projectPiNativeShapes(ps *model.ParsedSession) {
+	for i := range ps.Entries {
+		e := &ps.Entries[i]
+		var m map[string]any
+		if err := json.Unmarshal([]byte(e.RawJSON), &m); err != nil {
+			continue
+		}
+		if img, ok := m["image"].(map[string]any); ok {
+			block := map[string]any{"type": "image"}
+			for k, v := range img {
+				block[k] = v
+			}
+			e.Assets = append(e.Assets, parseImageAsset(block, len(e.Assets), len(e.Assets)))
+		}
+		msg, _ := m["message"].(map[string]any)
+		if msg == nil {
+			continue
+		}
+		if content, ok := msg["content"].([]any); ok {
+			projectPiContentBlocks(e, content)
+		}
+		if usage, ok := msg["usage"].(map[string]any); ok {
+			projectPiUsage(e, usage)
+		}
+	}
+}
+
+func projectPiContentBlocks(e *model.ParsedEntry, content []any) {
+	var thinking []string
+	for _, raw := range content {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch stringField(block, "type") {
+		case "toolCall":
+			if e.ToolName == "" {
+				e.ToolName = stringField(block, "name")
+			}
+			if args, ok := block["arguments"].(map[string]any); ok {
+				if e.FilesJSON == "" {
+					if b, err := json.Marshal(args); err == nil {
+						e.FilesJSON = string(b)
+					}
+				}
+				if e.Command == "" {
+					e.Command = stringField(args, "command")
+				}
+			}
+		case "thinking":
+			if t := stringField(block, "thinking"); t != "" {
+				thinking = append(thinking, t)
+			}
+		}
+	}
+	if len(thinking) > 0 {
+		joined := strings.Join(thinking, "\n")
+		if e.Text == "" {
+			e.Text = joined
+		} else {
+			e.Text = joined + "\n" + e.Text
+		}
+	}
+}
+
+func projectPiUsage(e *model.ParsedEntry, usage map[string]any) {
+	total := int64(numField(usage, "totalTokens"))
+	if total == 0 {
+		total = int64(numField(usage, "input") + numField(usage, "output") + numField(usage, "cacheRead") + numField(usage, "cacheWrite"))
+	}
+	if total > 0 && e.Tokens == 0 {
+		e.Tokens = total
+	}
+	if cr := int64(numField(usage, "cacheRead")); cr > 0 && e.CacheReadTokens == 0 {
+		e.CacheReadTokens = cr
+	}
+	if cw := int64(numField(usage, "cacheWrite")); cw > 0 && e.CacheWriteTokens == 0 {
+		e.CacheWriteTokens = cw
+	}
+	if cost, ok := usage["cost"].(map[string]any); ok && e.Cost == 0 {
+		e.Cost = numField(cost, "total")
+	}
 }

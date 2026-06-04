@@ -82,6 +82,45 @@ func TestParsePiNestedMessageRole(t *testing.T) {
 	}
 }
 
+// TestParseExtractsToolResultContent pins priority 6 from
+// docs/research/cross-agent-data-capture.md: tool_result content
+// blocks (both string and array forms) reach pe.Text so the
+// index_tool_output config flag has something to index. Until this
+// change parser.extractContent's tool_result case was a deliberate
+// no-op even though the gated index path existed.
+func TestParseExtractsToolResultContent(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "tool_result content as string",
+			input: `{"type":"user","id":"r1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_001","content":"stdout: file written"}]}}`,
+			want:  "stdout: file written",
+		},
+		{
+			name:  "tool_result content as nested text block",
+			input: `{"type":"user","id":"r2","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_002","content":[{"type":"text","text":"nested block stdout"}]}]}}`,
+			want:  "nested block stdout",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ps, err := parseGenericJSONL("claude-code", model.SessionFile{Source: "claude-code", SessionID: "s"}, strings.NewReader(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ps.Entries) != 1 {
+				t.Fatalf("entries=%d", len(ps.Entries))
+			}
+			if !strings.Contains(ps.Entries[0].Text, tc.want) {
+				t.Fatalf("Text=%q, want it to contain %q", ps.Entries[0].Text, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseImageDimensions(t *testing.T) {
 	input := `{"type":"user","message":{"content":[{"type":"image","source":{"media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mP8z8AABQMBgAAn5B6iAAAAAElFTkSuQmCC"}}]}}`
 	ps, err := parseGenericJSONL("claude-code", model.SessionFile{Source: "claude-code", SessionID: "s"}, strings.NewReader(input))

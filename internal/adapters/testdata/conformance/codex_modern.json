@@ -10,11 +10,16 @@
   "want": {
     "source": "codex",
     "source_session_id": "codex-modern-id",
-    "cwd": "/Users/me/proj",
+    "cwd": "/Users/example/proj",
     "started_at": "2026-06-04T00:00:00Z",
     "entries": 7,
     "contains_text": "codex modern needle",
-    "roles_by_index": {"2": "user", "3": "assistant"},
-    "model_by_index": {"3": "gpt-5-codex"}
+    "roles_by_index": {
+      "2": "user",
+      "3": "assistant"
+    },
+    "model_by_index": {
+      "3": "gpt-5-codex"
+    }
   }
 }

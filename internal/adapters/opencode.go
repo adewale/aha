@@ -222,17 +222,18 @@ func parseOpenCode(ctx context.Context, file model.SessionFile, r io.Reader) (*m
 func openCodeMessageEntry(m, row map[string]any, lineNo int, raw string) model.ParsedEntry {
 	data := openCodeData(row)
 	pe := model.ParsedEntry{
-		EntryID:   firstNonEmpty(stringField(m, "id"), stringField(row, "id")),
-		LineNo:    lineNo,
-		EntryType: "message",
-		Role:      firstNonEmpty(stringField(data, "role"), stringField(row, "role")),
-		Timestamp: openCodeTime(data),
-		RawJSON:   raw,
-		Model:     firstNonEmpty(stringField(data, "modelID"), stringField(data, "model")),
-		Provider:  stringField(data, "providerID"),
-		Cost:      numField(data, "cost"),
-		Tokens:    openCodeTokens(data),
-		Metadata:  map[string]any{},
+		EntryID:               firstNonEmpty(stringField(m, "id"), stringField(row, "id")),
+		LineNo:                lineNo,
+		EntryType:             "message",
+		Role:                  firstNonEmpty(stringField(data, "role"), stringField(row, "role")),
+		Timestamp:             openCodeTime(data),
+		RawJSON:               raw,
+		Model:                 firstNonEmpty(stringField(data, "modelID"), stringField(data, "model")),
+		Provider:              stringField(data, "providerID"),
+		Cost:                  numField(data, "cost"),
+		Tokens:                openCodeTokens(data),
+		ParticipatesInContext: true,
+		Metadata:              map[string]any{},
 	}
 	parts, _ := m["parts"].([]any)
 	pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = openCodeParts(parts)

@@ -64,15 +64,22 @@ How this is enforced:
 - R2 credentials must not appear in catalog shards, command JSON, config, or logs;
 - downloaded depot bundles are still validated by bundle SHA, manifest file list, entry sizes, and per-file SHA before ingest.
 
-## Guarantee 5: no v1 redaction
+## Guarantee 5: projection redaction is explicit and observable
 
-This is a warning, not a guarantee: v1 deliberately does **not** redact secrets. It preserves raw files so prompts can be reconstructed and future parsers can re-normalize data.
+By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `entries.raw_json`, artifact text, or FTS. Raw bundles remain unredacted provenance.
+
+How this is enforced:
+
+- CLI `ingest` and `refresh` both construct their ingestor from config, including extra redaction patterns;
+- sessions are stamped with `sessions.redaction_level` only when first inserted, so existing raw projections are not silently mislabeled;
+- per-entry counts are append-only in `redactions`; session/artifact redaction events are recorded in `redaction_events`;
+- `aha status --json`, `aha verify --json`, and `aha doctor --json` surface redaction counts/levels.
 
 Implication:
 
-- do not publish bundles or corpora;
-- do not upload them to issue trackers;
-- review before sharing logs or command output.
+- do not publish raw bundles;
+- check `redaction_levels` before assuming a corpus is redacted;
+- review command output before sharing logs or issue attachments.
 
 ## What `aha` writes
 
