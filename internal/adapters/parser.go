@@ -139,7 +139,12 @@ func extractContent(m map[string]any) (text, tool, command, files string, assets
 				assets = append(assets, parseImageAsset(x, idx, order))
 				order++
 			case "tool_result":
-				// Preserved raw, not indexed in v1.
+				// Extract content so the index_tool_output config flag has
+				// something to index when enabled; ingest's shouldIndexText
+				// gates whether the text actually lands in messages.text.
+				if inner, ok := x["content"]; ok {
+					walkContent(inner, idx)
+				}
 			default:
 				if s := stringField(x, "text"); s != "" {
 					parts = append(parts, s)
