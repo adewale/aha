@@ -99,6 +99,9 @@ type ParsedEntry struct {
 	CompactionFirstKeptEntryID string
 	CompactionTokensBefore     int64
 	ParticipatesInContext      bool
+	ThinkingLevel              string
+	Label                      string
+	LabelTargetEntryID         string
 	Assets                     []ParsedAsset
 	Metadata                   map[string]any
 }

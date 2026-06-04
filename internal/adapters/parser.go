@@ -61,9 +61,22 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 			role = typ
 		}
 		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), ParticipatesInContext: typ != "custom", Metadata: map[string]any{}}
-		if typ == "compaction" {
+		switch typ {
+		case "compaction":
 			pe.CompactionFirstKeptEntryID = stringField(m, "firstKeptEntryId")
 			pe.CompactionTokensBefore = int64(numField(m, "tokensBefore"))
+		case "model_change":
+			if pe.Model == "" {
+				pe.Model = stringField(m, "modelId")
+			}
+			if pe.Provider == "" {
+				pe.Provider = stringField(m, "provider")
+			}
+		case "thinking_level_change":
+			pe.ThinkingLevel = stringField(m, "thinkingLevel")
+		case "label":
+			pe.Label = stringField(m, "label")
+			pe.LabelTargetEntryID = stringField(m, "targetId")
 		}
 		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(m)
 		if pe.ToolName == "" {
