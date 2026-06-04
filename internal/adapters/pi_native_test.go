@@ -60,6 +60,45 @@ func TestPiNativeProjectionSynthetic(t *testing.T) {
 	}
 }
 
+// TestPiUsageSumsWhenTotalAbsent pins the projectPiUsage fallback: when
+// Pi omits the precomputed totalTokens, tokens is the sum of
+// input+output+cacheRead+cacheWrite. Targets the arithmetic and
+// boundary mutants at pi.go:180-182.
+func TestPiUsageSumsWhenTotalAbsent(t *testing.T) {
+	input := strings.Join([]string{
+		`{"type":"session","version":3,"id":"pi-sum","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"a1","parentId":"","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input":3,"output":11,"cacheRead":100,"cacheWrite":1000}}}`,
+	}, "\n")
+	ps, err := Pi{}.ParseSession(t.Context(), model.SessionFile{Source: "pi", SessionID: "fallback"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := ps.Entries[0]
+	if e.Tokens != 3+11+100+1000 {
+		t.Fatalf("summed tokens=%d want %d", e.Tokens, 3+11+100+1000)
+	}
+	if e.CacheReadTokens != 100 || e.CacheWriteTokens != 1000 {
+		t.Fatalf("cache splits read=%d write=%d want 100/1000", e.CacheReadTokens, e.CacheWriteTokens)
+	}
+}
+
+// TestPiUsageZeroDoesNotProject pins that an all-zero usage block leaves
+// tokens at 0 rather than writing a spurious 0 row of work. Targets the
+// `total > 0` boundary guard at pi.go:182.
+func TestPiUsageZeroDoesNotProject(t *testing.T) {
+	input := strings.Join([]string{
+		`{"type":"session","version":3,"id":"pi-zero","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"a1","parentId":"","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}}`,
+	}, "\n")
+	ps, err := Pi{}.ParseSession(t.Context(), model.SessionFile{Source: "pi", SessionID: "fallback"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps.Entries[0].Tokens != 0 {
+		t.Fatalf("tokens=%d want 0 for all-zero usage", ps.Entries[0].Tokens)
+	}
+}
+
 // TestPiNativeProjectionRealCorpus asserts the camelCase-token gap is
 // closed for real pi-mono sessions: at least one assistant entry must
 // carry a populated tool call and non-zero tokens (before this layer,

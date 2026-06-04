@@ -21,6 +21,8 @@ func TestCodexNativeProjectionSynthetic(t *testing.T) {
 		`{"type":"turn_context","timestamp":"2026-03-27T14:21:44Z","payload":{"model":"gpt-5.4","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}`,
 		`{"type":"response_item","timestamp":"2026-03-27T14:21:45Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the assistant answer"}]}}`,
 		`{"type":"response_item","timestamp":"2026-03-27T14:21:46Z","payload":{"type":"function_call","name":"shell","call_id":"call_1","arguments":"{\"command\":\"ls -la\"}"}}`,
+		`{"type":"response_item","timestamp":"2026-03-27T14:21:46Z","payload":{"type":"function_call_output","call_id":"call_1","output":"total 0\ndrwxr-xr-x"}}`,
+		`{"type":"response_item","timestamp":"2026-03-27T14:21:47Z","payload":{"type":"web_search_call","status":"completed","action":{"type":"search","query":"how to parse codex rollouts"}}}`,
 		`{"type":"event_msg","timestamp":"2026-03-27T14:21:47Z","payload":{"type":"agent_message","message":"final agent message"}}`,
 		`{"type":"event_msg","timestamp":"2026-03-27T14:21:48Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":40,"cached_input_tokens":60,"reasoning_output_tokens":25,"total_tokens":225}}}}`,
 	}, "\n")
@@ -59,6 +61,18 @@ func TestCodexNativeProjectionSynthetic(t *testing.T) {
 		t.Fatalf("function_call command=%q want 'ls -la'", fc.Command)
 	}
 
+	// function_call_output → toolResult role + text
+	fco := findEntry(t, ps.Entries, func(e model.ParsedEntry) bool { return strings.Contains(e.Text, "total 0") })
+	if fco.Role != "toolResult" {
+		t.Fatalf("function_call_output role=%q want toolResult", fco.Role)
+	}
+
+	// web_search_call → tool_name=web_search + command=query
+	ws := findEntry(t, ps.Entries, func(e model.ParsedEntry) bool { return e.ToolName == "web_search" })
+	if ws.Command != "how to parse codex rollouts" {
+		t.Fatalf("web_search_call command=%q want the query", ws.Command)
+	}
+
 	// agent_message → text
 	findEntry(t, ps.Entries, func(e model.ParsedEntry) bool { return strings.Contains(e.Text, "final agent message") })
 
@@ -77,6 +91,20 @@ func TestCodexNativeProjectionSynthetic(t *testing.T) {
 	// provider from session_meta carries forward to the assistant entry.
 	if am.Provider != "openai" {
 		t.Fatalf("assistant provider=%q want openai (session_meta propagation)", am.Provider)
+	}
+}
+
+// TestCodexTokenCountSumsWhenTotalAbsent pins applyCodexTokenCount's
+// fallback: when total_tokens is absent, tokens = input+output. Targets
+// the arithmetic and boundary mutants at codex.go:215-219.
+func TestCodexTokenCountSumsWhenTotalAbsent(t *testing.T) {
+	input := `{"type":"event_msg","timestamp":"2026-03-27T14:21:48Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"output_tokens":12}}}}`
+	ps, err := CodexCLI{}.ParseSession(t.Context(), model.SessionFile{Source: "codex", SessionID: "s"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps.Entries[0].Tokens != 42 {
+		t.Fatalf("summed tokens=%d want 42 (30+12)", ps.Entries[0].Tokens)
 	}
 }
 
