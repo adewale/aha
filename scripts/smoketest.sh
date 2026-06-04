@@ -72,6 +72,18 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL+1)); }
 note() { printf '  ---- %s\n' "$1"; }
 
+# json_num FILE KEY -> first numeric value for that top-level key (jq if present,
+# else a space-tolerant grep). Prints 0 when absent.
+json_num() {
+  local out
+  if command -v jq >/dev/null 2>&1; then
+    out="$(jq -r "(.$2 // 0)" "$1" 2>/dev/null)"
+  else
+    out="$(grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[0-9]+" "$1" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  fi
+  printf '%s' "${out:-0}"
+}
+
 # ---- resolve the source root ----------------------------------------------
 
 default_root() {
@@ -210,6 +222,12 @@ aha_repo status --json > "$LOGS/status.json" 2>"$LOGS/status.err" \
   && ok "status exited cleanly" || bad "status failed (see $LOGS/status.err)"
 aha_repo verify --json > "$LOGS/verify.json" 2>"$LOGS/verify.err" \
   && ok "verify exited cleanly" || bad "verify failed (see $LOGS/verify.err)"
+# Ingestion depth: distinguishes "adapter parsed nothing" from "indexed fine".
+NSESS="$(json_num "$LOGS/status.json" sessions)"
+NMSG="$(json_num "$LOGS/status.json" messages)"
+NENT="$(json_num "$LOGS/status.json" entries)"
+NFTS="$(json_num "$LOGS/status.json" fts_messages)"
+note "ingested: $NSESS sessions, $NENT entries, $NMSG messages, $NFTS searchable (FTS) rows"
 echo
 
 # ---- retrieval: search -> read --------------------------------------------
@@ -229,8 +247,12 @@ if [ -n "$REF" ]; then
   fi
 elif [ "$SESS_COUNT" -eq 0 ]; then
   note "no sessions discovered — skipping retrieval (not a failure)"
+elif [ "${NMSG:-0}" -eq 0 ]; then
+  bad "discovered $SESS_COUNT session file(s) but ingested 0 messages — the adapter parsed no messages from this source's real format (inspect $LOGS/refresh.json and a raw session file)"
+elif [ "${NFTS:-0}" -eq 0 ]; then
+  bad "ingested $NMSG messages but indexed 0 searchable rows — message text is not being extracted for this source's real format"
 else
-  note "search returned no hits across common tokens — retrieval inconclusive"
+  note "search matched no common tokens, but $NFTS messages are indexed — retrieval inconclusive (the corpus may simply not contain those words)"
 fi
 echo
 
