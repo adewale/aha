@@ -60,7 +60,11 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 		if role == "" {
 			role = typ
 		}
-		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), Metadata: map[string]any{}}
+		pe := model.ParsedEntry{EntryID: entryID, ParentID: firstNonEmpty(stringField(m, "parentId"), stringField(m, "parent_id"), stringField(m, "parentUuid")), LineNo: lineNo, EntryType: typ, Timestamp: stringField(m, "timestamp"), Role: role, RawJSON: raw, Model: nestedString(m, "message", "model"), ParticipatesInContext: typ != "custom", Metadata: map[string]any{}}
+		if typ == "compaction" {
+			pe.CompactionFirstKeptEntryID = stringField(m, "firstKeptEntryId")
+			pe.CompactionTokensBefore = int64(numField(m, "tokensBefore"))
+		}
 		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(m)
 		if pe.ToolName == "" {
 			pe.ToolName = firstNonEmpty(stringField(m, "toolName"), nestedString(m, "message", "toolName"))
@@ -74,7 +78,7 @@ func parseGenericJSONL(source string, file model.SessionFile, r io.Reader) (*mod
 			pe.CacheWriteTokens = int64(numField(usage, "cache_creation_input_tokens"))
 			pe.ReasoningTokens = int64(numField(usage, "reasoning_output_tokens") + numField(usage, "reasoning_tokens"))
 		}
-		if pe.Text == "" && (role == "branchSummary" || role == "compactionSummary" || typ == "summary") {
+		if pe.Text == "" && (role == "branchSummary" || role == "compactionSummary" || typ == "summary" || typ == "compaction" || typ == "branch_summary") {
 			pe.Text = firstNonEmpty(stringField(m, "summary"), stringField(m, "text"))
 		}
 		ps.Entries = append(ps.Entries, pe)

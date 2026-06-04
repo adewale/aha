@@ -136,7 +136,7 @@ func (w *corpusWriter) PrepareStatements() error {
 		{&w.stmts.insertSessionVersion, `insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`},
 		{&w.stmts.insertSessionPathToken, `insert or ignore into session_path_tokens(session_key,token) values(?,?)`},
 		{&w.stmts.insertEntry, `insert or ignore into entries(session_key,entry_id,parent_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json,source_metadata_json) values(?,?,?,?,?,?,?,?,?,?)`},
-		{&w.stmts.insertMessage, `insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertMessage, `insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost,compaction_first_kept_entry_id,compaction_tokens_before,participates_in_context) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertConflict, `insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`},
 		{&w.stmts.insertArtifact, `insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertArtifactPathToken, `insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`},
@@ -593,7 +593,19 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 		existing[pe.EntryID] = eh
 	}
 	if shouldPersistMessage(pe, w.manifest.Policy.IndexToolOutput) {
-		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.CacheReadTokens, pe.CacheWriteTokens, pe.ReasoningTokens, pe.Cost)
+		participates := 1
+		if !pe.ParticipatesInContext {
+			participates = 0
+		}
+		var compactionFirstKept any
+		if pe.CompactionFirstKeptEntryID != "" {
+			compactionFirstKept = pe.CompactionFirstKeptEntryID
+		}
+		var compactionTokensBefore any
+		if pe.CompactionTokensBefore > 0 {
+			compactionTokensBefore = pe.CompactionTokensBefore
+		}
+		res, err := w.stmts.insertMessage.Exec(sessionKey, pe.EntryID, pe.Role, pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Model, pe.Provider, pe.Tokens, pe.CacheReadTokens, pe.CacheWriteTokens, pe.ReasoningTokens, pe.Cost, compactionFirstKept, compactionTokensBefore, participates)
 		if err != nil {
 			return entryReport{}, err
 		}
@@ -646,7 +658,7 @@ func shouldIndexText(pe model.ParsedEntry, indexToolOutput bool) bool {
 		return false
 	}
 	switch pe.Role {
-	case "user", "assistant", "branchSummary", "compactionSummary", "summary":
+	case "user", "assistant", "branchSummary", "compactionSummary", "summary", "compaction", "branch_summary":
 		return true
 	case "toolResult", "bashExecution":
 		return indexToolOutput

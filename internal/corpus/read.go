@@ -81,6 +81,94 @@ func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEn
 	return ReadCanonical(db, ref, before, after)
 }
 
+// LiveContext returns the entries on the leaf→root path that the LLM
+// actually saw at the leaf, applying two Pi-specific reconstructions
+// (priority 3 in cross-agent-data-capture.md):
+//
+//  1. Compaction collapse. When a `compaction` entry is on the path it
+//     carries firstKeptEntryId pointing at an ancestor that was
+//     preserved across the compaction. Entries strictly older than
+//     that anchor (i.e. ancestors of firstKeptEntryId in the walk) are
+//     omitted — the compaction summary stands in for them.
+//  2. participates_in_context. Entries with participates_in_context=0
+//     (Pi `custom` extension state) are filtered out.
+//
+// For sources without compaction or custom-extension semantics this is
+// equivalent to ReadBranch.
+func LiveContext(db *sql.DB, sessionKeyOrID, leafEntryID string) ([]ReadEntry, error) {
+	sessionKey, err := resolveSession(db, sessionKeyOrID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`select e.line_no, e.entry_id, e.parent_id, e.entry_type, e.timestamp, e.role, coalesce(m.text, ''), e.raw_json, coalesce(m.compaction_first_kept_entry_id, ''), coalesce(m.participates_in_context, case when e.entry_type='custom' then 0 else 1 end) from entries e left join messages m on m.session_key=e.session_key and m.entry_id=e.entry_id where e.session_key=?`, sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type record struct {
+		entry         ReadEntry
+		parentID      string
+		entryType     string
+		compactionRef string
+		participates  bool
+	}
+	byID := map[string]record{}
+	for rows.Next() {
+		var r record
+		var participates int
+		if err := rows.Scan(&r.entry.LineNo, &r.entry.EntryID, &r.parentID, &r.entryType, &r.entry.Timestamp, &r.entry.Role, &r.entry.Text, &r.entry.RawJSON, &r.compactionRef, &participates); err != nil {
+			return nil, err
+		}
+		r.participates = participates != 0
+		byID[r.entry.EntryID] = r
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, ok := byID[leafEntryID]; !ok {
+		return nil, NotFoundError{Kind: "entry", Value: leafEntryID}
+	}
+	// Walk leaf → root. When a compaction is reached, take note of its
+	// firstKeptEntryId, continue walking until we visit that anchor,
+	// then stop. Pi's buildSessionContext emits the compaction summary
+	// *before* the kept entries (it represents older history) — so
+	// keep compaction nodes in a separate slot that prepends to the
+	// final root → leaf order.
+	stopAfter := ""
+	var nonCompaction []ReadEntry // leaf → root order
+	var compactions []ReadEntry   // most-recent first (walk order)
+	seen := map[string]struct{}{}
+	cur := leafEntryID
+	for cur != "" {
+		if _, dup := seen[cur]; dup {
+			return nil, fmt.Errorf("parent_id cycle at %q in session %q", cur, sessionKey)
+		}
+		seen[cur] = struct{}{}
+		r, ok := byID[cur]
+		if !ok {
+			return nil, fmt.Errorf("dangling parent_id %q in session %q", cur, sessionKey)
+		}
+		if r.participates {
+			if r.entryType == "compaction" {
+				compactions = append(compactions, r.entry)
+			} else {
+				nonCompaction = append(nonCompaction, r.entry)
+			}
+		}
+		if r.entryType == "compaction" && r.compactionRef != "" && stopAfter == "" {
+			stopAfter = r.compactionRef
+		}
+		if stopAfter != "" && cur == stopAfter {
+			break
+		}
+		cur = r.parentID
+	}
+	for i, j := 0, len(nonCompaction)-1; i < j; i, j = i+1, j-1 {
+		nonCompaction[i], nonCompaction[j] = nonCompaction[j], nonCompaction[i]
+	}
+	return append(compactions, nonCompaction...), nil
+}
+
 // ReadBranch walks the parent_id chain from leafEntryID back to a root
 // (parent_id == "") in the session identified by sessionKeyOrID and
 // returns the entries on that path, ordered root → leaf. This is the

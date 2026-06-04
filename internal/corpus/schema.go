@@ -19,7 +19,7 @@ func Init(db *sql.DB) error {
 		`create table if not exists sessions(session_key text primary key check(length(session_key)=68 and substr(session_key,1,4)='sk1_' and substr(session_key,5) not glob '*[^0-9a-f]*'),source_name text not null check(source_name<>''),source_session_id text not null check(source_session_id<>''),machine_id text not null check(machine_id<>''),raw_cwd text,project_key text,started_at text,source_metadata_json text,is_subagent integer default 0,parent_session_key text references sessions(session_key))`,
 		`create table if not exists session_versions(session_key text references sessions(session_key),file_sha256 text references files(file_sha256),bundle_id text references bundles(bundle_id),relative_path text,raw_path text,observed_at text,copy_state text,unique(session_key,file_sha256,bundle_id))`,
 		`create table if not exists entries(session_key text,entry_id text,parent_id text,line_no integer,entry_type text,timestamp text,role text,entry_sha256 text,raw_json text,source_metadata_json text,primary key(session_key,entry_id),check(session_key<>'' and entry_id<>''),foreign key(session_key) references sessions(session_key))`,
-		`create table if not exists messages(session_key text,entry_id text,role text,text text,tool_name text,command text,files_json text,model text,provider text,tokens integer,cache_read_tokens integer,cache_write_tokens integer,reasoning_tokens integer,cost real,primary key(session_key,entry_id),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
+		`create table if not exists messages(session_key text,entry_id text,role text,text text,tool_name text,command text,files_json text,model text,provider text,tokens integer,cache_read_tokens integer,cache_write_tokens integer,reasoning_tokens integer,cost real,compaction_first_kept_entry_id text,compaction_tokens_before integer,participates_in_context integer default 1,primary key(session_key,entry_id),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
 		`create table if not exists artifacts(artifact_id integer primary key,artifact_sha256 text check(length(artifact_sha256)=64),source_name text,machine_id text,bundle_id text not null references bundles(bundle_id),kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,text_body text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`,
 		`create table if not exists images(image_sha256 text primary key check(length(image_sha256)=64),source_name text,mime_type text,bytes integer check(bytes>=0),width integer,height integer,ext text,blob_path text)`,
 		`create table if not exists entry_assets(session_key text,entry_id text,asset_sha256 text,asset_kind text,content_index integer,prompt_order integer,raw_ref text,mime_type text,metadata_json text,primary key(session_key,entry_id,asset_sha256,content_index,prompt_order),foreign key(session_key,entry_id) references entries(session_key,entry_id))`,
@@ -128,6 +128,28 @@ var migrations = []migration{
 				}
 			}
 		}
+		return nil
+	}},
+	{version: 9, apply: func(db *sql.DB) error {
+		additions := []struct{ name, decl string }{
+			{"compaction_first_kept_entry_id", "alter table messages add column compaction_first_kept_entry_id text"},
+			{"compaction_tokens_before", "alter table messages add column compaction_tokens_before integer"},
+			{"participates_in_context", "alter table messages add column participates_in_context integer default 1"},
+		}
+		for _, a := range additions {
+			exists, err := columnExists(db, "messages", a.name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := db.Exec(a.decl); err != nil {
+					return err
+				}
+			}
+		}
+		// Existing rows backfill to 1 (true) via the column default for
+		// participates_in_context; the column defaults to NULL for the
+		// two compaction fields, which is correct (no compaction info).
 		return nil
 	}},
 }
