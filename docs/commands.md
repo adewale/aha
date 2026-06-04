@@ -194,6 +194,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 - `--after`
 - `--before`
+- `--branch`
 - `--config`
 - `--corpus`
 - `--entry`

@@ -81,6 +81,66 @@ func ReadContext(db *sql.DB, session, entry string, before, after int) ([]ReadEn
 	return ReadCanonical(db, ref, before, after)
 }
 
+// ReadBranch walks the parent_id chain from leafEntryID back to a root
+// (parent_id == "") in the session identified by sessionKeyOrID and
+// returns the entries on that path, ordered root → leaf. This is the
+// natural "what did the model actually see at this turn" projection for
+// Pi sessions where one file holds multiple alternate timelines, and a
+// no-op-shaped result for single-thread sessions (the path is just the
+// timeline up to the leaf).
+//
+// Returns NotFoundError if the session or leaf entry does not exist, and
+// reports dangling parents or cycles as ordinary errors (the corpus
+// fidelity tests guarantee real sessions are well-formed).
+func ReadBranch(db *sql.DB, sessionKeyOrID, leafEntryID string) ([]ReadEntry, error) {
+	sessionKey, err := resolveSession(db, sessionKeyOrID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`select e.line_no, e.entry_id, e.parent_id, e.timestamp, e.role, coalesce(m.text, ''), e.raw_json from entries e left join messages m on m.session_key=e.session_key and m.entry_id=e.entry_id where e.session_key=?`, sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type record struct {
+		entry    ReadEntry
+		parentID string
+	}
+	byID := map[string]record{}
+	for rows.Next() {
+		var r record
+		if err := rows.Scan(&r.entry.LineNo, &r.entry.EntryID, &r.parentID, &r.entry.Timestamp, &r.entry.Role, &r.entry.Text, &r.entry.RawJSON); err != nil {
+			return nil, err
+		}
+		byID[r.entry.EntryID] = r
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, ok := byID[leafEntryID]; !ok {
+		return nil, NotFoundError{Kind: "entry", Value: leafEntryID}
+	}
+	var path []ReadEntry
+	seen := map[string]struct{}{}
+	cur := leafEntryID
+	for cur != "" {
+		if _, dup := seen[cur]; dup {
+			return nil, fmt.Errorf("parent_id cycle at %q in session %q", cur, sessionKey)
+		}
+		seen[cur] = struct{}{}
+		r, ok := byID[cur]
+		if !ok {
+			return nil, fmt.Errorf("dangling parent_id %q in session %q", cur, sessionKey)
+		}
+		path = append(path, r.entry)
+		cur = r.parentID
+	}
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+	return path, nil
+}
+
 func readWindow(db *sql.DB, sessionKey string, center, before, after int) ([]ReadEntry, error) {
 	rows, err := db.Query(`select e.line_no,e.entry_id,e.timestamp,e.role,coalesce(m.text,''),e.raw_json from entries e left join messages m on m.session_key=e.session_key and m.entry_id=e.entry_id where e.session_key=? and e.line_no between ? and ? order by e.line_no`, sessionKey, center-before, center+after)
 	if err != nil {

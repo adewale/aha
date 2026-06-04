@@ -18,18 +18,22 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
 	session := pf.String("session")
 	entry := pf.String("entry")
+	branch := pf.String("branch")
 	if session == "" && pf.NArg() > 0 {
 		session = pf.Arg(0)
 	}
 	if session == "" {
 		return errors.New("--session required")
 	}
+	if branch != "" && entry != "" {
+		return errors.New("--branch and --entry are mutually exclusive")
+	}
 	if err := requireAtMostOneOutputMode(pf.Bool("json"), pf.Bool("md")); err != nil {
 		return err
 	}
 	var ref model.Ref
 	useRef := false
-	if entry == "" && looksLikeRef(session) {
+	if entry == "" && branch == "" && looksLikeRef(session) {
 		parsedRef, err := model.ParseRef(session)
 		if err != nil {
 			return err
@@ -47,9 +51,12 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 	}
 	defer store.Close()
 	var entries []corpus.ReadEntry
-	if useRef {
+	switch {
+	case branch != "":
+		entries, err = corpus.ReadBranch(store.DB, session, branch)
+	case useRef:
 		entries, err = corpus.ReadCanonical(store.DB, ref, pf.Int("before"), pf.Int("after"))
-	} else {
+	default:
 		entries, err = corpus.ReadContext(store.DB, session, entry, pf.Int("before"), pf.Int("after"))
 	}
 	if err != nil {
