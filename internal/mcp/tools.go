@@ -78,7 +78,7 @@ var ToolNames = []string{
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
 	"search":      "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-	"read":        "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates.",
+	"read":        "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
 	"status":      "Return corpus health summary: counts and disk usage.",
 	"verify":      "Run read-only corpus invariant checks (no repair).",
 	"conflicts":   "List quarantined merge conflicts.",
@@ -110,9 +110,10 @@ type SearchInput struct {
 type ReadInput struct {
 	Ref     string `json:"ref,omitempty" jsonschema:"Canonical ref text (msg:v1:..., session:v1:..., artifact:v1:...)"`
 	Session string `json:"session,omitempty" jsonschema:"Session key (used when ref is empty)"`
-	Entry   string `json:"entry,omitempty" jsonschema:"Entry id within the session (optional)"`
-	Before  int    `json:"before,omitempty" jsonschema:"Lines of context before the target entry (default 3)"`
-	After   int    `json:"after,omitempty" jsonschema:"Lines of context after the target entry (default 5)"`
+	Entry   string `json:"entry,omitempty" jsonschema:"Entry id within the session. In branch/live mode this is the leaf entry to walk back from."`
+	Mode    string `json:"mode,omitempty" jsonschema:"Read mode: 'window' (default, file-order context around the entry), 'branch' (walk parent_id from the entry leaf to the root), or 'live' (branch with Pi compaction collapse and non-participating entries filtered)."`
+	Before  int    `json:"before,omitempty" jsonschema:"Lines of context before the target entry (window mode only, default 3)"`
+	After   int    `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5)"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -154,29 +155,46 @@ func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
 }
 
 func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
-	before := in.Before
-	if before == 0 {
-		before = 3
-	}
-	after := in.After
-	if after == 0 {
-		after = 5
-	}
 	var (
 		entries []corpus.ReadEntry
 		err     error
 	)
-	if in.Ref != "" {
-		ref, perr := model.ParseRef(in.Ref)
-		if perr != nil {
-			return nil, fmt.Errorf("invalid ref: %w", perr)
+	switch in.Mode {
+	case "", "window":
+		before := in.Before
+		if before == 0 {
+			before = 3
 		}
-		entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
-	} else {
+		after := in.After
+		if after == 0 {
+			after = 5
+		}
+		if in.Ref != "" {
+			ref, perr := model.ParseRef(in.Ref)
+			if perr != nil {
+				return nil, fmt.Errorf("invalid ref: %w", perr)
+			}
+			entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
+		} else {
+			if in.Session == "" {
+				return nil, fmt.Errorf("read requires either ref or session")
+			}
+			entries, err = corpus.ReadContext(b.DB(), in.Session, in.Entry, before, after)
+		}
+	case "branch", "live":
 		if in.Session == "" {
-			return nil, fmt.Errorf("read requires either ref or session")
+			return nil, fmt.Errorf("read mode %q requires session", in.Mode)
 		}
-		entries, err = corpus.ReadContext(b.DB(), in.Session, in.Entry, before, after)
+		if in.Entry == "" {
+			return nil, fmt.Errorf("read mode %q requires entry (the leaf to walk back from)", in.Mode)
+		}
+		if in.Mode == "branch" {
+			entries, err = corpus.ReadBranch(b.DB(), in.Session, in.Entry)
+		} else {
+			entries, err = corpus.LiveContext(b.DB(), in.Session, in.Entry)
+		}
+	default:
+		return nil, fmt.Errorf("unknown read mode %q (want window, branch, or live)", in.Mode)
 	}
 	if err != nil {
 		return nil, err

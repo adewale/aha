@@ -130,10 +130,13 @@ func LiveContext(db *sql.DB, sessionKeyOrID, leafEntryID string) ([]ReadEntry, e
 	}
 	// Walk leaf → root. When a compaction is reached, take note of its
 	// firstKeptEntryId, continue walking until we visit that anchor,
-	// then stop. Pi's buildSessionContext emits the compaction summary
-	// *before* the kept entries (it represents older history) — so
-	// keep compaction nodes in a separate slot that prepends to the
-	// final root → leaf order.
+	// then stop. Pi's session-format.md specifies buildSessionContext
+	// "Emits the summary first, Then messages from firstKeptEntryId to
+	// compaction, Then messages after compaction" — i.e. the compaction
+	// summary precedes the kept entries. We keep compaction nodes in a
+	// separate slot that prepends to the final root → leaf order to
+	// match that ordering. (Verified against
+	// earendil-works/pi session-format.md, 2026-06.)
 	stopAfter := ""
 	var nonCompaction []ReadEntry // leaf → root order
 	var compactions []ReadEntry   // most-recent first (walk order)

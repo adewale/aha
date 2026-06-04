@@ -53,7 +53,6 @@
 
     "message.api": "raw_only:Pi message envelope (anthropic|openai selector). Discovered via pi-mono corpus.",
     "message.provider": "raw_only:Pi message envelope provider — future messages.provider population (cross-agent-data-capture.md, column exists but unpopulated)",
-    "message.model": "raw_only:Pi mirrors model at message envelope too. Generic parser already reads message.model into messages.model (parser.go:63); listed here so the corpus walk sees coverage.",
     "message.stopReason": "raw_only:Pi assistant stop reason — future projection (analogous to OpenInference llm.finish_reason)",
     "message.responseId": "raw_only:Pi provider response id (Anthropic message_id / OpenAI response id) — future projection",
     "message.toolCallId": "raw_only:Pi result→call link (their tool_use_id). Parser does not project tool_result linkage in v1 (parser.go:121).",
