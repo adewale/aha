@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adewale/aha/internal/mcp"
 	"github.com/adewale/aha/internal/mcp/codegen"
 )
 
@@ -30,7 +31,7 @@ func TestGeneratedTSFileIsUpToDate(t *testing.T) {
 // internal/mcp/tools.go.
 func TestGeneratedTSExposesEveryReadOnlyTool(t *testing.T) {
 	body := string(codegen.Generate())
-	for _, tool := range []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"} {
+	for _, tool := range mcp.ToolNames {
 		if !strings.Contains(body, tool+":") {
 			t.Fatalf("TS surface missing binding for %q", tool)
 		}

@@ -2,6 +2,7 @@ package corpus_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,86 @@ func TestIngestCapsLargeArtifactTextBody(t *testing.T) {
 	}
 }
 
+func TestIngestPopulatesToolInvocationClusters(t *testing.T) {
+	root := t.TempDir()
+	bundle, corpusDir := makeBundle(t, root)
+	store, err := corpus.Open(corpusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	// The claude fixture carries one failing `gh pr create` tool call.
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *corpus.Cluster
+	for i := range clusters {
+		if clusters[i].CommandFamily == "gh pr create" {
+			found = &clusters[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a gh pr create failure cluster, got %+v", clusters)
+	}
+	if found.Count != 1 || found.SampleRef == "" {
+		t.Fatalf("cluster missing count/ref: %+v", *found)
+	}
+	if _, err := model.ParseRef(found.SampleRef); err != nil {
+		t.Fatalf("cluster sample_ref invalid: %v", err)
+	}
+}
+
+func TestClustersDoNotExposeRawToolOutputWhenIndexToolOutputFalse(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	claudePath := filepath.Join(fx.ClaudeRoot, "-Users-me-proj", "abc.jsonl")
+	body, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "abc123def4567890"
+	body = []byte(strings.ReplaceAll(string(body), "pull request create failed: Head sha can't be blank", "Authorization: Bearer "+secret+" failed"))
+	if err := os.WriteFile(claudePath, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.MachineID = "test-machine"
+	cfg.IndexToolOutput = false
+	cfg.Sources = []model.SourceConfig{{Type: "claude-code", Root: fx.ClaudeRoot, Enabled: true}}
+	b, err := archive.Capture(t.Context(), cfg, adapters.Builtins(), archive.Options{CapturedAt: "2026-01-03T00:00:00Z", BundleID: "secret-cluster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(root, "secret.tar.zst")
+	if _, err := archive.Write(bundle, b); err != nil {
+		t.Fatal(err)
+	}
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := mustJSON(t, clusters)
+	if strings.Contains(payload, secret) || strings.Contains(payload, "Bearer "+secret) {
+		t.Fatalf("clusters leaked raw tool output despite index_tool_output=false: %s", payload)
+	}
+	if strings.Contains(payload, "authorization: bearer") {
+		t.Fatalf("clusters exposed raw authorization header shape: %s", payload)
+	}
+}
+
 func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	root := t.TempDir()
 	bundle, corpusDir := makeBundle(t, root)
@@ -193,7 +274,7 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Sessions != 3 || rep.Messages != 6 || rep.Images != 1 || rep.Artifacts != 3 {
+	if rep.Sessions != 3 || rep.Messages != 7 || rep.Images != 1 || rep.Artifacts != 3 {
 		t.Fatalf("bad first ingest: %+v", rep)
 	}
 	rep, err = corpus.IngestBundle(store, adapters.Builtins(), bundle)
@@ -205,7 +286,7 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	}
 	assertCount(t, store.DB, "bundles", 1)
 	assertCount(t, store.DB, "sessions", 3)
-	assertCount(t, store.DB, "messages", 6)
+	assertCount(t, store.DB, "messages", 7)
 	assertCount(t, store.DB, "images", 2)
 	assertCount(t, store.DB, "entry_assets", 1)
 	var subagents int
@@ -363,6 +444,94 @@ func TestConflictQuarantineFromBundle(t *testing.T) {
 	}
 	if text != "hello needle" {
 		t.Fatalf("original message overwritten: %q", text)
+	}
+}
+
+func TestLateToolResultCreatesClusterAfterPendingCall(t *testing.T) {
+	root := t.TempDir()
+	piRoot := filepath.Join(root, "pi")
+	sessionDir := filepath.Join(piRoot, "--Users-me-proj--")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionDir, "session.jsonl")
+	callOnly := `{"type":"session","version":3,"id":"late-result","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}
+{"id":"call","type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tu_late","name":"bash","arguments":{"command":"go test ./..."}}]}}
+`
+	if err := os.WriteFile(path, []byte(callOnly), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle1 := writePiOnlyBundle(t, root, piRoot, "late-1")
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle1); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, store.DB, "tool_invocations", 0)
+	withResult := callOnly + `{"id":"result","type":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"tu_late","toolName":"bash","content":[{"type":"text","text":"tests failed"}],"isError":true}}
+`
+	if err := os.WriteFile(path, []byte(withResult), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle2 := writePiOnlyBundle(t, root, piRoot, "late-2")
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err != nil {
+		t.Fatal(err)
+	}
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 || clusters[0].CommandFamily != "go test" {
+		t.Fatalf("late tool result did not produce cluster: %+v", clusters)
+	}
+}
+
+func TestConflictingEntriesDoNotCreateToolInvocations(t *testing.T) {
+	root := t.TempDir()
+	piRoot := filepath.Join(root, "pi")
+	sessionDir := filepath.Join(piRoot, "--Users-me-proj--")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionDir, "session.jsonl")
+	first := `{"type":"session","version":3,"id":"conflict-tools","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}
+{"id":"same","type":"user","timestamp":"2026-01-01T00:00:01Z","message":{"content":"original"}}
+`
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle1 := writePiOnlyBundle(t, root, piRoot, "b1")
+	store, err := corpus.Open(filepath.Join(root, "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle1); err != nil {
+		t.Fatal(err)
+	}
+	changed := `{"type":"session","version":3,"id":"conflict-tools","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}
+{"id":"same","type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tu_conflict","name":"bash","arguments":{"command":"gh pr create --title conflict"}}]}}
+{"id":"result","type":"user","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"tu_conflict","toolName":"bash","content":[{"type":"text","text":"conflicting new output should not cluster"}],"isError":true}}
+`
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle2 := writePiOnlyBundle(t, root, piRoot, "b2")
+	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(t, store.DB, "conflicts", 1)
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range clusters {
+		if c.CommandFamily == "gh pr create" || strings.Contains(c.ErrorSignature, "conflicting") {
+			t.Fatalf("conflicting entry produced cluster: %+v", c)
+		}
 	}
 }
 
@@ -536,6 +705,22 @@ func TestCrossMachineConflict(t *testing.T) {
 	assertCount(t, store.DB, "conflicts", 1)
 }
 
+func writePiOnlyBundle(t *testing.T, root, piRoot, bundleID string) string {
+	t.Helper()
+	cfg := config.Default()
+	cfg.MachineID = "test-machine"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: piRoot, Enabled: true}}
+	b, err := archive.Capture(t.Context(), cfg, adapters.Builtins(), archive.Options{CapturedAt: "2026-01-03T00:00:00Z", BundleID: bundleID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, bundleID+".tar.zst")
+	if _, err := archive.Write(path, b); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func writeBundleFromRoots(t *testing.T, root string, fx testutil.FixtureRoots, machine, bundleID string) string {
 	t.Helper()
 	cfg := config.Default()
@@ -550,6 +735,15 @@ func writeBundleFromRoots(t *testing.T, root string, fx testutil.FixtureRoots, m
 		t.Fatal(err)
 	}
 	return path
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func assertCount(t *testing.T, db *sql.DB, table string, want int) {

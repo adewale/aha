@@ -15,6 +15,7 @@ function clampText(s) {
 }
 
 let lastHits = [];
+let lastClusters = [];
 
 async function call(path, init) {
   const r = await fetch(path, init);
@@ -49,6 +50,40 @@ async function refreshConflicts() {
     el.innerHTML = rows.map((c) => `<li>#${c.id} ${esc(c.session_key)} ${esc(c.entry_id)} <span class="muted">${esc(c.created_at)}</span></li>`).join("");
   } catch (e) {
     $("conflicts").innerHTML = `<li class="muted">conflicts error: ${esc(e.message)}</li>`;
+  }
+}
+
+// refreshClusters loads ranked tool-call failure clusters. Each row shows the
+// recurrence signal (count, distinct sessions/projects) plus the normalized
+// command family and error signature — the shape a human scans to decide
+// whether the pattern is a skill candidate. Selecting a row drills into a sample failing
+// command via the same read view search results use.
+async function refreshClusters() {
+  const ol = $("clusters");
+  try {
+    const rows = await call("/api/clusters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    });
+    if (!rows || !rows.length) {
+      ol.innerHTML = `<li class="muted">no error clusters yet — ingest sessions with tool failures to populate this</li>`;
+      lastClusters = [];
+      return;
+    }
+    lastClusters = rows;
+    ol.innerHTML = rows.map((c, i) => `
+      <li data-cidx="${i}"${c.sample_ref ? "" : ' class="no-ref"'}>
+        <div class="meta">
+          <span class="kbd">×${c.count}</span>
+          <span class="muted">${c.distinct_sessions} sessions · ${c.distinct_projects} projects</span> ·
+          ${esc(c.tool_name || "?")} ·
+          <code>${esc(c.command_family || "")}</code>
+        </div>
+        <div class="snippet">${esc(c.error_signature || "").slice(0, 600)}</div>
+      </li>`).join("");
+  } catch (e) {
+    ol.innerHTML = `<li class="muted">clusters error: ${esc(e.message)}</li>`;
   }
 }
 
@@ -97,7 +132,7 @@ async function doSearch(ev) {
 // loadRead fetches surrounding context for a ref and renders it. Selecting a
 // result also writes the ref into the URL fragment so the view is reloadable
 // and shareable — refs are stable identifiers by design.
-async function loadRead(refText, updateHash = true) {
+async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }) {
   if (!refText) return;
   const pre = $("reader-body");
   pre.textContent = "loading…";
@@ -109,11 +144,13 @@ async function loadRead(refText, updateHash = true) {
     const entries = await call("/api/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ref: refText, before: 3, after: 10 }),
+      body: JSON.stringify({ ref: refText, before: window.before, after: window.after }),
     });
-    pre.textContent = entries.map((e) =>
-      `[${e.timestamp || ""}] ${e.role || ""}:\n${clampText(e.text)}\n`
-    ).join("\n");
+    pre.textContent = entries.map((e) => {
+      const body = e.text || e.raw_json || "";
+      const label = e.text ? "" : " (raw_json)";
+      return `[${e.timestamp || ""}] ${e.role || ""}${label}:\n${clampText(body)}\n`;
+    }).join("\n");
   } catch (e) {
     pre.textContent = `read error: ${e.message}`;
   }
@@ -133,8 +170,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const hit = lastHits[Number(li.dataset.idx)];
     if (hit) loadRead(hit.ref_text);
   });
+  $("clusters").addEventListener("click", (ev) => {
+    const li = ev.target.closest("li[data-cidx]");
+    if (!li) return;
+    const c = lastClusters[Number(li.dataset.cidx)];
+    if (c && c.sample_ref) loadRead(c.sample_ref, true, { before: 0, after: 0 });
+  });
   refreshStatus();
   refreshConflicts();
+  refreshClusters();
   // Restore a deep-linked ref on load.
   const ref = refFromHash();
   if (ref) loadRead(ref, false);

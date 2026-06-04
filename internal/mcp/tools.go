@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -61,6 +62,7 @@ var serverInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 // AddTool calls in registerTools and a test in tools_test.go will fail
 // loudly if the registered set drifts.
 var ToolNames = []string{
+	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
@@ -84,6 +86,7 @@ var ToolDescriptions = map[string]string{
 	"conflicts":   "List quarantined merge conflicts.",
 	"corpus_size": "Return corpus on-disk size breakdown.",
 	"doctor":      "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+	"clusters":    "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -114,6 +117,13 @@ type ReadInput struct {
 	Mode    string `json:"mode,omitempty" jsonschema:"Read mode: 'window' (default, file-order context around the entry), 'branch' (walk parent_id from the entry leaf to the root), or 'live' (branch with Pi compaction collapse and non-participating entries filtered)."`
 	Before  *int   `json:"before,omitempty" jsonschema:"Lines of context before the target entry (window mode only, default 3; explicit 0 is honored)"`
 	After   *int   `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5; explicit 0 is honored)"`
+}
+
+// ClustersInput parameterizes the error-cluster tool. Clusters group failing
+// tool invocations by (tool, command family, error signature) so a dashboard
+// can surface recurring failures worth turning into a skill.
+type ClustersInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned clusters (default 50, max 200)"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -154,6 +164,8 @@ func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
 	return results, nil
 }
 
+const MaxReadContextEntries = 200
+
 func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
 	var (
 		entries []corpus.ReadEntry
@@ -163,11 +175,11 @@ func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
 	case "", "window":
 		before := 3
 		if in.Before != nil {
-			before = *in.Before
+			before = clampNonNegative(*in.Before, MaxReadContextEntries)
 		}
 		after := 5
 		if in.After != nil {
-			after = *in.After
+			after = clampNonNegative(*in.After, MaxReadContextEntries)
 		}
 		if in.Ref != "" {
 			ref, perr := model.ParseRef(in.Ref)
@@ -228,6 +240,24 @@ func doCorpusSize(b Backend) (corpus.SizeReport, error) {
 	return corpus.Size(b.Store())
 }
 
+func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > corpus.MaxClusterLimit {
+		limit = corpus.MaxClusterLimit
+	}
+	rows, err := corpus.Clusters(b.DB(), limit)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []corpus.Cluster{}
+	}
+	return rows, nil
+}
+
 func doDoctor(b Backend) (map[string]any, error) {
 	cfg := b.Config()
 	names := make([]string, 0, len(adapters.Builtins()))
@@ -282,7 +312,7 @@ func doDoctor(b Backend) (map[string]any, error) {
 //     (as a TextContent block) AND CallToolResult.StructuredContent from
 //     the same bytes. We return nil for the *CallToolResult.
 //
-//   - List-typed tools (search, read, conflicts) declare Out=any so the
+//   - List-typed tools (search, read, clusters, conflicts) declare Out=any so the
 //     SDK skips output-schema derivation — array schemas would otherwise
 //     panic the SDK with "output schema must have type object" (which
 //     matches the official Python SDK's Pydantic Dict[str, Any] constraint
@@ -306,6 +336,16 @@ var readOnlyAnnotations = &mcp.ToolAnnotations{
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func clampNonNegative(n, max int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
 
 // NewServer builds an MCP Server with every read tool registered. The
 // returned *mcp.Server is ready to be paired with any of the SDK's
@@ -402,6 +442,18 @@ func registerTools(server *mcp.Server, b Backend) {
 		}
 		return nil, out, nil
 	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "clusters",
+		Description: ToolDescriptions["clusters"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in ClustersInput) (*mcp.CallToolResult, any, error) {
+		out, err := doClusters(b, in)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(out), nil, nil
+	})
 }
 
 // textResult builds a CallToolResult carrying v as a JSON text content
@@ -478,6 +530,12 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doDoctor(b)
+	case "clusters":
+		in, err := decodeInput[ClustersInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doClusters(b, in)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", name)
 }
@@ -494,12 +552,18 @@ func decodeInput[T any](raw json.RawMessage, toolName string) (T, error) {
 	dec.DisallowUnknownFields()
 	var out T
 	if err := dec.Decode(&out); err != nil {
-		// json's "unknown field" error message matches what tests look for;
-		// also tolerate the case where the body parses but errs midway.
-		if errors.Is(err, &json.UnmarshalTypeError{}) {
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) {
 			return zero, fmt.Errorf("invalid arguments for %s: %w", toolName, err)
 		}
 		return zero, fmt.Errorf("unexpected argument for %s: %w", toolName, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return zero, fmt.Errorf("unexpected trailing JSON for %s", toolName)
+		}
+		return zero, fmt.Errorf("invalid trailing JSON for %s: %w", toolName, err)
 	}
 	return out, nil
 }

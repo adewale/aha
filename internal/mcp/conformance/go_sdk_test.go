@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -26,6 +27,7 @@ import (
 )
 
 var expectedTools = []string{
+	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
@@ -159,7 +161,7 @@ func TestGoSDKAgainstAha(t *testing.T) {
 
 	// Strict argument validation: unknown arg must surface as an error.
 	if err := callExpectingError(ctx, session, "search",
-		map[string]any{"query": "x", "bogus": 1}, "unexpected argument"); err != nil {
+		map[string]any{"query": "x", "bogus": 1}, "bogus"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,20 +198,22 @@ func callExpectingError(ctx context.Context, session *mcp.ClientSession, name st
 		if wantSubstr == "" || strings.Contains(err.Error(), wantSubstr) {
 			return nil
 		}
-		// Match the substring loosely: SDK error messages vary.
-		return nil
+		return fmt.Errorf("call errored with %q, want substring %q", err.Error(), wantSubstr)
 	}
 	if res != nil && res.IsError {
 		if wantSubstr == "" {
 			return nil
 		}
+		texts := []string{}
 		for _, c := range res.Content {
-			if tb, ok := c.(*mcp.TextContent); ok && strings.Contains(tb.Text, wantSubstr) {
-				return nil
+			if tb, ok := c.(*mcp.TextContent); ok {
+				texts = append(texts, tb.Text)
+				if strings.Contains(tb.Text, wantSubstr) {
+					return nil
+				}
 			}
 		}
-		// Mismatched substring is fine — what matters is isError fired.
-		return nil
+		return fmt.Errorf("call returned isError text %q, want substring %q", strings.Join(texts, "\n"), wantSubstr)
 	}
 	return errors.New("call unexpectedly succeeded: " + name)
 }

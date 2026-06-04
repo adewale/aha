@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/adewale/aha/internal/hash"
@@ -259,7 +261,9 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 		pe.Provider = curProvider
 	case "message":
 		pe.Role = stringField(payload, "role")
-		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = extractContent(map[string]any{"content": payload["content"]})
+		ec := extractContent(map[string]any{"content": payload["content"]})
+		pe.Text, pe.ToolName, pe.Command, pe.FilesJSON, pe.Assets = ec.text, ec.tool, ec.command, ec.files, ec.assets
+		pe.ToolCalls, pe.ToolResults = ec.toolCalls, ec.toolResults
 		if pe.Role == "assistant" {
 			pe.Model = curModel
 			pe.Provider = curProvider
@@ -269,18 +273,23 @@ func fillCodexResponseItem(pe *model.ParsedEntry, payload map[string]any, curMod
 		pe.ToolName = firstNonEmpty(stringField(payload, "name"), ptype)
 		pe.FilesJSON = codexArgumentsJSON(payload["arguments"])
 		pe.Command = codexCommandFromArguments(payload["arguments"])
+		pe.ToolCalls = []model.ParsedToolCall{{ID: firstNonEmpty(stringField(payload, "call_id"), stringField(payload, "id")), ToolName: pe.ToolName, Command: pe.Command, FilesJSON: pe.FilesJSON}}
 	case "web_search_call":
 		pe.Role = "toolCall"
 		pe.ToolName = "web_search"
 		if action, ok := payload["action"].(map[string]any); ok {
 			pe.Command = stringField(action, "query")
 		}
+		pe.ToolCalls = []model.ParsedToolCall{{ID: firstNonEmpty(stringField(payload, "call_id"), stringField(payload, "id")), ToolName: pe.ToolName, Command: pe.Command}}
 	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
 		pe.Role = "toolResult"
 		pe.Text = codexToolOutputText(payload["output"])
+		exitCode, hasExitCode := codexExitCode(pe.Text)
+		isError := boolField(payload, "is_error") || (hasExitCode && exitCode != 0)
+		pe.ToolResults = []model.ParsedToolResult{{ForID: firstNonEmpty(stringField(payload, "call_id"), stringField(payload, "id")), IsError: isError, OutcomeText: truncateUTF8(pe.Text, maxOutcomeTextBytes), ExitCode: exitCode, ExitCodeValid: hasExitCode}}
 	case "reasoning":
 		pe.Role = "reasoning"
-		pe.Text, _, _, _, _ = extractContent(map[string]any{"content": firstNonNil(payload["summary"], payload["content"])})
+		pe.Text = extractContent(map[string]any{"content": firstNonNil(payload["summary"], payload["content"])}).text
 	case "token_count":
 		applyCodexTokenCount(pe, payload)
 	}
@@ -332,13 +341,23 @@ func codexCommandValue(v any) string {
 	return ""
 }
 
+var codexExitCodeRE = regexp.MustCompile(`(?i)\b(?:process|command) exited with code\s+(-?\d+)\b`)
+
+func codexExitCode(text string) (int64, bool) {
+	m := codexExitCodeRE.FindStringSubmatch(text)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	return n, err == nil
+}
+
 func codexToolOutputText(v any) string {
 	switch x := v.(type) {
 	case string:
 		return x
 	case []any:
-		text, _, _, _, _ := extractContent(map[string]any{"content": x})
-		return text
+		return extractContent(map[string]any{"content": x}).text
 	case map[string]any:
 		if s := stringField(x, "content"); s != "" {
 			return s

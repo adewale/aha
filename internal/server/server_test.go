@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -158,6 +159,51 @@ func TestSearchEndpointRejectsBadArgs(t *testing.T) {
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestJSONPostRejectsTrailingJSON(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+		strings.NewReader(`{"query":"needle"}{"bogus":1}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for trailing JSON, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestJSONPostRejectsOversizedBody(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	body := `{"query":"needle"}` + strings.Repeat(" ", 1<<20)
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(body)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "exceeds") {
+		t.Fatalf("oversized response should explain the limit: %s", w.Body.String())
+	}
+}
+
+func TestClustersEndpointAcceptsPOST(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/clusters", strings.NewReader(`{"limit":1}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clusters status=%d body=%s", w.Code, w.Body.String())
+	}
+	var clusters []corpus.Cluster
+	if err := json.Unmarshal(w.Body.Bytes(), &clusters); err != nil {
+		t.Fatalf("decode clusters: %v\n%s", err, w.Body.String())
+	}
+	if clusters == nil {
+		t.Fatalf("clusters response must be [] not null: %s", w.Body.String())
 	}
 }
 
@@ -413,17 +459,8 @@ func TestToolsEndpointAdvertisesReadOnlySet(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	wantSet := map[string]bool{}
-	for _, n := range []string{"search", "read", "status", "verify", "conflicts", "corpus_size", "doctor"} {
-		wantSet[n] = true
-	}
-	if len(got.Tools) != len(wantSet) {
-		t.Fatalf("tools count=%d want=%d (%v)", len(got.Tools), len(wantSet), got.Tools)
-	}
-	for _, n := range got.Tools {
-		if !wantSet[n] {
-			t.Fatalf("unexpected tool in HTTP list: %s", n)
-		}
+	if !reflect.DeepEqual(got.Tools, mcp.ToolNames) {
+		t.Fatalf("tools mismatch:\n  got:  %v\n  want: %v", got.Tools, mcp.ToolNames)
 	}
 }
 
@@ -434,6 +471,16 @@ func TestListenRefusesNonLoopbackByDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected loopback error, got %v", err)
+	}
+}
+
+func TestListenRefusesWildcardByDefault(t *testing.T) {
+	_, err := server.Listen(server.Options{Addr: ":0"})
+	if err == nil {
+		t.Fatalf("expected refuse wildcard bind, got nil")
+	}
+	if !strings.Contains(err.Error(), "wildcard") && !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected wildcard/loopback error, got %v", err)
 	}
 }
 

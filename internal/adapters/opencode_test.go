@@ -82,6 +82,29 @@ func TestOpenCodeDBPathsEnvOverridesConfiguredRoot(t *testing.T) {
 	}
 }
 
+func TestOpenCodePartsProjectToolInvocation(t *testing.T) {
+	parts := []any{map[string]any{"data": map[string]any{
+		"type":   "tool",
+		"tool":   "bash",
+		"callID": "call_1",
+		"state": map[string]any{
+			"status": "failed",
+			"input":  map[string]any{"command": "git push origin main"},
+			"output": "error: failed to push some refs",
+		},
+	}}}
+	_, tool, command, _, _, calls, results := openCodeParts(parts)
+	if tool != "bash" || command != "git push origin main" {
+		t.Fatalf("legacy fields not projected: tool=%q command=%q", tool, command)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Command != "git push origin main" {
+		t.Fatalf("bad tool call projection: %+v", calls)
+	}
+	if len(results) != 1 || results[0].ForID != "call_1" || !results[0].IsError || !strings.Contains(results[0].OutcomeText, "failed to push") {
+		t.Fatalf("bad tool result projection: %+v", results)
+	}
+}
+
 func TestOpenCodeDiscoverNamespacesDuplicateSessionIDsByDatabase(t *testing.T) {
 	root := t.TempDir()
 	buildMinimalOpenCodeDB(t, filepath.Join(root, "opencode.db"), "s1", "main needle")

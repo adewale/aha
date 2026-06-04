@@ -121,6 +121,89 @@ func TestParseExtractsToolResultContent(t *testing.T) {
 	}
 }
 
+func TestParseExtractsMultipleToolCallsAndResults(t *testing.T) {
+	input := `{"type":"assistant","id":"a1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"go test ./..."}},{"type":"tool_use","id":"tu_2","name":"Bash","input":{"command":"gh pr create --title x"}}]}}
+{"type":"user","id":"r1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","is_error":true,"content":"go test failed"},{"type":"tool_result","tool_use_id":"tu_2","is_error":true,"content":"head sha blank"}]}}
+`
+	ps, err := parseGenericJSONL("claude-code", model.SessionFile{Source: "claude-code", SessionID: "s"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps.Entries) != 2 {
+		t.Fatalf("entries=%d", len(ps.Entries))
+	}
+	if got := len(ps.Entries[0].ToolCalls); got != 2 {
+		t.Fatalf("assistant ToolCalls=%d want 2: %+v", got, ps.Entries[0].ToolCalls)
+	}
+	if ps.Entries[0].ToolCalls[0].ID != "tu_1" || ps.Entries[0].ToolCalls[0].Command != "go test ./..." {
+		t.Fatalf("bad first tool call: %+v", ps.Entries[0].ToolCalls[0])
+	}
+	if ps.Entries[0].ToolCalls[1].ID != "tu_2" || ps.Entries[0].ToolCalls[1].Command != "gh pr create --title x" {
+		t.Fatalf("bad second tool call: %+v", ps.Entries[0].ToolCalls[1])
+	}
+	if got := len(ps.Entries[1].ToolResults); got != 2 {
+		t.Fatalf("result ToolResults=%d want 2: %+v", got, ps.Entries[1].ToolResults)
+	}
+	if ps.Entries[1].Role != "toolResult" {
+		t.Fatalf("tool result role not normalized: %+v", ps.Entries[1])
+	}
+	if ps.Entries[1].ToolResults[0].ForID != "tu_1" || !ps.Entries[1].ToolResults[0].IsError {
+		t.Fatalf("bad first tool result: %+v", ps.Entries[1].ToolResults[0])
+	}
+}
+
+func TestExtractToolSignalsUnderstandsCodexPayloadRows(t *testing.T) {
+	callRaw := `{"type":"response_item","payload":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"shell","arguments":{"command":["go","test","./..."]}}}`
+	calls, results, err := ExtractToolSignals(callRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].ToolName != "shell" || calls[0].Command != "go test ./..." {
+		t.Fatalf("bad Codex call signals: calls=%+v results=%+v", calls, results)
+	}
+	resultRaw := `{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"command failed\nProcess exited with code 1"}}`
+	calls, results, err = ExtractToolSignals(resultRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 || len(results) != 1 || results[0].ForID != "call_1" || !results[0].IsError || results[0].OutcomeText != "command failed\nProcess exited with code 1" || !results[0].ExitCodeValid || results[0].ExitCode != 1 {
+		t.Fatalf("bad Codex result signals: calls=%+v results=%+v", calls, results)
+	}
+}
+
+func TestExtractToolSignalsUnderstandsOpenCodePartsRows(t *testing.T) {
+	raw := `{"type":"message","id":"m1","parts":[{"data":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"failed","input":{"command":"git push"},"output":"error: rejected"}}}]}`
+	calls, results, err := ExtractToolSignals(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Command != "git push" {
+		t.Fatalf("bad OpenCode call signals: %+v", calls)
+	}
+	if len(results) != 1 || results[0].ForID != "call_1" || !results[0].IsError || results[0].OutcomeText != "error: rejected" {
+		t.Fatalf("bad OpenCode result signals: %+v", results)
+	}
+}
+
+func TestParseExtractsPiToolCallAndRoleLevelResult(t *testing.T) {
+	input := `{"type":"message","id":"a1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"git push origin main"}}]}}
+{"type":"message","id":"r1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"error: failed to push some refs"}],"isError":true}}
+`
+	ps, err := parseGenericJSONL("pi", model.SessionFile{Source: "pi", SessionID: "s"}, strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps.Entries) != 2 {
+		t.Fatalf("entries=%d", len(ps.Entries))
+	}
+	if got := ps.Entries[0].ToolCalls; len(got) != 1 || got[0].ID != "call_1" || got[0].Command != "git push origin main" {
+		t.Fatalf("bad Pi tool call projection: %+v", got)
+	}
+	if got := ps.Entries[1].ToolResults; len(got) != 1 || got[0].ForID != "call_1" || !got[0].IsError || !strings.Contains(got[0].OutcomeText, "failed to push") {
+		t.Fatalf("bad Pi tool result projection: %+v", got)
+	}
+}
+
 func TestParseImageDimensions(t *testing.T) {
 	input := `{"type":"user","message":{"content":[{"type":"image","source":{"media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mP8z8AABQMBgAAn5B6iAAAAAElFTkSuQmCC"}}]}}`
 	ps, err := parseGenericJSONL("claude-code", model.SessionFile{Source: "claude-code", SessionID: "s"}, strings.NewReader(input))

@@ -1,8 +1,8 @@
 # MCP spec
 
 A read-only stdio MCP (Model Context Protocol) server that exposes the existing
-read-side CLI surface (`search`, `read`, `status`, `verify`, `conflicts`,
-`corpus size`, `doctor`) to coding agents without spawning a CLI subprocess per
+read-side CLI surface (`search`, `read`, `clusters`, `status`, `verify`,
+`conflicts`, `corpus size`, `doctor`) to coding agents without spawning a CLI subprocess per
 call.
 
 ## Goals
@@ -46,6 +46,7 @@ output.
 | ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `search`      | `aha search`                         | `query` (string, required), `source`, `machine`, `role`, `after`, `before`, `path`, `path_token`, `project`, `limit` (int, ≤ `search.MaxLimit`)    | `[]search.Result`                                     |
 | `read`        | `aha read`                           | one of: `ref` (string, canonical ref text) **or** `session` + optional `entry`; plus `before` (int, default 3), `after` (int, default 5)           | `[]corpus.ReadEntry`                                  |
+| `clusters`    | `aha clusters`                       | `limit` (int, default 50)                                                                                                                          | `[]corpus.Cluster`                                    |
 | `status`      | `aha status`                         | none                                                                                                                                               | `map[string]any` from `corpus.Status`                 |
 | `verify`      | `aha verify` (read-only; no repair)  | none                                                                                                                                               | `corpus.VerifyReport`                                 |
 | `conflicts`   | `aha conflicts`                      | none                                                                                                                                               | `[]corpus.Conflict`                                   |
@@ -63,7 +64,7 @@ Server (v1.6+). All wire-format details — JSON-RPC 2.0 framing, the
 newline-delimited stdio transport, version negotiation, lifecycle methods,
 `tools/list` shape, `tools/call` envelope, `structuredContent` vs
 `content[].text` decisions, ping, progress, cancellation, error
-propagation — are handled by the SDK. We register the seven read tools
+propagation — are handled by the SDK. We register the eight read tools
 via `mcp.AddTool[In, Out]` with typed Go input structs and let the SDK
 generate JSON-Schema, marshal results, and emit conformant responses.
 
@@ -107,8 +108,8 @@ aha mcp [--config PATH] [--repo DIR] [--dry-run]
 ## Security boundaries
 
 - Stdio only. No port is opened, no socket is bound.
-- Read-only: only `search`, `read`, `status`, `verify`, `conflicts`,
-  `corpus_size`, and `doctor` are reachable; write tools are not registered.
+- Read-only: only `search`, `read`, `clusters`, `status`, `verify`,
+  `conflicts`, `corpus_size`, and `doctor` are reachable; write tools are not registered.
 - Same filesystem access as the CLI: whatever corpus and config the calling
   user can read.
 - No depot writes, no R2 calls, no remote network access.
@@ -131,7 +132,7 @@ is duplicated. The MCP layer is purely:
 4. SDK `CallToolResult` construction. Object-typed tools (`status`,
    `verify`, `corpus_size`, `doctor`) return a typed `Out` and let the
    SDK fill both `content[].text` and `structuredContent` from one
-   marshal. List-typed tools (`search`, `read`, `conflicts`) use
+   marshal. List-typed tools (`search`, `read`, `clusters`, `conflicts`) use
    `Out=any` because the SDK refuses array output schemas, and call a
    thin `textResult` helper to set `content[].text` manually.
 
@@ -146,7 +147,7 @@ The same `CallTool` dispatch is exported and reused by the HTTP dashboard
   aha does not duplicate those tests.
 - In-process dispatch tests (`internal/mcp/tools_test.go`) construct an
   `NewInMemoryTransports` Client↔Server pair, run `tools/list` and assert
-  the canonical 7-tool set with `readOnlyHint: true` annotations,
+  the canonical `mcp.ToolNames` set with `readOnlyHint: true` annotations,
   round-trip `tools/call` for object-returning and list-returning tools,
   and verify error paths fire as `isError` on `CallToolResult` rather than
   JSON-RPC error codes (the spec-compliant behaviour).
@@ -170,9 +171,9 @@ official MCP SDKs (Python `mcp`, TypeScript `@modelcontextprotocol/sdk`, Go
 `github.com/modelcontextprotocol/go-sdk`) × two directions = six
 independent legs, plus a Code Mode workflow leg that exercises the typed
 TS surface end-to-end and an in-process HTTP↔MCP consistency check that
-pins both internal paths to the same payload. Each leg skips gracefully
-when its toolchain isn't available, so the suite still does useful work
-on a Python-only, Node-only, or Go-only box.
+pins both internal paths to the same payload. Optional SDK legs skip gracefully
+when their toolchain isn't available, but the Go and Node runtime legs run on
+standard CI runners and fail on tool-surface drift.
 
 ### Server-under-test (drive `aha mcp` from a real SDK Client)
 
@@ -244,8 +245,10 @@ A green run proves that:
    parallel read) works end-to-end with no manual JSON handling on the
    caller side.
 
-This is the load-bearing claim for code-mode runtime compatibility — a
-single round-trip for the agent's "search → read N" plan.
+This is the load-bearing claim for code-mode runtime compatibility: one
+code-mode program can plan, filter, and fan out over a long-lived transport.
+The fan-out still performs one MCP tool call per `read`; a future batch-read
+tool would be needed for a literal single MCP round trip.
 
 ## Code-mode TypeScript adapter
 
@@ -300,12 +303,13 @@ Routes:
 | GET    | `/api/tools`        | `{tools: [...]}` (advertised surface)  |
 | POST   | `/api/search`       | JSON args → `[]SearchResult`           |
 | POST   | `/api/read`         | JSON args → `[]ReadEntry`              |
+| POST   | `/api/clusters`     | JSON args → `[]Cluster`                |
 
 Security posture:
 
-- **Loopback bind by default** (`127.0.0.1:18428`). Non-loopback addresses
-  are refused at `Listen` time unless `--allow-remote` (or
-  `AHA_ALLOW_REMOTE=1`) is set.
+- **Loopback bind by default** (`127.0.0.1:18428`). Non-loopback and wildcard
+  addresses (including `:PORT`) are refused at `Listen` time unless
+  `--allow-remote` (or `AHA_ALLOW_REMOTE=1`) is set.
 - **Bearer-token authentication required when remote.** `--token <TOKEN>`
   (or `AHA_DASHBOARD_TOKEN`) is enforced on every request via constant-time
   comparison; `WWW-Authenticate: Bearer realm="aha"` accompanies 401
@@ -398,7 +402,7 @@ omission is a decision rather than an oversight:
   `structuredContent` alongside `content[].text` per the 2025-06-18 spec
   — the six-leg conformance suite verifies the dict-form matches the
   text payload across all three SDKs. List-typed tools (`search`, `read`,
-  `conflicts`) omit `structuredContent` because the official Python SDK
+  `clusters`, `conflicts`) omit `structuredContent` because the official Python SDK
   models the field as `Dict[str, Any]` and raises a Pydantic validation
   error on arrays. The typed payload travels in `content[].text` for
   those tools and the TS client surface JSON-parses it transparently.

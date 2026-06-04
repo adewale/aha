@@ -255,11 +255,12 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | `internal/safety` | Path and source-root safety checks. |
 | `internal/media` | Image/artifact classification helpers. |
 
-The CLI, the MCP server, and the HTTP dashboard are three skins over one
-JSON contract: `internal/mcp.CallTool` is the single dispatch point, so adding
-or changing a read tool updates all three surfaces at once. `cmd/aha-gen-ts`
-projects the Go result types into `clients/typescript/aha-mcp.ts` for
-code-mode agent runtimes.
+The CLI, the MCP server, and the HTTP dashboard share one JSON contract for
+read-side tool execution: `internal/mcp.CallTool` is the dispatch point the
+HTTP dashboard reuses, while CLI commands call the same corpus/search APIs.
+Adding a read tool still requires wiring its CLI command, HTTP route, and TS
+transport entry; drift tests pin those lists. `cmd/aha-gen-ts` projects the Go
+result types into `clients/typescript/aha-mcp.ts` for code-mode agent runtimes.
 
 ## Design invariants
 

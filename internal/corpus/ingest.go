@@ -139,6 +139,7 @@ type writerStatements struct {
 	insertRedaction         *sql.Stmt
 	insertRedactionEvent    *sql.Stmt
 	stampSessionLevel       *sql.Stmt
+	insertToolInvocation    *sql.Stmt
 }
 
 func (w *corpusWriter) PrepareStatements() error {
@@ -162,6 +163,7 @@ func (w *corpusWriter) PrepareStatements() error {
 		{&w.stmts.insertRedaction, `insert or ignore into redactions(session_key,entry_id,pattern,count) values(?,?,?,?)`},
 		{&w.stmts.insertRedactionEvent, `insert into redaction_events(session_key,subject_kind,subject_id,entry_id,artifact_id,surface,pattern,count) values(?,?,?,?,?,?,?,?)`},
 		{&w.stmts.stampSessionLevel, `update sessions set redaction_level=? where session_key=?`},
+		{&w.stmts.insertToolInvocation, `insert or ignore into tool_invocations(session_key,entry_id,tool_key,tool_use_id,ordinal,tool_name,command_family,command,exit_code,is_error,error_signature,outcome_text,timestamp,project_key,machine_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`},
 	}
 	for _, item := range prepared {
 		stmt, err := w.tx.Prepare(item.sql)
@@ -175,7 +177,7 @@ func (w *corpusWriter) PrepareStatements() error {
 
 func (w *corpusWriter) CloseStatements() error {
 	var first error
-	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset, w.stmts.insertRedaction, w.stmts.insertRedactionEvent, w.stmts.stampSessionLevel} {
+	for _, stmt := range []*sql.Stmt{w.stmts.insertMachine, w.stmts.upsertSource, w.stmts.insertFile, w.stmts.insertSession, w.stmts.insertSessionVersion, w.stmts.insertSessionPathToken, w.stmts.insertEntry, w.stmts.insertMessage, w.stmts.insertConflict, w.stmts.insertArtifact, w.stmts.insertArtifactPathToken, w.stmts.insertImage, w.stmts.insertEntryAsset, w.stmts.insertRedaction, w.stmts.insertRedactionEvent, w.stmts.stampSessionLevel, w.stmts.insertToolInvocation} {
 		if stmt == nil {
 			continue
 		}
@@ -567,7 +569,73 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 		rep.Messages += r.Messages
 		rep.Images += r.Images
 	}
+	if err := w.insertToolInvocations(sessionKey, projectKey(rawCWD), manifest.MachineID, ps.Entries, existingEntries); err != nil {
+		return IngestReport{}, err
+	}
 	return rep, nil
+}
+
+func (w corpusWriter) insertToolInvocations(sessionKey, projectKey, machineID string, entries []model.ParsedEntry, present map[string]string) error {
+	accepted := make([]model.ParsedEntry, 0, len(entries))
+	for _, pe := range entries {
+		if present[pe.EntryID] == hash.SHA256Bytes([]byte(pe.RawJSON)) {
+			accepted = append(accepted, pe)
+		}
+	}
+	for _, inv := range BuildToolInvocations(accepted, projectKey, machineID) {
+		if !inv.OutcomeObserved {
+			continue
+		}
+		if _, ok := present[inv.EntryID]; !ok {
+			continue
+		}
+		var exitCode any
+		if inv.ExitCodeValid {
+			exitCode = inv.ExitCode
+		}
+		command, cmdHits := w.applyRedaction(inv.Command)
+		family, famHits := w.applyRedaction(inv.CommandFamily)
+		sig, outcome, sigHits, outcomeHits := w.storedToolOutcome(inv)
+		res, err := w.stmts.insertToolInvocation.Exec(sessionKey, inv.EntryID, inv.ToolKey, inv.ToolUseID, inv.Ordinal, inv.ToolName, family, command, exitCode, boolInt(inv.IsError), sig, outcome, inv.Timestamp, inv.ProjectKey, inv.MachineID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue
+		}
+		if err := w.recordRedactionEvents(sessionKey, "entry", inv.EntryID, inv.EntryID, nil, "tool_invocations.command", cmdHits); err != nil {
+			return err
+		}
+		if err := w.recordRedactionEvents(sessionKey, "entry", inv.EntryID, inv.EntryID, nil, "tool_invocations.command_family", famHits); err != nil {
+			return err
+		}
+		if err := w.recordRedactionEvents(sessionKey, "entry", inv.EntryID, inv.EntryID, nil, "tool_invocations.error_signature", sigHits); err != nil {
+			return err
+		}
+		if err := w.recordRedactionEvents(sessionKey, "entry", inv.EntryID, inv.EntryID, nil, "tool_invocations.outcome_text", outcomeHits); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w corpusWriter) storedToolOutcome(inv ToolInvocation) (signature, outcome string, sigHits, outcomeHits redact.Hits) {
+	if !inv.IsError {
+		return "", "", nil, nil
+	}
+	if !w.manifest.Policy.IndexToolOutput || strings.TrimSpace(inv.OutcomeText) == "" {
+		signature = fallbackErrorSignature(inv)
+		return signature, signature, nil, nil
+	}
+	redactedOutcome, outcomeHits := w.applyRedaction(inv.OutcomeText)
+	signature = normalizeErrorSignature(redactedOutcome)
+	signature, sigHits = w.applyRedaction(signature)
+	if signature == "" {
+		signature = fallbackErrorSignature(inv)
+	}
+	// Store only the normalized/redacted display signature, never the raw tool
+	// result body, so clusters do not become a second raw-output surface.
+	return signature, signature, sigHits, outcomeHits
 }
 
 type entryReport struct{ Entries, Messages, Images int }
@@ -666,7 +734,11 @@ func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe
 		if pe.LabelTargetEntryID != "" {
 			labelTarget = pe.LabelTargetEntryID
 		}
-		redactedText, textHits := w.applyRedaction(pe.Text)
+		projectedText := ""
+		if shouldIndexText(pe, w.manifest.Policy.IndexToolOutput) {
+			projectedText = pe.Text
+		}
+		redactedText, textHits := w.applyRedaction(projectedText)
 		redactedCommand, cmdHits := w.applyRedaction(pe.Command)
 		redactedFilesJSON, filesHits := w.applyRedaction(pe.FilesJSON)
 		entryHits = mergeRedactionHits(entryHits, textHits)

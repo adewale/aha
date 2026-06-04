@@ -178,14 +178,79 @@ func TestIngestNoneV1IsBackwardsCompatible(t *testing.T) {
 	}
 }
 
+func TestClustersDoNotExposeToolOutputWhenIndexToolOutputDisabled(t *testing.T) {
+	secretPhrase := "unindexedproprietaryphrase"
+	lines := []string{
+		`{"type":"session","version":3,"id":"cluster-no-tool-output","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"call","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tu_1","name":"bash","arguments":{"command":"gh pr create --title x"}}]}}`,
+		`{"type":"message","id":"result","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"tu_1","toolName":"bash","content":[{"type":"text","text":"` + secretPhrase + `"}],"isError":true}}`,
+	}
+	store := ingestWithRedactionPolicy(t, "cluster-no-tool-output", lines, nil, "none-v1", false)
+	defer store.Close()
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 {
+		t.Fatalf("clusters=%+v", clusters)
+	}
+	if strings.Contains(clusters[0].ErrorSignature, secretPhrase) || strings.Contains(clusters[0].SampleError, secretPhrase) {
+		t.Fatalf("cluster exposed non-indexed tool output: %+v", clusters[0])
+	}
+	if clusters[0].ErrorSignature != "tool_error" || clusters[0].SampleError != "tool_error" {
+		t.Fatalf("cluster should fail closed to generic signature, got %+v", clusters[0])
+	}
+	var persistedText string
+	if err := store.DB.QueryRow(`select coalesce(group_concat(text,'\n'),'') from messages`).Scan(&persistedText); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(persistedText, secretPhrase) {
+		t.Fatalf("messages.text exposed non-indexed tool output: %q", persistedText)
+	}
+}
+
+func TestClusterSignaturesApplyExtraRedactionBeforeNormalization(t *testing.T) {
+	secret := "ACME-ABCDEFGHIJKLMNOP"
+	r, err := redact.NewWithExtras([]redact.ExtraPattern{{Name: "acme_secret", Regex: `ACME-[A-Z]{16}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"type":"session","version":3,"id":"cluster-extra-redaction","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`,
+		`{"type":"message","id":"call","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tu_1","name":"bash","arguments":{"command":"deploy"}}]}}`,
+		`{"type":"message","id":"result","timestamp":"2026-01-01T00:00:02Z","message":{"role":"toolResult","toolCallId":"tu_1","toolName":"bash","content":[{"type":"text","text":"` + secret + ` failed"}],"isError":true}}`,
+	}
+	store := ingestWithRedactionPolicy(t, "cluster-extra-redaction", lines, r, "v1", true)
+	defer store.Close()
+	clusters, err := corpus.Clusters(store.DB, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 {
+		t.Fatalf("clusters=%+v", clusters)
+	}
+	combined := clusters[0].ErrorSignature + "\n" + clusters[0].SampleError
+	if strings.Contains(combined, strings.ToLower(secret)) || strings.Contains(combined, secret) {
+		t.Fatalf("cluster leaked extra-redacted secret: %+v", clusters[0])
+	}
+	if !strings.Contains(combined, "[redacted:acme_secret]") {
+		t.Fatalf("cluster missing extra redaction marker: %+v", clusters[0])
+	}
+}
+
 func ingestWithRedaction(t *testing.T, sessionID string, lines []string, r *redact.Redactor, level string) *corpus.Store {
+	t.Helper()
+	return ingestWithRedactionPolicy(t, sessionID, lines, r, level, false)
+}
+
+func ingestWithRedactionPolicy(t *testing.T, sessionID string, lines []string, r *redact.Redactor, level string, indexToolOutput bool) *corpus.Store {
 	t.Helper()
 	var data []byte
 	for _, l := range lines {
 		data = append(data, []byte(l+"\n")...)
 	}
 	mf := model.ManifestFile{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/" + sessionID + ".jsonl", RawPath: sessionID + ".jsonl", SHA256: hash.SHA256Bytes(data), Bytes: int64(len(data)), SessionID: sessionID, CopyState: "stable"}
-	manifest := model.Manifest{Schema: model.BundleSchema, BundleID: "redact-" + sessionID, MachineID: "m1", CapturedAt: "2026-01-01T00:00:00Z", Policy: model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"}, Files: []model.ManifestFile{mf}}
+	manifest := model.Manifest{Schema: model.BundleSchema, BundleID: "redact-" + sessionID, MachineID: "m1", CapturedAt: "2026-01-01T00:00:00Z", Policy: model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, IndexToolOutput: indexToolOutput, Redaction: "none-v1"}, Files: []model.ManifestFile{mf}}
 	bundlePath := filepath.Join(t.TempDir(), "bundle.tar.zst")
 	if _, err := archive.Write(bundlePath, archive.Bundle{Manifest: manifest, Files: []model.CapturedFile{{Manifest: mf, Data: data}}}); err != nil {
 		t.Fatal(err)

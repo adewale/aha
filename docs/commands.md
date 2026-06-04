@@ -23,6 +23,29 @@ When a command is invoked with `--json`, failures are written to stderr as:
 }
 ```
 
+## aha clusters
+
+rank recurring tool-call failure clusters as skill-candidate signals
+
+```txt
+aha clusters [--repo DIR] [--limit N] [--json]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--json`
+- `--limit`
+- `--repo`
+
+**Examples:**
+
+- `aha clusters --json`
+- `aha clusters --limit 20`
+
+**JSON contract:** `array<object{tool_name,command_family,error_signature,count,distinct_sessions,distinct_projects,first_seen,last_seen,sample_command,sample_error,sample_ref,score}>`
+
 ## aha conflicts
 
 list quarantined merge conflicts
@@ -300,7 +323,7 @@ aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout
 - `aha serve --addr 127.0.0.1:18428`
 - `aha serve --allow-remote --token $(openssl rand -hex 32)`
 
-**JSON contract:** `http://HOST:PORT/api/{search,read,status,verify,conflicts,corpus_size,doctor}`
+**JSON contract:** `http://HOST:PORT/api/{search,read,clusters,status,verify,conflicts,corpus_size,doctor}`
 
 ## aha snapshot
 
@@ -350,7 +373,7 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 - `aha status --json`
 - `aha status --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}`
+**JSON contract:** `object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}`
 
 ## aha verify
 

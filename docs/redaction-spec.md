@@ -28,7 +28,7 @@ in the first place.*
 ## Goals
 
 - **Indexed text is safe to surface.** Anywhere aha projects text into the
-  corpus (messages.text, messages.command, artifacts.text_*, FTS rows) is
+  corpus (messages.text, messages.command, tool_invocations.*, artifacts.text_*, FTS rows) is
   redacted before it lands.
 - **Redactions are observable.** Per-session and per-entry hit counts,
   grouped by pattern, are persisted and surfaced via `aha status` and the
@@ -88,7 +88,7 @@ aha has two "tiers" of state. Redaction applies to *exactly one* of them.
 | ------------ | ------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------ |
 | Source       | `~/.claude/projects/*.jsonl`, `~/.codex/sessions/...`                     | No        | Read-only by design; aha never writes there.                       |
 | Bundles      | `~/.aha/depot/bundles/v1/<sha>.tar.zst`                                  | No        | Content-addressed; bundles are the recovery + provenance path.     |
-| Corpus index | `messages.text`, `messages.command`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha read` consumer can observe. |
+| Corpus index | `messages.text`, `messages.command`, `tool_invocations.command`, `tool_invocations.command_family`, `tool_invocations.error_signature`, `tool_invocations.outcome_text`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha read` consumer can observe. |
 
 `entries.raw_json` is included even though it is the "parsed source bytes."
 That's deliberate: `aha read --json` returns `raw_json`, and the MCP `read`
@@ -103,7 +103,7 @@ replacement carries information.
 | Type                          | Pattern                                                                                                    | Notes                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `anthropic_key`               | `\bsk-ant-[A-Za-z0-9_\-]{20,}\b`                                                                           | Claude API key                                                         |
-| `openai_key`                  | `\bsk-(?!ant-)[A-Za-z0-9_\-]{20,}\b`                                                                       | OpenAI / compatibles; negative lookahead excludes anthropic            |
+| `openai_key`                  | `\bsk-[A-Za-z0-9_\-]{20,}\b`                                                                               | OpenAI / compatibles; applied after `anthropic_key` because Go RE2 has no lookahead |
 | `private_key_block`           | `-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`                                | PEM-encoded private keys (RSA / EC / OpenSSH)                          |
 | `github_fine_grained_token`   | `\bgithub_pat_[A-Za-z0-9_]{20,}\b`                                                                         | GitHub fine-grained PAT                                                |
 | `github_token`                | `\bgh[pousr]_[A-Za-z0-9_]{20,}\b`                                                                          | Classic GitHub tokens                                                  |
@@ -111,14 +111,14 @@ replacement carries information.
 | `npm_token`                   | `\bnpm_[A-Za-z0-9]{20,}\b`                                                                                 | npm publish tokens                                                     |
 | `pypi_token`                  | `\bpypi-[A-Za-z0-9_\-]{20,}\b`                                                                             | PyPI tokens                                                            |
 | `aws_access_key`              | `\bAKIA[0-9A-Z]{16}\b`                                                                                     | AWS access key ID                                                      |
-| `gcp_service_account`         | `\b[A-Za-z0-9_\-]{20,}@[a-z0-9\-]+\.iam\.gserviceaccount\.com\b`                                           | GCP SA email — not a secret but useful for context redaction           |
+| `gcp_service_account`         | `\b[A-Za-z0-9_\-]{6,}@[a-z0-9\-]+\.iam\.gserviceaccount\.com\b`                                            | GCP SA email — not a secret but useful for context redaction           |
 | `google_api_key`              | `\bAIza[0-9A-Za-z\-_]{35}\b`                                                                               | Google API keys                                                        |
-| `stripe_key`                  | `\bsk_(live\|test)_[A-Za-z0-9]{24,}\b`                                                                     | Stripe API keys                                                        |
-| `cloudflare_token`            | `\b[A-Za-z0-9_\-]{40}\b` *guarded by `(?:cf\|cloudflare)`* context                                         | Context-required; Cloudflare API tokens are not lexically distinctive |
+| `stripe_key`                  | `\bsk_(?:live|test)_[A-Za-z0-9]{24,}\b`                                                                    | Stripe API keys                                                        |
+| `cloudflare_token`            | `(?i)\b(?:CF_API_TOKEN|CLOUDFLARE(?:_API)?_TOKEN)\s*[:=]\s*(?:"[A-Za-z0-9_\-]{20,}"|'[A-Za-z0-9_\-]{20,}'|[A-Za-z0-9_\-]{20,})` | Context-required; Cloudflare API tokens are not lexically distinctive |
 | `jwt_token`                   | `\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b`                                     | Three-segment dotted base64; high false-positive risk on test fixtures |
 | `authorization_bearer`        | `\bAuthorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=\-]{8,}`                                                   | HTTP bearer header                                                     |
 | `url_credentials`             | `\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:[^/\s@]+@`                                                               | `scheme://user:pass@…`                                                 |
-| `assignment_secret`           | `\b([A-Z0-9_]*(?:PASSWORD\|SECRET\|TOKEN\|API[_-]?KEY\|ACCESS[_-]?KEY)[A-Z0-9_]*\|password\|secret\|token\|api[_-]?key)\s*[:=]\s*(?:"[^"\n]{8,}"\|'[^'\n]{8,}'\|[^\s'"]{8,})` | Generic `KEY=value` assignment                                          |
+| `assignment_secret`           | `\b(?:[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY)[A-Z0-9_]*|password|secret|token|api[_-]?key)\s*[:=]\s*(?:"[^"\n]{8,}"|'[^'\n]{8,}'|[^\s'"]{8,})` | Generic `KEY=value` assignment                                          |
 
 Replacement format: `[REDACTED:<type>]` (matching Tracebase's convention, so
 external tools that already grok the marker continue to work). The original
@@ -257,14 +257,14 @@ Match aha's existing rigor (`rapid`, fuzz, golden):
 7. **Schema test**: every column in the redactions table is queried by at
    least one `aha status` / `aha verify` path.
 8. **Static test**: assert that every code path projecting text into
-   `messages.text`/`artifacts.text_*`/`entries.raw_json`/FTS calls the
+   `messages.text`/`tool_invocations.*`/`artifacts.text_*`/`entries.raw_json`/FTS calls the
    redactor exactly once.
 
 ## Performance estimate
 
 For a 50,000-entry corpus with average 2 KB of indexable text per entry:
 
-- Per entry: ~17 regex passes (14 built-ins + 3 user extras typical).
+- Per entry: one pass per configured regex pattern (~17 built-ins today, plus user extras).
   RE2 runtime is linear in input length; ~2 KB × 17 ≈ 34 KB of scanning
   per entry.
 - Total ingest cost: 50,000 × 34 KB = ~1.6 GB of scanning, plus the
