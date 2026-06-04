@@ -1,11 +1,48 @@
 package adapters
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/adewale/aha/internal/model"
 )
+
+func TestCodexFormatProbeDoesNotReadWholeRollout(t *testing.T) {
+	line := `{"type":"message","role":"user","message":{"content":"legacy"}}` + "\n"
+	data := []byte(strings.Repeat(line, 50000))
+	r := &countingReader{Reader: bytes.NewReader(data)}
+	modern, replay, err := probeCodexFormat(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modern {
+		t.Fatalf("legacy rollout detected as modern")
+	}
+	if r.n >= len(data) {
+		t.Fatalf("format probe read entire rollout: read %d of %d bytes", r.n, len(data))
+	}
+	got, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("probe replay did not preserve consumed bytes")
+	}
+}
+
+type countingReader struct {
+	*bytes.Reader
+	n int
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.n += n
+	return n, err
+}
 
 func TestAdapterParseSessionCommittedFixtures(t *testing.T) {
 	tests := []struct {
@@ -49,8 +86,8 @@ func TestAdapterParseSessionCommittedFixtures(t *testing.T) {
 			}
 		}},
 		{name: "opencode", adapter: OpenCode{}, fixture: "testdata/opencode_realish.jsonl", file: model.SessionFile{Source: "opencode", SessionID: "path-fallback", CWD: ""}, wantID: "ses_realish", wantSource: "opencode", wantEntries: 2, wantNeedle: "opencode fixture needle", check: func(t *testing.T, ps *model.ParsedSession) {
-			if ps.CWD != "/Users/me/work" || ps.Entries[0].Role != "user" || ps.Entries[1].Role != "assistant" || ps.Entries[1].Model != "opencode-test-model" || ps.Entries[1].Tokens != 19 || ps.Entries[1].ToolName != "bash" || ps.Entries[1].Command != "ls -la" {
-				t.Fatalf("opencode adapter did not preserve session/message metadata: %+v", ps)
+			if ps.CWD != "/Users/me/work" || ps.Entries[0].Role != "user" || len(ps.Entries[0].Assets) != 1 || ps.Entries[0].Assets[0].MimeType != "image/png" || ps.Entries[1].Role != "assistant" || ps.Entries[1].Model != "opencode-test-model" || ps.Entries[1].Tokens != 19 || ps.Entries[1].ToolName != "bash" || ps.Entries[1].Command != "ls -la" {
+				t.Fatalf("opencode adapter did not preserve session/message/image metadata: %+v", ps)
 			}
 		}},
 	}

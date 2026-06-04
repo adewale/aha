@@ -29,12 +29,12 @@ No `LESSONS_LEARNED.md` file was present in the current CHE checkout inspected f
 
 | Area | CHE | `aha` |
 |---|---|---|
-| Scope | Single-source Claude Code explorer. | Multi-source Pi + Claude Code archive/corpus. |
+| Scope | Single-source Claude Code explorer. | Multi-source Pi + Claude Code + Codex + OpenCode archive/corpus. |
 | Storage | Parse local files on demand. | Snapshot immutable bundles, ingest into SQLite + blobs. |
 | Privacy posture | Read-only/no-network local explorer; wrapped aggregate sharing feature. | Local private archive; no redaction in v1; no hosted/share feature. |
 | Search | In-process regex over parsed sessions. | SQLite FTS5 over indexed messages/artifacts. |
 | Tool input/output | Searches some tool inputs; skips tool results. | V1 records tool metadata but excludes tool output from default index. |
-| History safety | Never writes to Claude history. | Never mutates source histories; writes only bundles/corpus/config. |
+| History safety | Never writes to Claude history. | Never mutates source histories; writes bundles/corpus/config plus a private OpenCode JSONL export cache when OpenCode is enabled. |
 | Multi-machine | Not primary goal. | Core bundle/corpus merge goal. |
 
 ## Improvements applied after this comparison

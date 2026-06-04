@@ -65,6 +65,36 @@ func TestCLIDoctorReportsDepotSourceAndCorpusDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCLIDoctorAcceptsOpenCodeDatabaseFileRoot(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	dbPath := filepath.Join(fx.OpenCodeRoot, "opencode.db")
+	configPath := filepath.Join(root, "config-opencode.jsonc")
+	corpusDir := filepath.Join(root, "corpus-opencode")
+	depotDir := filepath.Join(root, "depot-opencode")
+	t.Setenv("AHA_OPENCODE_EXPORT_DIR", filepath.Join(root, "exports"))
+	cfg := `{
+		"machine_id":"doctor-opencode",
+		"sources":[{"type":"opencode","root":"` + filepath.ToSlash(dbPath) + `","enabled":true}],
+		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"depot":{"type":"local","location":"` + filepath.ToSlash(depotDir) + `"},
+		"accept_secrets_warning":true
+	}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`"type": "opencode"`, `"ok": true`, `"is_file": true`, `"session_files": 1`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("doctor with OpenCode DB root missing %q in %s", want, body)
+		}
+	}
+}
+
 func TestRunMainWritesOptionalProfiles(t *testing.T) {
 	root := t.TempDir()
 	cpuProfile := filepath.Join(root, "cpu.pprof")

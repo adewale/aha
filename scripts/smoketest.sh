@@ -9,9 +9,9 @@
 #   * Reads your real agent history for the chosen source.
 #   * Writes EVERYTHING it generates under a single /tmp directory — a throwaway
 #     corpus, depot, config, cache, and the OpenCode JSONL export. Your real
-#     ~/.aha, ~/.config/aha, and shell caches are never touched.
-#   * Never writes to the source data. It records a fingerprint of the source
-#     tree (and, for OpenCode, a content hash + integrity check of the .db)
+#     ~/.aha, ~/.config/aha, shell caches, and Go build/module caches are never touched.
+#   * Never writes to the source data. It records a content fingerprint of the source
+#     tree (and, for OpenCode, content hashes + integrity checks of DB files/sidecars)
 #     before and after the run and fails if anything changed.
 #   * Because all artifacts live in /tmp, there is nothing to clean up; /tmp is
 #     reclaimed by the OS. (You may `rm -rf` the printed directory if you like.)
@@ -56,14 +56,20 @@ case "$(uname)" in
   *)      STAT_FMT='-c %n|%s|%Y' ;;
 esac
 
-# Fingerprint a tree by name+size+mtime only (no content read — fast, and still
-# detects any create/modify/delete). Returns a single hash, or "absent".
+# Fingerprint a file/tree by path metadata plus file content. Returns a single
+# hash, or "absent". This is intentionally stronger than a size/mtime smoke
+# signal because the script is a read-only regression check.
 fingerprint_tree() {
   local root="$1"
   [ -e "$root" ] || { echo "absent"; return; }
+  if [ -f "$root" ]; then
+    { stat $STAT_FMT "$root" 2>/dev/null; sha256_file "$root"; } | sha256_stdin
+    return
+  fi
   # shellcheck disable=SC2086
   find "$root" -type f 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
     stat $STAT_FMT "$f" 2>/dev/null
+    sha256_file "$f"
   done | sha256_stdin
 }
 
@@ -97,6 +103,12 @@ default_root() {
   esac
 }
 SOURCE_ROOT="${SOURCE_ROOT_ARG:-$(default_root)}"
+if [ "$SOURCE" = "opencode" ] && [ -n "$SOURCE_ROOT_ARG" ]; then
+  # An explicit SOURCE_ROOT should be the thing under test. OPENCODE_DB is an
+  # adapter-level override, so leaving a parent-shell value set would make the
+  # script fingerprint one DB/root while the adapter reads another.
+  unset OPENCODE_DB
+fi
 
 if [ ! -e "$SOURCE_ROOT" ]; then
   echo "error: source root not found: $SOURCE_ROOT" >&2
@@ -117,6 +129,9 @@ mkdir -p "$CORPUS" "$DEPOT" "$LOGS" "$WORK/cache" "$WORK/tmp" "$WORK/export"
 export XDG_CACHE_HOME="$WORK/cache"
 export XDG_CONFIG_HOME="$WORK/cache/config"
 export TMPDIR="$WORK/tmp"
+export GOCACHE="$WORK/cache/go-build"
+export GOMODCACHE="$WORK/cache/go-mod"
+export GOPATH="$WORK/cache/go-path"
 export AHA_OPENCODE_EXPORT_DIR="$WORK/export"   # honored by the opencode adapter
 
 echo "aha smoketest: source=$SOURCE  root=$SOURCE_ROOT"
@@ -127,11 +142,11 @@ echo
 
 AHA="${AHA_BIN:-}"
 if [ -z "$AHA" ]; then
-  if command -v aha >/dev/null 2>&1; then
-    AHA="$(command -v aha)"
-  elif [ -d "./cmd/aha" ] && command -v go >/dev/null 2>&1; then
+  if [ -d "./cmd/aha" ] && command -v go >/dev/null 2>&1; then
     echo "building aha into $WORK/aha ..."
     if go build -o "$WORK/aha" ./cmd/aha; then AHA="$WORK/aha"; fi
+  elif command -v aha >/dev/null 2>&1; then
+    AHA="$(command -v aha)"
   fi
 fi
 if [ -z "$AHA" ] || [ ! -x "$AHA" ]; then
@@ -167,12 +182,13 @@ aha_repo() { "$AHA" "$@" --repo "$CORPUS" --config "$CFG"; } # read-only corpus 
 
 echo "== capturing source fingerprint (before) =="
 SRC_FP_BEFORE="$(fingerprint_tree "$SOURCE_ROOT")"
-note "tree fingerprint: $SRC_FP_BEFORE"
+note "content fingerprint: $SRC_FP_BEFORE"
 
-# OpenCode: also content-hash the database file(s) and integrity-check them.
-# Parallel indexed arrays (OC_DBS[i] <-> OC_HASH_BEFORE[i]) — associative arrays
+# OpenCode: also content-hash the database file(s), sidecars, and integrity-check DBs.
+# Parallel indexed arrays (OC_HASH_PATHS[i] <-> OC_HASH_BEFORE[i]) — associative arrays
 # need bash 4+, but macOS ships bash 3.2.
 OC_DBS=()
+OC_HASH_PATHS=()
 OC_HASH_BEFORE=()
 if [ "$SOURCE" = "opencode" ]; then
   if [ -f "$SOURCE_ROOT" ]; then OC_DBS+=("$SOURCE_ROOT")
@@ -184,9 +200,14 @@ if [ "$SOURCE" = "opencode" ]; then
   if [ "${#OC_DBS[@]}" -eq 0 ]; then
     bad "no opencode.db found under $SOURCE_ROOT"
   else
-    for i in "${!OC_DBS[@]}"; do
-      OC_HASH_BEFORE[$i]="$(sha256_file "${OC_DBS[$i]}")"
-      note "db ${OC_DBS[$i]}: ${OC_HASH_BEFORE[$i]}"
+    for d in "${OC_DBS[@]}"; do
+      OC_HASH_PATHS+=("$d")
+      [ -f "$d-wal" ] && OC_HASH_PATHS+=("$d-wal")
+      [ -f "$d-shm" ] && OC_HASH_PATHS+=("$d-shm")
+    done
+    for i in "${!OC_HASH_PATHS[@]}"; do
+      OC_HASH_BEFORE[$i]="$(sha256_file "${OC_HASH_PATHS[$i]}")"
+      note "source ${OC_HASH_PATHS[$i]}: ${OC_HASH_BEFORE[$i]}"
     done
   fi
 fi
@@ -234,7 +255,14 @@ echo
 
 echo "== aha search -> read (end-to-end retrieval) =="
 REF=""
-for word in the and to of a error file function test code session message user; do
+SEARCH_TERMS=""
+if command -v sqlite3 >/dev/null 2>&1 && [ -f "$CORPUS/corpus.db" ]; then
+  SAMPLE_TEXT="$(sqlite3 "$CORPUS/corpus.db" "select m.text from messages m join sessions s on s.session_key=m.session_key where s.source_name='$SOURCE_TYPE' and trim(coalesce(m.text,''))<>'' limit 1;" 2>/dev/null)"
+  SAMPLE_TERM="$(printf '%s\n' "$SAMPLE_TEXT" | tr -cs '[:alnum:]_' '\n' | awk 'length($0) >= 3 { print; exit }')"
+  [ -n "$SAMPLE_TERM" ] && SEARCH_TERMS="$SAMPLE_TERM"
+fi
+SEARCH_TERMS="$SEARCH_TERMS the and to of a error file function test code session message user"
+for word in $SEARCH_TERMS; do
   REF="$("$AHA" search "$word" --repo "$CORPUS" --source "$SOURCE_TYPE" --refs 2>/dev/null | awk 'NF{print $1; exit}')"
   [ -n "$REF" ] && { note "matched on \"$word\" -> $REF"; break; }
 done
@@ -252,7 +280,7 @@ elif [ "${NMSG:-0}" -eq 0 ]; then
 elif [ "${NFTS:-0}" -eq 0 ]; then
   bad "ingested $NMSG messages but indexed 0 searchable rows — message text is not being extracted for this source's real format"
 else
-  note "search matched no common tokens, but $NFTS messages are indexed — retrieval inconclusive (the corpus may simply not contain those words)"
+  bad "indexed $NFTS searchable rows but search/read returned no refs — retrieval failed (see $LOGS/status.json)"
 fi
 echo
 
@@ -263,6 +291,8 @@ if [ "$SOURCE" = "opencode" ]; then
   if command -v sqlite3 >/dev/null 2>&1 && [ "${#OC_DBS[@]}" -gt 0 ]; then
     # Open a private read-only copy so we never touch the live DB.
     cp "${OC_DBS[0]}" "$WORK/tmp/inspect.db"
+    [ -f "${OC_DBS[0]}-wal" ] && cp "${OC_DBS[0]}-wal" "$WORK/tmp/inspect.db-wal"
+    [ -f "${OC_DBS[0]}-shm" ] && cp "${OC_DBS[0]}-shm" "$WORK/tmp/inspect.db-shm"
     # `.tables` lists bare, unquoted names — robust to how the DDL quotes them
     # (sqlite3 may emit "session", `session`, [session], or session).
     OC_TABLES="$(sqlite3 "$WORK/tmp/inspect.db" '.tables' 2>/dev/null)"
@@ -301,19 +331,19 @@ fi
 echo "== verifying source was NOT modified (read-only guarantee) =="
 SRC_FP_AFTER="$(fingerprint_tree "$SOURCE_ROOT")"
 if [ "$SRC_FP_BEFORE" = "$SRC_FP_AFTER" ]; then
-  ok "source tree unchanged (name/size/mtime fingerprint identical)"
+  ok "source unchanged (path metadata + content fingerprint identical)"
 else
   bad "source tree CHANGED during run — investigate before trusting the adapter"
 fi
 
 if [ "$SOURCE" = "opencode" ] && [ "${#OC_DBS[@]}" -gt 0 ]; then
   changed=0
-  for i in "${!OC_DBS[@]}"; do
-    after="$(sha256_file "${OC_DBS[$i]}")"
-    [ "$after" = "${OC_HASH_BEFORE[$i]}" ] || { changed=1; bad "database content changed: ${OC_DBS[$i]}"; }
+  for i in "${!OC_HASH_PATHS[@]}"; do
+    after="$(sha256_file "${OC_HASH_PATHS[$i]}")"
+    [ "$after" = "${OC_HASH_BEFORE[$i]}" ] || { changed=1; bad "OpenCode source content changed: ${OC_HASH_PATHS[$i]}"; }
   done
   if [ "$changed" -eq 0 ]; then
-    ok "opencode database content unchanged (sha256 identical)"
+    ok "opencode database/sidecar content unchanged (sha256 identical)"
     note "if this ever fails while OpenCode is running, re-run with OpenCode closed"
   fi
   if command -v sqlite3 >/dev/null 2>&1; then

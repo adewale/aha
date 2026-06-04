@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/config"
 )
 
@@ -14,8 +15,20 @@ func TestDefaultSourcesComeFromRegisteredAdapters(t *testing.T) {
 	for _, s := range cfg.Sources {
 		seen[s.Type] = s.Root
 	}
-	if seen["pi"] != "~/.pi/agent/sessions" || seen["claude-code"] != "~/.claude/projects" || seen["codex"] != "~/.codex/sessions" {
-		t.Fatalf("unexpected default sources: %+v", cfg.Sources)
+	for name, adapter := range adapters.Builtins() {
+		roots := adapter.DefaultRoots()
+		if len(roots) == 0 {
+			if _, ok := seen[name]; ok {
+				t.Fatalf("adapter %s has no default roots but appears in default config", name)
+			}
+			continue
+		}
+		if got, want := seen[name], roots[0].Path; got != want {
+			t.Fatalf("default source %s root = %q, want %q; all built-ins must stay in config sync", name, got, want)
+		}
+	}
+	if len(seen) != len(adapters.Builtins()) {
+		t.Fatalf("default config has unexpected source set: %+v", cfg.Sources)
 	}
 }
 

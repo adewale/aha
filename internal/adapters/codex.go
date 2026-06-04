@@ -71,7 +71,10 @@ func (CodexCLI) DiscoverArtifacts(ctx context.Context, session model.SessionFile
 	return nil, nil
 }
 func (CodexCLI) ParseSession(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
-	return parseCodex(file, r)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseCodex(ctx, file, r)
 }
 
 // parseCodex handles both Codex rollout formats. The current Codex CLI wraps
@@ -81,20 +84,67 @@ func (CodexCLI) ParseSession(ctx context.Context, file model.SessionFile, r io.R
 // top-level role / message.content, extracts nothing. Older rollouts use the
 // flat {type:"session"|"message", role, message:{content}} shape the generic
 // parser already understands, so those are delegated unchanged.
-func parseCodex(file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
-	data, err := io.ReadAll(r)
+func parseCodex(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
+	modern, replay, err := probeCodexFormat(r)
 	if err != nil {
 		return nil, err
 	}
-	if looksModernCodex(data) {
-		return parseCodexModern(file, data)
+	if modern {
+		return parseCodexModern(ctx, file, replay)
 	}
-	return parseGenericJSONL("codex", file, bytes.NewReader(data))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseGenericJSONL("codex", file, replay)
 }
 
 // looksModernCodex reports whether the rollout uses the enveloped format,
 // detected by a line carrying a "payload" object under one of the known
 // rollout line types.
+func probeCodexFormat(r io.Reader) (bool, io.Reader, error) {
+	br := bufio.NewReader(r)
+	var probe bytes.Buffer
+	buf := make([]byte, 4096)
+	for countNonEmptyLines(probe.Bytes()) < 50 && probe.Len() < 1<<20 {
+		want := len(buf)
+		if remain := (1 << 20) - probe.Len(); remain < want {
+			want = remain
+		}
+		if want <= 0 {
+			break
+		}
+		n, err := br.Read(buf[:want])
+		if n > 0 {
+			_, _ = probe.Write(buf[:n])
+			if looksModernCodex(probe.Bytes()) {
+				return true, io.MultiReader(bytes.NewReader(probe.Bytes()), br), nil
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return false, nil, err
+		}
+	}
+	return looksModernCodex(probe.Bytes()), io.MultiReader(bytes.NewReader(probe.Bytes()), br), nil
+}
+
+func countNonEmptyLines(data []byte) int {
+	reader := bufio.NewReader(bytes.NewReader(data))
+	count := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+		if err != nil {
+			break
+		}
+	}
+	return count
+}
+
 func looksModernCodex(data []byte) bool {
 	reader := bufio.NewReader(bytes.NewReader(data))
 	for scanned := 0; scanned < 50; {
@@ -118,12 +168,15 @@ func looksModernCodex(data []byte) bool {
 	return false
 }
 
-func parseCodexModern(file model.SessionFile, data []byte) (*model.ParsedSession, error) {
+func parseCodexModern(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
 	ps := &model.ParsedSession{Source: "codex", SourceSessionID: file.SessionID, CWD: file.CWD, StartedAt: file.StartedAt, IsSubagent: file.IsSubagent, Metadata: map[string]any{"relative_path": file.RelativePath}}
-	reader := bufio.NewReader(bytes.NewReader(data))
+	reader := bufio.NewReader(r)
 	lineNo := 0
 	curModel, curProvider := "", ""
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
 			ps.Diagnostics = append(ps.Diagnostics, fmt.Sprintf("line %d: %v", lineNo+1, err))

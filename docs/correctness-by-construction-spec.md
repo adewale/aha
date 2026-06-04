@@ -221,7 +221,7 @@ Adapter conformance fixtures should be data-driven JSON cases:
 adapter input raw line/file → normalized entry/diagnostic
 ```
 
-Run the same harness for Pi, Claude Code, and Codex.
+Run the same harness for Pi, Claude Code, Codex, and OpenCode.
 
 ### 5. Storage constraints and triggers
 
@@ -526,7 +526,7 @@ Required guardrails before production refactors:
 
 1. **Keep expanding static debt inventories before refactors.** Freeze known raw identity construction, ambient time/sleep, manual FTS writes, broad path authority, direct SQL mutation of append-only tables, network imports outside depot, and weak-test patterns. Start with allowlisted known debt; shrink the allowlists as each phase removes debt.
 2. **Add state-machine skeletons for corpus and depot before changing storage.** The first skeleton may characterize current behavior and skip unimplemented commands, but it must define the model state, commands, invariant checks, and replay format before schema/identity changes begin.
-3. **Add adapter conformance fixtures before parser rewrites.** Current Pi, Claude Code, and Codex normalization behavior must be captured as data-driven raw-input → normalized-entry/diagnostic fixtures before replacing parser internals.
+3. **Add adapter conformance fixtures before parser rewrites.** Current Pi, Claude Code, Codex, and OpenCode normalization behavior must be captured as data-driven raw-input → normalized-entry/diagnostic fixtures before replacing parser internals.
 4. **Add schema introspection helpers before FK/trigger migrations.** Tests should be able to assert “table has FK/check/trigger/index X” and run direct-SQL Type B attempts without hand-parsing all schema text in each test.
 5. **Introduce seams by name first.** Add behavior-preserving wrappers/interfaces named `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read capability before changing their internals. Names first, behavior second.
 6. **Add corpus/depot verifier queries before enforcing stricter constraints.** A verifier should detect current drift/missing blobs/stale catalog refs before migrations make those states impossible or repairable.
@@ -622,7 +622,7 @@ These are Phase 0 tasks and can be done before production refactors. They are in
 
 1. **Keep expanding static debt inventories before refactors.** Static tests should fail if new raw identity construction, ambient time/sleep, direct FTS writes, raw SQL mutations of append-only tables, network imports outside depot, path writes outside corpus/depot roots, or weak-test patterns appear. Begin with explicit allowlists of current debt; every refactor that removes debt must shrink the allowlist in the same commit. If a category reaches zero, convert the inventory into a hard ban.
 2. **Add state-machine skeletons for corpus and depot before changing storage.** Create minimal `rapid` state-machine tests with model state, commands, invariant checks, and replay traces before schema changes. The first version may only execute `ingest duplicate`, `read`, `search`, `status`, `depot put/list/fetch/verify`, and seeded failure cases, but the structure must be present before adding FK/trigger/identity migrations.
-3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, and Codex behavior as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
+3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, Codex, and OpenCode behavior as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
 4. **Add schema introspection helpers before FK/trigger migrations.** Provide test helpers for `HasTable`, `HasColumn`, `HasIndex`, `HasForeignKey`, `HasCheck`, `HasTrigger`, and direct-SQL Type B attempts. Migration tests should assert both the structural object exists and the invalid operation is rejected.
 5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add narrow wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behavior, and storage changes in one diff.
 6. **Add corpus/depot verifier queries before enforcing stricter constraints.** Implement lightweight queries that find orphan messages/assets/artifacts, FTS drift, missing blobs, wrong blob hashes where cheap, stale depot catalog refs, malformed depot keys, and missing catalog shards. The verifier should run against current stores and produce actionable diagnostics before migrations start rejecting these states.

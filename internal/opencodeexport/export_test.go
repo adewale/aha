@@ -2,10 +2,15 @@ package opencodeexport
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -129,6 +134,99 @@ func splitLines(b []byte) [][]byte {
 	return out
 }
 
+func TestRunUsesPrivateExportPermissions(t *testing.T) {
+	src := t.TempDir()
+	dbPath := filepath.Join(src, "opencode.db")
+	buildDB(t, dbPath)
+	dest := filepath.Join(t.TempDir(), "out")
+
+	sessions, err := Run(context.Background(), dbPath, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("export directory mode = %o, want no group/other permissions", got)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	fst, err := os.Stat(sessions[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fst.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("export file mode = %o, want no group/other permissions", got)
+	}
+}
+
+func TestRunHonorsCanceledContextBeforeWriting(t *testing.T) {
+	src := t.TempDir()
+	dbPath := filepath.Join(src, "opencode.db")
+	buildDB(t, dbPath)
+	dest := filepath.Join(t.TempDir(), "out")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Run(ctx, dbPath, dest)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run with canceled context error = %v, want context.Canceled", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "s1.jsonl")); !os.IsNotExist(statErr) {
+		t.Fatalf("canceled export wrote final JSONL: stat err=%v", statErr)
+	}
+}
+
+func TestRunRejectsDatabaseAboveConfiguredLimit(t *testing.T) {
+	src := t.TempDir()
+	dbPath := filepath.Join(src, "opencode.db")
+	buildDB(t, dbPath)
+	dest := filepath.Join(t.TempDir(), "out")
+	t.Setenv("AHA_OPENCODE_MAX_DB_BYTES", "1")
+
+	_, err := Run(context.Background(), dbPath, dest)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Run over size limit error = %v, want exceeds limit", err)
+	}
+}
+
+func TestRunConcurrentExportsSerializeSharedDestination(t *testing.T) {
+	src := t.TempDir()
+	dbPath := filepath.Join(src, "opencode.db")
+	buildDB(t, dbPath)
+	dest := filepath.Join(t.TempDir(), "out")
+
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := Run(context.Background(), dbPath, dest)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Run failed: %v", err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "s1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLossless(t, got)
+	if _, err := os.Stat(filepath.Join(dest, ".work")); !os.IsNotExist(err) {
+		t.Fatalf("shared work dir leaked after concurrent export: %v", err)
+	}
+}
+
 func TestRunDoesNotMutateSource(t *testing.T) {
 	src := t.TempDir()
 	dbPath := filepath.Join(src, "opencode.db")
@@ -183,9 +281,22 @@ func dirState(t *testing.T, dir string) string {
 		b = append(b, []byte(e.Name())...)
 		b = append(b, ':')
 		b = append(b, []byte(itoa(info.Size()))...)
+		b = append(b, ':')
+		if !info.IsDir() {
+			content, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			b = append(b, []byte(sha256Bytes(content))...)
+		}
 		b = append(b, ';')
 	}
 	return string(b)
+}
+
+func sha256Bytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func itoa(n int64) string {

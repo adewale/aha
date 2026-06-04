@@ -30,7 +30,7 @@ type OpenCode struct{}
 func (OpenCode) Name() string    { return "opencode" }
 func (OpenCode) Version() string { return "v1" }
 func (OpenCode) DefaultRoots() []model.DefaultRoot {
-	return []model.DefaultRoot{{OS: "all", Path: "~/.local/share/opencode"}}
+	return []model.DefaultRoot{{OS: "all", Path: openCodeDefaultRoot()}}
 }
 func (OpenCode) Capabilities() model.AdapterCapabilities {
 	return model.AdapterCapabilities{HasThreads: true, HasSubagents: false, HasImages: true, HasToolCalls: true, HasStableEntryIDs: true, CanLinkSubagents: false}
@@ -47,8 +47,10 @@ func (OpenCode) Discover(ctx context.Context, config model.SourceConfig) ([]mode
 		if err != nil {
 			return nil, err
 		}
+		dbNS := openCodeDBNamespace(db)
 		for _, s := range sessions {
-			out = append(out, model.SessionFile{Source: "opencode", Root: dest, Path: s.Path, RelativePath: s.File, SessionID: s.ID})
+			rel := filepath.ToSlash(filepath.Join(dbNS, s.File))
+			out = append(out, model.SessionFile{Source: "opencode", Root: dest, Path: s.Path, RelativePath: rel, SessionID: dbNS + "/" + s.ID})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -60,18 +62,20 @@ func (OpenCode) DiscoverArtifacts(ctx context.Context, session model.SessionFile
 }
 
 func (OpenCode) ParseSession(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
-	return parseOpenCode(file, r)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseOpenCode(ctx, file, r)
 }
 
-// openCodeDBPaths resolves the OpenCode database files to read, honouring the
-// OPENCODE_DB override and any release-channel databases beside the default.
+// openCodeDBPaths resolves the OpenCode database files to read. OPENCODE_DB is
+// an exclusive override; otherwise the configured root may be either a direct
+// .db path or a directory containing the default and release-channel DBs.
 func openCodeDBPaths(root string) []string {
-	var cands []string
 	if env := strings.TrimSpace(os.Getenv("OPENCODE_DB")); env != "" {
-		if p, err := paths.Expand(env); err == nil {
-			cands = append(cands, p)
-		}
+		return existingRegularFiles([]string{openCodeResolveDBOverride(env)})
 	}
+	var cands []string
 	if base, err := paths.Expand(root); err == nil && base != "" {
 		if strings.HasSuffix(base, ".db") {
 			cands = append(cands, base)
@@ -83,6 +87,30 @@ func openCodeDBPaths(root string) []string {
 			}
 		}
 	}
+	return existingRegularFiles(cands)
+}
+
+func openCodeDefaultRoot() string {
+	if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
+		return filepath.Join(xdg, "opencode")
+	}
+	return "~/.local/share/opencode"
+}
+
+func openCodeResolveDBOverride(raw string) string {
+	if filepath.IsAbs(raw) || strings.HasPrefix(raw, "~") {
+		if p, err := paths.Expand(raw); err == nil {
+			return p
+		}
+		return raw
+	}
+	if p, err := paths.Expand(filepath.Join(openCodeDefaultRoot(), raw)); err == nil {
+		return p
+	}
+	return raw
+}
+
+func existingRegularFiles(cands []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, c := range cands {
@@ -98,6 +126,28 @@ func openCodeDBPaths(root string) []string {
 	return out
 }
 
+func openCodeDBNamespace(dbPath string) string {
+	base := strings.TrimSuffix(filepath.Base(dbPath), filepath.Ext(dbPath))
+	base = openCodeSafePathPart(base)
+	if base == "" {
+		base = "opencode"
+	}
+	return base + "-" + hash.SHA256Bytes([]byte(dbPath))[:12]
+}
+
+func openCodeSafePathPart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return strings.Trim(b.String(), "._-")
+}
+
 // openCodeExportDir returns a stable per-database directory for the generated
 // JSONL files. Stability matters: the snapshot reuse fingerprint includes each
 // file's path, so a non-deterministic location would defeat unchanged-state
@@ -108,18 +158,22 @@ func openCodeExportDir(dbPath string) (string, error) {
 	if base == "" {
 		cache, err := os.UserCacheDir()
 		if err != nil || cache == "" {
-			cache = filepath.Join(os.TempDir(), "aha-cache")
+			home, _ := os.UserHomeDir()
+			cache = filepath.Join(os.TempDir(), "aha-cache-"+hash.SHA256Bytes([]byte(home))[:12])
 		}
 		base = filepath.Join(cache, "aha", "opencode-export")
 	}
 	return filepath.Join(base, hash.SHA256Bytes([]byte(dbPath))[:12]), nil
 }
 
-func parseOpenCode(file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
+func parseOpenCode(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
 	ps := &model.ParsedSession{Source: "opencode", SourceSessionID: file.SessionID, CWD: file.CWD, StartedAt: file.StartedAt, IsSubagent: file.IsSubagent, Metadata: map[string]any{"relative_path": file.RelativePath}}
 	reader := bufio.NewReader(r)
 	lineNo := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
 			ps.Diagnostics = append(ps.Diagnostics, fmt.Sprintf("line %d: %v", lineNo+1, err))
@@ -142,7 +196,10 @@ func parseOpenCode(file model.SessionFile, r io.Reader) (*model.ParsedSession, e
 		switch stringField(m, "type") {
 		case "session":
 			if id := stringField(m, "id"); id != "" {
-				ps.SourceSessionID = id
+				ps.Metadata["opencode_session_id"] = id
+				if !strings.Contains(file.SessionID, "/") {
+					ps.SourceSessionID = id
+				}
 			}
 			data := openCodeData(row)
 			if ps.CWD == "" {

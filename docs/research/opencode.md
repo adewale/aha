@@ -10,23 +10,27 @@ session, parsed from an `io.Reader`, with raw bytes copied into the bundle), the
 adapter converts the database to deterministic, lossless JSONL *during
 `Discover`* and lets the unchanged downstream handle the JSONL:
 
-- The DB and any `-wal`/`-shm` sidecars are copied into a stable per-database
-  export directory before reading, giving a consistent view of a live WAL
-  database without writing to the source.
+- The DB and any currently present `-wal`/`-shm` sidecars are copied into a
+  stable, private, per-database export directory before reading. Exports are
+  serialized with a lock and written atomically with private permissions. This
+  avoids writing to the source; if OpenCode is actively checkpointing WAL files,
+  rerun the smoketest with OpenCode closed for the strongest verification.
 - Each `session`/`message`/`part` row is dumped with its full `data` JSON
   preserved verbatim (`json.RawMessage`), so the conversion is lossless rather
   than a lossy projection. Output is byte-stable for identical DB contents, so
   the snapshot unchanged-state fingerprint still avoids re-uploading.
 - The file-writing lives in `internal/opencodeexport`, not `internal/adapters`,
-  so the source adapters keep their textual read-only invariant.
+  so the source adapters keep their textual read-only invariant. The generated
+  cache is private data and is documented in `docs/trust.md`.
 
-Remaining follow-up: the fixtures are schema-tolerant but synthetic; verify the
-`message`/`part` `data` shapes against a real current `anomalyco/opencode`
-install (images, subtask/agent parts, compaction summaries, fork/parent
-semantics) and commit a real-DB fixture. Run `scripts/smoketest.sh opencode` on a
-machine with OpenCode for a safe, read-only end-to-end check (it dumps the live
-schema when `sqlite3` is present, which is the fastest way to confirm the
-table/column assumptions hold). The notes below capture the original research.
+Remaining follow-up: the fixtures are schema-tolerant and now cover text, tool,
+metadata, duplicate IDs across release-channel DBs, and image file parts, but
+real OpenCode installations can still reveal new `message`/`part` shapes
+(subtask/agent parts, compaction summaries, fork/parent semantics). Run
+`scripts/smoketest.sh opencode` on a machine with OpenCode for a safe, read-only
+end-to-end check (it dumps the live schema when `sqlite3` is present, which is
+the fastest way to confirm table/column assumptions hold). The notes below
+capture the original research.
 
 ## Scope
 
@@ -71,10 +75,11 @@ Relevant findings from source:
 A read-only adapter is feasible:
 
 1. Discover likely roots:
-   - `$OPENCODE_DB` if absolute or relative to XDG data when set;
-   - `$XDG_DATA_HOME/opencode/opencode.db`;
-   - fallback `~/.local/share/opencode/opencode.db`;
-   - channel DBs matching `opencode-*.db`;
+   - `$OPENCODE_DB` as an exclusive override (absolute, `~`-expanded, or
+     relative to the OpenCode data directory);
+   - otherwise `$XDG_DATA_HOME/opencode/opencode.db` when `XDG_DATA_HOME` is set;
+   - otherwise `~/.local/share/opencode/opencode.db`;
+   - channel DBs matching `opencode-*.db` when no override is set;
    - legacy JSON tree under `<data>/storage`.
 2. For SQLite, copy the DB plus WAL/SHM sidecars to a temporary snapshot location before parsing, or open through SQLite immutable/read-only URI only after ensuring WAL visibility. Copying is more consistent with `aha`'s existing snapshot-first design.
 3. Parse `project`, `session`, `message`, and `part` rows. Message text likely requires combining message `data` with related `part.data` rows; tool/file/agent/subtask parts should be preserved and selectively indexed like other adapters.
@@ -88,8 +93,6 @@ A read-only adapter is feasible:
 - Need real user fixtures to verify current `message.data` / `part.data` shapes, especially images, tool outputs, subtask/agent parts, compaction summaries, and fork/parent semantics.
 - `opencode-ai/opencode` stores a different SQLite schema and should be considered a separate legacy adapter only if users still have that data.
 
-## Recommendation
+## Current recommendation
 
-OpenCode is a good v1.1/v1.2 adapter candidate, after Aider/Cline only if prioritizing JSONL/plain-file simplicity. It is more complex than Codex because current storage is SQLite plus JSON columns, but it is local, discoverable, and read-only-compatible.
-
-Recommended next step: add a read-only `opencode` adapter behind fixtures from a current `anomalyco/opencode` install, starting with SQLite DB copy + query parser and no legacy support until fixtures justify it.
+Keep the shipped `opencode` adapter focused on current `anomalyco/opencode` SQLite databases. Continue validating with real-machine smoketests and add anonymized fixtures only when they document new real shapes. Treat `opencode-ai/opencode` as a separate legacy adapter only if users still have that data.

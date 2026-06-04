@@ -25,7 +25,7 @@ Inputs:
 - Added ingest failure-injection hooks/tests for rollback after file blobs and cleanup after bundle promotion.
 - Split ingest setup into `ingestPlan`, metadata insertion, and bundle promotion helpers.
 - Added multi-store concurrent duplicate ingest coverage and busy retry for SQLite writer contention.
-- Added real-ish committed parser fixtures for Pi, Claude Code, and Codex.
+- Added real-ish committed parser fixtures for Pi, Claude Code, Codex, and OpenCode.
 - Added CLI flag metadata/FlagSet sync coverage.
 - Added resolver tests for exact-vs-prefix precedence and literal `%`/`_` handling.
 - Added search path-filter wildcard escaping coverage.

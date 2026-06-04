@@ -12,7 +12,7 @@ Design rules:
 
 ## Journey 1: first local archive
 
-User goal: “I want all of this machine's Pi, Claude Code, and Codex history searchable.”
+User goal: “I want all of this machine's Pi, Claude Code, Codex, and OpenCode history searchable.”
 
 ```bash
 aha init --accept-secrets
@@ -185,5 +185,5 @@ Use flags for:
 - deterministic test bundles (`--captured-at`, `--bundle-id`);
 - copied bundles from another machine;
 - multiple corpora;
-- nonstandard Pi, Claude Code, or Codex roots;
+- nonstandard Pi, Claude Code, Codex, or OpenCode roots;
 - temporary workspaces and CI.

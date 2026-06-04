@@ -2,7 +2,7 @@
 
 `aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-It captures Pi, Claude Code, and Codex sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. Pattern detection and skill-candidate generation are documented as the next layer; they're not in the box today.
+It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. Pattern detection and skill-candidate generation are documented as the next layer; they're not in the box today.
 
 Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
@@ -10,7 +10,7 @@ Use it when you've accumulated enough coding-agent conversations that you want t
 
 `aha` is for developers who:
 
-- use multiple coding agents (Pi, Claude Code, Codex — more adapters later) and want one place to examine everything they've done;
+- use multiple coding agents (Pi, Claude Code, Codex, OpenCode — more adapters later) and want one place to examine everything they've done;
 - work across multiple machines and want a portable, content-addressed history that follows them;
 - want to *manually* find patterns in their own prompts and agent behaviour today, and want the substrate that automated pattern detection will be built on tomorrow;
 - want their agents to *read* the depot today via MCP, with the "agent proposes new skills" loop tracked but not yet built;
@@ -41,7 +41,7 @@ Many users start with:
 
 ## Why use it?
 
-- **One corpus for multiple agents on multiple machines**: Pi, Claude Code, and Codex today across every machine you work from; more adapters later.
+- **One corpus for multiple agents on multiple machines**: Pi, Claude Code, Codex, and OpenCode today across every machine you work from; more adapters later.
 - **Built for pattern-finding**: a stable schema and a typed retrieval surface so you (or an agent on your behalf) can ask "what do I keep doing", "where did this go wrong before", "have I asked this already".
 - **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
 - **Portable history**: deterministic `tar.zst` bundles + a local-or-R2 depot; share a depot, copy a bundle from another machine, or `aha ingest` it.
@@ -137,7 +137,7 @@ What it does **not** do yet: semantic/vector search, ranking beyond SQLite FTS s
 
 | Tool | Search scope | Search engine | Retrieval style | Best fit |
 |---|---|---|---|---|
-| `aha` | Pi + Claude Code + Codex, across machines after ingest | SQLite FTS5 over a local corpus | Search returns refs; `read <ref>` expands to full context/artifact text | Private cross-agent archive and agent-friendly retrieval |
+| `aha` | Pi + Claude Code + Codex + OpenCode, across machines after ingest | SQLite FTS5 over a local corpus | Search returns refs; `read <ref>` expands to full context/artifact text | Private cross-agent archive and agent-friendly retrieval |
 | Claude History Explorer | Claude Code history only | On-demand parsing/regex-style local exploration | Browse/search Claude sessions directly | Lightweight Claude-only exploration |
 | QMD-style workflows | Usually document/session search with agent-oriented outputs | Depends on QMD setup | Treat snippets as leads, then retrieve cited context | Query/read discipline and citation-like workflows |
 
@@ -222,13 +222,13 @@ Optional profiling: any command can write local Go pprof profiles with `--cpupro
 | Pi | `~/.pi/agent/sessions` | JSONL session files |
 | Claude Code | `~/.claude/projects` | JSONL project/session files, including `agent-*` subagents |
 | Codex | `~/.codex/sessions` | JSONL rollout/session files |
-| OpenCode | `~/.local/share/opencode` | SQLite database (`opencode.db`), converted to JSONL during discovery |
+| OpenCode | `$XDG_DATA_HOME/opencode` when set, otherwise `~/.local/share/opencode` | SQLite database (`opencode.db`), converted to JSONL during discovery |
 
-A source is read-only during snapshot. For JSONL sources, raw files are copied into the bundle and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the bundle stores those JSONL files; the database is copied (with any WAL/SHM sidecars) before reading and is never written to. `$OPENCODE_DB` overrides the database path, and release-channel databases (`opencode-*.db`) beside the default are picked up automatically.
+A source is read-only during snapshot. For JSONL sources, raw files are copied into the bundle and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the bundle stores those JSONL files. The source database is copied (with any WAL/SHM sidecars that are present) into a private export cache before reading and is never written to. `$OPENCODE_DB` is an exclusive database-path override; when it is not set, release-channel databases (`opencode-*.db`) beside the default are picked up automatically. The export cache defaults under the user cache directory (`.../aha/opencode-export/<db-hash>/`), uses private directory/file modes, and can be redirected with `AHA_OPENCODE_EXPORT_DIR` or size-limited with `AHA_OPENCODE_MAX_DB_BYTES`.
 
 ### Verifying an adapter against a real machine
 
-`scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` runs a safe, read-only end-to-end check (discovery → snapshot → ingest → search → read) against your real history. Every artifact it generates goes under a single `/tmp` directory — a throwaway corpus, depot, config, cache, and (for OpenCode) the JSONL export — so your real `~/.aha`/`~/.config/aha` are untouched and there is nothing to clean up. It also fingerprints the source before and after (plus a content hash + `integrity_check` of the OpenCode database) and fails if anything changed, proving the run was read-only.
+`scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` runs a safe end-to-end check (discovery → snapshot → ingest → search → read) against your real history. Every artifact it generates goes under a single `/tmp` directory — a throwaway corpus, depot, config, cache/build cache, and (for OpenCode) the JSONL export — so your real `~/.aha`/`~/.config/aha` are untouched and there is nothing to clean up. It fingerprints and content-hashes source files before and after (plus `integrity_check` of OpenCode databases) and fails if anything changed, giving a strong read-only regression check.
 
 ```bash
 scripts/smoketest.sh opencode          # uses the default root
@@ -274,7 +274,7 @@ For coding agents using `aha`:
 1. Use `aha search ... --json` or `--refs` to find leads.
 2. Use `aha read <ref> --json` to retrieve full source context.
 3. Answer from retrieved context, not from snippets alone.
-4. Prefer read-only commands (`search`, `read`, `status`, `conflicts`, `doctor`) unless the user explicitly asks to snapshot/ingest.
+4. Prefer query-only commands (`search`, `read`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
 5. Remember v1 does not redact secrets.
 
 ## Accepted v1 limits
