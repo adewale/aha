@@ -33,6 +33,7 @@ var expectedTools = []string{
 	"doctor",
 	"read",
 	"search",
+	"skill_candidates",
 	"status",
 	"verify",
 }

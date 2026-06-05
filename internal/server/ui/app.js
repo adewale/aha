@@ -16,6 +16,7 @@ function clampText(s) {
 
 let lastHits = [];
 let lastClusters = [];
+let lastSkillRefs = [];
 
 async function call(path, init) {
   const r = await fetch(path, init);
@@ -84,6 +85,57 @@ async function refreshClusters() {
       </li>`).join("");
   } catch (e) {
     ol.innerHTML = `<li class="muted">clusters error: ${esc(e.message)}</li>`;
+  }
+}
+
+// refreshSkillCandidates loads outcome-weighted skill candidates: clusters
+// whose failures have at least one observed fix. Each row shows the cluster
+// identity, its resolution rate and tier, and top-K resolution paths ranked
+// by Wilson-bound confidence — so a 1/1 fix never appears above a 3/4 one.
+// Selecting a path drills into a sample resolving success via the read view.
+async function refreshSkillCandidates() {
+  const ol = $("skills");
+  try {
+    const rows = await call("/api/skill_candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 50 }),
+    });
+    if (!rows || !rows.length) {
+      ol.innerHTML = `<li class="muted">no resolved clusters yet — ingest sessions where a failing command later succeeds</li>`;
+      lastSkillRefs = [];
+      return;
+    }
+    const refs = [];
+    ol.innerHTML = rows.map((c) => {
+      const paths = (c.paths || []).map((p) => {
+        const idx = refs.length;
+        refs.push(p.sample_ref || "");
+        const fams = (p.families || []).map(esc).join(" › ");
+        return `
+          <li class="skill-path${p.sample_ref ? "" : " no-ref"}" data-skidx="${idx}">
+            <div class="meta">
+              <span class="kbd">conf=${p.confidence.toFixed(2)}</span>
+              <span class="muted">×${p.support} · ${p.distinct_sessions} sessions · ${p.distinct_projects} projects</span>
+            </div>
+            <div class="snippet"><code>${fams}</code></div>
+          </li>`;
+      }).join("");
+      return `
+        <li class="skill">
+          <div class="meta">
+            <span class="kbd">${esc(c.tier || "")}</span>
+            <span class="muted">${c.resolved}/${c.episodes} resolved · rate=${(c.resolution_rate || 0).toFixed(2)}</span> ·
+            ${esc(c.tool_name || "?")} ·
+            <code>${esc(c.command_family || "")}</code>
+          </div>
+          <div class="snippet">${esc(c.error_signature || "").slice(0, 600)}</div>
+          <ol class="skill-paths">${paths}</ol>
+        </li>`;
+    }).join("");
+    lastSkillRefs = refs;
+  } catch (e) {
+    ol.innerHTML = `<li class="muted">skill candidates error: ${esc(e.message)}</li>`;
   }
 }
 
@@ -176,9 +228,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const c = lastClusters[Number(li.dataset.cidx)];
     if (c && c.sample_ref) loadRead(c.sample_ref, true, { before: 0, after: 0 });
   });
+  $("skills").addEventListener("click", (ev) => {
+    const li = ev.target.closest("li[data-skidx]");
+    if (!li) return;
+    const ref = lastSkillRefs[Number(li.dataset.skidx)];
+    if (ref) loadRead(ref, true, { before: 0, after: 0 });
+  });
   refreshStatus();
   refreshConflicts();
   refreshClusters();
+  refreshSkillCandidates();
   // Restore a deep-linked ref on load.
   const ref = refFromHash();
   if (ref) loadRead(ref, false);

@@ -68,6 +68,7 @@ var ToolNames = []string{
 	"doctor",
 	"read",
 	"search",
+	"skill_candidates",
 	"status",
 	"verify",
 }
@@ -79,14 +80,15 @@ var ToolNames = []string{
 // code-mode LLM reading the surface gets the same descriptions it would
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
-	"search":      "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-	"read":        "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
-	"status":      "Return corpus health summary: counts and disk usage.",
-	"verify":      "Run read-only corpus invariant checks (no repair).",
-	"conflicts":   "List quarantined merge conflicts.",
-	"corpus_size": "Return corpus on-disk size breakdown.",
-	"doctor":      "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
-	"clusters":    "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
+	"search":           "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+	"read":             "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
+	"status":           "Return corpus health summary: counts and disk usage.",
+	"verify":           "Run read-only corpus invariant checks (no repair).",
+	"conflicts":        "List quarantined merge conflicts.",
+	"corpus_size":      "Return corpus on-disk size breakdown.",
+	"doctor":           "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+	"clusters":         "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
+	"skill_candidates": "Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -124,6 +126,14 @@ type ReadInput struct {
 // can surface recurring failures worth turning into a skill.
 type ClustersInput struct {
 	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned clusters (default 50, max 200)"`
+}
+
+// SkillCandidatesInput parameterizes the resolved-cluster (outcome-weighted)
+// surface. Clusters with at least one resolved episode return ranked
+// resolution paths; pain points without an observed fix are returned by
+// the clusters tool, not this one.
+type SkillCandidatesInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned skill candidates (default 50, max 200)"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -254,6 +264,24 @@ func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
 	}
 	if rows == nil {
 		rows = []corpus.Cluster{}
+	}
+	return rows, nil
+}
+
+func doSkillCandidates(b Backend, in SkillCandidatesInput) ([]corpus.SkillCandidate, error) {
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > corpus.MaxClusterLimit {
+		limit = corpus.MaxClusterLimit
+	}
+	rows, err := corpus.SkillCandidates(b.DB(), limit)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []corpus.SkillCandidate{}
 	}
 	return rows, nil
 }
@@ -454,6 +482,18 @@ func registerTools(server *mcp.Server, b Backend) {
 		}
 		return textResult(out), nil, nil
 	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "skill_candidates",
+		Description: ToolDescriptions["skill_candidates"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in SkillCandidatesInput) (*mcp.CallToolResult, any, error) {
+		out, err := doSkillCandidates(b, in)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(out), nil, nil
+	})
 }
 
 // textResult builds a CallToolResult carrying v as a JSON text content
@@ -536,6 +576,12 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doClusters(b, in)
+	case "skill_candidates":
+		in, err := decodeInput[SkillCandidatesInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doSkillCandidates(b, in)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", name)
 }

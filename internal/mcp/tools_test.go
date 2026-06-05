@@ -227,6 +227,27 @@ func TestToolsCallClustersReturnsList(t *testing.T) {
 	}
 }
 
+func TestToolsCallSkillCandidatesReturnsList(t *testing.T) {
+	session, ctx, _ := connectPair(t)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "skill_candidates",
+		Arguments: map[string]any{"limit": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(skill_candidates): %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("skill_candidates returned isError: %s", contentText(t, res))
+	}
+	var candidates []corpus.SkillCandidate
+	if err := json.Unmarshal([]byte(contentText(t, res)), &candidates); err != nil {
+		t.Fatalf("skill_candidates payload not a list: %v\n%s", err, contentText(t, res))
+	}
+	if candidates == nil {
+		t.Fatalf("skill_candidates payload must be [] not null: %s", contentText(t, res))
+	}
+}
+
 func TestToolsCallDoctorReturnsLocalDiagnostics(t *testing.T) {
 	session, ctx, _ := connectPair(t)
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "doctor"})
@@ -378,6 +399,7 @@ func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 		{"search", map[string]any{"query": "definitelynotinthecorpus"}},
 		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
 		{"clusters", map[string]any{"limit": 1}},
+		{"skill_candidates", map[string]any{"limit": 1}},
 	}
 
 	for _, tc := range cases {

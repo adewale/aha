@@ -47,6 +47,16 @@ ol#clusters li.no-ref { cursor: default; opacity: 0.85; }
 ol#clusters .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.2rem; }
 ol#clusters .snippet { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
 ol#clusters code { background: #efefef; padding: 0 4px; border-radius: 3px; }
+#skills-section { grid-column: 1 / span 2; }
+ol#skills { list-style: none; padding: 0; margin: 0.75rem 0 0 0; max-height: 50vh; overflow: auto; }
+ol#skills > li.skill { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem; }
+ol#skills .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.2rem; }
+ol#skills .snippet { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
+ol#skills code { background: #efefef; padding: 0 4px; border-radius: 3px; }
+ol.skill-paths { list-style: none; padding: 0; margin: 0.4rem 0 0 1rem; }
+ol.skill-paths li.skill-path { padding: 0.35rem 0.6rem; border-left: 2px solid var(--border); margin-bottom: 0.3rem; cursor: pointer; }
+ol.skill-paths li.skill-path:hover { background: var(--hit); }
+ol.skill-paths li.skill-path.no-ref { cursor: default; opacity: 0.85; }
 form { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 0.5rem; }
 input, button { font: inherit; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
 button { background: var(--accent); color: white; border-color: var(--accent); cursor: pointer; }

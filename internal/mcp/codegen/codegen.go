@@ -51,6 +51,8 @@ func Generate() []byte {
 		{"Conflict", reflect.TypeOf(corpus.Conflict{})},
 		{"SizeReport", reflect.TypeOf(corpus.SizeReport{})},
 		{"Cluster", reflect.TypeOf(corpus.Cluster{})},
+		{"ResolutionPath", reflect.TypeOf(corpus.ResolutionPath{})},
+		{"SkillCandidate", reflect.TypeOf(corpus.SkillCandidate{})},
 	} {
 		writeStructInterface(&b, e.name, e.t, known)
 		known[e.name] = true
@@ -166,6 +168,7 @@ func inputInterfaces() string {
 	var b bytes.Buffer
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
 	writeStructInterfaceWithDocs(&b, "ClustersArgs", reflect.TypeOf(mcp.ClustersInput{}))
+	writeStructInterfaceWithDocs(&b, "SkillCandidatesArgs", reflect.TypeOf(mcp.SkillCandidatesInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
@@ -263,6 +266,10 @@ export function aha(transport: Transport) {
 		case "clusters":
 			b.WriteString(`    clusters: (args: ClustersArgs = {}) =>
       transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
+`)
+		case "skill_candidates":
+			b.WriteString(`    skill_candidates: (args: SkillCandidatesArgs = {}) =>
+      transport.call("skill_candidates", args as unknown as Record<string, unknown>) as Promise<SkillCandidate[]>,
 `)
 		}
 	}

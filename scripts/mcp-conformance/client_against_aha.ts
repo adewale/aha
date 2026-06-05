@@ -16,6 +16,7 @@ const EXPECTED_TOOLS = [
   "search",
   "read",
   "clusters",
+  "skill_candidates",
   "status",
   "verify",
   "conflicts",

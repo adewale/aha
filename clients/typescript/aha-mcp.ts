@@ -151,6 +151,27 @@ export interface Cluster {
   score: number;
 }
 
+export interface ResolutionPath {
+  families: string[];
+  support: number;
+  distinct_sessions: number;
+  distinct_projects: number;
+  confidence: number;
+  sample_ref?: string;
+}
+
+export interface SkillCandidate {
+  tool_name: string;
+  command_family: string;
+  error_signature: string;
+  episodes: number;
+  resolved: number;
+  resolution_rate: number;
+  paths: ResolutionPath[];
+  score: number;
+  tier: string;
+}
+
 // Tools whose Go return type is map[string]any are exposed loosely.
 // Callers that need stronger typing can cast at the call site.
 export type StatusReport = Record<string, unknown>;
@@ -204,6 +225,13 @@ export interface SearchArgs {
 export interface ClustersArgs {
   /**
    * Cap on returned clusters (default 50, max 200)
+   */
+  limit?: number;
+}
+
+export interface SkillCandidatesArgs {
+  /**
+   * Cap on returned skill candidates (default 50, max 200)
    */
   limit?: number;
 }
@@ -277,6 +305,9 @@ export function aha(transport: Transport) {
     /** Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read. */
     search: (args: SearchArgs) =>
       transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
+    /** Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed. */
+    skill_candidates: (args: SkillCandidatesArgs = {}) =>
+      transport.call("skill_candidates", args as unknown as Record<string, unknown>) as Promise<SkillCandidate[]>,
     /** Return corpus health summary: counts and disk usage. */
     status: () => transport.call("status", {}) as Promise<StatusReport>,
     /** Run read-only corpus invariant checks (no repair). */
@@ -291,6 +322,7 @@ export const TOOLS = [
   "doctor",
   "read",
   "search",
+  "skill_candidates",
   "status",
   "verify",
 ] as const;

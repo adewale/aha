@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">14,223</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">14,281</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">19</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -4373,7 +4373,7 @@ const PKG_GRAPH = {
   'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
 
   'redact':      { deps: ['model'], role: 'v1.1 redaction pipeline: 14 built-in regex patterns plus user extras, idempotent and property-tested. Wired into corpus ingest to scrub messages.text, tool_invocations.*, entries.raw_json, artifacts.text_* before insertion.' },
-  'mcp':         { deps: ['adapters','config','corpus','model','search'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/clusters/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
+  'mcp':         { deps: ['adapters','config','corpus','model','search'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/clusters/skill_candidates/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
   'server':      { deps: ['mcp','model'],                 role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON content-type enforcement, request timeout.' },
 
   'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','redact','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },

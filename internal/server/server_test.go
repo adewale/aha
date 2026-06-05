@@ -207,6 +207,24 @@ func TestClustersEndpointAcceptsPOST(t *testing.T) {
 	}
 }
 
+func TestSkillCandidatesEndpointAcceptsPOST(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/skill_candidates", strings.NewReader(`{"limit":1}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("skill_candidates status=%d body=%s", w.Code, w.Body.String())
+	}
+	var candidates []corpus.SkillCandidate
+	if err := json.Unmarshal(w.Body.Bytes(), &candidates); err != nil {
+		t.Fatalf("decode skill_candidates: %v\n%s", err, w.Body.String())
+	}
+	if candidates == nil {
+		t.Fatalf("skill_candidates response must be [] not null: %s", w.Body.String())
+	}
+}
+
 func TestSearchEndpointRejectsGET(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
