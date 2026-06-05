@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/adewale/aha/internal/corpus"
 )
@@ -14,6 +15,7 @@ func cmdClusters(args []string, stdout, stderr io.Writer) error {
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 50, "maximum clusters to return (default 50, max 200)")
+	withFixes := fs.Bool("with-fixes", false, "rank resolved clusters with the resolution path(s) that fixed them")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -26,6 +28,34 @@ func cmdClusters(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
+
+	if *withFixes {
+		candidates, err := corpus.SkillCandidates(store.DB, *limit)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return writeJSON(stdout, candidates)
+		}
+		if len(candidates) == 0 {
+			fmt.Fprintln(stdout, "no resolved error clusters found")
+			return nil
+		}
+		for _, c := range candidates {
+			fmt.Fprintf(stdout, "%-6.1f %-11s resolved %d/%d  %s :: %s :: %s\n",
+				c.Score, c.Tier, c.Resolved, c.Episodes, c.ToolName, c.CommandFamily, c.ErrorSignature)
+			for _, p := range c.Paths {
+				ref := p.SampleRef
+				if ref == "" {
+					ref = "(no sample_ref)"
+				}
+				fmt.Fprintf(stdout, "    fix conf=%.2f x%-3d s=%-2d p=%-2d  %s  ref=%s\n",
+					p.Confidence, p.Support, p.Sessions, p.Projects, strings.Join(p.Families, " > "), ref)
+			}
+		}
+		return nil
+	}
+
 	clusters, err := corpus.Clusters(store.DB, *limit)
 	if err != nil {
 		return err

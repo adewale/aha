@@ -24,7 +24,7 @@ The substrate is built, with a first deterministic pattern layer for recurring t
 - **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results, reading full session context, checking status/conflicts, and scanning recurring failure clusters. It is still a browser over local data, not an autonomous skill author.
 - **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?" or "which failures keep recurring?" via read-only tools.
 - **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can run one code-mode program over a long-lived transport (`search → filter → Promise.all(read)`). That is still multiple MCP tool calls when the program fans out. See `clients/typescript/README.md` for examples.
-- **Error clusters** (`aha clusters`) — recurring tool-call failures are grouped by tool, command family, and normalized error signature with a `sample_ref` for drilling into the sample command row. Clusters are candidate signals for humans/agents to write better skills; `aha` does not generate or install skills.
+- **Error clusters** (`aha clusters`) — recurring tool-call failures are grouped by tool, command family, and normalized error signature with a `sample_ref` for drilling into the sample command row. `aha clusters --with-fixes` goes a step further: it mines single-session failure→fix arcs (`failure_episodes`) and ranks each resolved cluster by the **resolution path that actually worked**, using a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one. Clusters and candidate fixes are signals for humans/agents to write better skills; `aha` does not generate or install skills. See `docs/outcome-weighting-spec.md`.
 
 The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader skill-candidate detection, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
 
@@ -190,7 +190,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha clusters [--repo DIR] [--limit N] [--json]
+aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
@@ -209,7 +209,7 @@ Command roles:
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `clusters`: rank recurring tool-call failure clusters as skill-candidate signals; each row includes a `sample_ref` for `aha read` drill-in to the sample command row.
+- `clusters`: rank recurring tool-call failure clusters as skill-candidate signals; each row includes a `sample_ref` for `aha read` drill-in to the sample command row. `--with-fixes` instead ranks *resolved* clusters by the outcome-weighted resolution path that fixed them (top-K paths, each with support, confidence, tier, and a `sample_ref` to the resolving success).
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.

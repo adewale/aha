@@ -1,10 +1,18 @@
 # Outcome-weighting spec
 
-Status: design (not yet implemented). Builds directly on the shipped
-error-cluster surface (`internal/corpus/clusters.go`, migration 13
-`tool_invocations`). This document specifies the *second half* of the
-"sessions → skills" idea: turning a recurring **failure** cluster into a
-recommended **fix**, scored by whether that fix actually worked.
+Status: implemented (CLI + corpus layer; MCP/HTTP/TS parity still deferred).
+Builds directly on the shipped error-cluster surface
+(`internal/corpus/clusters.go`, migration 13 `tool_invocations`). This document
+specifies the *second half* of the "sessions → skills" idea: turning a
+recurring **failure** cluster into a recommended **fix**, scored by whether that
+fix actually worked.
+
+Shipped: migration 14 `failure_episodes` (`internal/corpus/failure_episodes_migration.go`),
+`assembleEpisodes` (`internal/corpus/episodes.go`), the Wilson scoring helpers
+(`internal/corpus/scoring.go`), `SkillCandidates` (`internal/corpus/outcomes.go`),
+and `aha clusters --with-fixes` (`internal/cli/command_clusters.go`). Episodes
+are rebuilt at ingest from the stored `tool_invocations` and backfilled for
+existing corpora by the migration.
 
 ## Why
 
@@ -123,16 +131,22 @@ For each cluster `C`:
 
    ```
    confidence_P = wilsonLowerBound(successes = support_P,
-                                   trials   = support_P + competing_failures_at_same_step,
+                                   trials   = resolved,    // resolved episodes in the cluster
                                    z        = 1.96)
    pathScore_P  = confidence_P × spread(sessions_P, projects_P)
    ```
 
-   The Wilson lower bound is the correctness-by-construction guard against the
-   `1/1 = 100%` overconfidence trap: a path seen once scores well below a path
-   seen ten times even though both are "100% successful." `spread()` reuses the
-   exact cluster spread weighting (`clusters.go:340`) so a path that worked
-   across many projects outranks one that worked repeatedly in a single repo.
+   The Bernoulli trial is "of the times this failure was fixed, was it fixed
+   *this* way?": successes = `support_P`, trials = the cluster's total resolved
+   episode count. (The original draft proposed `support_P + competing_failures`;
+   the resolved-episode denominator is the cleaner, directly computable, and
+   testable form, and was chosen during implementation.) The Wilson lower bound
+   is the correctness-by-construction guard against the `1/1 = 100%`
+   overconfidence trap: a path taken in 1 of 1 resolved episodes scores below
+   one taken in 3 of 4, even though both are "always" by raw rate. `spread()`
+   reuses the exact cluster spread weighting (now a shared helper in
+   `scoring.go`, also called by `clusterScore`) so a path that worked across
+   many projects outranks one that worked repeatedly in a single repo.
 
 5. Emit the **top-K distinct paths** (default K=3), not a single winner.
    Clusters are frequently *confounded* — one `error_signature` with several

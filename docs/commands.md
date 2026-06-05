@@ -25,10 +25,10 @@ When a command is invoked with `--json`, failures are written to stderr as:
 
 ## aha clusters
 
-rank recurring tool-call failure clusters as skill-candidate signals
+rank recurring tool-call failure clusters as skill-candidate signals; --with-fixes ranks resolved clusters by the resolution path that fixed them
 
 ```txt
-aha clusters [--repo DIR] [--limit N] [--json]
+aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
 ```
 
 **Flags:**
@@ -38,11 +38,13 @@ aha clusters [--repo DIR] [--limit N] [--json]
 - `--json`
 - `--limit`
 - `--repo`
+- `--with-fixes`
 
 **Examples:**
 
 - `aha clusters --json`
 - `aha clusters --limit 20`
+- `aha clusters --with-fixes`
 
 **JSON contract:** `array<object{tool_name,command_family,error_signature,count,distinct_sessions,distinct_projects,first_seen,last_seen,sample_command,sample_error,sample_ref,score}>`
 
