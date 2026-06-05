@@ -301,6 +301,7 @@ For coding agents using `aha`:
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
 - `docs/redaction-spec.md` — implemented v1.1 corpus-projection redaction plus deferred v1.2+ designs.
+- `docs/outcome-weighting-spec.md` — design for ranking error clusters by the fix that actually worked (resolution-path mining over `tool_invocations`).
 - `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
 - `docs/research/openinference.md` — OpenInference semantic-convention reference.
 - `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.
