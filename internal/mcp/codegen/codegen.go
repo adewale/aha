@@ -53,6 +53,10 @@ func Generate() []byte {
 		{"Cluster", reflect.TypeOf(corpus.Cluster{})},
 		{"ResolutionPath", reflect.TypeOf(corpus.ResolutionPath{})},
 		{"SkillCandidate", reflect.TypeOf(corpus.SkillCandidate{})},
+		{"Incident", reflect.TypeOf(corpus.Incident{})},
+		{"TrajectoryStep", reflect.TypeOf(corpus.TrajectoryStep{})},
+		{"NamedCount", reflect.TypeOf(corpus.NamedCount{})},
+		{"Overview", reflect.TypeOf(corpus.Overview{})},
 	} {
 		writeStructInterface(&b, e.name, e.t, known)
 		known[e.name] = true
@@ -169,6 +173,8 @@ func inputInterfaces() string {
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
 	writeStructInterfaceWithDocs(&b, "ClustersArgs", reflect.TypeOf(mcp.ClustersInput{}))
 	writeStructInterfaceWithDocs(&b, "SkillCandidatesArgs", reflect.TypeOf(mcp.SkillCandidatesInput{}))
+	writeStructInterfaceWithDocs(&b, "IncidentsArgs", reflect.TypeOf(mcp.IncidentsInput{}))
+	writeStructInterfaceWithDocs(&b, "IncidentTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
@@ -270,6 +276,17 @@ export function aha(transport: Transport) {
 		case "skill_candidates":
 			b.WriteString(`    skill_candidates: (args: SkillCandidatesArgs = {}) =>
       transport.call("skill_candidates", args as unknown as Record<string, unknown>) as Promise<SkillCandidate[]>,
+`)
+		case "incidents":
+			b.WriteString(`    incidents: (args: IncidentsArgs = {}) =>
+      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+`)
+		case "incident_trajectory":
+			b.WriteString(`    incident_trajectory: (args: IncidentTrajectoryArgs) =>
+      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+`)
+		case "overview":
+			b.WriteString(`    overview: () => transport.call("overview", {}) as Promise<Overview>,
 `)
 		}
 	}

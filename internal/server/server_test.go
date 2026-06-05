@@ -225,6 +225,53 @@ func TestSkillCandidatesEndpointAcceptsPOST(t *testing.T) {
 	}
 }
 
+func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incidents", strings.NewReader(`{"limit":5}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("incidents status=%d body=%s", w.Code, w.Body.String())
+	}
+	var incidents []corpus.Incident
+	if err := json.Unmarshal(w.Body.Bytes(), &incidents); err != nil {
+		t.Fatalf("decode incidents: %v\n%s", err, w.Body.String())
+	}
+	if incidents == nil {
+		t.Fatalf("incidents response must be [] not null: %s", w.Body.String())
+	}
+}
+
+func TestOverviewEndpointReturnsComposition(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/overview", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", w.Code, w.Body.String())
+	}
+	var o corpus.Overview
+	if err := json.Unmarshal(w.Body.Bytes(), &o); err != nil {
+		t.Fatalf("decode overview: %v\n%s", err, w.Body.String())
+	}
+	if o.Sessions <= 0 {
+		t.Fatalf("overview should report sessions from the fixture corpus: %+v", o)
+	}
+}
+
+func TestIncidentTrajectoryEndpointValidatesRef(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incident_trajectory", strings.NewReader(`{"ref":"session:v1:abc"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	// A non-message ref is a clean error, not a crash.
+	if w.Code == http.StatusInternalServerError {
+		t.Fatalf("trajectory should reject a non-message ref gracefully, got 500: %s", w.Body.String())
+	}
+}
+
 func TestSearchEndpointRejectsGET(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()

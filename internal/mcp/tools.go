@@ -66,6 +66,9 @@ var ToolNames = []string{
 	"conflicts",
 	"corpus_size",
 	"doctor",
+	"incident_trajectory",
+	"incidents",
+	"overview",
 	"read",
 	"search",
 	"skill_candidates",
@@ -80,15 +83,18 @@ var ToolNames = []string{
 // code-mode LLM reading the surface gets the same descriptions it would
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
-	"search":           "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-	"read":             "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
-	"status":           "Return corpus health summary: counts and disk usage.",
-	"verify":           "Run read-only corpus invariant checks (no repair).",
-	"conflicts":        "List quarantined merge conflicts.",
-	"corpus_size":      "Return corpus on-disk size breakdown.",
-	"doctor":           "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
-	"clusters":         "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
-	"skill_candidates": "Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed.",
+	"search":              "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+	"read":                "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
+	"status":              "Return corpus health summary: counts and disk usage.",
+	"verify":              "Run read-only corpus invariant checks (no repair).",
+	"conflicts":           "List quarantined merge conflicts.",
+	"corpus_size":         "Return corpus on-disk size breakdown.",
+	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+	"clusters":            "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
+	"skill_candidates":    "Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed.",
+	"incidents":           "Unified failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tier, and top resolution paths). Optional project/source/machine/tool facets. The single best surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list.",
+	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
+	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -134,6 +140,22 @@ type ClustersInput struct {
 // the clusters tool, not this one.
 type SkillCandidatesInput struct {
 	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned skill candidates (default 50, max 200)"`
+}
+
+// IncidentsInput parameterizes the unified failure-and-fix view, with optional
+// facet filters.
+type IncidentsInput struct {
+	Limit   int    `json:"limit,omitempty" jsonschema:"Cap on returned incidents (default 50, max 200)"`
+	Project string `json:"project,omitempty" jsonschema:"Filter to one project key"`
+	Source  string `json:"source,omitempty" jsonschema:"Filter to one source adapter (pi, claude-code, codex, opencode)"`
+	Machine string `json:"machine,omitempty" jsonschema:"Filter to one machine id"`
+	Tool    string `json:"tool,omitempty" jsonschema:"Filter to one tool name"`
+}
+
+// IncidentTrajectoryInput names the resolving-success ref to reconstruct an arc
+// from.
+type IncidentTrajectoryInput struct {
+	Ref string `json:"ref" jsonschema:"Resolving-success ref (msg:v1:...), e.g. an incident/skill-candidate path sample_ref"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -273,6 +295,41 @@ func doSkillCandidates(b Backend, in SkillCandidatesInput) ([]corpus.SkillCandid
 		rows = []corpus.SkillCandidate{}
 	}
 	return rows, nil
+}
+
+func doIncidents(b Backend, in IncidentsInput) ([]corpus.Incident, error) {
+	rows, err := corpus.Incidents(b.DB(), corpus.IncidentFilter{
+		Limit:   in.Limit,
+		Project: in.Project,
+		Source:  in.Source,
+		Machine: in.Machine,
+		Tool:    in.Tool,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []corpus.Incident{}
+	}
+	return rows, nil
+}
+
+func doIncidentTrajectory(b Backend, in IncidentTrajectoryInput) ([]corpus.TrajectoryStep, error) {
+	if in.Ref == "" {
+		return nil, fmt.Errorf("missing required argument for incident_trajectory: ref")
+	}
+	steps, err := corpus.IncidentTrajectory(b.DB(), in.Ref)
+	if err != nil {
+		return nil, err
+	}
+	if steps == nil {
+		steps = []corpus.TrajectoryStep{}
+	}
+	return steps, nil
+}
+
+func doOverview(b Backend) (corpus.Overview, error) {
+	return corpus.CorpusOverview(b.DB())
 }
 
 func doDoctor(b Backend) (map[string]any, error) {
@@ -483,6 +540,42 @@ func registerTools(server *mcp.Server, b Backend) {
 		}
 		return textResult(out), nil, nil
 	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "incidents",
+		Description: ToolDescriptions["incidents"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentsInput) (*mcp.CallToolResult, any, error) {
+		out, err := doIncidents(b, in)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "incident_trajectory",
+		Description: ToolDescriptions["incident_trajectory"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentTrajectoryInput) (*mcp.CallToolResult, any, error) {
+		out, err := doIncidentTrajectory(b, in)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "overview",
+		Description: ToolDescriptions["overview"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.Overview, error) {
+		out, err := doOverview(b)
+		if err != nil {
+			return errorResult(err), corpus.Overview{}, nil
+		}
+		return nil, out, nil
+	})
 }
 
 // textResult builds a CallToolResult carrying v as a JSON text content
@@ -571,6 +664,23 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doSkillCandidates(b, in)
+	case "incidents":
+		in, err := decodeInput[IncidentsInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doIncidents(b, in)
+	case "incident_trajectory":
+		in, err := decodeInput[IncidentTrajectoryInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doIncidentTrajectory(b, in)
+	case "overview":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doOverview(b)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", name)
 }

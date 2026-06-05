@@ -397,6 +397,8 @@ func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
 		{"clusters", map[string]any{"limit": 1}},
 		{"skill_candidates", map[string]any{"limit": 1}},
+		{"incidents", map[string]any{"limit": 5}},
+		{"overview", nil},
 	}
 
 	for _, tc := range cases {

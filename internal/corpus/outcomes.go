@@ -98,7 +98,7 @@ having sum(resolved) >= 1`)
 	}
 
 	for i := range candidates {
-		paths, err := resolutionPaths(db, &candidates[i])
+		paths, err := resolutionPaths(db, candidates[i].ToolName, candidates[i].CommandFamily, candidates[i].ErrorSignature)
 		if err != nil {
 			return nil, err
 		}
@@ -148,13 +148,13 @@ func candidateTier(resolved, sessions int) string {
 // top K. Confidence is the Wilson lower bound of "of the times this failure was
 // fixed, how often was it fixed THIS way" — so a 1-of-1 path ranks below a
 // 3-of-4 path even though both are "always" by raw rate.
-func resolutionPaths(db *sql.DB, c *SkillCandidate) ([]ResolutionPath, error) {
+func resolutionPaths(db *sql.DB, toolName, commandFamily, errorSignature string) ([]ResolutionPath, error) {
 	rows, err := db.Query(`
 select resolution_path, session_key, project_key, resolve_entry_id, coalesce(resolved_at,'')
 from failure_episodes
 where resolved=1 and tool_name=? and command_family=? and error_signature=?
 order by resolved_at desc, session_key desc, open_entry_id desc`,
-		c.ToolName, c.CommandFamily, c.ErrorSignature)
+		toolName, commandFamily, errorSignature)
 	if err != nil {
 		return nil, err
 	}

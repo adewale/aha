@@ -172,6 +172,50 @@ export interface SkillCandidate {
   tier: string;
 }
 
+export interface Incident {
+  tool_name: string;
+  command_family: string;
+  error_signature: string;
+  episodes: number;
+  distinct_sessions: number;
+  distinct_projects: number;
+  resolved: number;
+  resolution_rate: number;
+  state: string;
+  tier: string;
+  first_seen: string;
+  last_seen: string;
+  spark: number[];
+  paths: ResolutionPath[];
+  sample_ref?: string;
+  score: number;
+}
+
+export interface TrajectoryStep {
+  family: string;
+  ref: Ref;
+  is_error: boolean;
+  timestamp: string;
+}
+
+export interface NamedCount {
+  name: string;
+  count: number;
+}
+
+export interface Overview {
+  sessions: number;
+  entries: number;
+  messages: number;
+  tool_calls: number;
+  sources: NamedCount[];
+  machines: NamedCount[];
+  projects: NamedCount[];
+  first_session: string;
+  last_session: string;
+  index_size_bytes: number;
+}
+
 // Tools whose Go return type is map[string]any are exposed loosely.
 // Callers that need stronger typing can cast at the call site.
 export type StatusReport = Record<string, unknown>;
@@ -234,6 +278,36 @@ export interface SkillCandidatesArgs {
    * Cap on returned skill candidates (default 50, max 200)
    */
   limit?: number;
+}
+
+export interface IncidentsArgs {
+  /**
+   * Cap on returned incidents (default 50, max 200)
+   */
+  limit?: number;
+  /**
+   * Filter to one project key
+   */
+  project?: string;
+  /**
+   * Filter to one source adapter (pi, claude-code, codex, opencode)
+   */
+  source?: string;
+  /**
+   * Filter to one machine id
+   */
+  machine?: string;
+  /**
+   * Filter to one tool name
+   */
+  tool?: string;
+}
+
+export interface IncidentTrajectoryArgs {
+  /**
+   * Resolving-success ref (msg:v1:...), e.g. an incident/skill-candidate path sample_ref
+   */
+  ref: Ref;
 }
 
 /**
@@ -299,6 +373,14 @@ export function aha(transport: Transport) {
     corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
     /** Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only. */
     doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
+    /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
+    incident_trajectory: (args: IncidentTrajectoryArgs) =>
+      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+    /** Unified failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tier, and top resolution paths). Optional project/source/machine/tool facets. The single best surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list. */
+    incidents: (args: IncidentsArgs = {}) =>
+      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+    /** Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'. */
+    overview: () => transport.call("overview", {}) as Promise<Overview>,
     /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
     read: (args: ReadArgs) =>
       transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
@@ -320,6 +402,9 @@ export const TOOLS = [
   "conflicts",
   "corpus_size",
   "doctor",
+  "incident_trajectory",
+  "incidents",
+  "overview",
   "read",
   "search",
   "skill_candidates",

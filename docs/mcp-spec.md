@@ -48,6 +48,9 @@ output.
 | `read`        | `aha read`                           | one of: `ref` (string, canonical ref text) **or** `session` + optional `entry`; plus `before` (int, default 3), `after` (int, default 5)           | `[]corpus.ReadEntry`                                  |
 | `clusters`    | `aha clusters`                       | `limit` (int, default 50)                                                                                                                          | `[]corpus.Cluster`                                    |
 | `skill_candidates` | `aha clusters --with-fixes`     | `limit` (int, default 50)                                                                                                                          | `[]corpus.SkillCandidate`                             |
+| `incidents`   | (dashboard unified view)             | `limit` (int, default 50); optional `project`, `source`, `machine`, `tool`                                                                          | `[]corpus.Incident`                                   |
+| `incident_trajectory` | (dashboard drill-in)         | `ref` (string, a resolving-success `msg:v1:` ref)                                                                                                   | `[]corpus.TrajectoryStep`                             |
+| `overview`    | (dashboard orientation)              | none                                                                                                                                               | `corpus.Overview`                                     |
 | `status`      | `aha status`                         | none                                                                                                                                               | `map[string]any` from `corpus.Status`                 |
 | `verify`      | `aha verify` (read-only; no repair)  | none                                                                                                                                               | `corpus.VerifyReport`                                 |
 | `conflicts`   | `aha conflicts`                      | none                                                                                                                                               | `[]corpus.Conflict`                                   |
@@ -109,8 +112,9 @@ aha mcp [--config PATH] [--repo DIR] [--dry-run]
 ## Security boundaries
 
 - Stdio only. No port is opened, no socket is bound.
-- Read-only: only `search`, `read`, `clusters`, `status`, `verify`,
-  `conflicts`, `corpus_size`, `skill_candidates`, and `doctor` are reachable; write tools are not registered.
+- Read-only: only `search`, `read`, `clusters`, `skill_candidates`,
+  `incidents`, `incident_trajectory`, `overview`, `status`, `verify`,
+  `conflicts`, `corpus_size`, and `doctor` are reachable; write tools are not registered.
 - Same filesystem access as the CLI: whatever corpus and config the calling
   user can read.
 - No depot writes, no R2 calls, no remote network access.
@@ -306,6 +310,9 @@ Routes:
 | POST   | `/api/read`         | JSON args → `[]ReadEntry`              |
 | POST   | `/api/clusters`     | JSON args → `[]Cluster`                |
 | POST   | `/api/skill_candidates` | JSON args → `[]SkillCandidate`     |
+| POST   | `/api/incidents`    | JSON args → `[]Incident`               |
+| POST   | `/api/incident_trajectory` | JSON args → `[]TrajectoryStep`  |
+| GET    | `/api/overview`     | `Overview`                             |
 
 Security posture:
 

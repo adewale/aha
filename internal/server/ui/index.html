@@ -9,10 +9,15 @@
 <body>
 <header>
   <h1>aha</h1>
-  <div id="status-strip" class="muted">loading status…</div>
+  <div id="status-strip" class="muted">loading…</div>
 </header>
 
 <main>
+  <section id="overview-section">
+    <h2>corpus</h2>
+    <div id="overview" class="muted">loading overview…</div>
+  </section>
+
   <section id="search">
     <form id="search-form">
       <input id="query" placeholder="search messages and artifacts" autofocus>
@@ -30,16 +35,23 @@
     <pre id="reader-body"></pre>
   </section>
 
-  <section id="clusters-section">
-    <h2>error clusters <span class="muted">— skill candidates</span></h2>
-    <p class="muted">recurring tool-call failures, ranked. select one to inspect a sample failing command.</p>
-    <ol id="clusters"></ol>
-  </section>
-
-  <section id="skills-section">
-    <h2>resolved clusters <span class="muted">— outcome-weighted fixes</span></h2>
-    <p class="muted">clusters with at least one observed fix, ranked by the resolution path that worked. select a path to drill into its resolving success.</p>
-    <ol id="skills"></ol>
+  <section id="incidents-section">
+    <h2>incidents <span class="muted">— what breaks &amp; how it gets fixed</span></h2>
+    <div id="incident-controls">
+      <span class="seg" role="group" aria-label="state filter">
+        <button type="button" class="state-btn active" data-state="all">all</button>
+        <button type="button" class="state-btn" data-state="unresolved">unresolved</button>
+        <button type="button" class="state-btn" data-state="partial">partial</button>
+        <button type="button" class="state-btn" data-state="resolved">resolved</button>
+      </span>
+      <input id="f-project" class="facet" placeholder="project">
+      <input id="f-source" class="facet" placeholder="source">
+      <input id="f-machine" class="facet" placeholder="machine">
+      <input id="f-tool" class="facet" placeholder="tool">
+      <button type="button" id="incident-apply">apply</button>
+    </div>
+    <p class="muted">recurring tool-call failures, each with its resolution status. select a row or fix path to read it; unresolved &amp; recurring is your to-do list.</p>
+    <ol id="incidents"></ol>
   </section>
 
   <section id="conflicts-section">
