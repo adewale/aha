@@ -40,3 +40,16 @@ func TestGeneratedTSExposesEveryReadOnlyTool(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratedTSUsesWireRefStringsOutsideSearchResult(t *testing.T) {
+	body := string(codegen.Generate())
+	for _, want := range []string{
+		"  ref: Ref;\n  ref_text: string;",
+		"export interface TrajectoryStep {\n  family: string;\n  ref: string;",
+		"export interface IncidentTrajectoryArgs {\n  /**\n   * Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref\n   */\n  ref: string;",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("generated TS ref type contract missing %q", want)
+		}
+	}
+}

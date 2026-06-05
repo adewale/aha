@@ -170,6 +170,7 @@ func BuildToolInvocations(entries []model.ParsedEntry, projectKey, machineID str
 		inv := ToolInvocation{
 			SessionKey:     "", // filled by caller (needs session key)
 			EntryID:        item.entry.EntryID,
+			LineNo:         item.entry.LineNo,
 			ToolKey:        toolKey,
 			ToolUseID:      c.ID,
 			Ordinal:        c.Ordinal,
@@ -209,6 +210,7 @@ func BuildToolInvocations(entries []model.ParsedEntry, projectKey, machineID str
 type ToolInvocation struct {
 	SessionKey      string
 	EntryID         string
+	LineNo          int
 	ToolKey         string
 	ToolUseID       string
 	Ordinal         int

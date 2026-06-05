@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/adewale/aha/internal/model"
@@ -141,6 +142,71 @@ func TestIncidentsFacetFilters(t *testing.T) {
 	}
 }
 
+// TestIncidentsStateFilterAppliesBeforeLimit proves state is a corpus-side
+// filter, not a client-side trim of the first mixed-state page.
+func TestIncidentsStateFilterAppliesBeforeLimit(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	// The resolved incident has the higher score and would win limit=1 without
+	// the state predicate being applied before pagination.
+	for _, s := range []string{"resolved-a", "resolved-b", "resolved-c"} {
+		seedToolInvocation(t, store.DB, s, "e1", 0, "Bash", "high score resolved", true, "boom", "2026-01-01T00:00:00Z")
+		seedToolInvocation(t, store.DB, s, "e2", 1, "Bash", "high score resolved", false, "", "2026-01-01T00:00:01Z")
+	}
+	seedToolInvocation(t, store.DB, "unresolved-a", "e1", 0, "Bash", "lower score unresolved", true, "boom", "2026-01-02T00:00:00Z")
+	if err := backfillFailureEpisodes(store.DB); err != nil {
+		t.Fatal(err)
+	}
+
+	unresolved, err := Incidents(store.DB, IncidentFilter{State: "unresolved", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unresolved) != 1 || unresolved[0].State != "unresolved" || unresolved[0].CommandFamily != "lower score unresolved" {
+		t.Fatalf("state filter must run before limit, got %+v", unresolved)
+	}
+}
+
+// TestIncidentsResolutionPathsRespectFacetFilters proves a scoped incident row
+// cannot borrow fix paths, confidence, or sample refs from another facet that
+// shares the same tool/family/error identity.
+func TestIncidentsResolutionPathsRespectFacetFilters(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	seedToolInvocation(t, store.DB, "s-alpha", "e1", 0, "Bash", "deploy", true, "boom", "2026-01-01T00:00:00Z")
+	seedToolInvocation(t, store.DB, "s-alpha", "e2", 1, "Bash", "alpha-fix", false, "", "2026-01-01T00:00:01Z")
+	seedToolInvocation(t, store.DB, "s-alpha", "e3", 2, "Bash", "deploy", false, "", "2026-01-01T00:00:02Z")
+	seedToolInvocation(t, store.DB, "s-beta", "e1", 0, "Bash", "deploy", true, "boom", "2026-01-01T00:00:00Z")
+	seedToolInvocation(t, store.DB, "s-beta", "e2", 1, "Bash", "beta-fix", false, "", "2026-01-01T00:00:01Z")
+	seedToolInvocation(t, store.DB, "s-beta", "e3", 2, "Bash", "deploy", false, "", "2026-01-01T00:00:02Z")
+	if err := backfillFailureEpisodes(store.DB); err != nil {
+		t.Fatal(err)
+	}
+
+	alpha, err := Incidents(store.DB, IncidentFilter{Project: "s-alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alpha) != 1 || alpha[0].Projects != 1 || alpha[0].Resolved != 1 {
+		t.Fatalf("project-scoped incident should contain only alpha's episode: %+v", alpha)
+	}
+	if len(alpha[0].Paths) != 1 {
+		t.Fatalf("project-scoped paths must not include beta's fix path: %+v", alpha[0].Paths)
+	}
+	families := fmt.Sprint(alpha[0].Paths[0].Families)
+	if families != fmt.Sprint([]string{"alpha-fix", "deploy"}) {
+		t.Fatalf("project-scoped path = %s, want only alpha fix", families)
+	}
+}
+
 // TestIncidentTrajectoryReconstructsArc proves the fail→fix arc is rebuilt with
 // a ref per step, from a resolving-success ref.
 func TestIncidentTrajectoryReconstructsArc(t *testing.T) {
@@ -163,7 +229,7 @@ func TestIncidentTrajectoryReconstructsArc(t *testing.T) {
 	if len(incidents) != 1 || incidents[0].SampleRef == "" {
 		t.Fatalf("expected one resolved incident with a sample ref: %+v", incidents)
 	}
-	steps, err := IncidentTrajectory(store.DB, incidents[0].SampleRef)
+	steps, err := IncidentTrajectory(store.DB, incidents[0].SampleRef, &incidents[0].Paths[0].SampleOrdinal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +250,57 @@ func TestIncidentTrajectoryReconstructsArc(t *testing.T) {
 		if steps[i].Ref == "" {
 			t.Fatalf("step[%d] missing ref", i)
 		}
+	}
+}
+
+// TestIncidentTrajectoryDisambiguatesSharedResolvingEntry covers entries with
+// multiple tool calls: a message ref alone identifies the transcript entry, so
+// the incident path also carries the resolving invocation ordinal to select the
+// exact fail→fix arc.
+func TestIncidentTrajectoryDisambiguatesSharedResolvingEntry(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	seedToolInvocation(t, store.DB, "s1", "open", 0, "Bash", "cmd a", true, "boom-a", "2026-01-01T00:00:00Z")
+	seedToolInvocation(t, store.DB, "s1", "open", 1, "Bash", "cmd b", true, "boom-b", "2026-01-01T00:00:00Z")
+	seedToolInvocation(t, store.DB, "s1", "resolve", 0, "Bash", "cmd a", false, "", "2026-01-01T00:00:01Z")
+	seedToolInvocation(t, store.DB, "s1", "resolve", 1, "Bash", "cmd b", false, "", "2026-01-01T00:00:01Z")
+	if err := backfillFailureEpisodes(store.DB); err != nil {
+		t.Fatal(err)
+	}
+
+	incidents, err := Incidents(store.DB, IncidentFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byFamily := map[string]Incident{}
+	for _, in := range incidents {
+		byFamily[in.CommandFamily] = in
+	}
+	for _, family := range []string{"cmd a", "cmd b"} {
+		in := byFamily[family]
+		if len(in.Paths) != 1 || in.Paths[0].SampleRef == "" {
+			t.Fatalf("%s incident missing path sample: %+v", family, in)
+		}
+		steps, err := IncidentTrajectory(store.DB, in.Paths[0].SampleRef, &in.Paths[0].SampleOrdinal)
+		if err != nil {
+			t.Fatalf("trajectory for %s: %v", family, err)
+		}
+		if len(steps) == 0 || steps[0].Family != family || steps[len(steps)-1].Family != family {
+			t.Fatalf("trajectory for %s selected the wrong arc: %+v", family, steps)
+		}
+	}
+	if byFamily["cmd a"].Paths[0].SampleRef != byFamily["cmd b"].Paths[0].SampleRef {
+		t.Fatalf("test setup expected shared resolving entry refs: a=%q b=%q", byFamily["cmd a"].Paths[0].SampleRef, byFamily["cmd b"].Paths[0].SampleRef)
+	}
+	if byFamily["cmd a"].Paths[0].SampleOrdinal == byFamily["cmd b"].Paths[0].SampleOrdinal {
+		t.Fatalf("sample ordinals must disambiguate shared ref: a=%d b=%d", byFamily["cmd a"].Paths[0].SampleOrdinal, byFamily["cmd b"].Paths[0].SampleOrdinal)
+	}
+	if _, err := IncidentTrajectory(store.DB, byFamily["cmd a"].Paths[0].SampleRef, nil); err == nil {
+		t.Fatal("ambiguous resolving entry without ordinal should fail instead of returning an arbitrary arc")
 	}
 }
 

@@ -39,18 +39,10 @@ func cmdIncidents(args []string, stdout, stderr io.Writer) error {
 		Source:  *source,
 		Machine: *machine,
 		Tool:    *tool,
+		State:   *state,
 	})
 	if err != nil {
 		return err
-	}
-	if *state != "" {
-		filtered := incidents[:0]
-		for _, in := range incidents {
-			if in.State == *state {
-				filtered = append(filtered, in)
-			}
-		}
-		incidents = filtered
 	}
 
 	if *jsonOut {

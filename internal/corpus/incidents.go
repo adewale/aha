@@ -39,12 +39,14 @@ type Incident struct {
 }
 
 // IncidentFilter scopes the incident list. Empty fields impose no constraint;
-// Limit<=0 uses the default page size and is clamped to MaxClusterLimit.
+// State, when set, must be unresolved, partial, or resolved. Limit<=0 uses
+// the default page size and is clamped to MaxClusterLimit.
 type IncidentFilter struct {
 	Project string
 	Source  string
 	Machine string
 	Tool    string
+	State   string
 	Limit   int
 }
 
@@ -64,6 +66,12 @@ func incidentState(resolved, episodes int) string {
 // spread so the loudest pain surfaces first regardless of whether it has a fix
 // yet (callers filter by State to get e.g. "recurring but unresolved").
 func Incidents(db *sql.DB, f IncidentFilter) ([]Incident, error) {
+	state, err := normalizeIncidentState(f.State)
+	if err != nil {
+		return nil, err
+	}
+	f.State = state
+
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
@@ -84,7 +92,8 @@ select fe.tool_name, fe.command_family, fe.error_signature,
        max(fe.opened_at) as last_seen
 from failure_episodes fe
 ` + incidentJoin(f) + where + `
-group by fe.tool_name, fe.command_family, fe.error_signature`
+group by fe.tool_name, fe.command_family, fe.error_signature
+` + incidentHaving(f)
 	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -142,7 +151,7 @@ group by fe.tool_name, fe.command_family, fe.error_signature`
 	// <= limit.
 	for i := range incidents {
 		if incidents[i].Resolved > 0 {
-			paths, err := resolutionPaths(db, incidents[i].ToolName, incidents[i].CommandFamily, incidents[i].ErrorSignature)
+			paths, err := resolutionPaths(db, f, incidents[i].ToolName, incidents[i].CommandFamily, incidents[i].ErrorSignature)
 			if err != nil {
 				return nil, err
 			}
@@ -183,6 +192,15 @@ func incidentJoin(f IncidentFilter) string {
 	return ""
 }
 
+func normalizeIncidentState(state string) (string, error) {
+	switch state {
+	case "", "unresolved", "partial", "resolved":
+		return state, nil
+	default:
+		return "", fmt.Errorf("invalid incident state %q (want unresolved, partial, or resolved)", state)
+	}
+}
+
 func incidentWhere(f IncidentFilter) (string, []any) {
 	var conds []string
 	var args []any
@@ -206,6 +224,19 @@ func incidentWhere(f IncidentFilter) (string, []any) {
 		return "", nil
 	}
 	return "where " + strings.Join(conds, " and ") + "\n", args
+}
+
+func incidentHaving(f IncidentFilter) string {
+	switch f.State {
+	case "unresolved":
+		return "having sum(fe.resolved) = 0"
+	case "partial":
+		return "having sum(fe.resolved) > 0 and sum(fe.resolved) < count(*)"
+	case "resolved":
+		return "having sum(fe.resolved) = count(*)"
+	default:
+		return ""
+	}
 }
 
 // incidentFailureRef returns a ref into a representative failing opener for an
@@ -325,6 +356,7 @@ from failure_episodes fe
 type TrajectoryStep struct {
 	Family    string `json:"family"`
 	Ref       string `json:"ref"`
+	Ordinal   int    `json:"ordinal"`
 	IsError   bool   `json:"is_error"`
 	Timestamp string `json:"timestamp"`
 }
@@ -332,8 +364,9 @@ type TrajectoryStep struct {
 // IncidentTrajectory reconstructs the full fail→fix arc behind a resolving
 // success ref: every tool call from the failing opener through the resolving
 // success, in order, each with a ref. The input is the resolving success ref a
-// ResolutionPath carries as its SampleRef.
-func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error) {
+// ResolutionPath carries as its SampleRef plus, for multi-call transcript
+// entries, the path's SampleOrdinal to identify the exact resolving invocation.
+func IncidentTrajectory(db *sql.DB, resolveRef string, resolveOrdinal *int) ([]TrajectoryStep, error) {
 	parsed, err := model.ParseRef(resolveRef)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ref: %w", err)
@@ -344,22 +377,55 @@ func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error)
 	}
 	sessionKey, resolveEntry := msg.Session.String(), msg.Entry.String()
 
-	var openEntry string
-	err = db.QueryRow(`select open_entry_id from failure_episodes where session_key=? and resolve_entry_id=? limit 1`, sessionKey, resolveEntry).Scan(&openEntry)
-	if err == sql.ErrNoRows {
-		return []TrajectoryStep{}, nil
+	type episodeMatch struct {
+		openEntry      string
+		openOrdinal    int
+		resolveOrdinal int
 	}
+	q := `select open_entry_id, open_ordinal, coalesce(resolve_ordinal, -1) from failure_episodes where session_key=? and resolve_entry_id=?`
+	args := []any{sessionKey, resolveEntry}
+	if resolveOrdinal != nil {
+		q += ` and resolve_ordinal=?`
+		args = append(args, *resolveOrdinal)
+	}
+	q += ` order by open_entry_id, open_ordinal, resolve_ordinal limit 2`
+	matchRows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
+	var matches []episodeMatch
+	for matchRows.Next() {
+		var m episodeMatch
+		if err := matchRows.Scan(&m.openEntry, &m.openOrdinal, &m.resolveOrdinal); err != nil {
+			_ = matchRows.Close()
+			return nil, err
+		}
+		matches = append(matches, m)
+	}
+	if err := matchRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := matchRows.Err(); err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return []TrajectoryStep{}, nil
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("trajectory requires resolve ordinal for multi-invocation resolving entry %q", resolveEntry)
+	}
+	match := matches[0]
 
-	rows, err := db.Query(`select entry_id, ordinal, command_family, is_error, timestamp from tool_invocations where session_key=?`, sessionKey)
+	rows, err := db.Query(`select ti.entry_id, ti.ordinal, e.line_no, ti.command_family, ti.is_error, ti.timestamp
+from tool_invocations ti
+join entries e on e.session_key=ti.session_key and e.entry_id=ti.entry_id
+where ti.session_key=?`, sessionKey)
 	if err != nil {
 		return nil, err
 	}
 	type inv struct {
 		entryID, family, ts string
-		ordinal             int
+		lineNo, ordinal     int
 		isError             bool
 	}
 	var invs []inv
@@ -367,7 +433,7 @@ func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error)
 		var iv inv
 		var isErr int
 		var fam, ts sql.NullString
-		if err := rows.Scan(&iv.entryID, &iv.ordinal, &fam, &isErr, &ts); err != nil {
+		if err := rows.Scan(&iv.entryID, &iv.ordinal, &iv.lineNo, &fam, &isErr, &ts); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -389,6 +455,9 @@ func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error)
 		if oki && okj && !ti.Equal(tj) {
 			return ti.Before(tj)
 		}
+		if invs[i].lineNo != invs[j].lineNo {
+			return invs[i].lineNo < invs[j].lineNo
+		}
 		if invs[i].entryID != invs[j].entryID {
 			return invs[i].entryID < invs[j].entryID
 		}
@@ -397,10 +466,10 @@ func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error)
 
 	openIdx, resolveIdx := -1, -1
 	for i, iv := range invs {
-		if iv.entryID == openEntry && openIdx == -1 {
+		if iv.entryID == match.openEntry && iv.ordinal == match.openOrdinal {
 			openIdx = i
 		}
-		if iv.entryID == resolveEntry {
+		if iv.entryID == resolveEntry && iv.ordinal == match.resolveOrdinal {
 			resolveIdx = i
 		}
 	}
@@ -410,7 +479,7 @@ func IncidentTrajectory(db *sql.DB, resolveRef string) ([]TrajectoryStep, error)
 	steps := make([]TrajectoryStep, 0, resolveIdx-openIdx+1)
 	for i := openIdx; i <= resolveIdx; i++ {
 		iv := invs[i]
-		step := TrajectoryStep{Family: iv.family, IsError: iv.isError, Timestamp: iv.ts}
+		step := TrajectoryStep{Family: iv.family, Ordinal: iv.ordinal, IsError: iv.isError, Timestamp: iv.ts}
 		if r, err := messageRefText(sessionKey, iv.entryID); err == nil {
 			step.Ref = r
 		}

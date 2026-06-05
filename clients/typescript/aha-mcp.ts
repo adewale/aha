@@ -143,6 +143,7 @@ export interface ResolutionPath {
   distinct_projects: number;
   confidence: number;
   sample_ref?: string;
+  sample_ordinal: number;
 }
 
 export interface Incident {
@@ -166,7 +167,8 @@ export interface Incident {
 
 export interface TrajectoryStep {
   family: string;
-  ref: Ref;
+  ref: string;
+  ordinal: number;
   is_error: boolean;
   timestamp: string;
 }
@@ -260,13 +262,21 @@ export interface IncidentsArgs {
    * Filter to one tool name
    */
   tool?: string;
+  /**
+   * Filter by incident state: unresolved, partial, or resolved
+   */
+  state?: string;
 }
 
 export interface IncidentTrajectoryArgs {
   /**
-   * Resolving-success ref (msg:v1:...), e.g. an incident/skill-candidate path sample_ref
+   * Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref
    */
-  ref: Ref;
+  ref: string;
+  /**
+   * Resolving invocation ordinal from the incident path sample_ordinal; required when one transcript entry resolved multiple incidents
+   */
+  ordinal?: number;
 }
 
 /**
@@ -329,7 +339,7 @@ export function aha(transport: Transport) {
     corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
     /** Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only. */
     doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
-    /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
+    /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
     incident_trajectory: (args: IncidentTrajectoryArgs) =>
       transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
     /** The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output. */

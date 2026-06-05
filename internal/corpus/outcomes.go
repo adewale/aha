@@ -18,12 +18,13 @@ const defaultPathsPerCandidate = 3
 // ResolutionPath is one distinct way a cluster's failures got resolved: the
 // ordered command families taken from the failure to the fix (fix family last).
 type ResolutionPath struct {
-	Families   []string `json:"families"`
-	Support    int      `json:"support"`
-	Sessions   int      `json:"distinct_sessions"`
-	Projects   int      `json:"distinct_projects"`
-	Confidence float64  `json:"confidence"`
-	SampleRef  string   `json:"sample_ref,omitempty"`
+	Families      []string `json:"families"`
+	Support       int      `json:"support"`
+	Sessions      int      `json:"distinct_sessions"`
+	Projects      int      `json:"distinct_projects"`
+	Confidence    float64  `json:"confidence"`
+	SampleRef     string   `json:"sample_ref,omitempty"`
+	SampleOrdinal int      `json:"sample_ordinal"`
 }
 
 // candidateTier marks how much evidence backs a candidate: "established" needs
@@ -42,13 +43,20 @@ func candidateTier(resolved, sessions int) string {
 // top K. Confidence is the Wilson lower bound of "of the times this failure was
 // fixed, how often was it fixed THIS way" — so a 1-of-1 path ranks below a
 // 3-of-4 path even though both are "always" by raw rate.
-func resolutionPaths(db *sql.DB, toolName, commandFamily, errorSignature string) ([]ResolutionPath, error) {
-	rows, err := db.Query(`
-select resolution_path, session_key, project_key, resolve_entry_id, coalesce(resolved_at,'')
-from failure_episodes
-where resolved=1 and tool_name=? and command_family=? and error_signature=?
-order by resolved_at desc, session_key desc, open_entry_id desc`,
-		toolName, commandFamily, errorSignature)
+func resolutionPaths(db *sql.DB, f IncidentFilter, toolName, commandFamily, errorSignature string) ([]ResolutionPath, error) {
+	where, args := incidentWhere(f)
+	clause := "where"
+	if where != "" {
+		clause = strings.TrimPrefix(where, "where")
+		clause = "where" + clause + " and"
+	}
+	q := `
+select fe.resolution_path, fe.session_key, fe.project_key, fe.resolve_entry_id, coalesce(fe.resolve_ordinal, -1), coalesce(fe.resolved_at,'')
+from failure_episodes fe
+` + incidentJoin(f) + clause + ` fe.resolved=1 and fe.tool_name=? and fe.command_family=? and fe.error_signature=?
+order by fe.resolved_at desc, fe.session_key desc, fe.open_entry_id desc`
+	args = append(append([]any{}, args...), toolName, commandFamily, errorSignature)
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +68,14 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 		projects      map[string]struct{}
 		sampleSession string
 		sampleEntry   string
+		sampleOrdinal int
 	}
 	byPath := map[string]*agg{}
 	var pathOrder []string
 	for rows.Next() {
 		var pathJSON, sessionKey, projectKey, resolveEntryID, resolvedAt string
-		if err := rows.Scan(&pathJSON, &sessionKey, &projectKey, &resolveEntryID, &resolvedAt); err != nil {
+		var resolveOrdinal int
+		if err := rows.Scan(&pathJSON, &sessionKey, &projectKey, &resolveEntryID, &resolveOrdinal, &resolvedAt); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -82,6 +92,7 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 				projects:      map[string]struct{}{},
 				sampleSession: sessionKey, // rows are newest-first, so the first row is the most recent
 				sampleEntry:   resolveEntryID,
+				sampleOrdinal: resolveOrdinal,
 			}
 			byPath[pathJSON] = a
 			pathOrder = append(pathOrder, pathJSON)
@@ -117,11 +128,12 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 	for _, key := range pathOrder {
 		a := byPath[key]
 		p := ResolutionPath{
-			Families:   a.families,
-			Support:    a.support,
-			Sessions:   len(a.sessions),
-			Projects:   len(a.projects),
-			Confidence: wilsonLowerBound(a.support, trials, wilsonZ95),
+			Families:      a.families,
+			Support:       a.support,
+			Sessions:      len(a.sessions),
+			Projects:      len(a.projects),
+			Confidence:    wilsonLowerBound(a.support, trials, wilsonZ95),
+			SampleOrdinal: a.sampleOrdinal,
 		}
 		// Best-effort: a malformed stored coordinate degrades to an empty
 		// SampleRef. The schema CHECK guarantees resolve_entry_id is non-null on

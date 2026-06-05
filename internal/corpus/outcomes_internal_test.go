@@ -225,8 +225,8 @@ func TestResolutionPathSampleRefBestEffort(t *testing.T) {
 	seedToolInvocation(t, store.DB, "s1", "e1", 0, "Bash", "git push", true, "rejected", "2026-01-01T00:00:00Z")
 	key, _ := model.NewSessionKey("claude-code", "m", "s1")
 	sk := key.String()
-	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sk, "e1", 0, "Bash", "git push", "rejected", 1, "bad\nid", `["git push"]`, "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z"); err != nil {
+	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolve_ordinal,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sk, "e1", 0, "Bash", "git push", "rejected", 1, "bad\nid", 0, `["git push"]`, "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z"); err != nil {
 		t.Fatalf("seed resolved episode: %v", err)
 	}
 	incidents, err := Incidents(store.DB, IncidentFilter{})
@@ -317,8 +317,8 @@ func TestFailureEpisodesSchemaRejectsInvalidShape(t *testing.T) {
 	key, _ := model.NewSessionKey("claude-code", "m", "s1")
 	sk := key.String()
 
-	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sk, "e1", 0, "Bash", "git push", "rejected", 0, nil, nil, "s1", "2026-01-01T00:00:00Z", nil); err != nil {
+	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolve_ordinal,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sk, "e1", 0, "Bash", "git push", "rejected", 0, nil, nil, nil, "s1", "2026-01-01T00:00:00Z", nil); err != nil {
 		t.Fatalf("valid abandoned episode should insert: %v", err)
 	}
 	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,resolved,resolution_path,opened_at) values(?,?,?,?,?,?)`,
@@ -327,13 +327,68 @@ func TestFailureEpisodesSchemaRejectsInvalidShape(t *testing.T) {
 	}
 	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,resolved,opened_at) values(?,?,?,?,?)`,
 		sk, "e1", 98, 1, "2026-01-01T00:00:00Z"); err == nil {
-		t.Fatal("CHECK should reject resolved=1 without resolve_entry_id/resolution_path/resolved_at")
+		t.Fatal("CHECK should reject resolved=1 without resolve_entry_id/resolve_ordinal/resolution_path/resolved_at")
 	}
 	if _, err := store.DB.Exec(`delete from failure_episodes where session_key=?`, sk); err != nil {
 		t.Fatalf("recompute delete should be allowed for a derived view: %v", err)
 	}
-	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sk, "e1", 0, "Bash", "git push", "rejected", 1, "e1", `["git push"]`, "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z"); err != nil {
+	if _, err := store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolve_ordinal,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sk, "e1", 0, "Bash", "git push", "rejected", 1, "e1", 0, `["git push"]`, "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z"); err != nil {
 		t.Fatalf("reinsert after recompute delete should succeed: %v", err)
+	}
+}
+
+func TestFailureEpisodeResolveOrdinalMigrationStrengthensExistingV14Table(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	seedToolInvocation(t, store.DB, "s1", "e1", 0, "Bash", "git push", true, "rejected", "2026-01-01T00:00:00Z")
+	seedToolInvocation(t, store.DB, "s1", "e2", 0, "Bash", "git push", false, "", "2026-01-01T00:00:05Z")
+	if _, err := store.DB.Exec(`drop table failure_episodes`); err != nil {
+		t.Fatal(err)
+	}
+	oldV14 := `create table failure_episodes(
+  session_key text not null,
+  open_entry_id text not null,
+  open_ordinal integer not null default 0,
+  tool_name text,
+  command_family text,
+  error_signature text,
+  resolved integer not null check(resolved in (0,1)),
+  resolve_entry_id text,
+  resolution_path text,
+  project_key text,
+  opened_at text,
+  resolved_at text,
+  primary key(session_key, open_entry_id, open_ordinal),
+  foreign key(session_key, open_entry_id) references entries(session_key, entry_id),
+  check(
+    (resolved=1 and resolve_entry_id is not null and resolution_path is not null and resolved_at is not null)
+    or
+    (resolved=0 and resolve_entry_id is null and resolution_path is null and resolved_at is null)
+  )
+)`
+	if _, err := store.DB.Exec(oldV14); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateFailureEpisodeResolveOrdinals(store.DB); err != nil {
+		t.Fatal(err)
+	}
+	var nullResolved int
+	if err := store.DB.QueryRow(`select count(*) from failure_episodes where resolved=1 and resolve_ordinal is null`).Scan(&nullResolved); err != nil {
+		t.Fatal(err)
+	}
+	if nullResolved != 0 {
+		t.Fatalf("migration backfill left resolved episodes without resolve_ordinal")
+	}
+	key, _ := model.NewSessionKey("claude-code", "m", "s1")
+	sk := key.String()
+	_, err = store.DB.Exec(`insert into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sk, "e1", 99, "Bash", "git push", "rejected", 1, "e2", `["git push"]`, "s1", "2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z")
+	if err == nil {
+		t.Fatal("upgraded CHECK should reject resolved row without resolve_ordinal")
 	}
 }

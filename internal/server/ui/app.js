@@ -134,18 +134,19 @@ function incidentFacets() {
 async function refreshIncidents() {
   const ol = $("incidents");
   try {
+    const args = { limit: 50, ...incidentFacets() };
+    if (incidentState !== "all") args.state = incidentState;
     const rows = await call("/api/incidents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 50, ...incidentFacets() }),
+      body: JSON.stringify(args),
     });
     lastIncidents = rows || [];
-    const shown = lastIncidents.filter((c) => incidentState === "all" || c.state === incidentState);
-    if (!shown.length) {
+    if (!lastIncidents.length) {
       ol.innerHTML = `<li class="muted">no incidents for this filter — ingest sessions with tool failures, or widen the filter</li>`;
       return;
     }
-    ol.innerHTML = shown.map((c) => renderIncident(c, lastIncidents.indexOf(c))).join("");
+    ol.innerHTML = lastIncidents.map((c, idx) => renderIncident(c, idx)).join("");
   } catch (e) {
     ol.innerHTML = `<li class="muted">incidents error: ${esc(e.message)}</li>`;
   }
@@ -167,10 +168,11 @@ function renderIncident(c, idx) {
           const fams = (p.families || []).map(esc).join(" › ");
           const confClass = p.confidence >= 0.6 ? " conf-high" : "";
           const ref = p.sample_ref || "";
-          return `<li class="skill-path${ref ? "" : " no-ref"}"${ref ? ` data-ref="${esc(ref)}"` : ""}>` +
+          const ord = Number.isInteger(p.sample_ordinal) ? p.sample_ordinal : 0;
+          return `<li class="skill-path${ref ? "" : " no-ref"}"${ref ? ` data-ref="${esc(ref)}" data-ordinal="${ord}"` : ""}>` +
             `<div class="meta"><span class="kbd${confClass}">conf=${(p.confidence || 0).toFixed(2)}</span>` +
             `<span class="muted">×${p.support} · ${p.distinct_sessions} sessions · ${p.distinct_projects} projects</span>` +
-            (ref ? ` <button type="button" class="trace-btn" data-ref="${esc(ref)}">trace</button>` : "") +
+            (ref ? ` <button type="button" class="trace-btn" data-ref="${esc(ref)}" data-ordinal="${ord}">trace</button>` : "") +
             `</div><div class="snippet"><code>${fams}</code></div>` +
             `<div class="trajectory" hidden></div></li>`;
         }).join("") +
@@ -232,7 +234,7 @@ async function copyText(text) {
 
 // loadTrajectory expands a fix path into the full fail→fix arc (each step
 // clickable to read), via the incident_trajectory tool.
-async function loadTrajectory(ref, container) {
+async function loadTrajectory(ref, ordinal, container) {
   if (!container.hidden) { container.hidden = true; container.innerHTML = ""; return; }
   container.hidden = false;
   container.innerHTML = `<span class="muted">loading trajectory…</span>`;
@@ -240,7 +242,7 @@ async function loadTrajectory(ref, container) {
     const steps = await call("/api/incident_trajectory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ref }),
+      body: JSON.stringify({ ref, ordinal }),
     });
     if (!steps || !steps.length) {
       container.innerHTML = `<span class="muted">no trajectory available</span>`;
@@ -361,7 +363,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (traceBtn) {
       ev.stopPropagation();
       const container = traceBtn.closest("li.skill-path").querySelector(".trajectory");
-      loadTrajectory(traceBtn.dataset.ref, container);
+      loadTrajectory(traceBtn.dataset.ref, Number(traceBtn.dataset.ordinal), container);
       return;
     }
     const trajStep = ev.target.closest(".traj-step[data-ref]");

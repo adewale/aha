@@ -11,7 +11,8 @@ paths that worked) — there is no separate failure-only or fix-only surface.
 
 Shipped:
 
-- corpus layer — migration 14 `failure_episodes`
+- corpus layer — migration 14 `failure_episodes` plus migration 15's
+  `resolve_ordinal` exact-invocation upgrade
   (`internal/corpus/failure_episodes_migration.go`), `assembleEpisodes`
   (`internal/corpus/episodes.go`), the Wilson scoring helpers
   (`internal/corpus/scoring.go`), and `Incidents` (`internal/corpus/incidents.go`,
@@ -19,8 +20,9 @@ Shipped:
   are recomputed per session at ingest from the stored `tool_invocations` and
   backfilled for existing corpora by the migration.
 - CLI — `aha incidents` (`internal/cli/command_incidents.go`).
-- MCP — an `incidents` tool plus `incident_trajectory` (the fail→fix arc) and
-  `overview` (`internal/mcp/tools.go`), crossing the SDK transport, the HTTP
+- MCP — an `incidents` tool plus `incident_trajectory` (the fail→fix arc,
+  disambiguated by `sample_ordinal` for multi-call entries) and `overview`
+  (`internal/mcp/tools.go`), crossing the SDK transport, the HTTP
   dispatch, and the cross-SDK conformance harness.
 - HTTP — `POST /api/incidents`, `POST /api/incident_trajectory`,
   `GET /api/overview` on the dashboard server (`internal/server/server.go`).
@@ -71,9 +73,9 @@ stores **one row per paired tool call with an observed outcome** — and crucial
 it stores **successes as well as failures**. The backfill inserts every
 invocation with an observed outcome, stamping `is_error`, `exit_code` (and its
 validity), `error_signature`, `command_family`, `timestamp`, `session_key`,
-`project_key`, and `entry_id`. The cluster query only ever filters
-`where is_error=1`, so the success rows are present but currently unread.
-**Outcome-weighting is the consumer of those success rows.**
+`project_key`, `entry_id`, and per-entry `ordinal`. Older cluster-style
+failure queries filter `where is_error=1`; outcome-weighting consumes the
+success rows as first-class evidence for resolved episodes.
 
 That means the entire layer is, in principle, a deterministic query plus a new
 projection table — the expensive parts (cross-adapter `tool_use`↔`tool_result`
@@ -126,9 +128,9 @@ succeeded." Paths are compared by their normalized family sequence, so the same
 fix across repos/ids collapses (the normalization already lives in
 `commandFamily`/`normalizeErrorSignature`).
 
-**Skill candidate.** A failure cluster `(tool_name, command_family,
-error_signature)` that has ≥1 resolved episode. Its recommended fix is the
-highest-confidence resolution path (below).
+**Incident.** A failure cluster `(tool_name, command_family,
+error_signature)` surfaced with recurrence, state, resolution rate, and (when
+resolved at least once) the top resolution paths that worked.
 
 ## Outcome-weighting
 
@@ -174,8 +176,8 @@ For each cluster `C`:
 At single-user scale most clusters have small N — often a single resolved
 episode. The design degrades *gracefully* rather than lying:
 
-- A path with `support=1` is surfaced, but its low Wilson bound and a
-  `confidence: "low"` band make the thin evidence explicit.
+- A path with `support=1` is surfaced, but its numeric Wilson lower-bound
+  `confidence` makes the thin evidence explicit.
 - Two presentation tiers mirror the personal-vs-promote distinction:
   `tentative` (resolved ≥1) and `established` (resolved ≥3 across ≥2 sessions).
 - The output never asserts "the fix is X." It asserts "in N observed episodes,
@@ -188,12 +190,13 @@ episode. The design degrades *gracefully* rather than lying:
 ```go
 // internal/corpus/outcomes.go
 type ResolutionPath struct {
-    Families   []string `json:"families"`     // normalized command-family sequence, fix tail last
-    Support    int      `json:"support"`      // resolved episodes taking this path
-    Sessions   int      `json:"distinct_sessions"`
-    Projects   int      `json:"distinct_projects"`
-    Confidence float64  `json:"confidence"`   // Wilson lower bound
-    SampleRef  string   `json:"sample_ref,omitempty"` // msg ref to the resolving success
+    Families      []string `json:"families"`       // normalized command-family sequence, fix tail last
+    Support       int      `json:"support"`        // resolved episodes taking this path
+    Sessions      int      `json:"distinct_sessions"`
+    Projects      int      `json:"distinct_projects"`
+    Confidence    float64  `json:"confidence"`     // Wilson lower bound
+    SampleRef     string   `json:"sample_ref,omitempty"` // msg ref to the resolving success
+    SampleOrdinal int      `json:"sample_ordinal"` // resolving tool-call ordinal within SampleRef's entry
 }
 
 type Incident struct {
@@ -238,9 +241,9 @@ surface.
 ### MCP / HTTP / TS
 
 The same `incidents` surface is exposed as an MCP tool (with `incident_trajectory`
-for the fail→fix arc behind a resolving ref, and `overview` for corpus
-orientation), as HTTP routes (`/api/incidents`, `/api/incident_trajectory`,
-`/api/overview`), and in the generated TypeScript client — all via the existing
+for the fail→fix arc behind a resolving ref plus its `sample_ordinal`, and
+`overview` for corpus orientation), as HTTP routes (`/api/incidents`,
+`/api/incident_trajectory`, `/api/overview`), and in the generated TypeScript client — all via the existing
 codegen/conformance pattern. Identities and paths are normalized command
 families / error signatures, never raw tool output, so no new redaction
 boundary is crossed.
@@ -250,7 +253,8 @@ boundary is crossed.
 A projection table, deterministically rebuildable from `tool_invocations`
 (which is itself rebuildable from `entries.raw_json`). Following the established
 pattern: `if not exists` schema, a foreign key, a require-entry trigger, and the
-versioned migration (**14**) that creates it and backfills.
+versioned migrations (**14** creates/backfills it; **15** adds/backfills the
+resolving invocation ordinal for multi-tool-call entries).
 
 Unlike the immutable `tool_invocations` rows it projects, `failure_episodes` is
 **not append-only**: a failure episode is a windowed aggregate that legitimately
@@ -269,6 +273,7 @@ create table if not exists failure_episodes(
   error_signature  text,
   resolved         integer not null check(resolved in (0,1)),
   resolve_entry_id text,
+  resolve_ordinal  integer,              -- exact resolving tool-call ordinal within resolve_entry_id
   resolution_path  text,                 -- json array of command families
   project_key      text,
   opened_at        text,
@@ -276,9 +281,9 @@ create table if not exists failure_episodes(
   primary key(session_key, open_entry_id, open_ordinal),
   foreign key(session_key, open_entry_id) references entries(session_key, entry_id),
   check(
-    (resolved=1 and resolve_entry_id is not null and resolution_path is not null and resolved_at is not null)
+    (resolved=1 and resolve_entry_id is not null and resolve_ordinal is not null and resolution_path is not null and resolved_at is not null)
     or
-    (resolved=0 and resolve_entry_id is null and resolution_path is null and resolved_at is null)
+    (resolved=0 and resolve_entry_id is null and resolve_ordinal is null and resolution_path is null and resolved_at is null)
   )
 );
 create index if not exists idx_failure_episodes_cluster
@@ -295,14 +300,14 @@ function of the current corpus and carries no independent (stale) truth.
 
 - An episode row cannot exist without a failing opener (the writer only emits
   rows for `is_error=1` openers; enforced by a smart constructor in Go and by
-  the `resolved`/`resolve_entry_id` shape — `resolved=1 ⟺ resolve_entry_id is
-  not null`, checked). Note `resolved_at` mirrors the resolving success's
+  the `resolved`/`resolve_entry_id`/`resolve_ordinal` shape — `resolved=1 ⟺
+  resolve_entry_id is not null and resolve_ordinal is not null`, checked). Note `resolved_at` mirrors the resolving success's
   timestamp and may be empty even when resolved (the source had none), so it is
   not a resolved/abandoned discriminator on its own.
 - `resolution_path` is non-null exactly when `resolved=1`; the CHECK ties
-  `resolved`, `resolve_entry_id`, `resolution_path`, and `resolved_at` together
-  so an abandoned episode cannot carry a phantom fix and a resolved one cannot
-  be missing its evidence.
+  `resolved`, `resolve_entry_id`, `resolve_ordinal`, `resolution_path`, and
+  `resolved_at` together so an abandoned episode cannot carry a phantom fix and
+  a resolved one cannot be missing its exact invocation evidence.
 - Determinism: identical corpus ⇒ identical `failure_episodes` ⇒ identical
   `Incidents` output, including the lexical tie-break tail shared with the
   cluster ranking.
@@ -322,8 +327,8 @@ code to pass, then refactor. No production code without a failing test first.
      same-family-success-as-resolution, unrelated-success-is-not-resolution.
    - Green: the windowing function. Pure, no DB — directly unit-testable.
    - Property test: every emitted episode opens on `is_error=1`; `resolved=1 ⟺
-     resolve_entry_id set`; resolution path families are a contiguous in-session
-     subsequence ending in the resolving family.
+     resolve_entry_id set and resolve_ordinal >= 0`; resolution path families
+     are a contiguous in-session subsequence ending in the resolving family.
 
 2. **Wilson scoring — `wilsonLowerBound`, `pathScore`.**
    - Red: known fixtures (`1/1 < 10/10`; `5/5` vs `50/55`; monotonicity).
@@ -331,7 +336,7 @@ code to pass, then refactor. No production code without a failing test first.
    - Property: score is monotone non-decreasing in support at fixed rate; always
      in `[0,1]` for the bound.
 
-3. **Migration 14 + backfill.**
+3. **Migrations 14/15 + backfill.**
    - Red: schema-introspection + state-machine tests (CHECK rejects `resolved=0`
      with a non-null path and `resolved=1` without evidence; a per-session
      recompute — delete + reinsert — is permitted; backfill from a seeded

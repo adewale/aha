@@ -196,7 +196,7 @@ aha owns only the typed wrappers.
    │   Anthropic, custom)   │         │                        │
    ├────────────────────────┤         ├────────────────────────┤
    │ Sandbox / executor     │         │ aha mcp (Go server)    │
-   │   - V8 isolate or vm   │         │   - 8 read-only tools  │
+   │   - V8 isolate or vm   │         │   - 10 read-only tools │
    │   - no FS / no egress  │ <─────> │   - SDK-driven wire    │
    │ Tool surface injection │  stdio  │                        │
    │   - generates the      │ JSON    │ Typed TS surface       │

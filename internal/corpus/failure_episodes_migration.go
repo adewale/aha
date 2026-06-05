@@ -13,8 +13,8 @@ import (
 //
 // Correctness-by-construction is enforced in the schema: the CHECK ties the
 // resolved flag to the presence of resolve_entry_id / resolution_path /
-// resolved_at, so an abandoned episode cannot carry a phantom fix and a
-// resolved one cannot be missing its evidence.
+// resolve_ordinal / resolved_at, so an abandoned episode cannot carry a phantom
+// fix and a resolved one cannot be missing its exact invocation evidence.
 const failureEpisodesSchemaSQL = `create table if not exists failure_episodes(
   session_key text not null,
   open_entry_id text not null,
@@ -24,6 +24,7 @@ const failureEpisodesSchemaSQL = `create table if not exists failure_episodes(
   error_signature text,
   resolved integer not null check(resolved in (0,1)),
   resolve_entry_id text,
+  resolve_ordinal integer,
   resolution_path text,
   project_key text,
   opened_at text,
@@ -31,9 +32,9 @@ const failureEpisodesSchemaSQL = `create table if not exists failure_episodes(
   primary key(session_key, open_entry_id, open_ordinal),
   foreign key(session_key, open_entry_id) references entries(session_key, entry_id),
   check(
-    (resolved=1 and resolve_entry_id is not null and resolution_path is not null and resolved_at is not null)
+    (resolved=1 and resolve_entry_id is not null and resolve_ordinal is not null and resolution_path is not null and resolved_at is not null)
     or
-    (resolved=0 and resolve_entry_id is null and resolution_path is null and resolved_at is null)
+    (resolved=0 and resolve_entry_id is null and resolve_ordinal is null and resolution_path is null and resolved_at is null)
   )
 )`
 
@@ -55,6 +56,15 @@ func ensureFailureEpisodesSchema(db *sql.DB) error {
 	if _, err := db.Exec(failureEpisodesSchemaSQL); err != nil {
 		return err
 	}
+	hasResolveOrdinal, err := columnExists(db, "failure_episodes", "resolve_ordinal")
+	if err != nil {
+		return err
+	}
+	if !hasResolveOrdinal {
+		if _, err := db.Exec(`alter table failure_episodes add column resolve_ordinal integer`); err != nil {
+			return err
+		}
+	}
 	stmts := []string{
 		`create index if not exists idx_failure_episodes_cluster on failure_episodes(tool_name,command_family,error_signature,resolved)`,
 		// failure_episodes is a *derived* view of tool_invocations, recomputed
@@ -71,6 +81,25 @@ func ensureFailureEpisodesSchema(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func migrateFailureEpisodeResolveOrdinals(db *sql.DB) error {
+	exists, err := tableExists(db, "failure_episodes")
+	if err != nil {
+		return err
+	}
+	if exists {
+		// failure_episodes is a derived projection. Recreating it is the safest
+		// way to strengthen SQLite CHECK constraints for corpora that already ran
+		// the earlier v14 branch migration before resolve_ordinal existed.
+		if _, err := db.Exec(`drop table failure_episodes`); err != nil {
+			return err
+		}
+	}
+	if err := ensureFailureEpisodesSchema(db); err != nil {
+		return err
+	}
+	return backfillFailureEpisodes(db)
 }
 
 func backfillFailureEpisodes(db *sql.DB) error {
@@ -141,7 +170,10 @@ func rebuildFailureEpisodesForSession(x txLike, sessionKey string) error {
 // families and error signatures identical to what clusters display, with no
 // new bypass around redaction or index_tool_output.
 func failureEpisodesForSession(q queryer, sessionKey string) ([]FailureEpisode, error) {
-	rows, err := q.Query(`select entry_id,ordinal,tool_name,command_family,error_signature,is_error,timestamp,project_key from tool_invocations where session_key=?`, sessionKey)
+	rows, err := q.Query(`select ti.entry_id,ti.ordinal,e.line_no,ti.tool_name,ti.command_family,ti.error_signature,ti.is_error,ti.timestamp,ti.project_key
+from tool_invocations ti
+join entries e on e.session_key=ti.session_key and e.entry_id=ti.entry_id
+where ti.session_key=?`, sessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +189,7 @@ func failureEpisodesForSession(q queryer, sessionKey string) ([]FailureEpisode, 
 			fam    sql.NullString
 			ts     sql.NullString
 		)
-		if err := rows.Scan(&iv.EntryID, &iv.Ordinal, &tname, &fam, &errSig, &isErr, &ts, &proj); err != nil {
+		if err := rows.Scan(&iv.EntryID, &iv.Ordinal, &iv.LineNo, &tname, &fam, &errSig, &isErr, &ts, &proj); err != nil {
 			return nil, err
 		}
 		iv.SessionKey = sessionKey
@@ -180,9 +212,10 @@ func failureEpisodesForSession(q queryer, sessionKey string) ([]FailureEpisode, 
 // schema CHECK is satisfied; a resolved episode stores its evidence.
 func insertFailureEpisodes(x execer, eps []FailureEpisode) error {
 	for _, ep := range eps {
-		var resolveEntryID, resolvedAt, pathJSON any
+		var resolveEntryID, resolveOrdinal, resolvedAt, pathJSON any
 		if ep.Resolved {
 			resolveEntryID = ep.ResolveEntryID
+			resolveOrdinal = ep.ResolveOrdinal
 			resolvedAt = ep.ResolvedAt
 			b, err := json.Marshal(ep.ResolutionPath)
 			if err != nil {
@@ -190,9 +223,9 @@ func insertFailureEpisodes(x execer, eps []FailureEpisode) error {
 			}
 			pathJSON = string(b)
 		}
-		if _, err := x.Exec(`insert or ignore into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		if _, err := x.Exec(`insert or ignore into failure_episodes(session_key,open_entry_id,open_ordinal,tool_name,command_family,error_signature,resolved,resolve_entry_id,resolve_ordinal,resolution_path,project_key,opened_at,resolved_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			ep.SessionKey, ep.OpenEntryID, ep.OpenOrdinal, ep.ToolName, ep.CommandFamily, ep.ErrorSignature,
-			boolInt(ep.Resolved), resolveEntryID, pathJSON, ep.ProjectKey, ep.OpenedAt, resolvedAt); err != nil {
+			boolInt(ep.Resolved), resolveEntryID, resolveOrdinal, pathJSON, ep.ProjectKey, ep.OpenedAt, resolvedAt); err != nil {
 			return fmt.Errorf("insert failure episode %s/%s: %w", ep.SessionKey, ep.OpenEntryID, err)
 		}
 	}

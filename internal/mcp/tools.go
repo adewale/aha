@@ -89,7 +89,7 @@ var ToolDescriptions = map[string]string{
 	"corpus_size":         "Return corpus on-disk size breakdown.",
 	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
 	"incidents":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
-	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
+	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
 	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
 }
 
@@ -131,12 +131,14 @@ type IncidentsInput struct {
 	Source  string `json:"source,omitempty" jsonschema:"Filter to one source adapter (pi, claude-code, codex, opencode)"`
 	Machine string `json:"machine,omitempty" jsonschema:"Filter to one machine id"`
 	Tool    string `json:"tool,omitempty" jsonschema:"Filter to one tool name"`
+	State   string `json:"state,omitempty" jsonschema:"Filter by incident state: unresolved, partial, or resolved"`
 }
 
 // IncidentTrajectoryInput names the resolving-success ref to reconstruct an arc
 // from.
 type IncidentTrajectoryInput struct {
-	Ref string `json:"ref" jsonschema:"Resolving-success ref (msg:v1:...), e.g. an incident/skill-candidate path sample_ref"`
+	Ref     string `json:"ref" jsonschema:"Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref"`
+	Ordinal *int   `json:"ordinal,omitempty" jsonschema:"Resolving invocation ordinal from the incident path sample_ordinal; required when one transcript entry resolved multiple incidents"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -262,6 +264,7 @@ func doIncidents(b Backend, in IncidentsInput) ([]corpus.Incident, error) {
 		Source:  in.Source,
 		Machine: in.Machine,
 		Tool:    in.Tool,
+		State:   in.State,
 	})
 	if err != nil {
 		return nil, err
@@ -276,7 +279,7 @@ func doIncidentTrajectory(b Backend, in IncidentTrajectoryInput) ([]corpus.Traje
 	if in.Ref == "" {
 		return nil, fmt.Errorf("missing required argument for incident_trajectory: ref")
 	}
-	steps, err := corpus.IncidentTrajectory(b.DB(), in.Ref)
+	steps, err := corpus.IncidentTrajectory(b.DB(), in.Ref, in.Ordinal)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +347,7 @@ func doDoctor(b Backend) (map[string]any, error) {
 //     (as a TextContent block) AND CallToolResult.StructuredContent from
 //     the same bytes. We return nil for the *CallToolResult.
 //
-//   - List-typed tools (search, read, clusters, conflicts) declare Out=any so the
+//   - List-typed tools (search, read, incidents, conflicts) declare Out=any so the
 //     SDK skips output-schema derivation — array schemas would otherwise
 //     panic the SDK with "output schema must have type object" (which
 //     matches the official Python SDK's Pydantic Dict[str, Any] constraint

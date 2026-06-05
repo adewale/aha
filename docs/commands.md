@@ -143,7 +143,7 @@ aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [-
 - `aha incidents --state unresolved`
 - `aha incidents --state resolved --project myrepo`
 
-**JSON contract:** `array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref}>,sample_ref,score}>`
+**JSON contract:** `array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref,sample_ordinal}>,sample_ref,score}>`
 
 ## aha ingest
 

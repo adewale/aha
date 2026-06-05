@@ -210,7 +210,7 @@ func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	session, ctx, _ := connectPair(t)
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      "incidents",
-		Arguments: map[string]any{"limit": 1},
+		Arguments: map[string]any{"limit": 1, "state": "unresolved"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(incidents): %v", err)

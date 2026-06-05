@@ -192,7 +192,7 @@ func TestJSONPostRejectsOversizedBody(t *testing.T) {
 func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incidents", strings.NewReader(`{"limit":5}`)))
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incidents", strings.NewReader(`{"limit":5,"state":"unresolved"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

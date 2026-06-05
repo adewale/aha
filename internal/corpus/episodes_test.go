@@ -100,6 +100,29 @@ func TestAssembleEpisodes(t *testing.T) {
 			},
 		},
 		{
+			name: "same timestamp follows transcript line order before entry id",
+			invs: []ToolInvocation{
+				{SessionKey: "s1", EntryID: "z-open", LineNo: 1, Ordinal: 0, ToolName: "Bash", CommandFamily: "git push", IsError: true, Timestamp: ts(0)},
+				{SessionKey: "s1", EntryID: "a-resolve", LineNo: 2, Ordinal: 0, ToolName: "Bash", CommandFamily: "git push", IsError: false, Timestamp: ts(0)},
+			},
+			cfg: cfg,
+			want: []FailureEpisode{
+				{
+					SessionKey:     "s1",
+					OpenEntryID:    "z-open",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       true,
+					ResolveEntryID: "a-resolve",
+					ResolveOrdinal: 0,
+					ResolutionPath: []string{"git push"},
+					OpenedAt:       ts(0),
+					ResolvedAt:     ts(0),
+				},
+			},
+		},
+		{
 			name: "abandoned by end of session",
 			invs: []ToolInvocation{
 				inv("s1", "e1", 0, "git push", true, ts(0)),
@@ -108,13 +131,14 @@ func TestAssembleEpisodes(t *testing.T) {
 			cfg: cfg,
 			want: []FailureEpisode{
 				{
-					SessionKey:    "s1",
-					OpenEntryID:   "e1",
-					OpenOrdinal:   0,
-					ToolName:      "Bash",
-					CommandFamily: "git push",
-					Resolved:      false,
-					OpenedAt:      ts(0),
+					SessionKey:     "s1",
+					OpenEntryID:    "e1",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       false,
+					ResolveOrdinal: -1,
+					OpenedAt:       ts(0),
 				},
 			},
 		},
@@ -127,13 +151,14 @@ func TestAssembleEpisodes(t *testing.T) {
 			cfg: cfg,
 			want: []FailureEpisode{
 				{
-					SessionKey:    "s1",
-					OpenEntryID:   "e1",
-					OpenOrdinal:   0,
-					ToolName:      "Bash",
-					CommandFamily: "git push",
-					Resolved:      false,
-					OpenedAt:      ts(0),
+					SessionKey:     "s1",
+					OpenEntryID:    "e1",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       false,
+					ResolveOrdinal: -1,
+					OpenedAt:       ts(0),
 				},
 			},
 		},
@@ -152,13 +177,14 @@ func TestAssembleEpisodes(t *testing.T) {
 			cfg: EpisodeConfig{MaxGap: 30 * time.Minute, MaxSteps: 3},
 			want: []FailureEpisode{
 				{
-					SessionKey:    "s1",
-					OpenEntryID:   "e0",
-					OpenOrdinal:   0,
-					ToolName:      "Bash",
-					CommandFamily: "git push",
-					Resolved:      false,
-					OpenedAt:      ts(0),
+					SessionKey:     "s1",
+					OpenEntryID:    "e0",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       false,
+					ResolveOrdinal: -1,
+					OpenedAt:       ts(0),
 				},
 			},
 		},
@@ -232,13 +258,14 @@ func TestAssembleEpisodes(t *testing.T) {
 			cfg: cfg,
 			want: []FailureEpisode{
 				{
-					SessionKey:    "s1",
-					OpenEntryID:   "e1",
-					OpenOrdinal:   0,
-					ToolName:      "Bash",
-					CommandFamily: "git push",
-					Resolved:      false,
-					OpenedAt:      ts(0),
+					SessionKey:     "s1",
+					OpenEntryID:    "e1",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       false,
+					ResolveOrdinal: -1,
+					OpenedAt:       ts(0),
 				},
 			},
 		},
@@ -266,13 +293,14 @@ func TestAssembleEpisodes(t *testing.T) {
 					ResolvedAt:     ts(1),
 				},
 				{
-					SessionKey:    "s2",
-					OpenEntryID:   "e1",
-					OpenOrdinal:   0,
-					ToolName:      "Bash",
-					CommandFamily: "git push",
-					Resolved:      false,
-					OpenedAt:      ts(0),
+					SessionKey:     "s2",
+					OpenEntryID:    "e1",
+					OpenOrdinal:    0,
+					ToolName:       "Bash",
+					CommandFamily:  "git push",
+					Resolved:       false,
+					ResolveOrdinal: -1,
+					OpenedAt:       ts(0),
 				},
 			},
 		},
@@ -352,6 +380,10 @@ func TestEpisodeInvariants(t *testing.T) {
 			// Resolved iff ResolveEntryID set.
 			if e.Resolved != (e.ResolveEntryID != "") {
 				rt.Fatalf("Resolved=%v but ResolveEntryID=%q", e.Resolved, e.ResolveEntryID)
+			}
+			// Resolved iff ResolveOrdinal names a concrete invocation.
+			if e.Resolved != (e.ResolveOrdinal >= 0) {
+				rt.Fatalf("Resolved=%v but ResolveOrdinal=%d", e.Resolved, e.ResolveOrdinal)
 			}
 			// Resolved iff ResolutionPath non-nil.
 			if e.Resolved != (e.ResolutionPath != nil) {

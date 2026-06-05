@@ -36,7 +36,7 @@ func TestToolInvocationMigrationBackfillsExistingEntries(t *testing.T) {
 	for _, st := range []string{
 		`drop table failure_episodes`,
 		`drop table tool_invocations`,
-		`delete from schema_migrations where version in (13,14)`,
+		`delete from schema_migrations where version in (13,14,15)`,
 	} {
 		if _, err := store.DB.Exec(st); err != nil {
 			t.Fatal(err)

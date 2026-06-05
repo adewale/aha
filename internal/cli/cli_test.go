@@ -214,8 +214,9 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)
 	outDir := filepath.Join(root, "bundles")
+	configPath := filepath.Join(root, "config.jsonc")
 	var out, stderr bytes.Buffer
-	err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir}, &out, &stderr)
+	err := cli.Run([]string{"snapshot", "--config", configPath, "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir}, &out, &stderr)
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}

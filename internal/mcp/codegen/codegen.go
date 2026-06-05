@@ -362,10 +362,11 @@ func writeStructInterfaceWithDocs(b *bytes.Buffer, name string, t reflect.Type) 
 // shipping a `unknown` for a new field is preferable to crashing
 // regeneration entirely.
 func goTypeToTS(t reflect.Type, fieldName string, known map[string]bool) string {
-	// Special-case the Ref interface field on search.Result: a Go interface
-	// has no concrete reflect.Type until runtime, but every variant
-	// marshals to a discriminated JSON shape.
-	if fieldName == "Ref" {
+	// Special-case model.Ref interface fields (currently search.Result.Ref): a
+	// Go interface has no concrete reflect.Type until runtime, but every variant
+	// marshals to a discriminated JSON shape. Plain string fields named Ref (for
+	// canonical ref wire text) must stay string.
+	if t.Kind() == reflect.Interface && t.PkgPath() == "github.com/adewale/aha/internal/model" && t.Name() == "Ref" {
 		return "Ref"
 	}
 	switch t.Kind() {

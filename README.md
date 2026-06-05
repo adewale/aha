@@ -26,7 +26,7 @@ The substrate is built, with a first deterministic pattern layer for recurring t
 - **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can run one code-mode program over a long-lived transport (`search → filter → Promise.all(read)`). That is still multiple MCP tool calls when the program fans out. See `clients/typescript/README.md` for examples.
 - **Incidents** (`aha incidents`) — recurring tool-call failures grouped by tool, command family, and normalized error signature, each carrying both its recurrence (episodes, distinct sessions/projects, first/last seen) and its resolution status: `unresolved` / `partial` / `resolved`, a tier, and the top **resolution paths that actually worked** (ranked by a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one). Filter `--state unresolved` for the unsolved-pain to-do list or `--state resolved` for skills worth harvesting. Incidents are signals for humans/agents to write better skills; `aha` does not generate or install skills. See `docs/outcome-weighting-spec.md`.
 
-The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader skill-candidate detection, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
+The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader incident-to-skill discovery, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
 
 ## What does it replace?
 
@@ -209,7 +209,7 @@ Command roles:
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `incidents`: rank recurring tool-call failures with their resolution status (`unresolved`/`partial`/`resolved`), tier, and the outcome-weighted fix paths that worked (each with support, confidence, and a `sample_ref` to the resolving success). Scope with `--state` and `--project`/`--source`/`--machine`/`--tool`.
+- `incidents`: rank recurring tool-call failures with their resolution status (`unresolved`/`partial`/`resolved`), tier, and the outcome-weighted fix paths that worked (each with support, confidence, `sample_ref`, and `sample_ordinal` for exact trajectory drill-in). Scope with `--state` and `--project`/`--source`/`--machine`/`--tool`.
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.

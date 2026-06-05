@@ -14,6 +14,7 @@ import (
 // following invariants always hold, never patched up after the fact:
 //
 //	Resolved == (ResolveEntryID != "")
+//	Resolved == (ResolveOrdinal >= 0)
 //	Resolved == (ResolutionPath != nil)
 //	len(ResolutionPath) > 0 && ResolutionPath[last] == CommandFamily, when Resolved.
 //
@@ -30,6 +31,7 @@ type FailureEpisode struct {
 	ErrorSignature string
 	Resolved       bool
 	ResolveEntryID string   // "" when abandoned
+	ResolveOrdinal int      // -1 when abandoned
 	ResolutionPath []string // intervening families (any family) then the resolving family; nil when abandoned
 	ProjectKey     string
 	OpenedAt       string // opener Timestamp
@@ -131,6 +133,7 @@ func assembleSession(session []ToolInvocation, cfg EpisodeConfig) []FailureEpiso
 				ProjectKey:     iv.ProjectKey,
 				OpenedAt:       iv.Timestamp,
 				Resolved:       false,
+				ResolveOrdinal: -1,
 			}
 			episodes = append(episodes, ep)
 			open[fam] = &openEpisode{
@@ -196,12 +199,13 @@ func resolve(ep *openEpisode, sorted []ToolInvocation, resolveIdx int) {
 
 	ep.out.Resolved = true
 	ep.out.ResolveEntryID = sorted[resolveIdx].EntryID
+	ep.out.ResolveOrdinal = sorted[resolveIdx].Ordinal
 	ep.out.ResolvedAt = sorted[resolveIdx].Timestamp
 	ep.out.ResolutionPath = path
 }
 
-// sortInvocations orders a session's invocations by (Timestamp, EntryID,
-// Ordinal). Empty/unparseable timestamps sort as earliest.
+// sortInvocations orders a session's invocations by (Timestamp, LineNo,
+// EntryID, Ordinal). Empty/unparseable timestamps sort as earliest.
 func sortInvocations(invs []ToolInvocation) {
 	sort.SliceStable(invs, func(i, j int) bool {
 		ti, oki := parseTimestamp(invs[i].Timestamp)
@@ -212,6 +216,9 @@ func sortInvocations(invs []ToolInvocation) {
 		}
 		if oki && okj && !ti.Equal(tj) {
 			return ti.Before(tj)
+		}
+		if invs[i].LineNo != invs[j].LineNo {
+			return invs[i].LineNo < invs[j].LineNo
 		}
 		if invs[i].EntryID != invs[j].EntryID {
 			return invs[i].EntryID < invs[j].EntryID
