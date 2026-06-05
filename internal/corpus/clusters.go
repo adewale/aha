@@ -337,8 +337,7 @@ func clusterScore(count, sessions, projects int) float64 {
 	if count <= 0 {
 		return 0
 	}
-	spread := 1.0 + float64(sessions-1) + float64(projects-1)*0.5
-	return float64(count) * spread
+	return float64(count) * spread(sessions, projects)
 }
 
 func sortToolInvocations(invs []ToolInvocation) {
