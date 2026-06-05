@@ -42,14 +42,19 @@ func cmdClusters(args []string, stdout, stderr io.Writer) error {
 			return nil
 		}
 		for _, c := range candidates {
-			fmt.Fprintf(stdout, "%-6.1f %-11s resolved %d/%d  %s :: %s :: %s\n",
-				c.Score, c.Tier, c.Resolved, c.Episodes, c.ToolName, c.CommandFamily, c.ErrorSignature)
+			// Pad the resolved n/m field so the tool :: family :: signature tail
+			// starts at a fixed column regardless of count width.
+			resolved := fmt.Sprintf("%d/%d", c.Resolved, c.Episodes)
+			fmt.Fprintf(stdout, "%-6.1f %-11s resolved %-7s  %s :: %s :: %s\n",
+				c.Score, c.Tier, resolved, c.ToolName, c.CommandFamily, c.ErrorSignature)
 			for _, p := range c.Paths {
 				ref := p.SampleRef
 				if ref == "" {
 					ref = "(no sample_ref)"
 				}
-				fmt.Fprintf(stdout, "    fix conf=%.2f x%-3d s=%-2d p=%-2d  %s  ref=%s\n",
+				// Same s=/p= width budget as the plain cluster output below, so
+				// the two output modes line up.
+				fmt.Fprintf(stdout, "    fix conf=%.2f x%-4d s=%-3d p=%-3d  %s  ref=%s\n",
 					p.Confidence, p.Support, p.Sessions, p.Projects, strings.Join(p.Families, " > "), ref)
 			}
 		}

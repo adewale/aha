@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">14,281</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">14,348</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">19</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -2548,10 +2548,10 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-fk">→ entries</div>
           <div class="er-note">append-only derived tool-call rows used by error clusters</div>
         </div>
-        <div class="er-table derived" data-cols="(session_key, open_entry_id, open_ordinal) PK, tool_name, command_family, error_signature, resolved, resolve_entry_id, resolution_path, opened_at, resolved_at">
+        <div class="er-table derived" data-cols="(session_key, open_entry_id, open_ordinal) PK, tool_name, command_family, error_signature, resolved, resolve_entry_id, resolution_path, project_key, opened_at, resolved_at">
           <div class="er-name">failure_episodes</div>
           <div class="er-fk">→ entries</div>
-          <div class="er-note">append-only; single-session failure→fix arcs projected from tool_invocations; powers outcome-weighted skill candidates</div>
+          <div class="er-note">single-session failure→fix arcs projected from tool_invocations; recomputed per session on ingest; powers outcome-weighted skill candidates</div>
         </div>
         <div class="er-table" data-cols="artifact_id PK, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body">
           <div class="er-name">artifacts</div>

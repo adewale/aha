@@ -344,9 +344,6 @@ func TestCallToolEmptySearchReturnsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
-	results, ok := out.([]struct{})
-	_ = results
-	_ = ok
 	// The result is []search.Result; verify it's not a nil slice by JSON
 	// marshalling and asserting we get "[]" rather than "null".
 	body, _ := json.Marshal(out)

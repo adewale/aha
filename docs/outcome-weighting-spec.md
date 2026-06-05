@@ -41,7 +41,8 @@ correctly without prompt engineering on top.
 ## Why
 
 `aha clusters` answers *"which tool-call failures recur and spread?"* It ranks
-recurring failures by `count × spread` (`clusters.go:336`) and hands back a
+recurring failures by `count × spread` (`clusterScore` in
+`internal/corpus/clusters.go`) and hands back a
 `sample_ref` for drill-in. That is genuinely useful — it surfaces skill
 *topics* — but it stops one step short of the thing a skill is *for*: the user
 or agent still has to go read the transcripts and work out the fix by hand.
@@ -72,20 +73,18 @@ successfully ≥M times; the skill is the resolution path.*
 This spec adds an analysis layer over data that migration 13 already captures.
 No new capture, no re-ingest, no new redaction boundary.
 
-`tool_invocations` (`tool_invocations_migration.go:11`) stores **one row per
-paired tool call with an observed outcome** — and crucially it stores
-**successes as well as failures**. The backfill inserts every invocation where
-`OutcomeObserved` is true (`tool_invocations_migration.go:140`), stamping
-`is_error`, `exit_code`/`exit_code` validity, `error_signature`,
-`command_family`, `timestamp`, `session_key`, `project_key`, and `entry_id`.
-`clusters.go` only ever queries `where is_error=1`, so the success rows are
-present but currently unread. **Outcome-weighting is the consumer of those
-success rows.**
+The `tool_invocations` table (see `internal/corpus/tool_invocations_migration.go`)
+stores **one row per paired tool call with an observed outcome** — and crucially
+it stores **successes as well as failures**. The backfill inserts every
+invocation with an observed outcome, stamping `is_error`, `exit_code` (and its
+validity), `error_signature`, `command_family`, `timestamp`, `session_key`,
+`project_key`, and `entry_id`. The cluster query only ever filters
+`where is_error=1`, so the success rows are present but currently unread.
+**Outcome-weighting is the consumer of those success rows.**
 
 That means the entire layer is, in principle, a deterministic query plus a new
-append-only projection table — the expensive parts (cross-adapter `tool_use`↔
-`tool_result` pairing, privacy-preserving normalization, append-only storage)
-are done.
+projection table — the expensive parts (cross-adapter `tool_use`↔`tool_result`
+pairing, privacy-preserving normalization, storage) are done.
 
 ### What we deliberately do *not* have, and will not invent in v1
 
@@ -96,14 +95,12 @@ are done.
   accepted limit, not a bug.
 - **No linguistic reward.** "Agent said 'that worked'" is not in
   `tool_invocations` and we will not reach back into raw transcript text to get
-  it — doing so would reopen the `index_tool_output=false` bypass that
-  `clusters.go` was careful to avoid (`clusters.go:23`). v1 reward is **hard
-  signals only**: `is_error` and `exit_code`. This is a correctness *and* a
-  privacy decision.
+  it — doing so would reopen the `index_tool_output=false` bypass that the
+  cluster pipeline was careful to avoid. v1 reward is **hard signals only**:
+  `is_error` and `exit_code`. This is a correctness *and* a privacy decision.
 - **No raw outcome text in the new surface.** Same fail-closed rule as the
-  cluster backfill (`tool_invocations_migration.go:148`): the outcome-weighting
-  surface displays only already-normalized `command_family` and
-  `error_signature`, never raw stdout/stderr.
+  cluster backfill: the outcome-weighting surface displays only already-
+  normalized `command_family` and `error_signature`, never raw stdout/stderr.
 
 ## Definitions
 
@@ -235,66 +232,91 @@ Extend the existing read-only command rather than add a new verb:
 aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
 ```
 
-- Without `--with-fixes`: today's behaviour, unchanged (pure failure ranking).
-- With `--with-fixes`: rows carry the top resolution path(s), resolution rate,
-  tier, and a `sample_ref` to the *resolving success* row (so `aha read`
-  drills into the command that fixed it, not just the one that failed).
+- Without `--with-fixes`: today's behaviour, unchanged (pure failure ranking,
+  returning `[]Cluster`).
+- With `--with-fixes`: a *different* contract — `[]SkillCandidate`, where each
+  candidate carries the cluster identity plus its resolution rate, tier, and the
+  top-K resolution `paths` (each with a `sample_ref` to the *resolving success*
+  row, so `aha read` drills into the command that fixed it, not the one that
+  failed). It is not the failure rows with extra fields; it is a distinct shape.
 
-`clusters` stays in the read-only command set (`README.md:280`). No new mutating
-surface.
+`clusters` stays in the read-only command set (see the read-only command list
+in the README "Agent guidance" section). No new mutating surface.
 
-### MCP / HTTP / TS (follow-up, not v1)
+### MCP / HTTP / TS
 
-The `clusters` tool already crosses MCP/HTTP/UI/TS. Adding a `with_fixes`
-boolean to that one tool extends all four surfaces uniformly, following the
-existing codegen/conformance pattern. Scoped as a fast-follow once the corpus
-function and CLI are green, to keep the first change reviewable.
+Surfaced as a **separate `skill_candidates` tool**, not a `with_fixes` boolean
+on `clusters`. Two reasons: MCP tool schemas are single-shape, so overloading
+one tool to return either `[]Cluster` or `[]SkillCandidate` would force every
+typed (TS) caller to narrow before reading; and MCP chooser selection is by
+name + description, so two clearly-named tools ("which failures recur" vs "what
+fixed them") route the model correctly without prompt engineering. The tool
+crosses the SDK transport, the HTTP dashboard (`POST /api/skill_candidates`),
+the dashboard UI, and the generated TypeScript client uniformly via the
+existing codegen/conformance pattern.
 
 ## Storage
 
-A new append-only projection table, deterministically rebuildable from
-`tool_invocations` (which is itself rebuildable from `entries.raw_json`).
-Following the established pattern: `if not exists` schema, no-update/no-delete
-triggers, foreign keys, a versioned migration (**migration 14**).
+A new projection table, deterministically rebuildable from `tool_invocations`
+(which is itself rebuildable from `entries.raw_json`). Following the established
+pattern: `if not exists` schema, a foreign key and a require-entry trigger, and
+versioned migrations (**14** creates it; **15** drops the legacy append-only
+triggers and rebuilds — see below).
+
+Unlike the immutable `tool_invocations` rows it projects, `failure_episodes` is
+**not append-only**: a failure episode is a windowed aggregate that legitimately
+*changes* as more invocations arrive (a session resumed after its fix lands must
+flip an abandoned episode to resolved). So the table is recomputed per session —
+delete + reinsert — on every ingest of that session. The real invariant is the
+resolved-shape CHECK, not a no-update trigger.
 
 ```sql
 create table if not exists failure_episodes(
-  session_key      text,
-  open_entry_id    text,
-  open_ordinal     integer,
+  session_key      text not null,
+  open_entry_id    text not null,
+  open_ordinal     integer not null default 0,
   tool_name        text,
   command_family   text,
   error_signature  text,
   resolved         integer not null check(resolved in (0,1)),
-  resolve_entry_id text,                 -- null when abandoned
-  resolution_path  text,                 -- json array of command families, null when abandoned
+  resolve_entry_id text,
+  resolution_path  text,                 -- json array of command families
   project_key      text,
   opened_at        text,
-  resolved_at      text,                 -- null when abandoned
+  resolved_at      text,
   primary key(session_key, open_entry_id, open_ordinal),
-  foreign key(session_key, open_entry_id) references entries(session_key, entry_id)
+  foreign key(session_key, open_entry_id) references entries(session_key, entry_id),
+  check(
+    (resolved=1 and resolve_entry_id is not null and resolution_path is not null and resolved_at is not null)
+    or
+    (resolved=0 and resolve_entry_id is null and resolution_path is null and resolved_at is null)
+  )
 );
 create index if not exists idx_failure_episodes_cluster
   on failure_episodes(tool_name, command_family, error_signature, resolved);
+-- plus a require-entry trigger mirroring tool_invocations.
 ```
 
 `SkillCandidates` aggregates over `failure_episodes`; the path ranking is a
-query over the JSON `resolution_path` column. Episodes are recomputed for a
-session whenever its invocations change (same hook point as the
-`tool_invocations` backfill), so the table is a pure function of the corpus and
-carries no independent truth.
+query over the JSON `resolution_path` column. Because each session's episodes
+are recomputed wholesale on every ingest of that session, the table is a pure
+function of the current corpus and carries no independent (stale) truth.
 
 **Correctness-by-construction notes:**
 
 - An episode row cannot exist without a failing opener (the writer only emits
   rows for `is_error=1` openers; enforced by a smart constructor in Go and by
   the `resolved`/`resolve_entry_id` shape — `resolved=1 ⟺ resolve_entry_id is
-  not null`, checked).
-- `resolution_path` is only non-null when `resolved=1`; a CHECK ties them so an
-  abandoned episode cannot carry a phantom fix.
+  not null`, checked). Note `resolved_at` mirrors the resolving success's
+  timestamp and may be empty even when resolved (the source had none), so it is
+  not a resolved/abandoned discriminator on its own.
+- `resolution_path` is non-null exactly when `resolved=1`; the CHECK ties
+  `resolved`, `resolve_entry_id`, `resolution_path`, and `resolved_at` together
+  so an abandoned episode cannot carry a phantom fix and a resolved one cannot
+  be missing its evidence.
 - Determinism: identical corpus ⇒ identical `failure_episodes` ⇒ identical
-  `SkillCandidates` output, including tie-breaks (reuse the lexical ordering
-  tail from `Clusters`, `clusters.go:275`).
+  `SkillCandidates` output, including the lexical tie-break tail shared with the
+  cluster ranking.
 - No redaction bypass: every stored/displayed string is an already-normalized
   `command_family` or `error_signature`; `resolution_path` is a list of
   families, never raw commands or outputs.
@@ -320,12 +342,15 @@ code to pass, then refactor. No production code without a failing test first.
    - Property: score is monotone non-decreasing in support at fixed rate; always
      in `[0,1]` for the bound.
 
-3. **Migration 14 + backfill.**
-   - Red: schema-introspection + state-machine tests (append-only triggers
-     reject update/delete; CHECK rejects `resolved=0` with a non-null path;
-     backfill from a seeded `tool_invocations` yields expected episodes).
-   - Green: migration entry, `if not exists` DDL, triggers, backfill loop
-     mirroring `backfillToolInvocations`.
+3. **Migration 14 + backfill (and migration 15 recompute repair).**
+   - Red: schema-introspection + state-machine tests (CHECK rejects `resolved=0`
+     with a non-null path and `resolved=1` without evidence; a per-session
+     recompute — delete + reinsert — is permitted; backfill from a seeded
+     `tool_invocations` yields expected episodes; a resumed session flips an
+     abandoned episode to resolved instead of keeping a stale row).
+   - Green: migration entry, `if not exists` DDL + CHECK + require-entry trigger,
+     per-session delete-then-insert backfill, and migration 15 dropping the
+     legacy no-update/no-delete triggers and rebuilding existing corpora.
 
 4. **`SkillCandidates` aggregation.**
    - Red: end-to-end over a seeded corpus — the worked Confluent example below

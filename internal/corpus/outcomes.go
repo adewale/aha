@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"sort"
+	"strings"
 )
 
 // wilsonZ95 is the z-score for a ~95% Wilson interval.
@@ -72,9 +73,10 @@ having sum(resolved) >= 1`)
 			_ = rows.Close()
 			return nil, err
 		}
-		if c.Episodes > 0 {
-			c.ResolutionRate = float64(c.Resolved) / float64(c.Episodes)
-		}
+		// The query's `having sum(resolved) >= 1` guarantees Resolved >= 1, and
+		// Episodes = count(*) >= Resolved, so Episodes is always >= 1 here — no
+		// divide-by-zero guard needed.
+		c.ResolutionRate = float64(c.Resolved) / float64(c.Episodes)
 		c.Score = clusterScore(c.Resolved, rsessions, rprojects)
 		c.Tier = candidateTier(c.Resolved, rsessions)
 		candidates = append(candidates, c)
@@ -86,6 +88,15 @@ having sum(resolved) >= 1`)
 		return nil, err
 	}
 
+	// Rank and truncate BEFORE fetching resolution paths: the per-candidate
+	// Score depends only on the aggregate columns above, so this reordering is
+	// behavior-preserving and bounds the follow-up path queries to <= limit
+	// (rather than one per resolved cluster in the whole corpus).
+	sortCandidates(candidates)
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
 	for i := range candidates {
 		paths, err := resolutionPaths(db, &candidates[i])
 		if err != nil {
@@ -94,6 +105,15 @@ having sum(resolved) >= 1`)
 		candidates[i].Paths = paths
 	}
 
+	if candidates == nil {
+		candidates = []SkillCandidate{}
+	}
+	return candidates, nil
+}
+
+// sortCandidates orders candidates by recurrence-and-spread score, then by
+// resolved count, then lexically — a total order so output is deterministic.
+func sortCandidates(candidates []SkillCandidate) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		a, b := candidates[i], candidates[j]
 		if a.Score != b.Score {
@@ -110,13 +130,6 @@ having sum(resolved) >= 1`)
 		}
 		return a.ErrorSignature < b.ErrorSignature
 	})
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
-	}
-	if candidates == nil {
-		candidates = []SkillCandidate{}
-	}
-	return candidates, nil
 }
 
 // candidateTier marks how much evidence backs a candidate: "established" needs
@@ -153,11 +166,9 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 		projects      map[string]struct{}
 		sampleSession string
 		sampleEntry   string
-		order         int // first-seen rank for deterministic tie-breaks (rows are newest-first)
 	}
 	byPath := map[string]*agg{}
 	var pathOrder []string
-	seen := 0
 	for rows.Next() {
 		var pathJSON, sessionKey, projectKey, resolveEntryID, resolvedAt string
 		if err := rows.Scan(&pathJSON, &sessionKey, &projectKey, &resolveEntryID, &resolvedAt); err != nil {
@@ -177,11 +188,9 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 				projects:      map[string]struct{}{},
 				sampleSession: sessionKey, // rows are newest-first, so the first row is the most recent
 				sampleEntry:   resolveEntryID,
-				order:         seen,
 			}
 			byPath[pathJSON] = a
 			pathOrder = append(pathOrder, pathJSON)
-			seen++
 		}
 		a.support++
 		a.sessions[sessionKey] = struct{}{}
@@ -194,47 +203,62 @@ order by resolved_at desc, session_key desc, open_entry_id desc`,
 		return nil, err
 	}
 
-	paths := make([]ResolutionPath, 0, len(pathOrder))
+	// trials = total resolved episodes in this cluster, derived from the SAME
+	// rows we just grouped, so support <= trials holds by construction (no
+	// dependence on the separately-queried c.Resolved aggregate).
+	trials := 0
+	for _, a := range byPath {
+		trials += a.support
+	}
+
+	// Decorate each path with its sort key once (Wilson confidence x spread,
+	// then support, then a stable family key), so the comparator below doesn't
+	// recompute pathScore or re-join families on every comparison.
+	type scoredPath struct {
+		path  ResolutionPath
+		score float64
+		key   string
+	}
+	decorated := make([]scoredPath, 0, len(pathOrder))
 	for _, key := range pathOrder {
 		a := byPath[key]
-		confidence := wilsonLowerBound(a.support, c.Resolved, wilsonZ95)
 		p := ResolutionPath{
 			Families:   a.families,
 			Support:    a.support,
 			Sessions:   len(a.sessions),
 			Projects:   len(a.projects),
-			Confidence: confidence,
+			Confidence: wilsonLowerBound(a.support, trials, wilsonZ95),
 		}
+		// Best-effort: a malformed stored coordinate degrades to an empty
+		// SampleRef. The schema CHECK guarantees resolve_entry_id is non-null on
+		// resolved rows, so this is defensive, not an expected path.
 		if ref, err := messageRefText(a.sampleSession, a.sampleEntry); err == nil {
 			p.SampleRef = ref
 		}
-		paths = append(paths, p)
+		decorated = append(decorated, scoredPath{
+			path:  p,
+			score: pathScore(p.Confidence, p.Sessions, p.Projects),
+			key:   strings.Join(a.families, "\x00"),
+		})
 	}
 
-	sort.SliceStable(paths, func(i, j int) bool {
-		si := pathScore(paths[i].Confidence, paths[i].Sessions, paths[i].Projects)
-		sj := pathScore(paths[j].Confidence, paths[j].Sessions, paths[j].Projects)
-		if si != sj {
-			return si > sj
+	sort.SliceStable(decorated, func(i, j int) bool {
+		if decorated[i].score != decorated[j].score {
+			return decorated[i].score > decorated[j].score
 		}
-		if paths[i].Support != paths[j].Support {
-			return paths[i].Support > paths[j].Support
+		if decorated[i].path.Support != decorated[j].path.Support {
+			return decorated[i].path.Support > decorated[j].path.Support
 		}
-		return joinFamilies(paths[i].Families) < joinFamilies(paths[j].Families)
+		return decorated[i].key < decorated[j].key
 	})
-	if len(paths) > defaultPathsPerCandidate {
-		paths = paths[:defaultPathsPerCandidate]
+
+	n := len(decorated)
+	if n > defaultPathsPerCandidate {
+		n = defaultPathsPerCandidate
+	}
+	paths := make([]ResolutionPath, 0, n)
+	for i := 0; i < n; i++ {
+		paths = append(paths, decorated[i].path)
 	}
 	return paths, nil
-}
-
-func joinFamilies(fams []string) string {
-	out := ""
-	for i, f := range fams {
-		if i > 0 {
-			out += " > "
-		}
-		out += f
-	}
-	return out
 }

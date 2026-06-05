@@ -581,14 +581,12 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 // insertFailureEpisodes rebuilds the session's failure episodes from its stored
 // (already-redacted) tool_invocations within the same transaction, so the
 // projection stays a pure function of the corpus and never reaches around the
-// redaction boundary. Append-only insert-or-ignore: re-ingesting an unchanged
-// session is a no-op; a resumed session only adds episodes for new openers.
+// redaction boundary. It is a full per-session recompute (delete + reinsert),
+// so re-ingesting an unchanged session is a no-op and a resumed session whose
+// resolving success has now arrived correctly flips its abandoned episode to
+// resolved rather than keeping a stale row.
 func (w corpusWriter) insertFailureEpisodes(sessionKey string) error {
-	eps, err := failureEpisodesForSession(w.tx, sessionKey)
-	if err != nil {
-		return err
-	}
-	return insertFailureEpisodes(w.tx, eps)
+	return rebuildFailureEpisodesForSession(w.tx, sessionKey)
 }
 
 func (w corpusWriter) insertToolInvocations(sessionKey, projectKey, machineID string, entries []model.ParsedEntry, present map[string]string) error {

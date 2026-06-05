@@ -324,8 +324,6 @@ limit 1`, c.ToolName, c.CommandFamily, c.ErrorSignature).Scan(&sessionKey, &entr
 	return nil
 }
 
-// clusterScore favors failures that recur AND spread: a single noisy session
-// shouldn't outrank a failure hit across many sessions/projects.
 func fallbackErrorSignature(inv ToolInvocation) string {
 	if inv.ExitCodeValid {
 		return fmt.Sprintf("exit_code:%d", inv.ExitCode)
@@ -333,11 +331,15 @@ func fallbackErrorSignature(inv ToolInvocation) string {
 	return "tool_error"
 }
 
-func clusterScore(count, sessions, projects int) float64 {
-	if count <= 0 {
+// clusterScore favors signals that recur AND spread: a single noisy session
+// shouldn't outrank one hit across many sessions/projects. `weight` is the
+// recurrence count being scored — failing-invocation count for error clusters,
+// resolved-episode count for skill candidates.
+func clusterScore(weight, sessions, projects int) float64 {
+	if weight <= 0 {
 		return 0
 	}
-	return float64(count) * spread(sessions, projects)
+	return float64(weight) * spread(sessions, projects)
 }
 
 func sortToolInvocations(invs []ToolInvocation) {

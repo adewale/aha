@@ -15,8 +15,12 @@ import (
 //
 //	Resolved == (ResolveEntryID != "")
 //	Resolved == (ResolutionPath != nil)
-//	Resolved == (ResolvedAt != "")
 //	len(ResolutionPath) > 0 && ResolutionPath[last] == CommandFamily, when Resolved.
+//
+// ResolvedAt mirrors the resolving success's timestamp and is "" when abandoned;
+// it is NOT a resolved/abandoned discriminator on its own, because a resolving
+// invocation may legitimately carry an empty timestamp. The one-directional
+// invariant is: ResolvedAt != "" implies Resolved.
 type FailureEpisode struct {
 	SessionKey     string
 	OpenEntryID    string

@@ -108,28 +108,36 @@ async function refreshSkillCandidates() {
     }
     const refs = [];
     ol.innerHTML = rows.map((c) => {
-      const paths = (c.paths || []).map((p) => {
+      let topIdx = -1;
+      const paths = (c.paths || []).map((p, i) => {
         const idx = refs.length;
         refs.push(p.sample_ref || "");
+        if (i === 0 && p.sample_ref) topIdx = idx;
         const fams = (p.families || []).map(esc).join(" › ");
+        // Tint the confidence chip so a strong fix reads differently from a weak one.
+        const confClass = p.confidence >= 0.6 ? " conf-high" : "";
         return `
           <li class="skill-path${p.sample_ref ? "" : " no-ref"}" data-skidx="${idx}">
             <div class="meta">
-              <span class="kbd">conf=${p.confidence.toFixed(2)}</span>
+              <span class="kbd${confClass}">conf=${p.confidence.toFixed(2)}</span>
               <span class="muted">×${p.support} · ${p.distinct_sessions} sessions · ${p.distinct_projects} projects</span>
             </div>
             <div class="snippet"><code>${fams}</code></div>
           </li>`;
       }).join("");
+      // The headline opens the top-ranked fix; tier gets its own chip styling.
+      const tier = esc(c.tier || "");
+      const parentAttr = topIdx >= 0 ? ` data-skidx="${topIdx}"` : "";
       return `
-        <li class="skill">
+        <li class="skill"${parentAttr}>
           <div class="meta">
-            <span class="kbd">${esc(c.tier || "")}</span>
+            <span class="kbd tier-${tier}">${tier}</span>
             <span class="muted">${c.resolved}/${c.episodes} resolved · rate=${(c.resolution_rate || 0).toFixed(2)}</span> ·
             ${esc(c.tool_name || "?")} ·
             <code>${esc(c.command_family || "")}</code>
           </div>
           <div class="snippet">${esc(c.error_signature || "").slice(0, 600)}</div>
+          <div class="skill-paths-label muted">fixes that worked</div>
           <ol class="skill-paths">${paths}</ol>
         </li>`;
     }).join("");

@@ -57,12 +57,17 @@ func ensureFailureEpisodesSchema(db *sql.DB) error {
 	}
 	stmts := []string{
 		`create index if not exists idx_failure_episodes_cluster on failure_episodes(tool_name,command_family,error_signature,resolved)`,
+		// failure_episodes is a *derived* view of tool_invocations, recomputed
+		// per session on ingest (delete + reinsert), so — unlike the immutable
+		// tool_invocations rows it projects — it is intentionally NOT
+		// append-only: a session resumed after its fix arrives must be able to
+		// flip an abandoned episode to resolved. The CHECK constraint, not a
+		// no-update trigger, is the real invariant. Drop any append-only
+		// triggers left by an earlier iteration of this migration.
 		`drop trigger if exists failure_episodes_require_entry`,
 		`drop trigger if exists failure_episodes_no_update`,
 		`drop trigger if exists failure_episodes_no_delete`,
 		`create trigger failure_episodes_require_entry before insert on failure_episodes when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.open_entry_id) begin select raise(abort,'failure episode entry missing'); end`,
-		`create trigger failure_episodes_no_update before update on failure_episodes begin select raise(abort,'failure episodes are append-only'); end`,
-		`create trigger failure_episodes_no_delete before delete on failure_episodes begin select raise(abort,'failure episodes are append-only'); end`,
 	}
 	for _, st := range stmts {
 		if _, err := db.Exec(st); err != nil {
@@ -93,15 +98,11 @@ func backfillFailureEpisodes(db *sql.DB) error {
 		return err
 	}
 	for _, sk := range sessions {
-		eps, err := failureEpisodesForSession(db, sk)
-		if err != nil {
-			return err
-		}
 		tx, err := db.Begin()
 		if err != nil {
 			return err
 		}
-		if err := insertFailureEpisodes(tx, eps); err != nil {
+		if err := rebuildFailureEpisodesForSession(tx, sk); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -110,6 +111,32 @@ func backfillFailureEpisodes(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// txLike is satisfied by both *sql.DB and *sql.Tx: the rebuild reads the
+// session's tool_invocations and rewrites its failure_episodes through the same
+// handle, so it works inside the ingest writer transaction and in the migration
+// backfill alike.
+type txLike interface {
+	queryer
+	execer
+}
+
+// rebuildFailureEpisodesForSession recomputes one session's episodes as a pure
+// function of its stored tool_invocations: delete the existing rows, then
+// insert the freshly assembled set. This makes the projection correct on
+// resume — a session re-ingested after its resolving success arrives flips its
+// abandoned episode to resolved instead of keeping a stale row — and idempotent
+// for unchanged sessions.
+func rebuildFailureEpisodesForSession(x txLike, sessionKey string) error {
+	eps, err := failureEpisodesForSession(x, sessionKey)
+	if err != nil {
+		return err
+	}
+	if _, err := x.Exec(`delete from failure_episodes where session_key=?`, sessionKey); err != nil {
+		return err
+	}
+	return insertFailureEpisodes(x, eps)
 }
 
 // failureEpisodesForSession reads a session's stored tool_invocations and

@@ -206,6 +206,24 @@ var migrations = []migration{
 	{version: 12, apply: migrateRedactionEvents},
 	{version: 13, apply: migrateToolInvocations},
 	{version: 14, apply: migrateFailureEpisodes},
+	// Migration 15: failure_episodes became a recomputable derived view (not
+	// append-only). Drop the legacy no-update/no-delete triggers and rebuild
+	// every session's episodes so rows left stale by the earlier
+	// insert-or-ignore behaviour (a fix that arrived on a later ingest never
+	// flipped the abandoned row to resolved) are corrected.
+	{version: 15, apply: migrateFailureEpisodesRecompute},
+}
+
+func migrateFailureEpisodesRecompute(db *sql.DB) error {
+	for _, st := range []string{
+		`drop trigger if exists failure_episodes_no_update`,
+		`drop trigger if exists failure_episodes_no_delete`,
+	} {
+		if _, err := db.Exec(st); err != nil {
+			return err
+		}
+	}
+	return backfillFailureEpisodes(db)
 }
 
 func migrateRedactionEvents(db *sql.DB) error {

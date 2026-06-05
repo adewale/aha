@@ -16,7 +16,11 @@ import (
 // TestClustersWithFixesSurfacesResolutionPaths drives the full read-only CLI
 // path: a corpus mined from raw entries yields a resolved skill candidate, and
 // `aha clusters --with-fixes --json` returns it with its resolution path.
-func TestClustersWithFixesSurfacesResolutionPaths(t *testing.T) {
+// seedResolvedClusterCorpus builds a corpus at dir whose only session is a
+// fail→same-family-success arc, then forces a migration rebuild so
+// failure_episodes is populated from raw entries. Returns the corpus dir.
+func seedResolvedClusterCorpus(t *testing.T) string {
+	t.Helper()
 	dir := filepath.Join(t.TempDir(), "corpus")
 	store, err := corpus.Open(dir)
 	if err != nil {
@@ -43,12 +47,17 @@ func TestClustersWithFixesSurfacesResolutionPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, st := range []string{`drop table failure_episodes`, `drop table tool_invocations`, `delete from schema_migrations where version in (13,14)`} {
+	for _, st := range []string{`drop table failure_episodes`, `drop table tool_invocations`, `delete from schema_migrations where version in (13,14,15)`} {
 		if _, err := store.DB.Exec(st); err != nil {
 			t.Fatal(err)
 		}
 	}
 	store.Close()
+	return dir
+}
+
+func TestClustersWithFixesSurfacesResolutionPaths(t *testing.T) {
+	dir := seedResolvedClusterCorpus(t)
 
 	var out bytes.Buffer
 	if err := cli.Run([]string{"clusters", "--repo", dir, "--with-fixes", "--json"}, &out, io.Discard); err != nil {
@@ -76,5 +85,40 @@ func TestClustersWithFixesSurfacesResolutionPaths(t *testing.T) {
 	}
 	if strings.Contains(plain.String(), "resolution_rate") {
 		t.Fatalf("plain clusters output must not carry skill-candidate fields: %s", plain.String())
+	}
+}
+
+// TestClustersWithFixesHumanOutput exercises the non-JSON rendering path: the
+// candidate header line and the indented per-path "fix conf=… ref=…" lines.
+func TestClustersWithFixesHumanOutput(t *testing.T) {
+	dir := seedResolvedClusterCorpus(t)
+
+	var out bytes.Buffer
+	if err := cli.Run([]string{"clusters", "--repo", dir, "--with-fixes"}, &out, io.Discard); err != nil {
+		t.Fatalf("clusters --with-fixes (human): %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"tentative", "resolved 1/1", "confluent topic describe", "fix conf=", "ref=msg:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("human --with-fixes output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestClustersWithFixesEmptyHumanOutput covers the empty-corpus human branch.
+func TestClustersWithFixesEmptyHumanOutput(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "corpus")
+	store, err := corpus.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	var out bytes.Buffer
+	if err := cli.Run([]string{"clusters", "--repo", dir, "--with-fixes"}, &out, io.Discard); err != nil {
+		t.Fatalf("clusters --with-fixes on empty corpus: %v", err)
+	}
+	if !strings.Contains(out.String(), "no resolved error clusters found") {
+		t.Fatalf("expected empty-corpus message, got: %q", out.String())
 	}
 }

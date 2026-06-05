@@ -46,7 +46,7 @@ aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
 - `aha clusters --limit 20`
 - `aha clusters --with-fixes`
 
-**JSON contract:** `array<object{tool_name,command_family,error_signature,count,distinct_sessions,distinct_projects,first_seen,last_seen,sample_command,sample_error,sample_ref,score}>`
+**JSON contract:** `default: array<object{tool_name,command_family,error_signature,count,distinct_sessions,distinct_projects,first_seen,last_seen,sample_command,sample_error,sample_ref,score}>; with --with-fixes: array<object{tool_name,command_family,error_signature,episodes,resolved,resolution_rate,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref}>,score,tier}>`
 
 ## aha conflicts
 

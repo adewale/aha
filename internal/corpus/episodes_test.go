@@ -345,6 +345,10 @@ func TestEpisodeInvariants(t *testing.T) {
 		eps := assembleEpisodes(invs, cfg)
 
 		for _, e := range eps {
+			// Every episode opens on a real failing opener.
+			if e.OpenEntryID == "" {
+				rt.Fatalf("episode has empty OpenEntryID: %+v", e)
+			}
 			// Resolved iff ResolveEntryID set.
 			if e.Resolved != (e.ResolveEntryID != "") {
 				rt.Fatalf("Resolved=%v but ResolveEntryID=%q", e.Resolved, e.ResolveEntryID)
@@ -353,10 +357,25 @@ func TestEpisodeInvariants(t *testing.T) {
 			if e.Resolved != (e.ResolutionPath != nil) {
 				rt.Fatalf("Resolved=%v but ResolutionPath=%v", e.Resolved, e.ResolutionPath)
 			}
+			// ResolvedAt is one-directional: a set ResolvedAt implies Resolved
+			// (but a resolved episode may have an empty ResolvedAt if the
+			// resolving invocation carried no timestamp).
+			if e.ResolvedAt != "" && !e.Resolved {
+				rt.Fatalf("ResolvedAt=%q on an abandoned episode", e.ResolvedAt)
+			}
 			if e.Resolved {
+				// A resolved path is never empty and ends at the opener's family.
+				if len(e.ResolutionPath) == 0 {
+					rt.Fatalf("resolved episode has empty ResolutionPath: %+v", e)
+				}
 				last := e.ResolutionPath[len(e.ResolutionPath)-1]
 				if last != e.CommandFamily {
 					rt.Fatalf("ResolutionPath tail %q != CommandFamily %q", last, e.CommandFamily)
+				}
+				// When both timestamps are present, the resolving success comes
+				// at/after the opener (episodes never run backwards in time).
+				if e.ResolvedAt != "" && e.OpenedAt != "" && e.ResolvedAt < e.OpenedAt {
+					rt.Fatalf("ResolvedAt %q precedes OpenedAt %q", e.ResolvedAt, e.OpenedAt)
 				}
 			} else if e.ResolvedAt != "" {
 				rt.Fatalf("abandoned episode has ResolvedAt=%q", e.ResolvedAt)

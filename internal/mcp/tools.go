@@ -250,15 +250,11 @@ func doCorpusSize(b Backend) (corpus.SizeReport, error) {
 	return corpus.Size(b.Store())
 }
 
+// doClusters and doSkillCandidates pass the requested limit straight through;
+// the corpus layer owns the default (50) and the MaxClusterLimit clamp, so the
+// policy lives in exactly one place.
 func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > corpus.MaxClusterLimit {
-		limit = corpus.MaxClusterLimit
-	}
-	rows, err := corpus.Clusters(b.DB(), limit)
+	rows, err := corpus.Clusters(b.DB(), in.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -269,14 +265,7 @@ func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
 }
 
 func doSkillCandidates(b Backend, in SkillCandidatesInput) ([]corpus.SkillCandidate, error) {
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > corpus.MaxClusterLimit {
-		limit = corpus.MaxClusterLimit
-	}
-	rows, err := corpus.SkillCandidates(b.DB(), limit)
+	rows, err := corpus.SkillCandidates(b.DB(), in.Limit)
 	if err != nil {
 		return nil, err
 	}
