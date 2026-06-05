@@ -194,11 +194,11 @@ func TestIngestPopulatesToolInvocationClusters(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The claude fixture carries one failing `gh pr create` tool call.
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *corpus.Cluster
+	var found *corpus.Incident
 	for i := range clusters {
 		if clusters[i].CommandFamily == "gh pr create" {
 			found = &clusters[i]
@@ -206,13 +206,13 @@ func TestIngestPopulatesToolInvocationClusters(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatalf("expected a gh pr create failure cluster, got %+v", clusters)
+		t.Fatalf("expected a gh pr create failure incident, got %+v", clusters)
 	}
-	if found.Count != 1 || found.SampleRef == "" {
-		t.Fatalf("cluster missing count/ref: %+v", *found)
+	if found.Episodes != 1 || found.SampleRef == "" {
+		t.Fatalf("incident missing episodes/ref: %+v", *found)
 	}
 	if _, err := model.ParseRef(found.SampleRef); err != nil {
-		t.Fatalf("cluster sample_ref invalid: %v", err)
+		t.Fatalf("incident sample_ref invalid: %v", err)
 	}
 }
 
@@ -249,7 +249,7 @@ func TestClustersDoNotExposeRawToolOutputWhenIndexToolOutputFalse(t *testing.T) 
 	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle); err != nil {
 		t.Fatal(err)
 	}
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +480,7 @@ func TestLateToolResultCreatesClusterAfterPendingCall(t *testing.T) {
 	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err != nil {
 		t.Fatal(err)
 	}
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestConflictingEntriesDoNotCreateToolInvocations(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCount(t, store.DB, "conflicts", 1)
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

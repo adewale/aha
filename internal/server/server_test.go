@@ -189,42 +189,6 @@ func TestJSONPostRejectsOversizedBody(t *testing.T) {
 	}
 }
 
-func TestClustersEndpointAcceptsPOST(t *testing.T) {
-	srv := newTestServer(t)
-	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/clusters", strings.NewReader(`{"limit":1}`)))
-	req.Header.Set("Content-Type", "application/json")
-	srv.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("clusters status=%d body=%s", w.Code, w.Body.String())
-	}
-	var clusters []corpus.Cluster
-	if err := json.Unmarshal(w.Body.Bytes(), &clusters); err != nil {
-		t.Fatalf("decode clusters: %v\n%s", err, w.Body.String())
-	}
-	if clusters == nil {
-		t.Fatalf("clusters response must be [] not null: %s", w.Body.String())
-	}
-}
-
-func TestSkillCandidatesEndpointAcceptsPOST(t *testing.T) {
-	srv := newTestServer(t)
-	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/skill_candidates", strings.NewReader(`{"limit":1}`)))
-	req.Header.Set("Content-Type", "application/json")
-	srv.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("skill_candidates status=%d body=%s", w.Code, w.Body.String())
-	}
-	var candidates []corpus.SkillCandidate
-	if err := json.Unmarshal(w.Body.Bytes(), &candidates); err != nil {
-		t.Fatalf("decode skill_candidates: %v\n%s", err, w.Body.String())
-	}
-	if candidates == nil {
-		t.Fatalf("skill_candidates response must be [] not null: %s", w.Body.String())
-	}
-}
-
 func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()

@@ -23,31 +23,6 @@ When a command is invoked with `--json`, failures are written to stderr as:
 }
 ```
 
-## aha clusters
-
-rank recurring tool-call failure clusters as skill-candidate signals; --with-fixes ranks resolved clusters by the resolution path that fixed them
-
-```txt
-aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
-```
-
-**Flags:**
-
-- `--config`
-- `--corpus`
-- `--json`
-- `--limit`
-- `--repo`
-- `--with-fixes`
-
-**Examples:**
-
-- `aha clusters --json`
-- `aha clusters --limit 20`
-- `aha clusters --with-fixes`
-
-**JSON contract:** `default: array<object{tool_name,command_family,error_signature,count,distinct_sessions,distinct_projects,first_seen,last_seen,sample_command,sample_error,sample_ref,score}>; with --with-fixes: array<object{tool_name,command_family,error_signature,episodes,resolved,resolution_rate,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref}>,score,tier}>`
-
 ## aha conflicts
 
 list quarantined merge conflicts
@@ -140,6 +115,35 @@ aha doctor [--depot DEPOT] [--json]
 - `aha doctor --depot local:~/.aha/depot --json`
 
 **JSON contract:** `object{version,config,adapters,sources,corpus,depot,next}`
+
+## aha incidents
+
+rank recurring tool-call failures with their resolution status (unresolved/partial/resolved) and the fix paths that worked
+
+```txt
+aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
+```
+
+**Flags:**
+
+- `--config`
+- `--corpus`
+- `--json`
+- `--limit`
+- `--machine`
+- `--project`
+- `--repo`
+- `--source`
+- `--state`
+- `--tool`
+
+**Examples:**
+
+- `aha incidents --json`
+- `aha incidents --state unresolved`
+- `aha incidents --state resolved --project myrepo`
+
+**JSON contract:** `array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref}>,sample_ref,score}>`
 
 ## aha ingest
 
@@ -325,7 +329,7 @@ aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout
 - `aha serve --addr 127.0.0.1:18428`
 - `aha serve --allow-remote --token $(openssl rand -hex 32)`
 
-**JSON contract:** `http://HOST:PORT/api/{search,read,clusters,status,verify,conflicts,corpus_size,doctor}`
+**JSON contract:** `http://HOST:PORT/api/{search,read,incidents,incident_trajectory,overview,status,verify,conflicts,corpus_size,doctor}`
 
 ## aha snapshot
 

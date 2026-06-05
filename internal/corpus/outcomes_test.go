@@ -10,7 +10,7 @@ import (
 // TestFailureEpisodeMigrationBackfillsFromRawEntries proves the full chain runs
 // off preserved raw_json with no re-ingest: dropping the projection tables and
 // their migration stamps, then reopening, rebuilds tool_invocations (13) and
-// failure_episodes (14) and yields a resolved skill candidate.
+// failure_episodes (14) and yields a resolved incident.
 func TestFailureEpisodeMigrationBackfillsFromRawEntries(t *testing.T) {
 	root := t.TempDir()
 	store, err := corpus.Open(root)
@@ -61,27 +61,27 @@ func TestFailureEpisodeMigrationBackfillsFromRawEntries(t *testing.T) {
 	}
 	defer store.Close()
 
-	candidates, err := corpus.SkillCandidates(store.DB, 0)
+	incidents, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("want one resolved candidate mined from raw entries, got %d: %+v", len(candidates), candidates)
+	if len(incidents) != 1 {
+		t.Fatalf("want one incident mined from raw entries, got %d: %+v", len(incidents), incidents)
 	}
-	cand := candidates[0]
-	if cand.CommandFamily != "confluent topic describe" {
-		t.Fatalf("unexpected command family: %+v", cand)
+	in := incidents[0]
+	if in.CommandFamily != "confluent topic describe" {
+		t.Fatalf("unexpected command family: %+v", in)
 	}
-	if cand.Resolved != 1 || cand.Episodes != 1 {
-		t.Fatalf("want 1/1 resolved episode, got resolved=%d episodes=%d", cand.Resolved, cand.Episodes)
+	if in.Resolved != 1 || in.Episodes != 1 || in.State != "resolved" {
+		t.Fatalf("want a 1/1 resolved incident, got resolved=%d episodes=%d state=%q", in.Resolved, in.Episodes, in.State)
 	}
-	if cand.Tier != "tentative" {
-		t.Fatalf("a single resolved episode should be tentative, got %q", cand.Tier)
+	if in.Tier != "tentative" {
+		t.Fatalf("a single resolved episode should be tentative, got %q", in.Tier)
 	}
-	if len(cand.Paths) != 1 || len(cand.Paths[0].Families) == 0 {
-		t.Fatalf("want one resolution path with families, got %+v", cand.Paths)
+	if len(in.Paths) != 1 || len(in.Paths[0].Families) == 0 {
+		t.Fatalf("want one resolution path with families, got %+v", in.Paths)
 	}
-	if got := cand.Paths[0].Families[len(cand.Paths[0].Families)-1]; got != "confluent topic describe" {
+	if got := in.Paths[0].Families[len(in.Paths[0].Families)-1]; got != "confluent topic describe" {
 		t.Fatalf("resolution path must end at the resolving family, got %q", got)
 	}
 }

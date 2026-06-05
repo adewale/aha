@@ -62,12 +62,8 @@ func ensureFailureEpisodesSchema(db *sql.DB) error {
 		// tool_invocations rows it projects — it is intentionally NOT
 		// append-only: a session resumed after its fix arrives must be able to
 		// flip an abandoned episode to resolved. The CHECK constraint, not a
-		// no-update trigger, is the real invariant. Drop any append-only
-		// triggers left by an earlier iteration of this migration.
-		`drop trigger if exists failure_episodes_require_entry`,
-		`drop trigger if exists failure_episodes_no_update`,
-		`drop trigger if exists failure_episodes_no_delete`,
-		`create trigger failure_episodes_require_entry before insert on failure_episodes when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.open_entry_id) begin select raise(abort,'failure episode entry missing'); end`,
+		// no-update trigger, is the real invariant.
+		`create trigger if not exists failure_episodes_require_entry before insert on failure_episodes when not exists(select 1 from entries where session_key=new.session_key and entry_id=new.open_entry_id) begin select raise(abort,'failure episode entry missing'); end`,
 	}
 	for _, st := range stmts {
 		if _, err := db.Exec(st); err != nil {

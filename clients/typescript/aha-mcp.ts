@@ -136,21 +136,6 @@ export interface SizeReport {
   files: number;
 }
 
-export interface Cluster {
-  tool_name: string;
-  command_family: string;
-  error_signature: string;
-  count: number;
-  distinct_sessions: number;
-  distinct_projects: number;
-  first_seen: string;
-  last_seen: string;
-  sample_command: string;
-  sample_error: string;
-  sample_ref?: string;
-  score: number;
-}
-
 export interface ResolutionPath {
   families: string[];
   support: number;
@@ -158,18 +143,6 @@ export interface ResolutionPath {
   distinct_projects: number;
   confidence: number;
   sample_ref?: string;
-}
-
-export interface SkillCandidate {
-  tool_name: string;
-  command_family: string;
-  error_signature: string;
-  episodes: number;
-  resolved: number;
-  resolution_rate: number;
-  paths: ResolutionPath[];
-  score: number;
-  tier: string;
 }
 
 export interface Incident {
@@ -266,20 +239,6 @@ export interface SearchArgs {
   limit?: number;
 }
 
-export interface ClustersArgs {
-  /**
-   * Cap on returned clusters (default 50, max 200)
-   */
-  limit?: number;
-}
-
-export interface SkillCandidatesArgs {
-  /**
-   * Cap on returned skill candidates (default 50, max 200)
-   */
-  limit?: number;
-}
-
 export interface IncidentsArgs {
   /**
    * Cap on returned incidents (default 50, max 200)
@@ -364,9 +323,6 @@ export interface Transport {
 
 export function aha(transport: Transport) {
   return {
-    /** Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output. */
-    clusters: (args: ClustersArgs = {}) =>
-      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
     /** List quarantined merge conflicts. */
     conflicts: () => transport.call("conflicts", {}) as Promise<Conflict[]>,
     /** Return corpus on-disk size breakdown. */
@@ -376,7 +332,7 @@ export function aha(transport: Transport) {
     /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
     incident_trajectory: (args: IncidentTrajectoryArgs) =>
       transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
-    /** Unified failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tier, and top resolution paths). Optional project/source/machine/tool facets. The single best surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list. */
+    /** The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output. */
     incidents: (args: IncidentsArgs = {}) =>
       transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
     /** Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'. */
@@ -387,9 +343,6 @@ export function aha(transport: Transport) {
     /** Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read. */
     search: (args: SearchArgs) =>
       transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
-    /** Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed. */
-    skill_candidates: (args: SkillCandidatesArgs = {}) =>
-      transport.call("skill_candidates", args as unknown as Record<string, unknown>) as Promise<SkillCandidate[]>,
     /** Return corpus health summary: counts and disk usage. */
     status: () => transport.call("status", {}) as Promise<StatusReport>,
     /** Run read-only corpus invariant checks (no repair). */
@@ -398,7 +351,6 @@ export function aha(transport: Transport) {
 }
 
 export const TOOLS = [
-  "clusters",
   "conflicts",
   "corpus_size",
   "doctor",
@@ -407,7 +359,6 @@ export const TOOLS = [
   "overview",
   "read",
   "search",
-  "skill_candidates",
   "status",
   "verify",
 ] as const;

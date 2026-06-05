@@ -62,7 +62,6 @@ var serverInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 // AddTool calls in registerTools and a test in tools_test.go will fail
 // loudly if the registered set drifts.
 var ToolNames = []string{
-	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
@@ -71,7 +70,6 @@ var ToolNames = []string{
 	"overview",
 	"read",
 	"search",
-	"skill_candidates",
 	"status",
 	"verify",
 }
@@ -90,9 +88,7 @@ var ToolDescriptions = map[string]string{
 	"conflicts":           "List quarantined merge conflicts.",
 	"corpus_size":         "Return corpus on-disk size breakdown.",
 	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
-	"clusters":            "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
-	"skill_candidates":    "Rank resolved error clusters by the resolution path that actually fixed them. For each cluster with at least one observed fix this returns top-K resolution paths (command-family sequences) ranked by Wilson-lower-bound confidence x spread, plus the cluster's resolution rate, a tentative/established tier, and a ref into a sample resolving success. Prefer this over clusters when looking for what worked, not what failed.",
-	"incidents":           "Unified failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tier, and top resolution paths). Optional project/source/machine/tool facets. The single best surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list.",
+	"incidents":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
 	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident or skill-candidate resolution path): every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
 	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
 }
@@ -127,22 +123,7 @@ type ReadInput struct {
 	After   *int   `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5; explicit 0 is honored)"`
 }
 
-// ClustersInput parameterizes the error-cluster tool. Clusters group failing
-// tool invocations by (tool, command family, error signature) so a dashboard
-// can surface recurring failures worth turning into a skill.
-type ClustersInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned clusters (default 50, max 200)"`
-}
-
-// SkillCandidatesInput parameterizes the resolved-cluster (outcome-weighted)
-// surface. Clusters with at least one resolved episode return ranked
-// resolution paths; pain points without an observed fix are returned by
-// the clusters tool, not this one.
-type SkillCandidatesInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned skill candidates (default 50, max 200)"`
-}
-
-// IncidentsInput parameterizes the unified failure-and-fix view, with optional
+// IncidentsInput parameterizes the failure-and-fix view, with optional
 // facet filters.
 type IncidentsInput struct {
 	Limit   int    `json:"limit,omitempty" jsonschema:"Cap on returned incidents (default 50, max 200)"`
@@ -272,31 +253,8 @@ func doCorpusSize(b Backend) (corpus.SizeReport, error) {
 	return corpus.Size(b.Store())
 }
 
-// doClusters and doSkillCandidates pass the requested limit straight through;
-// the corpus layer owns the default (50) and the MaxClusterLimit clamp, so the
-// policy lives in exactly one place.
-func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
-	rows, err := corpus.Clusters(b.DB(), in.Limit)
-	if err != nil {
-		return nil, err
-	}
-	if rows == nil {
-		rows = []corpus.Cluster{}
-	}
-	return rows, nil
-}
-
-func doSkillCandidates(b Backend, in SkillCandidatesInput) ([]corpus.SkillCandidate, error) {
-	rows, err := corpus.SkillCandidates(b.DB(), in.Limit)
-	if err != nil {
-		return nil, err
-	}
-	if rows == nil {
-		rows = []corpus.SkillCandidate{}
-	}
-	return rows, nil
-}
-
+// doIncidents passes the requested limit straight through; the corpus layer
+// owns the default (50) and the MaxClusterLimit clamp.
 func doIncidents(b Backend, in IncidentsInput) ([]corpus.Incident, error) {
 	rows, err := corpus.Incidents(b.DB(), corpus.IncidentFilter{
 		Limit:   in.Limit,
@@ -518,30 +476,6 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "clusters",
-		Description: ToolDescriptions["clusters"],
-		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in ClustersInput) (*mcp.CallToolResult, any, error) {
-		out, err := doClusters(b, in)
-		if err != nil {
-			return errorResult(err), nil, nil
-		}
-		return textResult(out), nil, nil
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "skill_candidates",
-		Description: ToolDescriptions["skill_candidates"],
-		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in SkillCandidatesInput) (*mcp.CallToolResult, any, error) {
-		out, err := doSkillCandidates(b, in)
-		if err != nil {
-			return errorResult(err), nil, nil
-		}
-		return textResult(out), nil, nil
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "incidents",
 		Description: ToolDescriptions["incidents"],
 		Annotations: readOnlyAnnotations,
@@ -652,18 +586,6 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doDoctor(b)
-	case "clusters":
-		in, err := decodeInput[ClustersInput](raw, name)
-		if err != nil {
-			return nil, err
-		}
-		return doClusters(b, in)
-	case "skill_candidates":
-		in, err := decodeInput[SkillCandidatesInput](raw, name)
-		if err != nil {
-			return nil, err
-		}
-		return doSkillCandidates(b, in)
 	case "incidents":
 		in, err := decodeInput[IncidentsInput](raw, name)
 		if err != nil {

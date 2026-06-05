@@ -1,8 +1,9 @@
 # MCP spec
 
 A read-only stdio MCP (Model Context Protocol) server that exposes the existing
-read-side CLI surface (`search`, `read`, `clusters`, `status`, `verify`,
-`conflicts`, `corpus size`, `doctor`) to coding agents without spawning a CLI subprocess per
+read-side CLI surface (`search`, `read`, `incidents`, `status`, `verify`,
+`conflicts`, `corpus size`, `doctor`) plus the dashboard analytics
+(`incident_trajectory`, `overview`) to coding agents without spawning a CLI subprocess per
 call.
 
 ## Goals
@@ -46,9 +47,7 @@ output.
 | ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `search`      | `aha search`                         | `query` (string, required), `source`, `machine`, `role`, `after`, `before`, `path`, `path_token`, `project`, `limit` (int, ≤ `search.MaxLimit`)    | `[]search.Result`                                     |
 | `read`        | `aha read`                           | one of: `ref` (string, canonical ref text) **or** `session` + optional `entry`; plus `before` (int, default 3), `after` (int, default 5)           | `[]corpus.ReadEntry`                                  |
-| `clusters`    | `aha clusters`                       | `limit` (int, default 50)                                                                                                                          | `[]corpus.Cluster`                                    |
-| `skill_candidates` | `aha clusters --with-fixes`     | `limit` (int, default 50)                                                                                                                          | `[]corpus.SkillCandidate`                             |
-| `incidents`   | (dashboard unified view)             | `limit` (int, default 50); optional `project`, `source`, `machine`, `tool`                                                                          | `[]corpus.Incident`                                   |
+| `incidents`   | `aha incidents`                      | `limit` (int, default 50); optional `project`, `source`, `machine`, `tool`                                                                          | `[]corpus.Incident`                                   |
 | `incident_trajectory` | (dashboard drill-in)         | `ref` (string, a resolving-success `msg:v1:` ref)                                                                                                   | `[]corpus.TrajectoryStep`                             |
 | `overview`    | (dashboard orientation)              | none                                                                                                                                               | `corpus.Overview`                                     |
 | `status`      | `aha status`                         | none                                                                                                                                               | `map[string]any` from `corpus.Status`                 |
@@ -68,7 +67,7 @@ Server (v1.6+). All wire-format details — JSON-RPC 2.0 framing, the
 newline-delimited stdio transport, version negotiation, lifecycle methods,
 `tools/list` shape, `tools/call` envelope, `structuredContent` vs
 `content[].text` decisions, ping, progress, cancellation, error
-propagation — are handled by the SDK. We register the eight read tools
+propagation — are handled by the SDK. We register the ten read tools
 via `mcp.AddTool[In, Out]` with typed Go input structs and let the SDK
 generate JSON-Schema, marshal results, and emit conformant responses.
 
@@ -112,9 +111,9 @@ aha mcp [--config PATH] [--repo DIR] [--dry-run]
 ## Security boundaries
 
 - Stdio only. No port is opened, no socket is bound.
-- Read-only: only `search`, `read`, `clusters`, `skill_candidates`,
-  `incidents`, `incident_trajectory`, `overview`, `status`, `verify`,
-  `conflicts`, `corpus_size`, and `doctor` are reachable; write tools are not registered.
+- Read-only: only `search`, `read`, `incidents`, `incident_trajectory`,
+  `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor`
+  are reachable; write tools are not registered.
 - Same filesystem access as the CLI: whatever corpus and config the calling
   user can read.
 - No depot writes, no R2 calls, no remote network access.
@@ -137,7 +136,7 @@ is duplicated. The MCP layer is purely:
 4. SDK `CallToolResult` construction. Object-typed tools (`status`,
    `verify`, `corpus_size`, `doctor`) return a typed `Out` and let the
    SDK fill both `content[].text` and `structuredContent` from one
-   marshal. List-typed tools (`search`, `read`, `clusters`, `conflicts`) use
+   marshal. List-typed tools (`search`, `read`, `incidents`, `conflicts`) use
    `Out=any` because the SDK refuses array output schemas, and call a
    thin `textResult` helper to set `content[].text` manually.
 
@@ -308,8 +307,6 @@ Routes:
 | GET    | `/api/tools`        | `{tools: [...]}` (advertised surface)  |
 | POST   | `/api/search`       | JSON args → `[]SearchResult`           |
 | POST   | `/api/read`         | JSON args → `[]ReadEntry`              |
-| POST   | `/api/clusters`     | JSON args → `[]Cluster`                |
-| POST   | `/api/skill_candidates` | JSON args → `[]SkillCandidate`     |
 | POST   | `/api/incidents`    | JSON args → `[]Incident`               |
 | POST   | `/api/incident_trajectory` | JSON args → `[]TrajectoryStep`  |
 | GET    | `/api/overview`     | `Overview`                             |
@@ -411,7 +408,7 @@ omission is a decision rather than an oversight:
   `structuredContent` alongside `content[].text` per the 2025-06-18 spec
   — the six-leg conformance suite verifies the dict-form matches the
   text payload across all three SDKs. List-typed tools (`search`, `read`,
-  `clusters`, `conflicts`) omit `structuredContent` because the official Python SDK
+  `incidents`, `conflicts`) omit `structuredContent` because the official Python SDK
   models the field as `Dict[str, Any]` and raises a Pydantic validation
   error on arrays. The typed payload travels in `content[].text` for
   those tools and the TS client surface JSON-parses it transparently.

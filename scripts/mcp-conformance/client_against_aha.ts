@@ -15,8 +15,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const EXPECTED_TOOLS = [
   "search",
   "read",
-  "clusters",
-  "skill_candidates",
   "incidents",
   "incident_trajectory",
   "overview",

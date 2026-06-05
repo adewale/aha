@@ -27,7 +27,6 @@ import (
 )
 
 var expectedTools = []string{
-	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
@@ -36,7 +35,6 @@ var expectedTools = []string{
 	"overview",
 	"read",
 	"search",
-	"skill_candidates",
 	"status",
 	"verify",
 }

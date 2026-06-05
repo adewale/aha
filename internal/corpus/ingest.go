@@ -648,7 +648,7 @@ func (w corpusWriter) storedToolOutcome(inv ToolInvocation) (signature, outcome 
 		signature = fallbackErrorSignature(inv)
 	}
 	// Store only the normalized/redacted display signature, never the raw tool
-	// result body, so clusters do not become a second raw-output surface.
+	// result body, so incidents do not become a second raw-output surface.
 	return signature, signature, sigHits, outcomeHits
 }
 

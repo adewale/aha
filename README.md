@@ -2,7 +2,7 @@
 
 `aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. `aha clusters` now surfaces recurring tool-call failures as skill candidates; it does not write skills for you.
+It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. `aha incidents` surfaces recurring tool-call failures alongside the fixes that resolved them; it does not write skills for you.
 
 Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
@@ -21,10 +21,10 @@ Use it when you've accumulated enough coding-agent conversations that you want t
 
 The substrate is built, with a first deterministic pattern layer for recurring tool failures:
 
-- **Local dashboard** (`aha serve`) — a loopback web UI for browsing search results, reading full session context, checking status/conflicts, and scanning recurring failure clusters. It is still a browser over local data, not an autonomous skill author.
-- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `clusters`, `skill_candidates`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?", "which failures keep recurring unresolved?", or "show me the fix that worked" via read-only tools.
+- **Local dashboard** (`aha serve`) — a loopback web UI with a corpus overview, search/read, and a unified **incidents** view (recurring failures with their resolution status, sparklines, fix paths, trajectory drill-in, and a copy-skill-draft affordance). It is still a browser over local data, not an autonomous skill author.
+- **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?", "which failures keep recurring unresolved?", or "show me the fix that worked" via read-only tools.
 - **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can run one code-mode program over a long-lived transport (`search → filter → Promise.all(read)`). That is still multiple MCP tool calls when the program fans out. See `clients/typescript/README.md` for examples.
-- **Error clusters** (`aha clusters`) — recurring tool-call failures are grouped by tool, command family, and normalized error signature with a `sample_ref` for drilling into the sample command row. `aha clusters --with-fixes` goes a step further: it mines single-session failure→fix arcs (`failure_episodes`) and ranks each resolved cluster by the **resolution path that actually worked**, using a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one. Clusters and candidate fixes are signals for humans/agents to write better skills; `aha` does not generate or install skills. See `docs/outcome-weighting-spec.md`.
+- **Incidents** (`aha incidents`) — recurring tool-call failures grouped by tool, command family, and normalized error signature, each carrying both its recurrence (episodes, distinct sessions/projects, first/last seen) and its resolution status: `unresolved` / `partial` / `resolved`, a tier, and the top **resolution paths that actually worked** (ranked by a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one). Filter `--state unresolved` for the unsolved-pain to-do list or `--state resolved` for skills worth harvesting. Incidents are signals for humans/agents to write better skills; `aha` does not generate or install skills. See `docs/outcome-weighting-spec.md`.
 
 The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader skill-candidate detection, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
 
@@ -190,7 +190,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 aha status [--repo DIR] [--depot DEPOT] [--json]
 aha verify [--repo DIR] [--repair-fts] [--json]
 aha conflicts [--repo DIR] [--json]
-aha clusters [--repo DIR] [--limit N] [--with-fixes] [--json]
+aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
 aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
 aha doctor [--depot DEPOT] [--json]
@@ -209,11 +209,11 @@ Command roles:
 - `status`: corpus counts and health.
 - `verify`: corpus invariant checks and optional FTS repair.
 - `conflicts`: quarantined merge conflicts.
-- `clusters`: rank recurring tool-call failure clusters as skill-candidate signals; each row includes a `sample_ref` for `aha read` drill-in to the sample command row. `--with-fixes` instead ranks *resolved* clusters by the outcome-weighted resolution path that fixed them (top-K paths, each with support, confidence, tier, and a `sample_ref` to the resolving success).
+- `incidents`: rank recurring tool-call failures with their resolution status (`unresolved`/`partial`/`resolved`), tier, and the outcome-weighted fix paths that worked (each with support, confidence, and a `sample_ref` to the resolving success). Scope with `--state` and `--project`/`--source`/`--machine`/`--tool`.
 - `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
 - `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
 - `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
-- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `clusters`, `skill_candidates`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
+- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
 - `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Loopback binds need no auth; passing `--allow-remote` (or setting `AHA_ALLOW_REMOTE=1`) requires a shared-secret bearer token via `--token` (or `AHA_DASHBOARD_TOKEN`). Hostnames accepted via `Host:` are restricted to the loopback allowlist by default; extend with `--allowed-hosts`.
 
 Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
@@ -277,7 +277,7 @@ For coding agents using `aha`:
 1. Use `aha search ... --json` or `--refs` to find leads.
 2. Use `aha read <ref> --json` to retrieve full source context.
 3. Answer from retrieved context, not from snippets alone.
-4. Prefer query-only commands (`search`, `read`, `clusters`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
+4. Prefer query-only commands (`search`, `read`, `incidents`, `status`, `conflicts`) unless the user explicitly asks to snapshot/ingest. `doctor` is diagnostic but may create/update the private OpenCode JSONL export cache while counting OpenCode sessions.
 5. Check `aha status --json` for `redaction_levels`; if the corpus is `none-v1`, do not assume secrets are redacted.
 
 ## Accepted v1 limits
@@ -301,7 +301,7 @@ For coding agents using `aha`:
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
 - `docs/redaction-spec.md` — implemented v1.1 corpus-projection redaction plus deferred v1.2+ designs.
-- `docs/outcome-weighting-spec.md` — design for ranking error clusters by the fix that actually worked (resolution-path mining over `tool_invocations`).
+- `docs/outcome-weighting-spec.md` — design for the incidents surface: ranking recurring failures by the fix that actually worked (resolution-path mining over `tool_invocations`).
 - `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
 - `docs/research/openinference.md` — OpenInference semantic-convention reference.
 - `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.

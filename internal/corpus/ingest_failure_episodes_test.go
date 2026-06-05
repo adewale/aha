@@ -74,7 +74,7 @@ func TestIngestProducesResolvedSkillCandidate(t *testing.T) {
 		t.Fatalf("ingest: %v", err)
 	}
 
-	candidates, err := corpus.SkillCandidates(store.DB, 0)
+	candidates, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,12 +106,12 @@ func TestIngestResumeFlipsAbandonedToResolved(t *testing.T) {
 	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle1); err != nil {
 		t.Fatalf("ingest bundle1: %v", err)
 	}
-	candidates, err := corpus.SkillCandidates(store.DB, 0)
+	incidents, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 0 {
-		t.Fatalf("unresolved opener must not yet be a candidate: %+v", candidates)
+	if len(incidents) != 1 || incidents[0].State != "unresolved" {
+		t.Fatalf("the opener should be one unresolved incident before the fix: %+v", incidents)
 	}
 
 	// Resume: the session grows with the resolving success; re-capture + ingest.
@@ -122,14 +122,14 @@ func TestIngestResumeFlipsAbandonedToResolved(t *testing.T) {
 	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err != nil {
 		t.Fatalf("ingest bundle2: %v", err)
 	}
-	candidates, err = corpus.SkillCandidates(store.DB, 0)
+	incidents, err = corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("after resume the episode must flip to resolved, got %d candidates: %+v", len(candidates), candidates)
+	if len(incidents) != 1 || incidents[0].State != "resolved" {
+		t.Fatalf("after resume the episode must flip to resolved: %+v", incidents)
 	}
-	if candidates[0].Resolved != 1 || candidates[0].Episodes != 1 {
-		t.Fatalf("resume should yield exactly one resolved episode, got resolved=%d episodes=%d", candidates[0].Resolved, candidates[0].Episodes)
+	if incidents[0].Resolved != 1 || incidents[0].Episodes != 1 {
+		t.Fatalf("resume should yield exactly one resolved episode, got resolved=%d episodes=%d", incidents[0].Resolved, incidents[0].Episodes)
 	}
 }

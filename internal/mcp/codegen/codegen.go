@@ -50,9 +50,7 @@ func Generate() []byte {
 		{"VerifyReport", reflect.TypeOf(corpus.VerifyReport{})},
 		{"Conflict", reflect.TypeOf(corpus.Conflict{})},
 		{"SizeReport", reflect.TypeOf(corpus.SizeReport{})},
-		{"Cluster", reflect.TypeOf(corpus.Cluster{})},
 		{"ResolutionPath", reflect.TypeOf(corpus.ResolutionPath{})},
-		{"SkillCandidate", reflect.TypeOf(corpus.SkillCandidate{})},
 		{"Incident", reflect.TypeOf(corpus.Incident{})},
 		{"TrajectoryStep", reflect.TypeOf(corpus.TrajectoryStep{})},
 		{"NamedCount", reflect.TypeOf(corpus.NamedCount{})},
@@ -171,8 +169,6 @@ export type DoctorReport = Record<string, unknown>;
 func inputInterfaces() string {
 	var b bytes.Buffer
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
-	writeStructInterfaceWithDocs(&b, "ClustersArgs", reflect.TypeOf(mcp.ClustersInput{}))
-	writeStructInterfaceWithDocs(&b, "SkillCandidatesArgs", reflect.TypeOf(mcp.SkillCandidatesInput{}))
 	writeStructInterfaceWithDocs(&b, "IncidentsArgs", reflect.TypeOf(mcp.IncidentsInput{}))
 	writeStructInterfaceWithDocs(&b, "IncidentTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
 	b.WriteString(readArgsUnion)
@@ -268,14 +264,6 @@ export function aha(transport: Transport) {
 `)
 		case "doctor":
 			b.WriteString(`    doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
-`)
-		case "clusters":
-			b.WriteString(`    clusters: (args: ClustersArgs = {}) =>
-      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
-`)
-		case "skill_candidates":
-			b.WriteString(`    skill_candidates: (args: SkillCandidatesArgs = {}) =>
-      transport.call("skill_candidates", args as unknown as Record<string, unknown>) as Promise<SkillCandidate[]>,
 `)
 		case "incidents":
 			b.WriteString(`    incidents: (args: IncidentsArgs = {}) =>

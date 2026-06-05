@@ -218,8 +218,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/doctor", s.jsonGet("doctor"))
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/read", s.handleRead)
-	s.mux.HandleFunc("/api/clusters", s.handleClusters)
-	s.mux.HandleFunc("/api/skill_candidates", s.handleSkillCandidates)
 	s.mux.HandleFunc("/api/incidents", s.handleIncidents)
 	s.mux.HandleFunc("/api/incident_trajectory", s.handleIncidentTrajectory)
 	s.mux.HandleFunc("/api/overview", s.jsonGet("overview"))
@@ -289,14 +287,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	s.handleJSONPost(w, r, "read")
-}
-
-func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "clusters")
-}
-
-func (s *Server) handleSkillCandidates(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "skill_candidates")
 }
 
 func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {

@@ -72,7 +72,7 @@ Rationale:
 
 - Search should default to the local corpus.
 - Results must be readable without knowing the source agent's file format.
-- Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Error clusters store normalized command/error signatures for ranking, not raw tool output samples.
+- Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Incidents store normalized command/error signatures for ranking, not raw tool output samples.
 
 ## Journey 4: create a repo and ingest bundles
 
@@ -126,7 +126,7 @@ aha mcp --dry-run
 
 Rationale:
 
-- Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
+- Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
 - It reuses the same corpus/search code as the CLI, so results match `--json` output exactly.
 - It is read-only by construction: snapshot/refresh/ingest are not reachable, so an agent cannot mutate the corpus.
 - `--dry-run` opens the corpus, registers tools, prints a one-line summary, and exits — confirms a host config before stdio carries protocol traffic.
