@@ -10,13 +10,13 @@ The first useful object is not a corpus, task rail, hero headline, or collection
 
 Design principle:
 
-> Three journeys, one domain model. Search finds a trace, Failures mines patterns across traces, Archive explains trust and scope.
+> Three journeys, one domain model. Search finds a trace, Failures mines patterns across traces, Sources explains indexed data, scope, and trust.
 
 Top-level tabs:
 
-- **Search**: find context inside traces.
-- **Failures**: inspect recurring failure patterns and fixes.
-- **Archive**: understand indexed sources, scope, and trust issues.
+- **Search**: find context inside traces, with prompts selected first.
+- **Failures**: inspect the most frequent recurring failure patterns and fixes.
+- **Sources**: understand indexed sources, scope, and trust issues. It stays out of the main workspace unless the user needs data confidence or scope.
 
 ## Research basis
 
@@ -55,7 +55,7 @@ User question: “Is this the one where the agent ran tests and edited the migra
 
 Trace-card anatomy:
 
-- title from the most recognizable matched prompt/event;
+- title from the first user prompt when available, with matched events shown separately;
 - project/source/machine/date provenance;
 - matched-event count;
 - status badge such as conversation, tool work, file match, or failed tool;
@@ -77,12 +77,13 @@ User question: “Search only prompts” or “search tool output too.”
 Flow:
 
 1. User types a query.
-2. User can refine via visible **Search in** chips:
-   - All history
+2. Prompt search is selected first.
+3. User can refine via visible **Search in** chips:
    - Prompts
+   - All history
    - Assistant replies
    - Tool output
-3. Advanced filters remain available but secondary:
+4. Advanced filters remain available but secondary:
    - Project
    - Source
    - Machine
@@ -103,7 +104,8 @@ Flow:
 1. User selects a trace card.
 2. The app calls `read` for the selected canonical ref.
 3. **Evidence** shows structured transcript entries, not one raw preformatted blob.
-4. URL hash stores the selected ref for reloadable context.
+4. Evidence exposes actions to copy the canonical ref and widen transcript context.
+5. URL hash stores the selected ref for reloadable context.
 
 Success criteria:
 
@@ -117,12 +119,13 @@ User question: “What keeps breaking, and has this been fixed before?”
 Flow:
 
 1. User opens the **Failures** tab when they want summaries rather than one trace.
-2. Failure state controls use human labels:
+2. The tab starts with the **most frequent** failure pattern so the user has a concrete next action.
+3. Failure state controls use human labels:
    - all
    - needs attention
    - sometimes fixed
    - fixed before
-3. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
+4. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
 
 Success criteria:
 
@@ -135,11 +138,11 @@ User question: “What data is indexed, and is anything quarantined?”
 
 Flow:
 
-1. User opens the **Archive** tab.
-2. User reads **Archive health** for indexed sessions, messages, sources, machines, projects, and span.
+1. User opens the **Sources** tab.
+2. User reads **Sources & scope** for indexed sessions, messages, sources, machines, projects, and span.
 3. Clicking a chip scopes the next search and recurring-failure filters.
 4. A visible scope summary appears with **Clear scope** in Search.
-5. **Merge conflicts** lists quarantined rows.
+5. **Trust checks** lists quarantined rows when there is a problem.
 
 Success criteria:
 
@@ -153,17 +156,17 @@ Success criteria:
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ aha · local agent memory                    sessions · entries · messages │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ [ Search ] [ Failures ] [ Archive ]                                        │
+│ [ Search ] [ Failures ] [ Sources ]                                        │
 │                                                                            │
 │ Search tab                                                                 │
 │ Search agent history                                                       │
 │ ┌────────────────────────────────────────────────────────────────────────┐ │
 │ │ schema migration sqlite failure                                        │ │
 │ └────────────────────────────────────────────────────────────────────────┘ │
-│ Search in: [All history] [Prompts] [Assistant replies] [Tool output]       │
+│ Search in: [Prompts] [All history] [Assistant replies] [Tool output]       │
 │ Advanced filters: project/source/machine/path                              │
 │                                                                            │
-│ Trace → Event → Evidence                                                   │
+│ Trace / Conversation → Event → Evidence                                    │
 │                                                                            │
 │ Traces                                                                     │
 │ ┌────────────────────────────────────────────────────────────────────────┐ │
@@ -181,8 +184,8 @@ Success criteria:
 │ Failures tab                                                               │
 │ recurring failure patterns, fix paths, evidence links                      │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Archive tab                                                                │
-│ archive health, scope chips, merge conflicts                               │
+│ Sources tab                                                                │
+│ sources & scope, trust checks                                              │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -191,27 +194,27 @@ Success criteria:
 | UI concept | API/tool backing | Notes |
 |---|---|---|
 | Search field | `POST /api/search_traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
+| Search in: Prompts | `role = "user"` | Default search mode; prompt recall comes first. |
 | Search in: All history | omit `role` | Search messages and artifacts. |
-| Search in: Prompts | `role = "user"` | UI label stays product-facing. |
 | Search in: Assistant replies | `role = "assistant"` | Searches assistant-authored messages. |
 | Search in: Tool output | `role = "toolResult"` | Searches indexed tool-result messages. |
 | Trace cards | grouped enriched search hits | Server groups hits by `session_key`, adds counts, timeline, command chips, file chips, status, and matched events. |
 | Evidence | `POST /api/read` | Uses the clicked card's `ref_text`. |
 | Recurring failures | `POST /api/incidents` | State labels map to corpus states. |
 | Trace fix | `POST /api/incident_trajectory` | Requires sample ref and ordinal. |
-| Archive health | `GET /api/overview` | Counts and scope chips. |
-| Merge conflicts | `GET /api/conflicts` | Quarantined rows. |
+| Sources & scope | `GET /api/overview` | Counts and scope chips. |
+| Trust checks | `GET /api/conflicts` | Quarantined rows. |
 
 ## Interaction rules
 
-- Top-level tabs separate user journeys: Search, Failures, Archive.
+- Top-level tabs separate user journeys: Search, Failures, Sources.
 - Empty state is not a task rail. It tells the user to search and explains trace-card output.
-- The search box searches all history by default.
+- The search box searches prompts by default. All history is one chip away.
 - Search chips set the hidden role filter, update `aria-pressed`, and rerun the search when a query is present.
 - Advanced filters are secondary and collapsed by default.
 - Scope changes show a visible summary and a live feedback sentence so users know what changed.
 - Search results come back as enriched trace cards grouped by session key.
-- Selecting any trace card loads the first matched ref in **Evidence** and highlights the selected entry when possible.
+- Selecting any trace card loads the first matched ref in **Evidence**, shows the selected trace header, enables copy-ref/widen-context actions, and highlights the selected entry when possible.
 - Overview chips populate search and incident facets, then focus the search box.
 - Incident rows and fix paths continue to drill into read context.
 - Clipboard actions are user-initiated only.
@@ -224,10 +227,10 @@ Prefer:
 - trace cards
 - Search
 - Failures
-- Archive
+- Sources
 - Search in
-- All history
 - Prompts
+- All history
 - Assistant replies
 - Tool output
 - Advanced filters
@@ -237,8 +240,8 @@ Prefer:
 - sometimes fixed
 - fixed before
 - copy fix notes
-- Archive health
-- Merge conflicts
+- Sources & scope
+- Trust checks
 
 Avoid as primary UI:
 
@@ -272,14 +275,14 @@ Desktop:
 - Search input is large, but its label and hint are compact enough that results stay close to the fold.
 - Trace cards and Evidence sit in one explicit workbench grid so their edges align.
 - The reader is not sticky; sticky layering can overlap later sections and make scroll state ambiguous.
-- A compact Search-tab hint names the local hierarchy: Trace, Event, Evidence.
-- Failures and Archive are not visible in the Search workspace except as top-level tabs.
+- A compact Search-tab hint names the local hierarchy: Trace or Conversation, Event, Evidence.
+- Failures and Sources are not visible in the Search workspace except as top-level tabs.
 
 Mobile/narrow:
 
 - Tabs wrap if needed.
 - Search tab single-column order: search, domain model hint, trace cards, evidence.
-- Failures and Archive keep their own single-column layouts.
+- Failures and Sources keep their own single-column layouts.
 - Search button stacks below input.
 - Advanced filters stack to one column.
 - Trace cards keep event labels and snippets readable.

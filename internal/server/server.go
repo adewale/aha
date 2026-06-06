@@ -503,13 +503,13 @@ func queryStrings(db *sql.DB, sqlText, arg string) []string {
 }
 
 func titleForSession(db *sql.DB, sessionKey string, hits []search.Result) string {
-	if t := titleFromHits(hits); t != "" {
-		return t
-	}
 	var text string
 	_ = db.QueryRow(`select coalesce(m.text,'') from messages m join entries e on e.session_key=m.session_key and e.entry_id=m.entry_id where m.session_key=? and m.role='user' and trim(coalesce(m.text,''))<>'' order by e.line_no,e.entry_id limit 1`, sessionKey).Scan(&text)
 	if text = cleanSnippet(text); text != "" {
 		return truncate(text, 140)
+	}
+	if t := titleFromHits(hits); t != "" {
+		return t
 	}
 	return "Untitled trace"
 }

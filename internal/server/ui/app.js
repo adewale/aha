@@ -17,6 +17,10 @@ function clampText(s) {
 let lastTraces = [];
 let lastIncidents = [];
 let incidentState = "all"; // all | unresolved | partial | resolved
+let currentRef = "";
+let currentSelectedEntryID = "";
+let currentTrace = null;
+let currentWindow = { before: 3, after: 10 };
 
 async function call(path, init) {
   const r = await fetch(path, init);
@@ -47,13 +51,16 @@ async function refreshConflicts() {
     if (!rows || !rows.length) {
       el.innerHTML = `<li class="muted">no quarantined conflicts</li>`;
       $("conflicts-summary-status").textContent = "clean";
+      $("sources-tab-status").textContent = "Data healthy";
       return;
     }
     el.innerHTML = rows.map((c) => `<li>#${c.id} ${esc(c.session_key)} ${esc(c.entry_id)} <span class="muted">${esc(c.created_at)}</span></li>`).join("");
     $("conflicts-summary-status").textContent = `${rows.length} quarantined`;
+    $("sources-tab-status").textContent = `${rows.length} needs review`;
   } catch (e) {
     $("conflicts").innerHTML = `<li class="muted">conflicts error: ${esc(e.message)}</li>`;
     $("conflicts-summary-status").textContent = "error";
+    $("sources-tab-status").textContent = "Trust issue";
   }
 }
 
@@ -151,11 +158,13 @@ async function refreshIncidents() {
     lastIncidents = rows || [];
     if (!lastIncidents.length) {
       ol.innerHTML = `<li class="muted">no failures for this filter. Ingest sessions with tool failures, or widen the filter.</li>`;
+      $("failure-summary").innerHTML = `No recurring failures for this filter.`;
       setIncidentFeedback(`No ${incidentStateLabel(incidentState).toLowerCase()} failures for the current filters.`);
       $("incident-summary-status").textContent = "none";
       return;
     }
     ol.innerHTML = lastIncidents.map((c, idx) => renderIncident(c, idx)).join("");
+    renderFailureSummary();
     setIncidentFeedback(`Showing ${lastIncidents.length} ${incidentStateLabel(incidentState).toLowerCase()} failure${lastIncidents.length === 1 ? "" : "s"}.`);
     $("incident-summary-status").textContent = `${lastIncidents.length} patterns`;
   } catch (e) {
@@ -163,6 +172,19 @@ async function refreshIncidents() {
     setIncidentFeedback(`Failure list error: ${e.message}`);
     $("incident-summary-status").textContent = "error";
   }
+}
+
+function renderFailureSummary() {
+  const top = lastIncidents.reduce((best, c, idx) => {
+    if (!best || c.episodes > best.c.episodes) return { c, idx };
+    return best;
+  }, null);
+  if (!top) return;
+  const c = top.c;
+  $("failure-summary").innerHTML =
+    `<strong>Most frequent:</strong> ${esc(c.tool_name || "tool")} · <code>${esc(c.command_family || "")}</code> ` +
+    `<span>${c.episodes} episodes across ${c.distinct_sessions} sessions</span> ` +
+    `<button type="button" class="incident-scope" data-iidx="${top.idx}">search matching history</button>`;
 }
 
 function incidentStateLabel(state) {
@@ -289,7 +311,7 @@ async function doSearch(ev) {
   updateScopeSummary();
   if (!args.query) {
     lastTraces = [];
-    ol.innerHTML = `<li class="empty-state">Type a prompt, file, command, error, or decision to search across local agent traces.</li>`;
+    ol.innerHTML = renderSearchEmpty();
     setSearchFeedback(`${roleFilterLabel()} selected. Type a query to search.`);
     return;
   }
@@ -305,18 +327,25 @@ async function doSearch(ev) {
     });
     lastTraces = traces || [];
     if (!lastTraces.length) {
-      ol.innerHTML = `<li class="empty-state">No trace cards found. Try all history, clear scope, or search fewer words.</li>`;
+      ol.innerHTML = renderSearchEmpty(`No trace cards found for “${esc(query)}”. Try all history, clear scope, or search fewer words.`);
       setSearchFeedback(`No matches for “${query}”.`);
       return;
     }
     const matchedEvents = lastTraces.reduce((n, t) => n + (t.matched_event_count || 0), 0);
     ol.innerHTML = renderTraceCards(lastTraces);
     setSearchFeedback(`${lastTraces.length} trace card${lastTraces.length === 1 ? "" : "s"} with ${matchedEvents} matched event${matchedEvents === 1 ? "" : "s"}. First trace selected.`);
-    if (lastTraces[0] && lastTraces[0].ref_text) loadRead(lastTraces[0].ref_text, true, { before: 3, after: 10 }, lastTraces[0].entry_id);
+    if (lastTraces[0] && lastTraces[0].ref_text) loadRead(lastTraces[0].ref_text, true, { before: 3, after: 10 }, lastTraces[0].entry_id, lastTraces[0]);
   } catch (e) {
     ol.innerHTML = `<li class="empty-state">Search error: ${esc(e.message)}</li>`;
     setSearchFeedback(`Search error: ${e.message}`);
   }
+}
+
+function renderSearchEmpty(message = "No search yet. Try one of these examples.") {
+  const examples = ["accept secrets warning", "schema migration", "fix recurring failures"];
+  return `<li class="empty-state"><p>${message}</p><div class="example-searches">` +
+    examples.map((q) => `<button type="button" class="example-search" data-query="${esc(q)}">${esc(q)}</button>`).join("") +
+  `</div></li>`;
 }
 
 function searchArgs() {
@@ -422,9 +451,14 @@ function traceSubtitle(t) {
 // loadRead fetches surrounding context for a ref and renders it. Selecting a
 // result also writes the ref into the URL fragment so the view is reloadable
 // and shareable. Refs are stable identifiers by design.
-async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }, selectedEntryID = "") {
+async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }, selectedEntryID = "", trace = null) {
   if (!refText) return;
   setActiveTab("search");
+  currentRef = refText;
+  currentSelectedEntryID = selectedEntryID;
+  currentTrace = trace;
+  currentWindow = window;
+  updateReaderContext(trace, refText);
   const body = $("reader-body");
   body.textContent = "loading…";
   if (updateHash) {
@@ -441,6 +475,16 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
   } catch (e) {
     body.innerHTML = `<div class="empty-state">read error: ${esc(e.message)}</div>`;
   }
+}
+
+function updateReaderContext(trace, refText) {
+  $("copy-ref").disabled = false;
+  $("widen-context").disabled = false;
+  if (trace) {
+    $("reader-context").innerHTML = `<strong>${esc(trace.title || "Selected trace")}</strong><span>${esc(traceSubtitle(trace))}</span><code>${esc(refText)}</code>`;
+    return;
+  }
+  $("reader-context").innerHTML = `<strong>Selected evidence</strong><code>${esc(refText)}</code>`;
 }
 
 function renderReadEntry(e, selected) {
@@ -531,6 +575,16 @@ document.addEventListener("DOMContentLoaded", () => {
     tab.addEventListener("click", () => setActiveTab(tab.dataset.tab)));
   $("search-form").addEventListener("submit", doSearch);
   $("clear-scope").addEventListener("click", clearScope);
+  $("copy-ref").addEventListener("click", async () => {
+    if (!currentRef) return;
+    const ok = await copyText(currentRef);
+    $("copy-ref").textContent = ok ? "Copied ref" : "Copy failed";
+    setTimeout(() => { $("copy-ref").textContent = "Copy ref"; }, 1500);
+  });
+  $("widen-context").addEventListener("click", () => {
+    if (!currentRef) return;
+    loadRead(currentRef, true, { before: 10, after: 20 }, currentSelectedEntryID, currentTrace);
+  });
   for (const id of ["project", "source", "machine", "path"]) {
     $(id).addEventListener("input", () => {
       updateScopeSummary();
@@ -545,17 +599,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }));
   // Event delegation: one listener for the whole results list.
   $("results").addEventListener("click", (ev) => {
+    const example = ev.target.closest("button.example-search");
+    if (example) {
+      $("query").value = example.dataset.query || "";
+      doSearch();
+      return;
+    }
     const card = ev.target.closest("[data-idx]");
     if (!card) return;
     const trace = lastTraces[Number(card.dataset.idx)];
     if (trace) {
       setSearchFeedback(`Opened ${trace.status || "conversation"} trace: ${traceSubtitle(trace)}.`);
-      loadRead(trace.ref_text, true, { before: 3, after: 10 }, trace.entry_id);
+      loadRead(trace.ref_text, true, { before: 3, after: 10 }, trace.entry_id, trace);
     }
   });
   // Incident list: one delegated listener handles read drill-in, trajectory
   // expand, skill-draft copy, and cross-link-to-search.
-  $("incidents").addEventListener("click", async (ev) => {
+  $("incidents-section").addEventListener("click", async (ev) => {
     const copyBtn = ev.target.closest("button.copy-skill");
     if (copyBtn) {
       const c = lastIncidents[Number(copyBtn.dataset.iidx)];

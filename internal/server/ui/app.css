@@ -191,6 +191,9 @@ section { background: var(--surface); border: 1px solid var(--line); border-radi
 .section-head > p { text-align: end; }
 ol.trace-results { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-sm); }
 .empty-state { color: var(--muted); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); padding: var(--space-lg); background: var(--surface-raised); }
+.empty-state p { margin-block: 0 var(--space-sm); }
+.example-searches { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.example-search { min-height: 2.3rem; padding: 0.35rem 0.65rem; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid oklch(80% 0.07 257); border-radius: 999px; }
 .trace-card {
   width: 100%;
   display: block;
@@ -236,6 +239,11 @@ ol.trace-results { list-style: none; padding: 0; margin: 0; display: grid; gap: 
 .event-snippet { white-space: pre-wrap; overflow-wrap: anywhere; }
 .trace-more { margin-block-start: var(--space-xs); }
 
+.reader-context { display: grid; gap: var(--space-2xs); padding: var(--space-sm); background: var(--surface-wash); border: 1px solid var(--line); border-radius: var(--radius-md); margin-block-end: var(--space-sm); }
+.reader-context code { font-family: var(--font-mono); font-size: 0.76rem; overflow-wrap: anywhere; }
+.reader-actions { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-block-end: var(--space-sm); }
+.reader-actions button { min-height: 2.3rem; padding: 0.35rem 0.65rem; color: var(--accent-ink); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.reader-actions button:disabled { cursor: not-allowed; opacity: 0.55; }
 .reader-body { display: grid; gap: var(--space-sm); max-height: 68vh; overflow: auto; }
 .read-entry { padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
 .read-entry.selected { border-color: var(--accent); background: var(--accent-soft); }
@@ -254,6 +262,9 @@ ol.trace-results { list-style: none; padding: 0; margin: 0; display: grid; gap: 
 #overview .ov-label { color: var(--muted); width: 4.5rem; flex: none; font-size: 0.76rem; letter-spacing: 0.04em; }
 .ov-chip { font-size: 0.82rem; min-height: 2rem; padding: 0.16rem 0.52rem; }
 
+.failure-summary { padding: var(--space-sm); background: var(--surface-wash); border: 1px solid var(--line); border-radius: var(--radius-md); margin-block-end: var(--space-sm); }
+.failure-summary strong { color: var(--fg); }
+.failure-summary code { font-family: var(--font-mono); }
 #incident-controls { display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; margin-block: var(--space-sm); }
 .seg { display: inline-flex; flex-wrap: wrap; gap: 1px; padding: 1px; background: var(--line); border-radius: var(--radius-md); }
 .state-btn { min-height: 2.35rem; padding: 0.32rem 0.72rem; background: var(--surface-raised); color: var(--muted); border: 0; border-radius: calc(var(--radius-md) - 1px); }

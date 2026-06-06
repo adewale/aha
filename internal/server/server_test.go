@@ -91,7 +91,7 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 		t.Fatalf("index status=%d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"Search", "Find context", "Failures", "Fix patterns", "Archive", "Trust and scope", "Search agent history", "schema migration sqlite failure", "Trace", "Event", "Evidence", "Traces", "Search in", "Prompts", "Tool output", "Advanced filters", "Clear scope", "aria-live", "aria-pressed", "Archive health"} {
+	for _, want := range []string{"Search", "Prompts first", "Failures", "Most frequent", "Sources", "Data &amp; trust", "Search agent history", "schema migration sqlite failure", "Conversation", "Trace", "Evidence", "Traces", "Search in", "Prompts", "Tool output", "Advanced filters", "Clear scope", "Copy ref", "Widen context", "aria-live", "aria-pressed", "Sources &amp; scope", "Trust checks"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dashboard copy missing search-first trace label %q:\n%s", want, body)
 		}
@@ -109,7 +109,7 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 		t.Fatalf("app.js status=%d", w.Code)
 	}
 	js := w.Body.String()
-	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
+	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "renderFailureSummary", "Most frequent", "updateReaderContext", "widen-context", "example-search", "sources-tab-status", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("dashboard behavior copy missing %q:\n%s", want, js)
 		}
@@ -233,7 +233,8 @@ func TestSearchTracesEndpointReturnsRecognizableCards(t *testing.T) {
 		tools, _ := tr["tool_calls"].(float64)
 		failures, _ := tr["failures"].(float64)
 		commands, _ := tr["commands"].([]any)
-		if tools > 0 && failures > 0 && len(commands) > 0 {
+		title, _ := tr["title"].(string)
+		if tools > 0 && failures > 0 && len(commands) > 0 && strings.Contains(title, "claude needle") {
 			sawToolFailure = true
 		}
 	}

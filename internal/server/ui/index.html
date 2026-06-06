@@ -17,9 +17,9 @@
 
 <main>
   <nav class="tabs" role="tablist" aria-label="User journeys">
-    <button id="tab-search" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-search" data-tab="search"><span>Search</span><small>Find context</small></button>
-    <button id="tab-failures" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-failures" data-tab="failures"><span>Failures</span><small>Fix patterns</small></button>
-    <button id="tab-archive" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-archive" data-tab="archive"><span>Archive</span><small>Trust and scope</small></button>
+    <button id="tab-search" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-search" data-tab="search"><span>Search</span><small>Prompts first</small></button>
+    <button id="tab-failures" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-failures" data-tab="failures"><span>Failures</span><small>Most frequent</small></button>
+    <button id="tab-archive" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-archive" data-tab="archive"><span>Sources</span><small id="sources-tab-status">Data &amp; trust</small></button>
   </nav>
 
   <div id="panel-search" class="tab-panel active" role="tabpanel" aria-labelledby="tab-search" data-tab-panel="search">
@@ -32,12 +32,12 @@
         <input id="query" class="search-input" placeholder="schema migration sqlite failure, file path, command" autofocus>
         <button type="submit" class="search-button">Search</button>
       </form>
-      <input type="hidden" id="role" value="">
+      <input type="hidden" id="role" value="user">
       <div class="search-refine" aria-label="Search refinements">
         <div class="chip-row" aria-label="Search in">
           <span class="chip-label">Search in</span>
-          <button type="button" class="role-chip active" data-role="" aria-pressed="true">All history</button>
-          <button type="button" class="role-chip" data-role="user" aria-pressed="false">Prompts</button>
+          <button type="button" class="role-chip active" data-role="user" aria-pressed="true">Prompts</button>
+          <button type="button" class="role-chip" data-role="" aria-pressed="false">All history</button>
           <button type="button" class="role-chip" data-role="assistant" aria-pressed="false">Assistant replies</button>
           <button type="button" class="role-chip" data-role="toolResult" aria-pressed="false">Tool output</button>
         </div>
@@ -57,25 +57,30 @@
       </div>
     </section>
 
-    <p class="model-hint"><strong>Trace</strong> is one session. <strong>Event</strong> is a prompt, reply, tool result, or file. <strong>Evidence</strong> is the original transcript around the selected event.</p>
+    <p class="model-hint"><strong>Trace</strong> is agent work. <strong>Conversation</strong> is prompt/reply-only. <strong>Event</strong> is one prompt, reply, tool result, or file. <strong>Evidence</strong> is the original transcript.</p>
 
     <div class="workbench">
       <section id="results-section" aria-labelledby="results-title">
         <div class="section-head">
           <div>
             <h2 id="results-title">Traces</h2>
-            <p class="muted">Session-level search results.</p>
+            <p class="muted">Session-level results. Plain prompt/reply sessions appear as conversations.</p>
           </div>
           <p id="search-feedback" class="muted" aria-live="polite">Search to see recognizable session slices with matched prompts, agent replies, tool output, files, and timestamps.</p>
         </div>
         <ol id="results" class="trace-results">
-          <li class="empty-state">No search yet. Type a phrase above to find the trace where it happened.</li>
+          <li class="empty-state"><p>No search yet. Try one of these examples.</p><div class="example-searches"><button type="button" class="example-search" data-query="accept secrets warning">accept secrets warning</button><button type="button" class="example-search" data-query="schema migration">schema migration</button><button type="button" class="example-search" data-query="fix recurring failures">fix recurring failures</button></div></li>
         </ol>
       </section>
 
       <section id="reader">
         <h2>Evidence</h2>
         <p class="muted">Original transcript context for the selected trace event.</p>
+        <div id="reader-context" class="reader-context muted">No trace selected.</div>
+        <div class="reader-actions">
+          <button type="button" id="copy-ref" disabled>Copy ref</button>
+          <button type="button" id="widen-context" disabled>Widen context</button>
+        </div>
         <div id="reader-body" class="reader-body"></div>
       </section>
     </div>
@@ -103,6 +108,7 @@
         <label class="field facet-field"><span>Tool</span><input id="f-tool" class="facet" placeholder="any"></label>
         <button type="button" id="incident-apply">Apply filters</button>
       </div>
+      <div id="failure-summary" class="failure-summary muted">Loading most frequent failure…</div>
       <p id="incident-feedback" class="muted" aria-live="polite">Showing all recurring failures. Use needs attention for repair work; fixed before shows fix paths that already worked.</p>
       <ol id="incidents"></ol>
     </section>
@@ -113,8 +119,8 @@
       <section id="overview-section" class="journey-section">
         <div class="journey-head">
           <div>
-            <h2>Archive health</h2>
-            <p class="muted">What is indexed locally. Click a chip to scope Search and Failures.</p>
+            <h2>Sources &amp; scope</h2>
+            <p class="muted">Indexed sources, machines, and projects. Click a chip to scope Search and Failures.</p>
           </div>
           <span id="overview-summary-status" class="drawer-status">loading</span>
         </div>
@@ -124,7 +130,7 @@
       <section id="conflicts-section" class="journey-section">
         <div class="journey-head">
           <div>
-            <h2>Merge conflicts</h2>
+            <h2>Trust checks</h2>
             <p class="muted">Quarantined transcript rows excluded from trusted search/read paths.</p>
           </div>
           <span id="conflicts-summary-status" class="drawer-status">loading</span>
