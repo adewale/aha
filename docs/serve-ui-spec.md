@@ -12,6 +12,8 @@ Design principle:
 
 > Three journeys, one domain model. Search finds a trace, Failures mines patterns across traces, Sources explains indexed data, scope, and trust.
 
+Visual direction: restrained technical ledger. The UI should feel like a precise local instrument: dense, aligned, rule-based, and quiet. Avoid decorative spectacle; make the memorable move the clarity of the evidence trail.
+
 Top-level tabs:
 
 - **Search**: find context inside traces, with prompts selected first.

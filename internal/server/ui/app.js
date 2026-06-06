@@ -375,7 +375,8 @@ function roleFilterLabel() {
 function renderTraceCards(traces) {
   return traces.map((t, i) => {
     const chips = traceChips(t);
-    return `<li><button type="button" class="trace-card" data-idx="${i}">` +
+    const selected = t.ref_text && t.ref_text === currentRef;
+    return `<li><button type="button" class="trace-card${selected ? " selected" : ""}" data-idx="${i}" data-ref="${esc(t.ref_text || "")}">` +
       `<div class="trace-head">` +
         `<div><div class="trace-title">${esc(t.title || "Untitled trace")}</div>` +
         `<div class="trace-meta">${esc(t.subtitle || "unknown trace")} · ${t.matched_event_count || 0} matched event${(t.matched_event_count || 0) === 1 ? "" : "s"}</div></div>` +
@@ -459,6 +460,7 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
   currentTrace = trace;
   currentWindow = window;
   updateReaderContext(trace, refText);
+  markSelectedTrace(refText);
   const body = $("reader-body");
   body.textContent = "loading…";
   if (updateHash) {
@@ -475,6 +477,12 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
   } catch (e) {
     body.innerHTML = `<div class="empty-state">read error: ${esc(e.message)}</div>`;
   }
+}
+
+function markSelectedTrace(refText) {
+  document.querySelectorAll(".trace-card").forEach((card) => {
+    card.classList.toggle("selected", card.dataset.ref === refText);
+  });
 }
 
 function updateReaderContext(trace, refText) {
