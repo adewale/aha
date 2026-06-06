@@ -35,7 +35,7 @@ Flow:
 2. User types remembered words.
 3. Results render as trace cards grouped by session, not isolated message rows.
 4. Each card shows recognizable provenance and matched events.
-5. Selecting a card opens **Read selected trace** at the exact ref.
+5. Selecting a card opens **Evidence** at the exact ref.
 
 Success criteria:
 
@@ -88,7 +88,7 @@ Success criteria:
 - Refinements use product language; internal `role=user` remains implementation detail.
 - Filters are visible in a calm secondary row below the search field.
 
-### 4. Read the selected trace
+### 4. Read the selected evidence
 
 User question: “Show me what happened around this match.”
 
@@ -96,13 +96,13 @@ Flow:
 
 1. User selects a trace card.
 2. The app calls `read` for the selected canonical ref.
-3. **Read selected trace** shows structured transcript entries, not one raw preformatted blob.
+3. **Evidence** shows structured transcript entries, not one raw preformatted blob.
 4. URL hash stores the selected ref for reloadable context.
 
 Success criteria:
 
 - Search results remain leads; the reader provides evidence.
-- The reader is framed as selected trace context, not a generic “read” command.
+- The reader is framed as evidence for the selected trace event, not a generic “read” command.
 
 ### 5. Investigate recurring failures
 
@@ -110,13 +110,14 @@ User question: “What keeps breaking, and has this been fixed before?”
 
 Flow:
 
-1. User searches normally, or scrolls to **Recurring failures**.
-2. Failure state controls use human labels:
+1. User opens **Across the archive** when they want summaries rather than one trace.
+2. User opens **Recurring failures**.
+3. Failure state controls use human labels:
    - all
    - needs attention
    - sometimes fixed
    - fixed before
-3. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
+4. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
 
 Success criteria:
 
@@ -129,11 +130,12 @@ User question: “What data is indexed, and is anything quarantined?”
 
 Flow:
 
-1. User reads **Archive health** below the primary search/results surface.
-2. Counts and chips show indexed sources, machines, projects, and span.
-3. Clicking a chip scopes the next search and recurring-failure filters.
-4. A visible scope summary appears with **Clear scope**.
-5. **Merge conflicts** lists quarantined rows.
+1. User opens **Across the archive**.
+2. User reads **Archive health** below the primary search/results surface.
+3. Counts and chips show indexed sources, machines, projects, and span.
+4. Clicking a chip scopes the next search and recurring-failure filters.
+5. A visible scope summary appears with **Clear scope**.
+6. **Merge conflicts** lists quarantined rows.
 
 Success criteria:
 
@@ -154,7 +156,9 @@ Success criteria:
 │ Search in: [All history] [Prompts] [Assistant replies] [Tool output]       │
 │ Advanced filters: project/source/machine/path                              │
 │                                                                            │
-│ Trace cards                                                                │
+│ Archive › Trace › Event › Evidence                                         │
+│                                                                            │
+│ Traces                                                                     │
 │ ┌────────────────────────────────────────────────────────────────────────┐ │
 │ │ old v14 failure_episodes CHECK constraints                             │ │
 │ │ aha · claude-code · machine · 2026-06-04 · 3 matched events             │ │
@@ -164,13 +168,12 @@ Success criteria:
 │ │ Tool output  go test ./internal/corpus ... failed                       │ │
 │ └────────────────────────────────────────────────────────────────────────┘ │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Read selected trace                                                        │
+│ Evidence                                                                   │
 │ original transcript context around selected ref                            │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Recurring failures                                                         │
-│ [all] [needs attention] [sometimes fixed] [fixed before] + facets          │
-├──────────────────────────────────────────────┬─────────────────────────────┤
-│ Archive health                               │ Merge conflicts             │
+│ Across the archive                                                        │
+│ ▸ Recurring failures                                                       │
+│ ▸ Archive health                         ▸ Merge conflicts                 │
 └──────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
@@ -184,7 +187,7 @@ Success criteria:
 | Search in: Assistant replies | `role = "assistant"` | Searches assistant-authored messages. |
 | Search in: Tool output | `role = "toolResult"` | Searches indexed tool-result messages. |
 | Trace cards | grouped enriched search hits | Server groups hits by `session_key`, adds counts, timeline, command chips, file chips, status, and matched events. |
-| Read selected trace | `POST /api/read` | Uses the clicked card's `ref_text`. |
+| Evidence | `POST /api/read` | Uses the clicked card's `ref_text`. |
 | Recurring failures | `POST /api/incidents` | State labels map to corpus states. |
 | Trace fix | `POST /api/incident_trajectory` | Requires sample ref and ordinal. |
 | Archive health | `GET /api/overview` | Counts and scope chips. |
@@ -198,7 +201,7 @@ Success criteria:
 - Advanced filters are secondary and collapsed by default.
 - Scope changes show a visible summary and a live feedback sentence so users know what changed.
 - Search results come back as enriched trace cards grouped by session key.
-- Selecting any trace card loads the first matched ref in **Read selected trace** and highlights the selected entry when possible.
+- Selecting any trace card loads the first matched ref in **Evidence** and highlights the selected entry when possible.
 - Overview chips populate search and incident facets, then focus the search box.
 - Incident rows and fix paths continue to drill into read context.
 - Clipboard actions are user-initiated only.
@@ -215,7 +218,8 @@ Prefer:
 - Assistant replies
 - Tool output
 - Advanced filters
-- Read selected trace
+- Evidence
+- Across the archive
 - Recurring failures
 - needs attention
 - sometimes fixed
@@ -254,12 +258,12 @@ Desktop:
 - Search input is large, but its label and hint are compact enough that results stay close to the fold.
 - Trace cards and reader sit in one explicit workbench grid so their edges align.
 - The reader is not sticky; sticky layering can overlap later sections and make scroll state ambiguous.
-- Recurring failures are below the workbench.
-- Archive health and merge conflicts sit in one lower-priority panel row.
+- A thin domain-model strip names the hierarchy: Archive, Trace, Event, Evidence.
+- Recurring failures, archive health, and merge conflicts sit inside one lower-priority **Across the archive** region as collapsible drawers.
 
 Mobile/narrow:
 
-- Single-column order: search, trace cards, reader, recurring failures, archive health, merge conflicts.
+- Single-column order: search, domain model, trace cards, evidence, across-archive drawers.
 - Search button stacks below input.
 - Advanced filters stack to one column.
 - Trace cards keep event labels and snippets readable.

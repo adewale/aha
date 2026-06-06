@@ -50,10 +50,23 @@
     </div>
   </section>
 
+  <div class="domain-model" aria-label="How aha organizes history">
+    <span><strong>Archive</strong><small>indexed agent histories</small></span>
+    <span aria-hidden="true">›</span>
+    <span><strong>Trace</strong><small>one session of work</small></span>
+    <span aria-hidden="true">›</span>
+    <span><strong>Event</strong><small>prompt, reply, tool, file</small></span>
+    <span aria-hidden="true">›</span>
+    <span><strong>Evidence</strong><small>original transcript context</small></span>
+  </div>
+
   <div class="workbench">
     <section id="results-section" aria-labelledby="results-title">
       <div class="section-head">
-        <h2 id="results-title">Trace cards</h2>
+        <div>
+          <h2 id="results-title">Traces</h2>
+          <p class="muted">Session-level search results.</p>
+        </div>
         <p id="search-feedback" class="muted" aria-live="polite">Search to see recognizable session slices with matched prompts, agent replies, tool output, files, and timestamps.</p>
       </div>
       <ol id="results" class="trace-results">
@@ -62,44 +75,59 @@
     </section>
 
     <section id="reader">
-      <h2>Read selected trace</h2>
-      <p class="muted">Select a trace card, recurring failure, or fix path to load the original transcript context.</p>
+      <h2>Evidence</h2>
+      <p class="muted">Original transcript context for the selected trace event.</p>
       <div id="reader-body" class="reader-body"></div>
     </section>
   </div>
 
-  <section id="incidents-section">
-    <h2>Recurring failures <span class="muted">what breaks and which fixes worked</span></h2>
-    <div id="incident-controls">
-      <span class="seg" role="group" aria-label="Failure state filter">
-        <button type="button" class="state-btn active" data-state="all" aria-pressed="true">all</button>
-        <button type="button" class="state-btn" data-state="unresolved" aria-pressed="false">needs attention</button>
-        <button type="button" class="state-btn" data-state="partial" aria-pressed="false">sometimes fixed</button>
-        <button type="button" class="state-btn" data-state="resolved" aria-pressed="false">fixed before</button>
-      </span>
-      <label class="field facet-field"><span>Project</span><input id="f-project" class="facet" placeholder="any"></label>
-      <label class="field facet-field"><span>Source</span><input id="f-source" class="facet" placeholder="any"></label>
-      <label class="field facet-field"><span>Machine</span><input id="f-machine" class="facet" placeholder="any"></label>
-      <label class="field facet-field"><span>Tool</span><input id="f-tool" class="facet" placeholder="any"></label>
-      <button type="button" id="incident-apply">Apply filters</button>
+  <section id="archive-views" aria-labelledby="archive-views-title">
+    <div class="section-head archive-head">
+      <div>
+        <h2 id="archive-views-title">Across the archive</h2>
+        <p class="muted">Search opens one trace. These summaries explain repeated patterns and whether the archive can be trusted.</p>
+      </div>
     </div>
-    <p id="incident-feedback" class="muted" aria-live="polite">Showing all recurring failures. Use needs attention for repair work; fixed before shows fix paths that already worked.</p>
-    <ol id="incidents"></ol>
+
+    <details id="incidents-section" class="archive-drawer">
+      <summary><span><strong>Recurring failures</strong><small>tool failures grouped across traces</small></span><span id="incident-summary-status" class="drawer-status">loading</span></summary>
+      <div class="drawer-body">
+        <div id="incident-controls">
+          <span class="seg" role="group" aria-label="Failure state filter">
+            <button type="button" class="state-btn active" data-state="all" aria-pressed="true">all</button>
+            <button type="button" class="state-btn" data-state="unresolved" aria-pressed="false">needs attention</button>
+            <button type="button" class="state-btn" data-state="partial" aria-pressed="false">sometimes fixed</button>
+            <button type="button" class="state-btn" data-state="resolved" aria-pressed="false">fixed before</button>
+          </span>
+          <label class="field facet-field"><span>Project</span><input id="f-project" class="facet" placeholder="any"></label>
+          <label class="field facet-field"><span>Source</span><input id="f-source" class="facet" placeholder="any"></label>
+          <label class="field facet-field"><span>Machine</span><input id="f-machine" class="facet" placeholder="any"></label>
+          <label class="field facet-field"><span>Tool</span><input id="f-tool" class="facet" placeholder="any"></label>
+          <button type="button" id="incident-apply">Apply filters</button>
+        </div>
+        <p id="incident-feedback" class="muted" aria-live="polite">Showing all recurring failures. Use needs attention for repair work; fixed before shows fix paths that already worked.</p>
+        <ol id="incidents"></ol>
+      </div>
+    </details>
+
+    <div class="archive-grid">
+      <details id="overview-section" class="archive-drawer">
+        <summary><span><strong>Archive health</strong><small>indexed sources, machines, projects</small></span><span id="overview-summary-status" class="drawer-status">loading</span></summary>
+        <div class="drawer-body">
+          <p class="muted">Click a chip to scope the next search and the failure list.</p>
+          <div id="overview" class="muted">loading overview…</div>
+        </div>
+      </details>
+
+      <details id="conflicts-section" class="archive-drawer">
+        <summary><span><strong>Merge conflicts</strong><small>quarantined rows excluded from trust</small></span><span id="conflicts-summary-status" class="drawer-status">loading</span></summary>
+        <div class="drawer-body">
+          <p class="muted">Quarantined transcript rows that need manual inspection before they can be trusted.</p>
+          <ul id="conflicts"></ul>
+        </div>
+      </details>
+    </div>
   </section>
-
-  <div class="lower-panels">
-    <section id="overview-section">
-      <h2>Archive health</h2>
-      <p class="muted">What is indexed locally. Click a chip to scope the next search and the failure list.</p>
-      <div id="overview" class="muted">loading overview…</div>
-    </section>
-
-    <section id="conflicts-section">
-      <h2>Merge conflicts</h2>
-      <p class="muted">Quarantined transcript rows that need manual inspection before they can be trusted.</p>
-      <ul id="conflicts"></ul>
-    </section>
-  </div>
 </main>
 
 <script src="/static/app.js"></script>

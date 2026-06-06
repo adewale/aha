@@ -46,11 +46,14 @@ async function refreshConflicts() {
     const el = $("conflicts");
     if (!rows || !rows.length) {
       el.innerHTML = `<li class="muted">no quarantined conflicts</li>`;
+      $("conflicts-summary-status").textContent = "clean";
       return;
     }
     el.innerHTML = rows.map((c) => `<li>#${c.id} ${esc(c.session_key)} ${esc(c.entry_id)} <span class="muted">${esc(c.created_at)}</span></li>`).join("");
+    $("conflicts-summary-status").textContent = `${rows.length} quarantined`;
   } catch (e) {
     $("conflicts").innerHTML = `<li class="muted">conflicts error: ${esc(e.message)}</li>`;
+    $("conflicts-summary-status").textContent = "error";
   }
 }
 
@@ -79,8 +82,10 @@ async function refreshOverview() {
       chips("source", o.sources) +
       chips("machine", o.machines) +
       chips("project", o.projects);
+    $("overview-summary-status").textContent = `${o.sessions || 0} sessions`;
   } catch (e) {
     $("overview").innerHTML = `<span class="muted">overview error: ${esc(e.message)}</span>`;
+    $("overview-summary-status").textContent = "error";
   }
 }
 
@@ -137,6 +142,7 @@ async function refreshIncidents() {
     const args = { limit: 50, ...incidentFacets() };
     if (incidentState !== "all") args.state = incidentState;
     setIncidentFeedback(`Loading ${incidentStateLabel(incidentState).toLowerCase()} failures…`);
+    $("incident-summary-status").textContent = "loading";
     const rows = await call("/api/incidents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -146,13 +152,16 @@ async function refreshIncidents() {
     if (!lastIncidents.length) {
       ol.innerHTML = `<li class="muted">no failures for this filter. Ingest sessions with tool failures, or widen the filter.</li>`;
       setIncidentFeedback(`No ${incidentStateLabel(incidentState).toLowerCase()} failures for the current filters.`);
+      $("incident-summary-status").textContent = "none";
       return;
     }
     ol.innerHTML = lastIncidents.map((c, idx) => renderIncident(c, idx)).join("");
     setIncidentFeedback(`Showing ${lastIncidents.length} ${incidentStateLabel(incidentState).toLowerCase()} failure${lastIncidents.length === 1 ? "" : "s"}.`);
+    $("incident-summary-status").textContent = `${lastIncidents.length} patterns`;
   } catch (e) {
     ol.innerHTML = `<li class="muted">incidents error: ${esc(e.message)}</li>`;
     setIncidentFeedback(`Failure list error: ${e.message}`);
+    $("incident-summary-status").textContent = "error";
   }
 }
 
