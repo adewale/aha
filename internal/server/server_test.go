@@ -127,7 +127,12 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 		t.Fatalf("app.css status=%d", w.Code)
 	}
 	css := w.Body.String()
-	for _, stale := range []string{"border-left", "border-right", "#fff", "#000"} {
+	for _, want := range []string{"contain: paint", "overflow: hidden", "overflow-wrap: anywhere"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("dashboard CSS missing card containment rule %q", want)
+		}
+	}
+	for _, stale := range []string{"border-left", "border-right", "#fff", "#000", "counter-reset", "counter-increment", "decimal-leading-zero", ".tab::before", ".trace-card::after"} {
 		if strings.Contains(css, stale) {
 			t.Fatalf("dashboard CSS still contains slop-prone token %q", stale)
 		}

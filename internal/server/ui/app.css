@@ -71,17 +71,14 @@ main {
 }
 section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-lg); }
 .tabs {
-  counter-reset: journey;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-lg);
   border-block-end: 1px solid var(--line);
 }
 .tab {
-  counter-increment: journey;
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-2xs) var(--space-xs);
+  gap: var(--space-2xs);
   min-width: 9rem;
   min-height: 3rem;
   padding: 0 0 var(--space-sm);
@@ -92,19 +89,11 @@ section { background: var(--surface); border: 1px solid var(--line); border-radi
   border-radius: 0;
   text-align: left;
 }
-.tab::before {
-  content: counter(journey, decimal-leading-zero);
-  grid-row: span 2;
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.7;
-}
 .tab span { color: var(--fg); font-weight: 720; }
 .tab small { color: var(--muted); font-size: 0.76rem; }
 .tab:hover span { color: var(--accent-ink); }
 .tab.active { border-block-end-color: var(--accent); }
-.tab.active::before, .tab.active span { color: var(--accent-ink); }
+.tab.active span { color: var(--accent-ink); }
 .tab-panel { display: grid; gap: var(--space-lg); }
 .tab-panel[hidden] { display: none; }
 .workbench {
@@ -205,38 +194,31 @@ section { background: var(--surface); border: 1px solid var(--line); border-radi
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-md); margin-block-end: var(--space-md); }
 .section-head p { margin: 0; }
 .section-head > p { text-align: end; }
-ol.trace-results { counter-reset: trace; list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-sm); }
-ol.trace-results > li { counter-increment: trace; }
+ol.trace-results { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-sm); }
+ol.trace-results > li { min-width: 0; }
 .empty-state { color: var(--muted); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); padding: var(--space-lg); background: var(--surface-raised); }
 .empty-state p { margin-block: 0 var(--space-sm); }
 .example-searches { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
 .example-search { min-height: 2.3rem; padding: 0.35rem 0.65rem; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid oklch(80% 0.07 257); border-radius: 999px; }
 .trace-card {
-  position: relative;
   width: 100%;
+  min-width: 0;
   display: block;
+  overflow: hidden;
+  contain: paint;
   text-align: left;
   color: var(--fg);
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: var(--space-md) calc(var(--space-md) + 2.3rem) var(--space-md) var(--space-md);
-}
-.trace-card::after {
-  content: counter(trace, decimal-leading-zero);
-  position: absolute;
-  inset-block-start: var(--space-md);
-  inset-inline-end: var(--space-md);
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
+  padding: var(--space-md);
 }
 .trace-card:hover, .trace-card:focus-visible { background: oklch(97.5% 0.018 238); border-color: var(--line-strong); }
 .trace-card.selected { border-color: var(--accent); background: var(--accent-soft); }
-.trace-card.selected::after { color: var(--accent-ink); }
-.trace-head { display: flex; justify-content: space-between; gap: var(--space-md); align-items: flex-start; }
-.trace-title { font-size: 1.05rem; font-weight: 720; line-height: 1.28; }
-.trace-meta { color: var(--muted); font-family: var(--font-mono); font-size: 0.76rem; margin-block-start: var(--space-2xs); }
+.trace-head { display: flex; min-width: 0; justify-content: space-between; gap: var(--space-md); align-items: flex-start; }
+.trace-head > div { min-width: 0; }
+.trace-title { overflow-wrap: anywhere; font-size: 1.05rem; font-weight: 720; line-height: 1.28; }
+.trace-meta { overflow-wrap: anywhere; color: var(--muted); font-family: var(--font-mono); font-size: 0.76rem; margin-block-start: var(--space-2xs); }
 .trace-status { flex: none; font-size: 0.74rem; line-height: 1; padding: 0.35rem 0.5rem; border-radius: 999px; border: 1px solid var(--line); letter-spacing: 0.03em; }
 .status-failure { color: var(--danger); background: var(--danger-soft); border-color: oklch(80% 0.08 28); }
 .status-tool { color: var(--tool); background: var(--tool-soft); border-color: oklch(80% 0.07 294); }
@@ -276,7 +258,7 @@ ol.trace-results > li { counter-increment: trace; }
 .reader-actions button { min-height: 2.3rem; padding: 0.35rem 0.65rem; color: var(--accent-ink); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .reader-actions button:disabled { cursor: not-allowed; opacity: 0.55; }
 .reader-body { display: grid; gap: var(--space-sm); max-height: 68vh; overflow: auto; }
-.read-entry { padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
+.read-entry { min-width: 0; overflow: hidden; contain: paint; padding: var(--space-sm); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
 .read-entry.selected { border-color: var(--accent); background: var(--accent-soft); }
 .read-meta { display: flex; justify-content: space-between; gap: var(--space-sm); color: var(--muted); font-family: var(--font-mono); font-size: 0.76rem; margin-block-end: var(--space-xs); }
 .read-text { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.86rem; line-height: 1.5; }
@@ -306,14 +288,14 @@ input.facet { padding: 0.25rem 0.5rem; font-size: 0.82rem; width: 100%; }
 .facet-field { width: 7rem; }
 #incident-apply { min-height: 2.35rem; padding: 0.35rem 0.7rem; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent); color: var(--surface-raised); }
 ol#incidents { list-style: none; padding: 0; margin: var(--space-sm) 0 0 0; max-height: 60vh; overflow: auto; display: grid; gap: var(--space-sm); }
-ol#incidents > li.incident { padding: var(--space-sm) var(--space-md); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
+ol#incidents > li.incident { min-width: 0; overflow: hidden; contain: paint; padding: var(--space-sm) var(--space-md); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
 ol#incidents > li.incident[data-ref] { cursor: pointer; }
 ol#incidents > li.incident[data-ref]:hover { background: oklch(97.5% 0.018 238); }
 li.incident.st-unresolved { border-color: oklch(80% 0.08 28); background: var(--danger-soft); }
 li.incident.st-partial { border-color: oklch(80% 0.08 80); background: var(--warn-soft); }
 li.incident.st-resolved { border-color: oklch(80% 0.07 150); background: var(--ok-soft); }
 ol#incidents .meta { font-size: 0.82rem; color: var(--muted); margin-block-end: var(--space-2xs); display: flex; flex-wrap: wrap; gap: var(--space-xs); align-items: center; }
-ol#incidents .snippet { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.86em; }
+ol#incidents .snippet { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 0.86em; }
 ol#incidents code { background: oklch(92% 0.01 238); padding: 0 4px; border-radius: 3px; }
 .incident-recency { margin-inline-start: auto; display: inline-flex; gap: var(--space-xs); align-items: center; }
 svg.spark rect { fill: var(--accent); opacity: 0.7; }
@@ -335,7 +317,7 @@ button.copy-skill:hover, button.trace-btn:hover { background: var(--accent-soft)
 .kbd.conf-high { background: var(--accent); color: var(--surface-raised); }
 .skill-paths-label { font-size: 0.76rem; letter-spacing: 0.04em; margin-block: var(--space-sm) var(--space-xs); }
 ol.skill-paths { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-xs); }
-ol.skill-paths li.skill-path { padding: var(--space-xs) var(--space-sm); border: 1px solid oklch(82% 0.06 257); border-radius: var(--radius-md); background: var(--surface-raised); cursor: pointer; }
+ol.skill-paths li.skill-path { min-width: 0; overflow: hidden; contain: paint; padding: var(--space-xs) var(--space-sm); border: 1px solid oklch(82% 0.06 257); border-radius: var(--radius-md); background: var(--surface-raised); cursor: pointer; }
 ol.skill-paths li.skill-path:hover { background: var(--accent-soft); }
 ol.skill-paths li.skill-path.no-ref { cursor: default; opacity: 0.85; }
 #conflicts { list-style: none; padding: 0; margin: 0; }

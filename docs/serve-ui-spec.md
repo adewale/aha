@@ -16,8 +16,9 @@ Visual direction: restrained technical ledger. The UI should feel like a precise
 
 Execution rules:
 
-- Navigation and result identity use small ordinals, not decorative icons.
+- Navigation uses labels only; avoid ordinal badges that look like ranking or indexing.
 - Trace selection is mirrored in Evidence with an explicit selected-ref header and `aria-current` state.
+- Result and evidence cards must never paint outside their own bounds or overlay neighboring cards.
 - Typography is label/mono-forward for provenance and controls, with restrained body text for transcript content.
 - Motion is limited to quick state transitions and disabled under reduced-motion preferences.
 
