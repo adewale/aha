@@ -11,7 +11,7 @@ const MAX_ENTRY_CHARS = 4000;
 function clampText(s) {
   s = String(s || "");
   if (s.length <= MAX_ENTRY_CHARS) return s;
-  return s.slice(0, MAX_ENTRY_CHARS) + `\n… [truncated ${s.length - MAX_ENTRY_CHARS} chars — use \`aha read\` for full context]`;
+  return s.slice(0, MAX_ENTRY_CHARS) + `\n… [truncated ${s.length - MAX_ENTRY_CHARS} chars; use \`aha read\` for full context]`;
 }
 
 let lastHits = [];
@@ -55,7 +55,7 @@ async function refreshConflicts() {
 }
 
 // refreshOverview renders the corpus orientation panel: counts, source/machine/
-// project composition, time span, and index size — "what am I looking at?".
+// project composition, time span, and index size: "what am I looking at?".
 async function refreshOverview() {
   try {
     const o = await call("/api/overview");
@@ -67,7 +67,7 @@ async function refreshOverview() {
       `</div>`;
     const span = o.first_session && o.last_session
       ? `${esc(o.first_session.slice(0, 10))} → ${esc(o.last_session.slice(0, 10))}`
-      : "—";
+      : "n/a";
     $("overview").innerHTML =
       `<div class="ov-counts">` +
         `<span class="kbd">${o.sessions || 0} sessions</span>` +
@@ -93,7 +93,7 @@ function fmtBytes(n) {
 }
 
 // sparkline renders a 12-bucket occurrence histogram as inline SVG (no remote
-// charting lib — the dashboard CSP forbids it). Taller bar = more occurrences;
+// charting lib; the dashboard CSP forbids it). Taller bar = more occurrences;
 // the rightmost bars are most recent.
 function sparkline(spark) {
   const b = spark || [];
@@ -109,9 +109,9 @@ function sparkline(spark) {
 
 // ageOf turns an RFC3339 timestamp into a compact "2d ago" string.
 function ageOf(ts) {
-  if (!ts) return "—";
+  if (!ts) return "n/a";
   const then = Date.parse(ts);
-  if (isNaN(then)) return "—";
+  if (isNaN(then)) return "n/a";
   const sec = Math.max(0, (Date.now() - then) / 1000);
   if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
@@ -136,6 +136,7 @@ async function refreshIncidents() {
   try {
     const args = { limit: 50, ...incidentFacets() };
     if (incidentState !== "all") args.state = incidentState;
+    setIncidentFeedback(`Loading ${incidentStateLabel(incidentState).toLowerCase()} failures…`);
     const rows = await call("/api/incidents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -143,13 +144,29 @@ async function refreshIncidents() {
     });
     lastIncidents = rows || [];
     if (!lastIncidents.length) {
-      ol.innerHTML = `<li class="muted">no incidents for this filter — ingest sessions with tool failures, or widen the filter</li>`;
+      ol.innerHTML = `<li class="muted">no failures for this filter. Ingest sessions with tool failures, or widen the filter.</li>`;
+      setIncidentFeedback(`No ${incidentStateLabel(incidentState).toLowerCase()} failures for the current filters.`);
       return;
     }
     ol.innerHTML = lastIncidents.map((c, idx) => renderIncident(c, idx)).join("");
+    setIncidentFeedback(`Showing ${lastIncidents.length} ${incidentStateLabel(incidentState).toLowerCase()} failure${lastIncidents.length === 1 ? "" : "s"}.`);
   } catch (e) {
     ol.innerHTML = `<li class="muted">incidents error: ${esc(e.message)}</li>`;
+    setIncidentFeedback(`Failure list error: ${e.message}`);
   }
+}
+
+function incidentStateLabel(state) {
+  switch (state) {
+  case "unresolved": return "Needs attention";
+  case "partial": return "Sometimes fixed";
+  case "resolved": return "Fixed before";
+  default: return "All recurring";
+  }
+}
+
+function setIncidentFeedback(text) {
+  $("incident-feedback").textContent = text;
 }
 
 function renderIncident(c, idx) {
@@ -162,7 +179,7 @@ function renderIncident(c, idx) {
     : `<div class="incident-fixes">` +
         `<div class="skill-paths-label muted">fixes that worked` +
           (c.tier ? ` · <span class="kbd tier-${esc(c.tier)}">${esc(c.tier)}</span>` : "") +
-          ` <button type="button" class="copy-skill" data-iidx="${idx}">copy skill draft</button></div>` +
+          ` <button type="button" class="copy-skill" data-iidx="${idx}">copy fix notes</button></div>` +
         `<ol class="skill-paths">` +
         c.paths.map((p) => {
           const fams = (p.families || []).map(esc).join(" › ");
@@ -181,7 +198,7 @@ function renderIncident(c, idx) {
   return `<li class="incident st-${c.state}"${headRef}>` +
     `<div class="meta">${stateBadge}` +
       `<span class="kbd">×${c.episodes}</span>` +
-      `<button type="button" class="incident-scope muted" data-iidx="${idx}">${c.distinct_sessions} sessions · ${c.distinct_projects} projects</button> · ` +
+      `<button type="button" class="incident-scope muted" data-iidx="${idx}">search matching history (${c.distinct_sessions} sessions · ${c.distinct_projects} projects)</button> · ` +
       `${esc(c.tool_name || "?")} · <code>${esc(c.command_family || "")}</code>` +
       `<span class="incident-recency muted">${sparkline(c.spark)} ${ageOf(c.last_seen)}</span>` +
     `</div>` +
@@ -190,21 +207,20 @@ function renderIncident(c, idx) {
   `</li>`;
 }
 
-// skillDraft renders an incident's top resolution path as a copy-pastable skill
-// stub — the "sessions → skills" payoff, inspect-only (the dashboard never
-// writes skills itself).
+// skillDraft renders an incident's top resolution path as copy-pastable fix
+// notes. The dashboard never writes or installs skills itself.
 function skillDraft(c) {
   const top = (c.paths || [])[0];
   const steps = top ? (top.families || []) : [];
   const name = (c.command_family || c.tool_name || "fix").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const lines = [
-    `# ${name}`,
+    `Fix notes: ${name}`,
     "",
     `Trigger: \`${c.tool_name}\` failing with "${c.error_signature}".`,
     "",
     `Observed in ${c.resolved}/${c.episodes} episodes (${(c.resolution_rate * 100).toFixed(0)}% resolved, ${c.tier || "tentative"}).`,
     "",
-    "## Resolution that worked",
+    "Resolution path that worked",
     "",
     ...steps.map((f, i) => `${i + 1}. ${f}`),
     "",
@@ -258,50 +274,164 @@ async function loadTrajectory(ref, ordinal, container) {
 }
 
 async function doSearch(ev) {
-  ev.preventDefault();
-  const args = {
-    query: $("query").value.trim(),
-    project: $("project").value.trim() || undefined,
-    source: $("source").value.trim() || undefined,
-    machine: $("machine").value.trim() || undefined,
-    limit: 50,
-  };
-  if (!args.query) return;
-  for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+  if (ev) ev.preventDefault();
+  const args = searchArgs();
   const ol = $("results");
-  ol.innerHTML = `<li class="muted">searching…</li>`;
+  updateScopeSummary();
+  if (!args.query) {
+    lastHits = [];
+    ol.innerHTML = `<li class="empty-state">Type a prompt, file, command, error, or decision to search across local agent traces.</li>`;
+    setSearchFeedback(`${roleFilterLabel()} selected. Type a query to search.`);
+    return;
+  }
+  const query = args.query;
+  for (const k of Object.keys(args)) if (args[k] === undefined) delete args[k];
+  setSearchFeedback(`Searching ${roleFilterLabel().toLowerCase()} for “${query}”…`);
+  ol.innerHTML = `<li class="empty-state">Searching traces…</li>`;
   try {
     const hits = await call("/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
     });
-    if (!hits.length) {
-      ol.innerHTML = `<li class="muted">no hits</li>`;
-      lastHits = [];
+    lastHits = hits || [];
+    if (!lastHits.length) {
+      ol.innerHTML = `<li class="empty-state">No trace cards found. Try all history, clear scope, or search fewer words.</li>`;
+      setSearchFeedback(`No matches for “${query}”.`);
       return;
     }
-    lastHits = hits;
-    ol.innerHTML = hits.map((h, i) => `
-      <li data-idx="${i}">
-        <div class="meta">
-          <span class="kbd">${esc(h.source || "?")}</span>
-          ${esc(h.role || "")} ·
-          ${esc(h.project || "")} ·
-          ${esc(h.machine || "")} ·
-          ${esc(h.timestamp || "")}
-        </div>
-        <div class="snippet">${esc(h.snippet || "").slice(0, 600)}</div>
-      </li>`).join("");
-    if (hits[0] && hits[0].ref_text) loadRead(hits[0].ref_text);
+    const traceCount = new Set(lastHits.map((h, i) => h.session_key || `hit-${i}`)).size;
+    ol.innerHTML = renderTraceCards(lastHits);
+    setSearchFeedback(`${lastHits.length} matched event${lastHits.length === 1 ? "" : "s"} in ${traceCount} trace card${traceCount === 1 ? "" : "s"}. First trace selected.`);
+    if (lastHits[0] && lastHits[0].ref_text) loadRead(lastHits[0].ref_text);
   } catch (e) {
-    ol.innerHTML = `<li class="muted">search error: ${esc(e.message)}</li>`;
+    ol.innerHTML = `<li class="empty-state">Search error: ${esc(e.message)}</li>`;
+    setSearchFeedback(`Search error: ${e.message}`);
   }
+}
+
+function searchArgs() {
+  return {
+    query: $("query").value.trim(),
+    role: $("role").value.trim() || undefined,
+    project: $("project").value.trim() || undefined,
+    source: $("source").value.trim() || undefined,
+    machine: $("machine").value.trim() || undefined,
+    path: $("path").value.trim() || undefined,
+    limit: 50,
+  };
+}
+
+function setSearchFeedback(text) {
+  $("search-feedback").textContent = text;
+}
+
+function roleFilterLabel() {
+  const role = $("role").value.trim();
+  if (role === "user") return "Prompts";
+  if (role === "assistant") return "Assistant replies";
+  if (role === "toolResult") return "Tool output";
+  return "All history";
+}
+
+function renderTraceCards(hits) {
+  const groups = [];
+  const bySession = new Map();
+  hits.forEach((h, i) => {
+    const key = h.session_key || `hit-${i}`;
+    if (!bySession.has(key)) {
+      const g = { first: h, hits: [] };
+      bySession.set(key, g);
+      groups.push(g);
+    }
+    bySession.get(key).hits.push({ h, i });
+  });
+  return groups.map((g) => {
+    const firstIdx = g.hits[0].i;
+    return `<li><button type="button" class="trace-card" data-idx="${firstIdx}">` +
+      `<div class="trace-head">` +
+        `<div><div class="trace-title">${esc(traceTitle(g.hits))}</div>` +
+        `<div class="trace-meta">${esc(sessionTitle(g.first))} · ${g.hits.length} matched event${g.hits.length === 1 ? "" : "s"}</div></div>` +
+        `<span class="trace-status ${esc(traceStatusClass(g.hits))}">${esc(traceStatus(g.hits))}</span>` +
+      `</div>` +
+      renderTraceTimeline(g.hits) +
+      `<div class="trace-events">` + g.hits.slice(0, 4).map(({ h }) => renderTraceEvent(h)).join("") + `</div>` +
+      (g.hits.length > 4 ? `<div class="trace-more muted">+${g.hits.length - 4} more matched events in this trace</div>` : "") +
+    `</button></li>`;
+  }).join("");
+}
+
+function traceTitle(hits) {
+  const userHit = hits.find(({ h }) => h.role === "user");
+  const chosen = (userHit || hits[0]).h;
+  const text = cleanSnippet(chosen.snippet || "");
+  return text ? text.slice(0, 120) : sessionTitle(chosen);
+}
+
+function cleanSnippet(s) {
+  return String(s || "").replace(/[\[\]]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function renderTraceTimeline(hits) {
+  const dots = hits.slice(0, 10).map(({ h }) =>
+    `<span class="trace-dot dot-${esc(roleClass(h.role))}" title="${esc(roleLabel(h.role))}"></span>`).join("");
+  return `<div class="trace-timeline" aria-label="matched events timeline">${dots}</div>`;
+}
+
+function renderTraceEvent(h) {
+  return `<div class="trace-event role-${esc(roleClass(h.role))}">` +
+    `<span class="event-role">${esc(roleLabel(h.role))}</span>` +
+    `<span class="event-snippet">${esc(cleanSnippet(h.snippet)).slice(0, 320)}</span>` +
+  `</div>`;
+}
+
+function roleLabel(role) {
+  switch (role) {
+  case "user": return "Prompt";
+  case "assistant": return "Assistant";
+  case "toolResult": return "Tool output";
+  case "artifact": return "File artifact";
+  default: return role || "Event";
+  }
+}
+
+function roleClass(role) {
+  switch (role) {
+  case "user": return "prompt";
+  case "assistant": return "assistant";
+  case "toolResult": return "tool";
+  case "artifact": return "file";
+  default: return "event";
+  }
+}
+
+function traceStatus(hits) {
+  const text = hits.map(({ h }) => `${h.role || ""} ${h.snippet || ""}`).join("\n").toLowerCase();
+  if (/\b(error|failed|failure|panic|exception|denied)\b/.test(text)) return "failure match";
+  if (hits.some(({ h }) => h.role === "toolResult")) return "tool trace";
+  if (hits.some(({ h }) => h.role === "artifact")) return "file match";
+  return "conversation";
+}
+
+function traceStatusClass(hits) {
+  const s = traceStatus(hits);
+  if (s.includes("failure")) return "status-failure";
+  if (s.includes("tool")) return "status-tool";
+  if (s.includes("file")) return "status-file";
+  return "status-conversation";
+}
+
+function sessionTitle(h) {
+  const project = h.project || "no project";
+  const machine = h.machine || "unknown machine";
+  const source = h.source || "unknown source";
+  const day = h.timestamp ? h.timestamp.slice(0, 10) : "unknown date";
+  return `${project} · ${source} · ${machine} · ${day}`;
 }
 
 // loadRead fetches surrounding context for a ref and renders it. Selecting a
 // result also writes the ref into the URL fragment so the view is reloadable
-// and shareable — refs are stable identifiers by design.
+// and shareable. Refs are stable identifiers by design.
 async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }) {
   if (!refText) return;
   const pre = $("reader-body");
@@ -331,14 +461,87 @@ function refFromHash() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+function setIncidentState(next) {
+  document.querySelectorAll(".state-btn").forEach((x) => {
+    const active = x.dataset.state === next;
+    x.classList.toggle("active", active);
+    x.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  incidentState = next;
+  refreshIncidents();
+}
+
+function setRoleFilter(role) {
+  $("role").value = role;
+  document.querySelectorAll(".role-chip").forEach((b) => {
+    const active = b.dataset.role === role;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function runSearchIfQuery() {
+  if ($("query").value.trim()) {
+    doSearch();
+    return true;
+  }
+  return false;
+}
+
+function updateScopeSummary() {
+  const parts = [];
+  for (const [id, label] of [["project", "project"], ["source", "source"], ["machine", "machine"], ["path", "path"]]) {
+    const value = $(id).value.trim();
+    if (value) parts.push(`${label}: ${value}`);
+  }
+  const box = $("scope-summary");
+  if (!parts.length) {
+    box.hidden = true;
+    $("scope-text").textContent = "";
+    return;
+  }
+  $("scope-text").textContent = `Scoped to ${parts.join(", ")}`;
+  box.hidden = false;
+}
+
+function clearScope() {
+  for (const id of ["project", "source", "machine", "path", "f-project", "f-source", "f-machine", "f-tool"]) $(id).value = "";
+  updateScopeSummary();
+  refreshIncidents();
+  if (!runSearchIfQuery()) setSearchFeedback("Scope cleared. Type a query to search all history.");
+  $("query").focus();
+}
+
+function focusSearch(hint) {
+  $("search-hint").textContent = hint;
+  $("search").scrollIntoView({ block: "start", behavior: "smooth" });
+  $("query").focus();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   $("search-form").addEventListener("submit", doSearch);
+  $("clear-scope").addEventListener("click", clearScope);
+  for (const id of ["project", "source", "machine", "path"]) {
+    $(id).addEventListener("input", () => {
+      updateScopeSummary();
+      if (!$("query").value.trim()) setSearchFeedback("Advanced filters updated. Type a query to search within this scope.");
+    });
+  }
+  document.querySelectorAll(".role-chip").forEach((b) =>
+    b.addEventListener("click", () => {
+      setRoleFilter(b.dataset.role || "");
+      if (!runSearchIfQuery()) setSearchFeedback(`${roleFilterLabel()} selected. Type a query to search.`);
+      $("query").focus();
+    }));
   // Event delegation: one listener for the whole results list.
   $("results").addEventListener("click", (ev) => {
-    const li = ev.target.closest("li[data-idx]");
-    if (!li) return;
-    const hit = lastHits[Number(li.dataset.idx)];
-    if (hit) loadRead(hit.ref_text);
+    const card = ev.target.closest("[data-idx]");
+    if (!card) return;
+    const hit = lastHits[Number(card.dataset.idx)];
+    if (hit) {
+      setSearchFeedback(`Opened ${roleLabel(hit.role).toLowerCase()} event from ${sessionTitle(hit)}.`);
+      loadRead(hit.ref_text);
+    }
   });
   // Incident list: one delegated listener handles read drill-in, trajectory
   // expand, skill-draft copy, and cross-link-to-search.
@@ -349,7 +552,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (c) {
         const ok = await copyText(skillDraft(c));
         copyBtn.textContent = ok ? "copied ✓" : "copy failed";
-        setTimeout(() => { copyBtn.textContent = "copy skill draft"; }, 1500);
+        setTimeout(() => { copyBtn.textContent = "copy fix notes"; }, 1500);
       }
       return;
     }
@@ -375,20 +578,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   // State segment + facet apply.
   document.querySelectorAll(".state-btn").forEach((b) =>
-    b.addEventListener("click", () => {
-      document.querySelectorAll(".state-btn").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      incidentState = b.dataset.state;
-      refreshIncidents();
-    }));
+    b.addEventListener("click", () => setIncidentState(b.dataset.state)));
   $("incident-apply").addEventListener("click", refreshIncidents);
   // Overview chips cross-link into the incident facets.
   $("overview").addEventListener("click", (ev) => {
     const chip = ev.target.closest("button.ov-chip");
     if (!chip) return;
-    const facet = chip.dataset.facet, value = chip.dataset.value;
-    const target = { source: "f-source", machine: "f-machine", project: "f-project" }[facet];
-    if (target) { $(target).value = value === "(none)" ? "" : value; refreshIncidents(); }
+    const facet = chip.dataset.facet, value = chip.dataset.value === "(none)" ? "" : chip.dataset.value;
+    const incidentTarget = { source: "f-source", machine: "f-machine", project: "f-project" }[facet];
+    const searchTarget = { source: "source", machine: "machine", project: "project" }[facet];
+    if (incidentTarget) $(incidentTarget).value = value;
+    if (searchTarget) $(searchTarget).value = value;
+    updateScopeSummary();
+    refreshIncidents();
+    focusSearch(value ? `Search within ${facet} ${value}.` : `Search across all ${facet} values.`);
+    if (!runSearchIfQuery()) setSearchFeedback(value ? `Scoped to ${facet}: ${value}. Type a query to search.` : `Cleared ${facet} scope. Type a query to search all history.`);
   });
   refreshStatus();
   refreshOverview();
@@ -403,7 +607,12 @@ document.addEventListener("DOMContentLoaded", () => {
 // facets from the incident and run a search over its error signature.
 function scopedSearch(c) {
   $("query").value = c.error_signature || c.command_family || "";
+  setRoleFilter("");
   $("project").value = "";
   $("source").value = "";
-  $("search-form").dispatchEvent(new Event("submit"));
+  $("machine").value = "";
+  $("path").value = "";
+  updateScopeSummary();
+  setSearchFeedback("Searching history for the selected recurring failure.");
+  doSearch();
 }

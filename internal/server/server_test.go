@@ -82,6 +82,58 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 }
 
+func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("index status=%d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Search agent history", "schema migration sqlite failure", "Trace cards", "Search in", "Prompts", "Tool output", "Advanced filters", "Clear scope", "aria-live", "aria-pressed", "Read selected trace", "Recurring failures", "Archive health"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard copy missing search-first trace label %q:\n%s", want, body)
+		}
+	}
+	for _, stale := range []string{"Start with a task", "Find prompts you typed", "Browse work history", "select a result or cluster", "<h2>corpus</h2>", "<h2>read</h2>", "<h2>conflicts</h2>"} {
+		if strings.Contains(body, stale) {
+			t.Fatalf("dashboard copy still exposes stale/confused label %q:\n%s", stale, body)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/static/app.js", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("app.js status=%d", w.Code)
+	}
+	js := w.Body.String()
+	for _, want := range []string{"search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("dashboard behavior copy missing %q:\n%s", want, js)
+		}
+	}
+	for _, stale := range []string{"copy skill draft", "applyJourney", "journey", "# ", "cluster"} {
+		if strings.Contains(js, stale) {
+			t.Fatalf("dashboard behavior copy still contains stale term %q", stale)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/static/app.css", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("app.css status=%d", w.Code)
+	}
+	css := w.Body.String()
+	for _, stale := range []string{"border-left", "border-right", "#fff", "#000"} {
+		if strings.Contains(css, stale) {
+			t.Fatalf("dashboard CSS still contains slop-prone token %q", stale)
+		}
+	}
+}
+
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	srv := newTestServer(t)
 	for _, path := range []string{"/static/app.js", "/static/app.css"} {

@@ -9,55 +9,97 @@
 <body>
 <header>
   <h1>aha</h1>
-  <div id="status-strip" class="muted">loading…</div>
+  <div>
+    <div class="eyebrow">local agent memory</div>
+    <div id="status-strip" class="muted">loading…</div>
+  </div>
 </header>
 
 <main>
-  <section id="overview-section">
-    <h2>corpus</h2>
-    <div id="overview" class="muted">loading overview…</div>
-  </section>
-
-  <section id="search">
-    <form id="search-form">
-      <input id="query" placeholder="search messages and artifacts" autofocus>
-      <input id="project" placeholder="project (optional)">
-      <input id="source" placeholder="source (optional)">
-      <input id="machine" placeholder="machine (optional)">
-      <button type="submit">search</button>
+  <section id="search" class="search-hero" aria-labelledby="search-title">
+    <div class="search-topline">
+      <label id="search-title" class="hero-label" for="query">Search agent history</label>
+      <p id="search-hint" class="muted">Prompts, files, commands, errors, decisions.</p>
+    </div>
+    <form id="search-form" class="search-shell" aria-label="Search history">
+      <input id="query" class="search-input" placeholder="schema migration sqlite failure, file path, command" autofocus>
+      <button type="submit" class="search-button">Search</button>
     </form>
-    <ol id="results"></ol>
+    <input type="hidden" id="role" value="">
+    <div class="search-refine" aria-label="Search refinements">
+      <div class="chip-row" aria-label="Search in">
+        <span class="chip-label">Search in</span>
+        <button type="button" class="role-chip active" data-role="" aria-pressed="true">All history</button>
+        <button type="button" class="role-chip" data-role="user" aria-pressed="false">Prompts</button>
+        <button type="button" class="role-chip" data-role="assistant" aria-pressed="false">Assistant replies</button>
+        <button type="button" class="role-chip" data-role="toolResult" aria-pressed="false">Tool output</button>
+      </div>
+      <details class="advanced-filters">
+        <summary>Advanced filters</summary>
+        <div class="filter-grid">
+          <label class="field"><span>Project</span><input id="project" placeholder="optional"></label>
+          <label class="field"><span>Source</span><input id="source" placeholder="optional"></label>
+          <label class="field"><span>Machine</span><input id="machine" placeholder="optional"></label>
+          <label class="field"><span>Path</span><input id="path" placeholder="file or directory"></label>
+        </div>
+      </details>
+    </div>
+    <div id="scope-summary" class="scope-summary" hidden>
+      <span id="scope-text"></span>
+      <button type="button" id="clear-scope">Clear scope</button>
+    </div>
   </section>
 
-  <section id="reader">
-    <h2>read</h2>
-    <p class="muted">select a result or cluster to load surrounding context</p>
-    <pre id="reader-body"></pre>
-  </section>
+  <div class="workbench">
+    <section id="results-section" aria-labelledby="results-title">
+      <div class="section-head">
+        <h2 id="results-title">Trace cards</h2>
+        <p id="search-feedback" class="muted" aria-live="polite">Search to see recognizable session slices with matched prompts, agent replies, tool output, files, and timestamps.</p>
+      </div>
+      <ol id="results" class="trace-results">
+        <li class="empty-state">No search yet. Type a phrase above to find the trace where it happened.</li>
+      </ol>
+    </section>
+
+    <section id="reader">
+      <h2>Read selected trace</h2>
+      <p class="muted">Select a trace card, recurring failure, or fix path to load the original transcript context.</p>
+      <pre id="reader-body"></pre>
+    </section>
+  </div>
 
   <section id="incidents-section">
-    <h2>incidents <span class="muted">— what breaks &amp; how it gets fixed</span></h2>
+    <h2>Recurring failures <span class="muted">what breaks and which fixes worked</span></h2>
     <div id="incident-controls">
-      <span class="seg" role="group" aria-label="state filter">
-        <button type="button" class="state-btn active" data-state="all">all</button>
-        <button type="button" class="state-btn" data-state="unresolved">unresolved</button>
-        <button type="button" class="state-btn" data-state="partial">partial</button>
-        <button type="button" class="state-btn" data-state="resolved">resolved</button>
+      <span class="seg" role="group" aria-label="Failure state filter">
+        <button type="button" class="state-btn active" data-state="all" aria-pressed="true">all</button>
+        <button type="button" class="state-btn" data-state="unresolved" aria-pressed="false">needs attention</button>
+        <button type="button" class="state-btn" data-state="partial" aria-pressed="false">sometimes fixed</button>
+        <button type="button" class="state-btn" data-state="resolved" aria-pressed="false">fixed before</button>
       </span>
-      <input id="f-project" class="facet" placeholder="project">
-      <input id="f-source" class="facet" placeholder="source">
-      <input id="f-machine" class="facet" placeholder="machine">
-      <input id="f-tool" class="facet" placeholder="tool">
-      <button type="button" id="incident-apply">apply</button>
+      <label class="field facet-field"><span>Project</span><input id="f-project" class="facet" placeholder="any"></label>
+      <label class="field facet-field"><span>Source</span><input id="f-source" class="facet" placeholder="any"></label>
+      <label class="field facet-field"><span>Machine</span><input id="f-machine" class="facet" placeholder="any"></label>
+      <label class="field facet-field"><span>Tool</span><input id="f-tool" class="facet" placeholder="any"></label>
+      <button type="button" id="incident-apply">Apply filters</button>
     </div>
-    <p class="muted">recurring tool-call failures, each with its resolution status. select a row or fix path to read it; unresolved &amp; recurring is your to-do list.</p>
+    <p id="incident-feedback" class="muted" aria-live="polite">Showing all recurring failures. Use needs attention for repair work; fixed before shows fix paths that already worked.</p>
     <ol id="incidents"></ol>
   </section>
 
-  <section id="conflicts-section">
-    <h2>conflicts</h2>
-    <ul id="conflicts"></ul>
-  </section>
+  <div class="lower-panels">
+    <section id="overview-section">
+      <h2>Archive health</h2>
+      <p class="muted">What is indexed locally. Click a chip to scope the next search and the failure list.</p>
+      <div id="overview" class="muted">loading overview…</div>
+    </section>
+
+    <section id="conflicts-section">
+      <h2>Merge conflicts</h2>
+      <p class="muted">Quarantined transcript rows that need manual inspection before they can be trusted.</p>
+      <ul id="conflicts"></ul>
+    </section>
+  </div>
 </main>
 
 <script src="/static/app.js"></script>

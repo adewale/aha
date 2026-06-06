@@ -300,6 +300,7 @@ For coding agents using `aha`:
 - `docs/r2-bucket-settings.md` — recommended R2 bucket, token, endpoint, and audit settings.
 - `docs/architecture.md` — high-level architecture diagram and flows.
 - `docs/mcp-spec.md` — read-only stdio MCP server spec and tool surface.
+- `docs/serve-ui-spec.md` — journey-oriented local dashboard spec for `aha serve`.
 - `docs/redaction-spec.md` — implemented v1.1 corpus-projection redaction plus deferred v1.2+ designs.
 - `docs/outcome-weighting-spec.md` — design for the incidents surface: ranking recurring failures by the fix that actually worked (resolution-path mining over `tool_invocations`).
 - `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
