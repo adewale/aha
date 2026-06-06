@@ -424,6 +424,7 @@ function traceSubtitle(t) {
 // and shareable. Refs are stable identifiers by design.
 async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }, selectedEntryID = "") {
   if (!refText) return;
+  setActiveTab("search");
   const body = $("reader-body");
   body.textContent = "loading…";
   if (updateHash) {
@@ -454,6 +455,17 @@ function renderReadEntry(e, selected) {
 function refFromHash() {
   const m = location.hash.match(/^#ref=(.+)$/);
   return m ? decodeURIComponent(m[1]) : null;
+}
+
+function setActiveTab(name) {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== name;
+  });
 }
 
 function setIncidentState(next) {
@@ -508,12 +520,15 @@ function clearScope() {
 }
 
 function focusSearch(hint) {
+  setActiveTab("search");
   $("search-hint").textContent = hint;
   $("search").scrollIntoView({ block: "start", behavior: "smooth" });
   $("query").focus();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".tab").forEach((tab) =>
+    tab.addEventListener("click", () => setActiveTab(tab.dataset.tab)));
   $("search-form").addEventListener("submit", doSearch);
   $("clear-scope").addEventListener("click", clearScope);
   for (const id of ["project", "source", "machine", "path"]) {
@@ -601,6 +616,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // scopedSearch cross-links an incident into the search box: pre-fill the search
 // facets from the incident and run a search over its error signature.
 function scopedSearch(c) {
+  setActiveTab("search");
   $("query").value = c.error_signature || c.command_family || "";
   setRoleFilter("");
   $("project").value = "";

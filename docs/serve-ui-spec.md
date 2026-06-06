@@ -10,7 +10,13 @@ The first useful object is not a corpus, task rail, hero headline, or collection
 
 Design principle:
 
-> Search first. Results are trace cards, not database rows.
+> Three journeys, one domain model. Search finds a trace, Failures mines patterns across traces, Archive explains trust and scope.
+
+Top-level tabs:
+
+- **Search**: find context inside traces.
+- **Failures**: inspect recurring failure patterns and fixes.
+- **Archive**: understand indexed sources, scope, and trust issues.
 
 ## Research basis
 
@@ -110,14 +116,13 @@ User question: “What keeps breaking, and has this been fixed before?”
 
 Flow:
 
-1. User opens **Across the archive** when they want summaries rather than one trace.
-2. User opens **Recurring failures**.
-3. Failure state controls use human labels:
+1. User opens the **Failures** tab when they want summaries rather than one trace.
+2. Failure state controls use human labels:
    - all
    - needs attention
    - sometimes fixed
    - fixed before
-4. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
+3. Each failure row can search matching history, open an example, trace a fix path, or copy fix notes.
 
 Success criteria:
 
@@ -130,12 +135,11 @@ User question: “What data is indexed, and is anything quarantined?”
 
 Flow:
 
-1. User opens **Across the archive**.
-2. User reads **Archive health** below the primary search/results surface.
-3. Counts and chips show indexed sources, machines, projects, and span.
-4. Clicking a chip scopes the next search and recurring-failure filters.
-5. A visible scope summary appears with **Clear scope**.
-6. **Merge conflicts** lists quarantined rows.
+1. User opens the **Archive** tab.
+2. User reads **Archive health** for indexed sessions, messages, sources, machines, projects, and span.
+3. Clicking a chip scopes the next search and recurring-failure filters.
+4. A visible scope summary appears with **Clear scope** in Search.
+5. **Merge conflicts** lists quarantined rows.
 
 Success criteria:
 
@@ -149,6 +153,9 @@ Success criteria:
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ aha · local agent memory                    sessions · entries · messages │
 ├────────────────────────────────────────────────────────────────────────────┤
+│ [ Search ] [ Failures ] [ Archive ]                                        │
+│                                                                            │
+│ Search tab                                                                 │
 │ Search agent history                                                       │
 │ ┌────────────────────────────────────────────────────────────────────────┐ │
 │ │ schema migration sqlite failure                                        │ │
@@ -156,7 +163,7 @@ Success criteria:
 │ Search in: [All history] [Prompts] [Assistant replies] [Tool output]       │
 │ Advanced filters: project/source/machine/path                              │
 │                                                                            │
-│ Archive › Trace › Event › Evidence                                         │
+│ Trace → Event → Evidence                                                   │
 │                                                                            │
 │ Traces                                                                     │
 │ ┌────────────────────────────────────────────────────────────────────────┐ │
@@ -171,10 +178,12 @@ Success criteria:
 │ Evidence                                                                   │
 │ original transcript context around selected ref                            │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Across the archive                                                        │
-│ ▸ Recurring failures                                                       │
-│ ▸ Archive health                         ▸ Merge conflicts                 │
-└──────────────────────────────────────────────┴─────────────────────────────┘
+│ Failures tab                                                               │
+│ recurring failure patterns, fix paths, evidence links                      │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Archive tab                                                                │
+│ archive health, scope chips, merge conflicts                               │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## API mapping
@@ -195,6 +204,7 @@ Success criteria:
 
 ## Interaction rules
 
+- Top-level tabs separate user journeys: Search, Failures, Archive.
 - Empty state is not a task rail. It tells the user to search and explains trace-card output.
 - The search box searches all history by default.
 - Search chips set the hidden role filter, update `aria-pressed`, and rerun the search when a query is present.
@@ -212,6 +222,9 @@ Prefer:
 
 - Search agent history
 - trace cards
+- Search
+- Failures
+- Archive
 - Search in
 - All history
 - Prompts
@@ -219,7 +232,6 @@ Prefer:
 - Tool output
 - Advanced filters
 - Evidence
-- Across the archive
 - Recurring failures
 - needs attention
 - sometimes fixed
@@ -254,16 +266,20 @@ Technical terms may remain in code/API docs, not in the main user-facing dashboa
 
 Desktop:
 
-- The compact search surface spans the full width and appears first.
+- Top-level tabs sit immediately under the app header.
+- The Search tab is the default workspace.
+- The compact search surface spans the full width and appears first inside Search.
 - Search input is large, but its label and hint are compact enough that results stay close to the fold.
-- Trace cards and reader sit in one explicit workbench grid so their edges align.
+- Trace cards and Evidence sit in one explicit workbench grid so their edges align.
 - The reader is not sticky; sticky layering can overlap later sections and make scroll state ambiguous.
-- A thin domain-model strip names the hierarchy: Archive, Trace, Event, Evidence.
-- Recurring failures, archive health, and merge conflicts sit inside one lower-priority **Across the archive** region as collapsible drawers.
+- A compact Search-tab hint names the local hierarchy: Trace, Event, Evidence.
+- Failures and Archive are not visible in the Search workspace except as top-level tabs.
 
 Mobile/narrow:
 
-- Single-column order: search, domain model, trace cards, evidence, across-archive drawers.
+- Tabs wrap if needed.
+- Search tab single-column order: search, domain model hint, trace cards, evidence.
+- Failures and Archive keep their own single-column layouts.
 - Search button stacks below input.
 - Advanced filters stack to one column.
 - Trace cards keep event labels and snippets readable.
