@@ -109,7 +109,7 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 		t.Fatalf("app.js status=%d", w.Code)
 	}
 	js := w.Body.String()
-	for _, want := range []string{"search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
+	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("dashboard behavior copy missing %q:\n%s", want, js)
 		}
@@ -199,6 +199,46 @@ func TestSearchEndpointAcceptsPOSTAndChainsToRead(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"entry_id"`) {
 		t.Fatalf("read response missing entry_id: %s", w.Body.String())
+	}
+}
+
+func TestSearchTracesEndpointReturnsRecognizableCards(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search_traces",
+		strings.NewReader(`{"query":"needle","limit":20}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search_traces status=%d body=%s", w.Code, w.Body.String())
+	}
+	var traces []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &traces); err != nil {
+		t.Fatalf("decode traces: %v\n%s", err, w.Body.String())
+	}
+	if len(traces) == 0 {
+		t.Fatalf("search_traces returned no cards: %s", w.Body.String())
+	}
+	first := traces[0]
+	for _, key := range []string{"title", "subtitle", "status", "ref_text", "matched_events", "timeline"} {
+		if _, ok := first[key]; !ok {
+			t.Fatalf("first trace missing %q: %#v", key, first)
+		}
+	}
+	if events, ok := first["matched_events"].([]any); !ok || len(events) == 0 {
+		t.Fatalf("first trace missing matched events: %#v", first)
+	}
+	var sawToolFailure bool
+	for _, tr := range traces {
+		tools, _ := tr["tool_calls"].(float64)
+		failures, _ := tr["failures"].(float64)
+		commands, _ := tr["commands"].([]any)
+		if tools > 0 && failures > 0 && len(commands) > 0 {
+			sawToolFailure = true
+		}
+	}
+	if !sawToolFailure {
+		t.Fatalf("search_traces should enrich cards with tool/failure/command evidence: %s", w.Body.String())
 	}
 }
 

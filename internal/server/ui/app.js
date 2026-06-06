@@ -14,7 +14,7 @@ function clampText(s) {
   return s.slice(0, MAX_ENTRY_CHARS) + `\n… [truncated ${s.length - MAX_ENTRY_CHARS} chars; use \`aha read\` for full context]`;
 }
 
-let lastHits = [];
+let lastTraces = [];
 let lastIncidents = [];
 let incidentState = "all"; // all | unresolved | partial | resolved
 
@@ -279,7 +279,7 @@ async function doSearch(ev) {
   const ol = $("results");
   updateScopeSummary();
   if (!args.query) {
-    lastHits = [];
+    lastTraces = [];
     ol.innerHTML = `<li class="empty-state">Type a prompt, file, command, error, or decision to search across local agent traces.</li>`;
     setSearchFeedback(`${roleFilterLabel()} selected. Type a query to search.`);
     return;
@@ -289,21 +289,21 @@ async function doSearch(ev) {
   setSearchFeedback(`Searching ${roleFilterLabel().toLowerCase()} for “${query}”…`);
   ol.innerHTML = `<li class="empty-state">Searching traces…</li>`;
   try {
-    const hits = await call("/api/search", {
+    const traces = await call("/api/search_traces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
     });
-    lastHits = hits || [];
-    if (!lastHits.length) {
+    lastTraces = traces || [];
+    if (!lastTraces.length) {
       ol.innerHTML = `<li class="empty-state">No trace cards found. Try all history, clear scope, or search fewer words.</li>`;
       setSearchFeedback(`No matches for “${query}”.`);
       return;
     }
-    const traceCount = new Set(lastHits.map((h, i) => h.session_key || `hit-${i}`)).size;
-    ol.innerHTML = renderTraceCards(lastHits);
-    setSearchFeedback(`${lastHits.length} matched event${lastHits.length === 1 ? "" : "s"} in ${traceCount} trace card${traceCount === 1 ? "" : "s"}. First trace selected.`);
-    if (lastHits[0] && lastHits[0].ref_text) loadRead(lastHits[0].ref_text);
+    const matchedEvents = lastTraces.reduce((n, t) => n + (t.matched_event_count || 0), 0);
+    ol.innerHTML = renderTraceCards(lastTraces);
+    setSearchFeedback(`${lastTraces.length} trace card${lastTraces.length === 1 ? "" : "s"} with ${matchedEvents} matched event${matchedEvents === 1 ? "" : "s"}. First trace selected.`);
+    if (lastTraces[0] && lastTraces[0].ref_text) loadRead(lastTraces[0].ref_text, true, { before: 3, after: 10 }, lastTraces[0].entry_id);
   } catch (e) {
     ol.innerHTML = `<li class="empty-state">Search error: ${esc(e.message)}</li>`;
     setSearchFeedback(`Search error: ${e.message}`);
@@ -334,54 +334,55 @@ function roleFilterLabel() {
   return "All history";
 }
 
-function renderTraceCards(hits) {
-  const groups = [];
-  const bySession = new Map();
-  hits.forEach((h, i) => {
-    const key = h.session_key || `hit-${i}`;
-    if (!bySession.has(key)) {
-      const g = { first: h, hits: [] };
-      bySession.set(key, g);
-      groups.push(g);
-    }
-    bySession.get(key).hits.push({ h, i });
-  });
-  return groups.map((g) => {
-    const firstIdx = g.hits[0].i;
-    return `<li><button type="button" class="trace-card" data-idx="${firstIdx}">` +
+function renderTraceCards(traces) {
+  return traces.map((t, i) => {
+    const chips = traceChips(t);
+    return `<li><button type="button" class="trace-card" data-idx="${i}">` +
       `<div class="trace-head">` +
-        `<div><div class="trace-title">${esc(traceTitle(g.hits))}</div>` +
-        `<div class="trace-meta">${esc(sessionTitle(g.first))} · ${g.hits.length} matched event${g.hits.length === 1 ? "" : "s"}</div></div>` +
-        `<span class="trace-status ${esc(traceStatusClass(g.hits))}">${esc(traceStatus(g.hits))}</span>` +
+        `<div><div class="trace-title">${esc(t.title || "Untitled trace")}</div>` +
+        `<div class="trace-meta">${esc(t.subtitle || "unknown trace")} · ${t.matched_event_count || 0} matched event${(t.matched_event_count || 0) === 1 ? "" : "s"}</div></div>` +
+        `<span class="trace-status ${esc(t.status_class || "status-conversation")}">${esc(t.status || "conversation")}</span>` +
       `</div>` +
-      renderTraceTimeline(g.hits) +
-      `<div class="trace-events">` + g.hits.slice(0, 4).map(({ h }) => renderTraceEvent(h)).join("") + `</div>` +
-      (g.hits.length > 4 ? `<div class="trace-more muted">+${g.hits.length - 4} more matched events in this trace</div>` : "") +
+      renderTraceTimeline(t.timeline || []) +
+      `<div class="trace-facts">` +
+        traceFact(t.messages, "messages") +
+        traceFact(t.tool_calls, "tools") +
+        traceFact(t.failures, "failures", "danger") +
+        traceFact((t.files || []).length, "files") +
+      `</div>` +
+      (chips ? `<div class="trace-chips">${chips}</div>` : "") +
+      `<div class="trace-events">` + (t.matched_events || []).slice(0, 4).map(renderTraceEvent).join("") + `</div>` +
+      ((t.matched_event_count || 0) > 4 ? `<div class="trace-more muted">+${(t.matched_event_count || 0) - 4} more matched events in this trace</div>` : "") +
     `</button></li>`;
   }).join("");
 }
 
-function traceTitle(hits) {
-  const userHit = hits.find(({ h }) => h.role === "user");
-  const chosen = (userHit || hits[0]).h;
-  const text = cleanSnippet(chosen.snippet || "");
-  return text ? text.slice(0, 120) : sessionTitle(chosen);
+function traceFact(value, label, tone = "") {
+  if (!value) return "";
+  return `<span class="trace-fact ${tone ? `trace-fact-${tone}` : ""}">${value} ${label}</span>`;
 }
 
-function cleanSnippet(s) {
-  return String(s || "").replace(/[\[\]]/g, "").replace(/\s+/g, " ").trim();
+function traceChips(t) {
+  const commands = (t.commands || []).slice(0, 4).map((x) => `<span class="trace-chip command">${esc(x)}</span>`);
+  const files = (t.files || []).slice(0, 4).map((x) => `<span class="trace-chip file">${esc(shortPath(x))}</span>`);
+  return commands.concat(files).join("");
 }
 
-function renderTraceTimeline(hits) {
-  const dots = hits.slice(0, 10).map(({ h }) =>
-    `<span class="trace-dot dot-${esc(roleClass(h.role))}" title="${esc(roleLabel(h.role))}"></span>`).join("");
-  return `<div class="trace-timeline" aria-label="matched events timeline">${dots}</div>`;
+function shortPath(s) {
+  const parts = String(s || "").split(/[\\/]+/).filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : String(s || "");
 }
 
-function renderTraceEvent(h) {
-  return `<div class="trace-event role-${esc(roleClass(h.role))}">` +
-    `<span class="event-role">${esc(roleLabel(h.role))}</span>` +
-    `<span class="event-snippet">${esc(cleanSnippet(h.snippet)).slice(0, 320)}</span>` +
+function renderTraceTimeline(timeline) {
+  const dots = timeline.slice(0, 18).map((p) =>
+    `<span class="trace-dot dot-${esc(roleClass(p.role))}" title="${esc(p.label || roleLabel(p.role))}"></span>`).join("");
+  return dots ? `<div class="trace-timeline" aria-label="session event timeline">${dots}</div>` : "";
+}
+
+function renderTraceEvent(ev) {
+  return `<div class="trace-event role-${esc(roleClass(ev.role))}">` +
+    `<span class="event-role">${esc(ev.label || roleLabel(ev.role))}</span>` +
+    `<span class="event-snippet">${esc(ev.snippet || "").slice(0, 360)}</span>` +
   `</div>`;
 }
 
@@ -405,37 +406,17 @@ function roleClass(role) {
   }
 }
 
-function traceStatus(hits) {
-  const text = hits.map(({ h }) => `${h.role || ""} ${h.snippet || ""}`).join("\n").toLowerCase();
-  if (/\b(error|failed|failure|panic|exception|denied)\b/.test(text)) return "failure match";
-  if (hits.some(({ h }) => h.role === "toolResult")) return "tool trace";
-  if (hits.some(({ h }) => h.role === "artifact")) return "file match";
-  return "conversation";
-}
-
-function traceStatusClass(hits) {
-  const s = traceStatus(hits);
-  if (s.includes("failure")) return "status-failure";
-  if (s.includes("tool")) return "status-tool";
-  if (s.includes("file")) return "status-file";
-  return "status-conversation";
-}
-
-function sessionTitle(h) {
-  const project = h.project || "no project";
-  const machine = h.machine || "unknown machine";
-  const source = h.source || "unknown source";
-  const day = h.timestamp ? h.timestamp.slice(0, 10) : "unknown date";
-  return `${project} · ${source} · ${machine} · ${day}`;
+function traceSubtitle(t) {
+  return t.subtitle || [t.project, t.source, t.machine, (t.timestamp || "").slice(0, 10)].filter(Boolean).join(" · ") || "unknown trace";
 }
 
 // loadRead fetches surrounding context for a ref and renders it. Selecting a
 // result also writes the ref into the URL fragment so the view is reloadable
 // and shareable. Refs are stable identifiers by design.
-async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }) {
+async function loadRead(refText, updateHash = true, window = { before: 3, after: 10 }, selectedEntryID = "") {
   if (!refText) return;
-  const pre = $("reader-body");
-  pre.textContent = "loading…";
+  const body = $("reader-body");
+  body.textContent = "loading…";
   if (updateHash) {
     const next = "#ref=" + encodeURIComponent(refText);
     if (location.hash !== next) history.replaceState(null, "", next);
@@ -446,14 +427,19 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref: refText, before: window.before, after: window.after }),
     });
-    pre.textContent = entries.map((e) => {
-      const body = e.text || e.raw_json || "";
-      const label = e.text ? "" : " (raw_json)";
-      return `[${e.timestamp || ""}] ${e.role || ""}${label}:\n${clampText(body)}\n`;
-    }).join("\n");
+    body.innerHTML = entries.length ? entries.map((e) => renderReadEntry(e, e.entry_id === selectedEntryID)).join("") : `<div class="empty-state">No context returned for this ref.</div>`;
   } catch (e) {
-    pre.textContent = `read error: ${e.message}`;
+    body.innerHTML = `<div class="empty-state">read error: ${esc(e.message)}</div>`;
   }
+}
+
+function renderReadEntry(e, selected) {
+  const text = clampText(e.text || e.raw_json || "");
+  const label = e.text ? roleLabel(e.role) : `${roleLabel(e.role)} raw`;
+  return `<article class="read-entry role-${esc(roleClass(e.role))}${selected ? " selected" : ""}">` +
+    `<div class="read-meta"><span>${esc(label)}</span><span>${esc(e.timestamp || "")}</span></div>` +
+    `<div class="read-text">${esc(text)}</div>` +
+  `</article>`;
 }
 
 function refFromHash() {
@@ -537,10 +523,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("results").addEventListener("click", (ev) => {
     const card = ev.target.closest("[data-idx]");
     if (!card) return;
-    const hit = lastHits[Number(card.dataset.idx)];
-    if (hit) {
-      setSearchFeedback(`Opened ${roleLabel(hit.role).toLowerCase()} event from ${sessionTitle(hit)}.`);
-      loadRead(hit.ref_text);
+    const trace = lastTraces[Number(card.dataset.idx)];
+    if (trace) {
+      setSearchFeedback(`Opened ${trace.status || "conversation"} trace: ${traceSubtitle(trace)}.`);
+      loadRead(trace.ref_text, true, { before: 3, after: 10 }, trace.entry_id);
     }
   });
   // Incident list: one delegated listener handles read drill-in, trajectory

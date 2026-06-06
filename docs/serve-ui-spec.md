@@ -41,7 +41,7 @@ Success criteria:
 
 - The search input is visually dominant and first in source/layout order. Supporting copy must not consume the first screen.
 - A first-time user does not need to choose a preliminary task before searching.
-- Results look like actual agent-session slices.
+- Results look like actual agent-session slices, with server-enriched counts, command chips, file chips, status, and matched events.
 
 ### 2. Recognize the right session before opening it
 
@@ -52,9 +52,11 @@ Trace-card anatomy:
 - title from the most recognizable matched prompt/event;
 - project/source/machine/date provenance;
 - matched-event count;
-- status badge such as conversation, tool trace, file match, or failure match;
-- mini event timeline;
-- event snippets with labels: Prompt, Assistant, Tool output, File artifact.
+- status badge such as conversation, tool work, file match, or failed tool;
+- session counts for messages, tool calls, failures, and files;
+- command and file chips when available;
+- mini event timeline from the actual session shape;
+- matched-event snippets with labels: Prompt, Assistant, Tool output, File artifact.
 
 Success criteria:
 
@@ -94,7 +96,7 @@ Flow:
 
 1. User selects a trace card.
 2. The app calls `read` for the selected canonical ref.
-3. **Read selected trace** shows surrounding transcript entries.
+3. **Read selected trace** shows structured transcript entries, not one raw preformatted blob.
 4. URL hash stores the selected ref for reloadable context.
 
 Success criteria:
@@ -176,13 +178,13 @@ Success criteria:
 
 | UI concept | API/tool backing | Notes |
 |---|---|---|
-| Search field | `POST /api/search` | Uses `query` plus optional role/project/source/machine/path. |
+| Search field | `POST /api/search_traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
 | Search in: All history | omit `role` | Search messages and artifacts. |
 | Search in: Prompts | `role = "user"` | UI label stays product-facing. |
 | Search in: Assistant replies | `role = "assistant"` | Searches assistant-authored messages. |
 | Search in: Tool output | `role = "toolResult"` | Searches indexed tool-result messages. |
-| Trace cards | grouped search hits | Frontend groups hits by `session_key` and renders session-shaped cards. |
-| Read selected trace | `POST /api/read` | Uses the clicked hit's `ref_text`. |
+| Trace cards | grouped enriched search hits | Server groups hits by `session_key`, adds counts, timeline, command chips, file chips, status, and matched events. |
+| Read selected trace | `POST /api/read` | Uses the clicked card's `ref_text`. |
 | Recurring failures | `POST /api/incidents` | State labels map to corpus states. |
 | Trace fix | `POST /api/incident_trajectory` | Requires sample ref and ordinal. |
 | Archive health | `GET /api/overview` | Counts and scope chips. |
@@ -195,8 +197,8 @@ Success criteria:
 - Search chips set the hidden role filter, update `aria-pressed`, and rerun the search when a query is present.
 - Advanced filters are secondary and collapsed by default.
 - Scope changes show a visible summary and a live feedback sentence so users know what changed.
-- Search results are grouped by session key into trace cards.
-- Selecting any trace card loads the first matched ref in **Read selected trace**.
+- Search results come back as enriched trace cards grouped by session key.
+- Selecting any trace card loads the first matched ref in **Read selected trace** and highlights the selected entry when possible.
 - Overview chips populate search and incident facets, then focus the search box.
 - Incident rows and fix paths continue to drill into read context.
 - Clipboard actions are user-initiated only.
