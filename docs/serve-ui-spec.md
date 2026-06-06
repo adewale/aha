@@ -14,6 +14,13 @@ Design principle:
 
 Visual direction: restrained technical ledger. The UI should feel like a precise local instrument: dense, aligned, rule-based, and quiet. Avoid decorative spectacle; make the memorable move the clarity of the evidence trail.
 
+Execution rules:
+
+- Navigation and result identity use small ordinals, not decorative icons.
+- Trace selection is mirrored in Evidence with an explicit selected-ref header and `aria-current` state.
+- Typography is label/mono-forward for provenance and controls, with restrained body text for transcript content.
+- Motion is limited to quick state transitions and disabled under reduced-motion preferences.
+
 Top-level tabs:
 
 - **Search**: find context inside traces, with prompts selected first.

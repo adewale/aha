@@ -376,7 +376,7 @@ function renderTraceCards(traces) {
   return traces.map((t, i) => {
     const chips = traceChips(t);
     const selected = t.ref_text && t.ref_text === currentRef;
-    return `<li><button type="button" class="trace-card${selected ? " selected" : ""}" data-idx="${i}" data-ref="${esc(t.ref_text || "")}">` +
+    return `<li><button type="button" class="trace-card${selected ? " selected" : ""}" data-idx="${i}" data-ref="${esc(t.ref_text || "")}"${selected ? ` aria-current="true"` : ""}>` +
       `<div class="trace-head">` +
         `<div><div class="trace-title">${esc(t.title || "Untitled trace")}</div>` +
         `<div class="trace-meta">${esc(t.subtitle || "unknown trace")} · ${t.matched_event_count || 0} matched event${(t.matched_event_count || 0) === 1 ? "" : "s"}</div></div>` +
@@ -481,7 +481,10 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
 
 function markSelectedTrace(refText) {
   document.querySelectorAll(".trace-card").forEach((card) => {
-    card.classList.toggle("selected", card.dataset.ref === refText);
+    const selected = card.dataset.ref === refText;
+    card.classList.toggle("selected", selected);
+    if (selected) card.setAttribute("aria-current", "true");
+    else card.removeAttribute("aria-current");
   });
 }
 
@@ -489,10 +492,10 @@ function updateReaderContext(trace, refText) {
   $("copy-ref").disabled = false;
   $("widen-context").disabled = false;
   if (trace) {
-    $("reader-context").innerHTML = `<strong>${esc(trace.title || "Selected trace")}</strong><span>${esc(traceSubtitle(trace))}</span><code>${esc(refText)}</code>`;
+    $("reader-context").innerHTML = `<span class="context-kicker">Selected evidence</span><strong>${esc(trace.title || "Selected trace")}</strong><span>${esc(traceSubtitle(trace))}</span><code>${esc(refText)}</code>`;
     return;
   }
-  $("reader-context").innerHTML = `<strong>Selected evidence</strong><code>${esc(refText)}</code>`;
+  $("reader-context").innerHTML = `<span class="context-kicker">Selected evidence</span><strong>Loaded from ref</strong><code>${esc(refText)}</code>`;
 }
 
 function renderReadEntry(e, selected) {
