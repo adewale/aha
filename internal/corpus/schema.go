@@ -30,6 +30,7 @@ func Init(db *sql.DB) error {
 		`create virtual table if not exists fts_messages using fts5(session_key unindexed,entry_id unindexed,text)`,
 		`create virtual table if not exists fts_artifacts using fts5(artifact_id unindexed,text)`,
 		`create index if not exists idx_sessions_source_machine on sessions(source_name,machine_id)`,
+		`create index if not exists idx_session_versions_file_path on session_versions(file_sha256,relative_path)`,
 		`create index if not exists idx_sessions_source_session on sessions(source_name,source_session_id,machine_id)`,
 		`create index if not exists idx_sessions_project on sessions(project_key)`,
 		`create index if not exists idx_session_path_tokens_token_session on session_path_tokens(token,session_key)`,

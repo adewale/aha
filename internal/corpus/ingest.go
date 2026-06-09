@@ -473,6 +473,29 @@ func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (In
 	return w.IngestSessionFile(mf, tmpPath)
 }
 
+// knownSessionVersionKey returns the session key of an already-ingested
+// version of this exact session file, or "" if none exists. A
+// session_versions row commits in the same transaction as the entries
+// it describes, so an existing row for the same machine, source, path,
+// and content hash proves the parse outcome is already in the corpus
+// and the parse can be skipped — this is what keeps ingest O(new files)
+// instead of O(bundle files). The key deliberately includes the paths:
+// byte-identical files under a different path or session ID are parsed,
+// never skipped (TestIdenticalBytesDifferentSessionStillParsed pins the
+// residual risk).
+func (w corpusWriter) knownSessionVersionKey(mf model.ManifestFile) (string, error) {
+	var key string
+	err := w.tx.QueryRow(`select sv.session_key from session_versions sv join sessions s on s.session_key=sv.session_key where sv.file_sha256=? and sv.relative_path=? and sv.raw_path=? and s.machine_id=? and s.source_name=? limit 1`,
+		mf.SHA256, mf.RelativePath, mf.RawPath, w.manifest.MachineID, mf.Source).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
 func (w corpusWriter) fileBlobKnown(sha string) (bool, error) {
 	var rel string
 	err := w.tx.QueryRow(`select compressed_blob_path from files where file_sha256=?`, sha).Scan(&rel)
@@ -500,6 +523,14 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	ad := w.Registry[mf.Source]
 	if ad == nil {
 		return IngestReport{}, fmt.Errorf("unknown source adapter %q", mf.Source)
+	}
+	if knownKey, err := w.knownSessionVersionKey(mf); err != nil {
+		return IngestReport{}, err
+	} else if knownKey != "" {
+		if _, err := w.stmts.insertSessionVersion.Exec(knownKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+			return IngestReport{}, err
+		}
+		return IngestReport{Sessions: 1}, nil
 	}
 	fh, err := os.Open(tmpPath)
 	if err != nil {
