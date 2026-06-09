@@ -147,6 +147,24 @@ Rationale:
 - Loopback-only and read-only by default; the `Host` header is validated to blunt DNS-rebinding, and non-loopback binds require `--allow-remote`.
 - Result clicks deep-link the ref into the URL fragment so a view is reloadable and shareable.
 
+## Journey 8: turn recurring incidents into intervention artifacts
+
+User goal: “What should I create so this failure pattern costs less next time?”
+
+```bash
+aha incidents --limit 50 --json
+aha incidents --state resolved --limit 25 --json
+aha incidents --state unresolved --limit 25 --json
+aha read <sample-ref> --before 3 --after 10 --md
+```
+
+Rationale:
+
+- Incidents are evidence, not automatic prescriptions.
+- Resolved/partial incidents can become runbooks, skills, dynamic workflows, or tool/platform fixes depending on the pattern shape.
+- Unresolved high-pain incidents usually become investigation backlog items until a reliable fix path exists.
+- `docs/patterns-and-interventions.md` provides the manual classifier and artifact templates.
+
 ## Defaults chosen from the journeys
 
 | Command | No-flag behavior |

@@ -27,7 +27,7 @@ Shipped:
 - HTTP — `POST /api/incidents`, `POST /api/incident_trajectory`,
   `GET /api/overview` on the dashboard server (`internal/server/server.go`).
 - Dashboard UI — a unified incidents section (recurrence + resolution, state
-  filter, facets, sparklines, copy-skill-draft, trajectory drill-in) in
+  filter, facets, sparklines, copy fix notes, trajectory drill-in) in
   `internal/server/ui/`.
 - TypeScript — `Incident`, `ResolutionPath`, `TrajectoryStep`, `Overview`
   types and `aha().incidents()/.incident_trajectory()/.overview()` methods,
@@ -61,7 +61,8 @@ Recurrence without outcome ⇒ "everyone does it this way, must be right" (ships
 popular wrong turns). Outcome without recurrence ⇒ "this one session ended ok,
 here's the skill" (mistakes an idiosyncratic local fix for a general
 technique). Together: *here is a pattern that recurred N times and resolved
-successfully ≥M times; the skill is the resolution path.*
+successfully ≥M times; the resolution path is evidence for a future
+intervention artifact.*
 
 ## The foundation already exists
 
@@ -235,8 +236,10 @@ aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [-
 ```
 
 `--state unresolved` is the unsolved-pain to-do list; `--state resolved` is the
-set of fixes worth harvesting into skills. A read-only command; no mutating
-surface.
+set of fixes worth harvesting into intervention artifacts: runbooks, skills,
+dynamic workflows, tool/platform fixes, or investigation items. A read-only
+command; no mutating surface. See `docs/patterns-and-interventions.md` for the
+manual classifier.
 
 ### MCP / HTTP / TS
 
