@@ -1,9 +1,10 @@
 // Drift test for docs/interactive/architecture.html.
 //
 // The interactive explorer hard-codes facts about the codebase: the count
-// of production-code Go lines, the set of packages under internal/, the
-// set of corpus schema tables, and the package import graph. None of
-// these are derived; all of them will silently rot when the code
+// of production-code Go lines, the CLI command count, the set of packages
+// under internal/ (both in the PKG_GRAPH diagram and the Codebase map's
+// PACKAGES reading-order cards), and the set of corpus schema tables. None
+// of these are derived; all of them will silently rot when the code
 // changes. This test re-derives each fact from the source files and
 // asserts the HTML still names them.
 //
@@ -22,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/adewale/aha/internal/cli"
 )
 
 const archHTMLPath = "../../docs/interactive/architecture.html"
@@ -92,6 +95,47 @@ func TestArchitectureHTMLPackageGraphCoversAllPackages(t *testing.T) {
 	if len(extra) > 0 {
 		t.Fatalf("architecture.html PKG_GRAPH names packages that no longer exist in internal/: %s.\n"+
 			"Fix: remove the stale entries from PKG_GRAPH and the corresponding LAYERS row.",
+			strings.Join(extra, ", "))
+	}
+}
+
+// TestArchitectureHTMLCommandCount asserts the HTML sidebar's command
+// count matches the CLI registry. This is the one sidebar number that
+// previously had no drift anchor — and it rotted (claimed 12 while the
+// registry had grown to 15).
+func TestArchitectureHTMLCommandCount(t *testing.T) {
+	want := fmt.Sprintf("%d", len(cli.Registry()))
+	html := readArchHTML(t)
+	claim := extractDriftAnchor(t, html, "prod-commands")
+	if claim != want {
+		t.Fatalf("architecture.html claims %s commands; cli.Registry() has %s.\n"+
+			"Fix: update the data-drift=\"prod-commands\" span in the sidebar to %s.",
+			claim, want, want)
+	}
+}
+
+// TestArchitectureHTMLCodebaseMapCoversAllPackages asserts every
+// production package under internal/ has a card in the Codebase map's
+// PACKAGES reading-order array. A package present in PKG_GRAPH but
+// absent here is visible in the dependency diagram yet unexplained in
+// the narrative.
+func TestArchitectureHTMLCodebaseMapCoversAllPackages(t *testing.T) {
+	pkgs, err := listProductionInternalPackages("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := readArchHTML(t)
+	named := extractCodebaseMapPackages(html)
+	missing := setDiff(pkgs, named)
+	if len(missing) > 0 {
+		t.Fatalf("architecture.html PACKAGES (Codebase map) is missing cards for: %s.\n"+
+			"Fix: add a { name: 'internal/%s', lines: ..., why: ..., read: [...] } entry.",
+			strings.Join(missing, ", "), missing[0])
+	}
+	extra := setDiff(named, pkgs)
+	if len(extra) > 0 {
+		t.Fatalf("architecture.html PACKAGES names packages that no longer exist in internal/: %s.\n"+
+			"Fix: remove the stale card.",
 			strings.Join(extra, ", "))
 	}
 }
@@ -264,6 +308,26 @@ func extractPkgGraphKeys(html string) []string {
 	out := make([]string, 0, len(matches))
 	for _, m := range matches {
 		out = append(out, m[1])
+	}
+	sort.Strings(out)
+	return out
+}
+
+// extractCodebaseMapPackages finds the package names in the Codebase
+// map's PACKAGES JS array. Entries look like:
+//
+//	{ name: 'internal/corpus',  lines: '~2900', why: '...', read: [...] },
+var codebaseMapNameRE = regexp.MustCompile(`name:\s*'internal/([a-z]+)'`)
+
+func extractCodebaseMapPackages(html string) []string {
+	matches := codebaseMapNameRE.FindAllStringSubmatch(html, -1)
+	seen := map[string]bool{}
+	for _, m := range matches {
+		seen[m[1]] = true
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
