@@ -50,6 +50,16 @@ Many users start with:
 - **Agent-friendly retrieval**: JSON, refs, Markdown, a read-only MCP server, and a typed TypeScript client for code-mode runtimes.
 - **Auditable trust claims**: read-only source access, local-by-default behaviour, and network boundaries are tested.
 
+## Use it like this
+
+- Run `aha refresh` to keep your local corpus current.
+- Use `aha search ...` to find leads.
+- Use `aha read <ref>` before trusting a result.
+- Use `aha serve` when you want a visual trace/evidence browser.
+- Use `aha incidents` to find recurring failures and observed fix paths.
+- Classify recurring patterns into runbooks, skills, dynamic workflows, platform fixes, or backlog items.
+- Expose `aha mcp` when you want agents to query the archive directly.
+
 ## Privacy warning
 
 By default, `aha` preserves today's `none-v1` behavior: bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
@@ -134,7 +144,30 @@ Search supports:
 
 What it does **not** do yet: semantic/vector search, ranking beyond SQLite FTS scoring plus deterministic ordering, OCR/image caption search, branch/thread reconstruction, or advanced query UI.
 
-### Compared with Claude History Explorer and QMD
+## From patterns to interventions
+
+`aha incidents` does not assume every recurring pattern should become a skill. Use incidents as evidence, then choose the right artifact:
+
+| Pattern shape | Prefer |
+|---|---|
+| Repeatable command/check sequence | Runbook |
+| Reusable judgment or habit | Skill |
+| Broad, parallel, uncertain work | Dynamic workflow |
+| Repeated tool friction | Tool/platform fix |
+| High-pain unresolved pattern | Investigation backlog |
+
+Start with:
+
+```bash
+aha incidents --limit 50 --json
+aha incidents --state resolved --json
+aha incidents --state unresolved --json
+aha read <sample_ref> --before 3 --after 10 --md
+```
+
+See `docs/patterns-and-interventions.md` for the manual classifier and artifact templates.
+
+## Compared with Claude History Explorer and QMD
 
 | Tool | Search scope | Search engine | Retrieval style | Best fit |
 |---|---|---|---|---|
@@ -179,44 +212,15 @@ More journey rationale: `docs/user-journeys.md`.
 
 ## Commands
 
-```txt
-aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]
-aha init [--config PATH] [--accept-secrets] [--json]
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]
-aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]
-aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
-aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
-aha status [--repo DIR] [--depot DEPOT] [--json]
-aha verify [--repo DIR] [--repair-fts] [--json]
-aha conflicts [--repo DIR] [--json]
-aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
-aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
-aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]
-aha doctor [--depot DEPOT] [--json]
-aha mcp [--config PATH] [--repo DIR] [--dry-run]
-aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
-```
+The daily surface is intentionally small:
 
-Command roles:
+- `aha refresh` — update the local corpus.
+- `aha search` → `aha read` — find leads, then retrieve evidence.
+- `aha incidents` — inspect recurring failures and observed fix paths.
+- `aha serve` — browse Search / Failures / Sources locally.
+- `aha mcp` — expose read-only tools to coding agents.
 
-- `init`: write starter JSONC config and optionally persist privacy acknowledgement.
-- `refresh`: common local update: snapshot or reuse an unchanged depot bundle, then ingest pending/new bundles.
-- `snapshot`: create an immutable bundle and store it in the configured depot.
-- `ingest`: merge bundles from paths or a depot into a corpus/repo.
-- `search`: find messages/artifacts; use `--json` or `--refs` for agents/scripts. Prefer indexed `--project`/`--path-token` over contains-style `--path` for large corpora; requested limits above 200 are capped with a warning.
-- `read`: retrieve full context from `--session/--entry` or a canonical `ref_text` emitted by `search` (`msg:v1:...`, `session:v1:...`, or `artifact:v1:...`).
-- `status`: corpus counts and health.
-- `verify`: corpus invariant checks and optional FTS repair.
-- `conflicts`: quarantined merge conflicts.
-- `incidents`: rank recurring tool-call failures with their resolution status (`unresolved`/`partial`/`resolved`), tier, and the outcome-weighted fix paths that worked (each with support, confidence, `sample_ref`, and `sample_ordinal` for exact trajectory drill-in). Scope with `--state` and `--project`/`--source`/`--machine`/`--tool`.
-- `corpus`: inspect corpus disk usage, run SQLite vacuum, or explicitly prune unreferenced blob files (`prune-orphans` is dry-run unless `--force`).
-- `depot`: initialize, switch the default (`use`), list, verify, or compact a local/R2 bundle depot; `depot verify` is quick by default, while `--deep` reads bundle bytes/manifests and `--repair` rebuilds catalogs.
-- `doctor`: environment, config, source, corpus, depot, and next-action diagnostics.
-- `mcp`: run a read-only stdio MCP server over the corpus so coding agents can call `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. `--dry-run` opens the corpus, registers the tools, prints a one-line summary, and exits — a pre-flight check for host wiring. See `docs/mcp-spec.md`.
-- `serve`: run a read-only local dashboard on loopback (`127.0.0.1:18428` by default). Same tool surface as `mcp`, served as HTTP/JSON plus a minimal embedded UI. Loopback binds need no auth; passing `--allow-remote` (or setting `AHA_ALLOW_REMOTE=1`) requires a shared-secret bearer token via `--token` (or `AHA_DASHBOARD_TOKEN`). Hostnames accepted via `Host:` are restricted to the loopback allowlist by default; extend with `--allowed-hosts`.
-
-Optional profiling: any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE` before or after the subcommand, or with `AHA_CPU_PROFILE`/`AHA_MEM_PROFILE`.
+See `docs/command-inventory.md` for the human command inventory and `docs/commands.md` for generated usage strings, flags, examples, and JSON contracts.
 
 ## Supported sources
 
@@ -292,6 +296,7 @@ For coding agents using `aha`:
 ## Project docs
 
 - `CHANGELOG.md` — notable unreleased changes.
+- `docs/command-inventory.md` — human command inventory and common workflows.
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
