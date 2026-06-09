@@ -82,6 +82,63 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 }
 
+func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("index status=%d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Search", "Prompts first", "Failures", "Most frequent", "Sources", "Data &amp; trust", "Search agent history", "schema migration sqlite failure", "Conversation", "Trace", "Evidence", "Traces", "Search in", "Prompts", "Tool output", "Advanced filters", "Clear scope", "Copy ref", "Widen context", "aria-live", "aria-pressed", "Sources &amp; scope", "Trust checks"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard copy missing search-first trace label %q:\n%s", want, body)
+		}
+	}
+	for _, stale := range []string{"Start with a task", "Find prompts you typed", "Browse work history", "select a result or cluster", "<h2>corpus</h2>", "<h2>read</h2>", "<h2>conflicts</h2>"} {
+		if strings.Contains(body, stale) {
+			t.Fatalf("dashboard copy still exposes stale/confused label %q:\n%s", stale, body)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/static/app.js", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("app.js status=%d", w.Code)
+	}
+	js := w.Body.String()
+	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "renderFailureSummary", "Most frequent", "updateReaderContext", "widen-context", "example-search", "sources-tab-status", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("dashboard behavior copy missing %q:\n%s", want, js)
+		}
+	}
+	for _, stale := range []string{"copy skill draft", "applyJourney", "journey", "# ", "cluster"} {
+		if strings.Contains(js, stale) {
+			t.Fatalf("dashboard behavior copy still contains stale term %q", stale)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/static/app.css", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("app.css status=%d", w.Code)
+	}
+	css := w.Body.String()
+	for _, want := range []string{"contain: paint", "overflow: hidden", "overflow-wrap: anywhere"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("dashboard CSS missing card containment rule %q", want)
+		}
+	}
+	for _, stale := range []string{"border-left", "border-right", "#fff", "#000", "counter-reset", "counter-increment", "decimal-leading-zero", ".tab::before", ".trace-card::after"} {
+		if strings.Contains(css, stale) {
+			t.Fatalf("dashboard CSS still contains slop-prone token %q", stale)
+		}
+	}
+}
+
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	srv := newTestServer(t)
 	for _, path := range []string{"/static/app.js", "/static/app.css"} {
@@ -150,6 +207,47 @@ func TestSearchEndpointAcceptsPOSTAndChainsToRead(t *testing.T) {
 	}
 }
 
+func TestSearchTracesEndpointReturnsRecognizableCards(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search_traces",
+		strings.NewReader(`{"query":"needle","limit":20}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search_traces status=%d body=%s", w.Code, w.Body.String())
+	}
+	var traces []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &traces); err != nil {
+		t.Fatalf("decode traces: %v\n%s", err, w.Body.String())
+	}
+	if len(traces) == 0 {
+		t.Fatalf("search_traces returned no cards: %s", w.Body.String())
+	}
+	first := traces[0]
+	for _, key := range []string{"title", "subtitle", "status", "ref_text", "matched_events", "timeline"} {
+		if _, ok := first[key]; !ok {
+			t.Fatalf("first trace missing %q: %#v", key, first)
+		}
+	}
+	if events, ok := first["matched_events"].([]any); !ok || len(events) == 0 {
+		t.Fatalf("first trace missing matched events: %#v", first)
+	}
+	var sawToolFailure bool
+	for _, tr := range traces {
+		tools, _ := tr["tool_calls"].(float64)
+		failures, _ := tr["failures"].(float64)
+		commands, _ := tr["commands"].([]any)
+		title, _ := tr["title"].(string)
+		if tools > 0 && failures > 0 && len(commands) > 0 && strings.Contains(title, "claude needle") {
+			sawToolFailure = true
+		}
+	}
+	if !sawToolFailure {
+		t.Fatalf("search_traces should enrich cards with tool/failure/command evidence: %s", w.Body.String())
+	}
+}
+
 func TestSearchEndpointRejectsBadArgs(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
@@ -189,21 +287,50 @@ func TestJSONPostRejectsOversizedBody(t *testing.T) {
 	}
 }
 
-func TestClustersEndpointAcceptsPOST(t *testing.T) {
+func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/clusters", strings.NewReader(`{"limit":1}`)))
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incidents", strings.NewReader(`{"limit":5,"state":"unresolved"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("clusters status=%d body=%s", w.Code, w.Body.String())
+		t.Fatalf("incidents status=%d body=%s", w.Code, w.Body.String())
 	}
-	var clusters []corpus.Cluster
-	if err := json.Unmarshal(w.Body.Bytes(), &clusters); err != nil {
-		t.Fatalf("decode clusters: %v\n%s", err, w.Body.String())
+	var incidents []corpus.Incident
+	if err := json.Unmarshal(w.Body.Bytes(), &incidents); err != nil {
+		t.Fatalf("decode incidents: %v\n%s", err, w.Body.String())
 	}
-	if clusters == nil {
-		t.Fatalf("clusters response must be [] not null: %s", w.Body.String())
+	if incidents == nil {
+		t.Fatalf("incidents response must be [] not null: %s", w.Body.String())
+	}
+}
+
+func TestOverviewEndpointReturnsComposition(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/overview", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", w.Code, w.Body.String())
+	}
+	var o corpus.Overview
+	if err := json.Unmarshal(w.Body.Bytes(), &o); err != nil {
+		t.Fatalf("decode overview: %v\n%s", err, w.Body.String())
+	}
+	if o.Sessions <= 0 {
+		t.Fatalf("overview should report sessions from the fixture corpus: %+v", o)
+	}
+}
+
+func TestIncidentTrajectoryEndpointValidatesRef(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incident_trajectory", strings.NewReader(`{"ref":"session:v1:abc"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	// A non-message ref is a clean error, not a crash.
+	if w.Code == http.StatusInternalServerError {
+		t.Fatalf("trajectory should reject a non-message ref gracefully, got 500: %s", w.Body.String())
 	}
 }
 

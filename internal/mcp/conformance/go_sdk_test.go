@@ -27,10 +27,12 @@ import (
 )
 
 var expectedTools = []string{
-	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
+	"incident_trajectory",
+	"incidents",
+	"overview",
 	"read",
 	"search",
 	"status",

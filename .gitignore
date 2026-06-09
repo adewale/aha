@@ -7,3 +7,6 @@ coverage.out
 # Installed agent skills (dev tooling, not project source)
 /.agents/
 /skills-lock.json
+
+# Harness-managed agent worktrees (transient scratch, not project source)
+/.claude/

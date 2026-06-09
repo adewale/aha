@@ -100,14 +100,15 @@ func backfillToolInvocations(db *sql.DB) error {
 }
 
 func backfillToolInvocationsForSession(db *sql.DB, sessionKey, projectKey, machineID string) error {
-	rows, err := db.Query(`select entry_id,timestamp,raw_json from entries where session_key=? order by line_no,entry_id`, sessionKey)
+	rows, err := db.Query(`select entry_id,line_no,timestamp,raw_json from entries where session_key=? order by line_no,entry_id`, sessionKey)
 	if err != nil {
 		return err
 	}
 	var entries []model.ParsedEntry
 	for rows.Next() {
 		var entryID, timestamp, rawJSON string
-		if err := rows.Scan(&entryID, &timestamp, &rawJSON); err != nil {
+		var lineNo int
+		if err := rows.Scan(&entryID, &lineNo, &timestamp, &rawJSON); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -115,7 +116,7 @@ func backfillToolInvocationsForSession(db *sql.DB, sessionKey, projectKey, machi
 		if err != nil || (len(calls) == 0 && len(results) == 0) {
 			continue
 		}
-		entries = append(entries, model.ParsedEntry{EntryID: entryID, Timestamp: timestamp, ToolCalls: calls, ToolResults: results})
+		entries = append(entries, model.ParsedEntry{EntryID: entryID, LineNo: lineNo, Timestamp: timestamp, ToolCalls: calls, ToolResults: results})
 	}
 	if err := rows.Close(); err != nil {
 		return err

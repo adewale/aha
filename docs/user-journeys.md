@@ -72,7 +72,7 @@ Rationale:
 
 - Search should default to the local corpus.
 - Results must be readable without knowing the source agent's file format.
-- Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Error clusters store normalized command/error signatures for ranking, not raw tool output samples.
+- Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Incidents store normalized command/error signatures for ranking, not raw tool output samples.
 
 ## Journey 4: create a repo and ingest bundles
 
@@ -126,7 +126,7 @@ aha mcp --dry-run
 
 Rationale:
 
-- Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
+- Agents already speak MCP; `aha mcp` exposes the read tools (`search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`) over stdio JSON-RPC.
 - It reuses the same corpus/search code as the CLI, so results match `--json` output exactly.
 - It is read-only by construction: snapshot/refresh/ingest are not reachable, so an agent cannot mutate the corpus.
 - `--dry-run` opens the corpus, registers tools, prints a one-line summary, and exits — confirms a host config before stdio carries protocol traffic.
@@ -146,6 +146,24 @@ Rationale:
 - Same read tools as `mcp`, served as HTTP/JSON plus a tiny embedded UI; no Node runtime on the host.
 - Loopback-only and read-only by default; the `Host` header is validated to blunt DNS-rebinding, and non-loopback binds require `--allow-remote`.
 - Result clicks deep-link the ref into the URL fragment so a view is reloadable and shareable.
+
+## Journey 8: turn recurring incidents into intervention artifacts
+
+User goal: “What should I create so this failure pattern costs less next time?”
+
+```bash
+aha incidents --limit 50 --json
+aha incidents --state resolved --limit 25 --json
+aha incidents --state unresolved --limit 25 --json
+aha read <sample-ref> --before 3 --after 10 --md
+```
+
+Rationale:
+
+- Incidents are evidence, not automatic prescriptions.
+- Resolved/partial incidents can become runbooks, skills, dynamic workflows, or tool/platform fixes depending on the pattern shape.
+- Unresolved high-pain incidents usually become investigation backlog items until a reliable fix path exists.
+- `docs/patterns-and-interventions.md` provides the manual classifier and artifact templates.
 
 ## Defaults chosen from the journeys
 

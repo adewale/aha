@@ -136,19 +136,59 @@ export interface SizeReport {
   files: number;
 }
 
-export interface Cluster {
+export interface ResolutionPath {
+  families: string[];
+  support: number;
+  distinct_sessions: number;
+  distinct_projects: number;
+  confidence: number;
+  sample_ref?: string;
+  sample_ordinal: number;
+}
+
+export interface Incident {
   tool_name: string;
   command_family: string;
   error_signature: string;
-  count: number;
+  episodes: number;
   distinct_sessions: number;
   distinct_projects: number;
+  resolved: number;
+  resolution_rate: number;
+  state: string;
+  tier: string;
   first_seen: string;
   last_seen: string;
-  sample_command: string;
-  sample_error: string;
+  spark: number[];
+  paths: ResolutionPath[];
   sample_ref?: string;
   score: number;
+}
+
+export interface TrajectoryStep {
+  family: string;
+  ref: string;
+  ordinal: number;
+  is_error: boolean;
+  timestamp: string;
+}
+
+export interface NamedCount {
+  name: string;
+  count: number;
+}
+
+export interface Overview {
+  sessions: number;
+  entries: number;
+  messages: number;
+  tool_calls: number;
+  sources: NamedCount[];
+  machines: NamedCount[];
+  projects: NamedCount[];
+  first_session: string;
+  last_session: string;
+  index_size_bytes: number;
 }
 
 // Tools whose Go return type is map[string]any are exposed loosely.
@@ -201,11 +241,42 @@ export interface SearchArgs {
   limit?: number;
 }
 
-export interface ClustersArgs {
+export interface IncidentsArgs {
   /**
-   * Cap on returned clusters (default 50, max 200)
+   * Cap on returned incidents (default 50, max 200)
    */
   limit?: number;
+  /**
+   * Filter to one project key
+   */
+  project?: string;
+  /**
+   * Filter to one source adapter (pi, claude-code, codex, opencode)
+   */
+  source?: string;
+  /**
+   * Filter to one machine id
+   */
+  machine?: string;
+  /**
+   * Filter to one tool name
+   */
+  tool?: string;
+  /**
+   * Filter by incident state: unresolved, partial, or resolved
+   */
+  state?: string;
+}
+
+export interface IncidentTrajectoryArgs {
+  /**
+   * Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref
+   */
+  ref: string;
+  /**
+   * Resolving invocation ordinal from the incident path sample_ordinal; required when one transcript entry resolved multiple incidents
+   */
+  ordinal?: number;
 }
 
 /**
@@ -262,15 +333,20 @@ export interface Transport {
 
 export function aha(transport: Transport) {
   return {
-    /** Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output. */
-    clusters: (args: ClustersArgs = {}) =>
-      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
     /** List quarantined merge conflicts. */
     conflicts: () => transport.call("conflicts", {}) as Promise<Conflict[]>,
     /** Return corpus on-disk size breakdown. */
     corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
     /** Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only. */
     doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
+    /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
+    incident_trajectory: (args: IncidentTrajectoryArgs) =>
+      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+    /** The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output. */
+    incidents: (args: IncidentsArgs = {}) =>
+      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+    /** Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'. */
+    overview: () => transport.call("overview", {}) as Promise<Overview>,
     /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
     read: (args: ReadArgs) =>
       transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
@@ -285,10 +361,12 @@ export function aha(transport: Transport) {
 }
 
 export const TOOLS = [
-  "clusters",
   "conflicts",
   "corpus_size",
   "doctor",
+  "incident_trajectory",
+  "incidents",
+  "overview",
   "read",
   "search",
   "status",

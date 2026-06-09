@@ -18,6 +18,7 @@ package server
 import (
 	"bytes"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/adewale/aha/internal/mcp"
 	"github.com/adewale/aha/internal/model"
+	"github.com/adewale/aha/internal/search"
 )
 
 // Options configures the HTTP server.
@@ -217,8 +219,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/corpus_size", s.jsonGet("corpus_size"))
 	s.mux.HandleFunc("/api/doctor", s.jsonGet("doctor"))
 	s.mux.HandleFunc("/api/search", s.handleSearch)
+	s.mux.HandleFunc("/api/search_traces", s.handleSearchTraces)
 	s.mux.HandleFunc("/api/read", s.handleRead)
-	s.mux.HandleFunc("/api/clusters", s.handleClusters)
+	s.mux.HandleFunc("/api/incidents", s.handleIncidents)
+	s.mux.HandleFunc("/api/incident_trajectory", s.handleIncidentTrajectory)
+	s.mux.HandleFunc("/api/overview", s.jsonGet("overview"))
 	s.mux.HandleFunc("/api/tools", s.handleToolsList)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 }
@@ -283,12 +288,351 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	s.handleJSONPost(w, r, "search")
 }
 
+func (s *Server) handleSearchTraces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return
+	}
+	args, err := readArgs(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out, err := mcp.CallTool(s.backend, "search", args)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	hits, ok := out.([]search.Result)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "search returned unexpected result shape")
+		return
+	}
+	traces, err := buildSearchTraces(s.backend.DB(), hits)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, traces)
+}
+
+type searchTraceCard struct {
+	TraceID           string             `json:"trace_id"`
+	SessionKey        string             `json:"session_key,omitempty"`
+	Title             string             `json:"title"`
+	Subtitle          string             `json:"subtitle"`
+	Project           string             `json:"project,omitempty"`
+	Source            string             `json:"source,omitempty"`
+	Machine           string             `json:"machine,omitempty"`
+	Timestamp         string             `json:"timestamp,omitempty"`
+	RefText           string             `json:"ref_text"`
+	EntryID           string             `json:"entry_id,omitempty"`
+	Status            string             `json:"status"`
+	StatusClass       string             `json:"status_class"`
+	MatchedEventCount int                `json:"matched_event_count"`
+	Messages          int                `json:"messages"`
+	UserPrompts       int                `json:"user_prompts"`
+	ToolCalls         int                `json:"tool_calls"`
+	Failures          int                `json:"failures"`
+	Commands          []string           `json:"commands"`
+	Files             []string           `json:"files"`
+	Timeline          []traceTimeline    `json:"timeline"`
+	MatchedEvents     []searchTraceEvent `json:"matched_events"`
+}
+
+type searchTraceEvent struct {
+	Role      string `json:"role"`
+	Label     string `json:"label"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Snippet   string `json:"snippet"`
+	RefText   string `json:"ref_text"`
+	EntryID   string `json:"entry_id,omitempty"`
+}
+
+type traceTimeline struct {
+	Role  string `json:"role"`
+	Label string `json:"label"`
+}
+
+func buildSearchTraces(db *sql.DB, hits []search.Result) ([]searchTraceCard, error) {
+	type group struct {
+		key  string
+		hits []search.Result
+	}
+	var groups []group
+	byKey := map[string]int{}
+	for _, h := range hits {
+		key := h.SessionKey
+		if key == "" {
+			key = h.RefText
+		}
+		if key == "" {
+			key = fmt.Sprintf("hit-%d", len(groups))
+		}
+		idx, ok := byKey[key]
+		if !ok {
+			idx = len(groups)
+			byKey[key] = idx
+			groups = append(groups, group{key: key})
+		}
+		groups[idx].hits = append(groups[idx].hits, h)
+	}
+	out := make([]searchTraceCard, 0, len(groups))
+	for _, g := range groups {
+		if len(g.hits) == 0 {
+			continue
+		}
+		card, err := buildSearchTrace(db, g.key, g.hits)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, card)
+	}
+	if out == nil {
+		out = []searchTraceCard{}
+	}
+	return out, nil
+}
+
+func buildSearchTrace(db *sql.DB, key string, hits []search.Result) (searchTraceCard, error) {
+	first := hits[0]
+	card := searchTraceCard{
+		TraceID:           key,
+		SessionKey:        first.SessionKey,
+		Project:           first.Project,
+		Source:            first.Source,
+		Machine:           first.Machine,
+		Timestamp:         first.Timestamp,
+		RefText:           first.RefText,
+		EntryID:           first.EntryID,
+		MatchedEventCount: len(hits),
+		MatchedEvents:     searchTraceEvents(hits, 5),
+	}
+	if first.SessionKey == "" {
+		card.Title = titleFromHits(hits)
+		card.Subtitle = compactJoin(" · ", first.Source, first.Machine, dateOnly(first.Timestamp))
+		card.Status = statusForTrace(card.Failures, card.ToolCalls, card.Files, hits)
+		card.StatusClass = statusClass(card.Status)
+		return card, nil
+	}
+	if err := enrichSessionTrace(db, &card, hits); err != nil {
+		return searchTraceCard{}, err
+	}
+	return card, nil
+}
+
+func enrichSessionTrace(db *sql.DB, card *searchTraceCard, hits []search.Result) error {
+	var rawCWD, source, machine, started string
+	err := db.QueryRow(`select coalesce(raw_cwd,''),source_name,machine_id,coalesce(started_at,'') from sessions where session_key=?`, card.SessionKey).Scan(&rawCWD, &source, &machine, &started)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if card.Project == "" {
+		card.Project = rawCWD
+	}
+	if card.Source == "" {
+		card.Source = source
+	}
+	if card.Machine == "" {
+		card.Machine = machine
+	}
+	if card.Timestamp == "" {
+		card.Timestamp = started
+	}
+	if err := db.QueryRow(`select count(*),coalesce(sum(case when role='user' then 1 else 0 end),0) from messages where session_key=?`, card.SessionKey).Scan(&card.Messages, &card.UserPrompts); err != nil {
+		return err
+	}
+	if err := db.QueryRow(`select count(*),coalesce(sum(case when is_error<>0 then 1 else 0 end),0) from tool_invocations where session_key=?`, card.SessionKey).Scan(&card.ToolCalls, &card.Failures); err != nil {
+		return err
+	}
+	card.Commands = queryStrings(db, `select distinct coalesce(nullif(command_family,''),nullif(tool_name,''),'') from tool_invocations where session_key=? and coalesce(nullif(command_family,''),nullif(tool_name,''),'')<>'' order by 1 limit 6`, card.SessionKey)
+	card.Files = queryStrings(db, `select distinct coalesce(nullif(relative_path,''),nullif(raw_path,''),'') from artifacts where parent_session_key=? and coalesce(nullif(relative_path,''),nullif(raw_path,''),'')<>'' order by 1 limit 6`, card.SessionKey)
+	card.Timeline = queryTimeline(db, card.SessionKey)
+	card.Title = titleForSession(db, card.SessionKey, hits)
+	card.Subtitle = compactJoin(" · ", card.Project, card.Source, card.Machine, dateOnly(card.Timestamp))
+	card.Status = statusForTrace(card.Failures, card.ToolCalls, card.Files, hits)
+	card.StatusClass = statusClass(card.Status)
+	return nil
+}
+
+func searchTraceEvents(hits []search.Result, limit int) []searchTraceEvent {
+	if len(hits) < limit {
+		limit = len(hits)
+	}
+	events := make([]searchTraceEvent, 0, limit)
+	for _, h := range hits[:limit] {
+		events = append(events, searchTraceEvent{Role: h.Role, Label: labelForRole(h.Role), Timestamp: h.Timestamp, Snippet: cleanSnippet(h.Snippet), RefText: h.RefText, EntryID: h.EntryID})
+	}
+	return events
+}
+
+func queryTimeline(db *sql.DB, sessionKey string) []traceTimeline {
+	rows, err := db.Query(`select role from messages m join entries e on e.session_key=m.session_key and e.entry_id=m.entry_id where m.session_key=? order by e.line_no,e.entry_id limit 18`, sessionKey)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []traceTimeline
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err == nil {
+			out = append(out, traceTimeline{Role: role, Label: labelForRole(role)})
+		}
+	}
+	return out
+}
+
+func queryStrings(db *sql.DB, sqlText, arg string) []string {
+	rows, err := db.Query(sqlText, arg)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err == nil && strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func titleForSession(db *sql.DB, sessionKey string, hits []search.Result) string {
+	var text string
+	_ = db.QueryRow(`select coalesce(m.text,'') from messages m join entries e on e.session_key=m.session_key and e.entry_id=m.entry_id where m.session_key=? and m.role='user' and trim(coalesce(m.text,''))<>'' order by e.line_no,e.entry_id limit 1`, sessionKey).Scan(&text)
+	if text = cleanSnippet(text); text != "" {
+		return truncate(text, 140)
+	}
+	if t := titleFromHits(hits); t != "" {
+		return t
+	}
+	return "Untitled trace"
+}
+
+func titleFromHits(hits []search.Result) string {
+	for _, h := range hits {
+		if h.Role == "user" {
+			if t := cleanSnippet(h.Snippet); t != "" {
+				return truncate(t, 140)
+			}
+		}
+	}
+	for _, h := range hits {
+		if t := cleanSnippet(h.Snippet); t != "" {
+			return truncate(t, 140)
+		}
+	}
+	return ""
+}
+
+func statusForTrace(failures, toolCalls int, files []string, hits []search.Result) string {
+	if failures > 0 || hitsContainFailure(hits) {
+		return "failed tool"
+	}
+	if toolCalls > 0 {
+		return "tool work"
+	}
+	if len(files) > 0 || hitsContainRole(hits, "artifact") {
+		return "file match"
+	}
+	return "conversation"
+}
+
+func statusClass(status string) string {
+	switch status {
+	case "failed tool":
+		return "status-failure"
+	case "tool work":
+		return "status-tool"
+	case "file match":
+		return "status-file"
+	default:
+		return "status-conversation"
+	}
+}
+
+func hitsContainFailure(hits []search.Result) bool {
+	for _, h := range hits {
+		text := strings.ToLower(h.Snippet)
+		if strings.Contains(text, "error") || strings.Contains(text, "failed") || strings.Contains(text, "failure") || strings.Contains(text, "panic") || strings.Contains(text, "exception") || strings.Contains(text, "denied") {
+			return true
+		}
+	}
+	return false
+}
+
+func hitsContainRole(hits []search.Result, role string) bool {
+	for _, h := range hits {
+		if h.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func labelForRole(role string) string {
+	switch role {
+	case "user":
+		return "Prompt"
+	case "assistant":
+		return "Assistant"
+	case "toolResult":
+		return "Tool output"
+	case "artifact":
+		return "File artifact"
+	default:
+		if role == "" {
+			return "Event"
+		}
+		return role
+	}
+}
+
+func cleanSnippet(s string) string {
+	s = strings.ReplaceAll(s, "[", "")
+	s = strings.ReplaceAll(s, "]", "")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.TrimSpace(s[:n]) + "…"
+}
+
+func dateOnly(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return ts
+}
+
+func compactJoin(sep string, parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, sep)
+}
+
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	s.handleJSONPost(w, r, "read")
 }
 
-func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "clusters")
+func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {
+	s.handleJSONPost(w, r, "incidents")
+}
+
+func (s *Server) handleIncidentTrajectory(w http.ResponseWriter, r *http.Request) {
+	s.handleJSONPost(w, r, "incident_trajectory")
 }
 
 func (s *Server) handleJSONPost(w http.ResponseWriter, r *http.Request, tool string) {

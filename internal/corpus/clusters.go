@@ -1,7 +1,6 @@
 package corpus
 
 import (
-	"database/sql"
 	"fmt"
 	"regexp"
 	"sort"
@@ -171,6 +170,7 @@ func BuildToolInvocations(entries []model.ParsedEntry, projectKey, machineID str
 		inv := ToolInvocation{
 			SessionKey:     "", // filled by caller (needs session key)
 			EntryID:        item.entry.EntryID,
+			LineNo:         item.entry.LineNo,
 			ToolKey:        toolKey,
 			ToolUseID:      c.ID,
 			Ordinal:        c.Ordinal,
@@ -210,6 +210,7 @@ func BuildToolInvocations(entries []model.ParsedEntry, projectKey, machineID str
 type ToolInvocation struct {
 	SessionKey      string
 	EntryID         string
+	LineNo          int
 	ToolKey         string
 	ToolUseID       string
 	Ordinal         int
@@ -227,105 +228,6 @@ type ToolInvocation struct {
 	MachineID       string
 }
 
-// Cluster is a ranked group of failing tool invocations sharing a tool,
-// command family, and error signature. SampleCommand/SampleError are normalized
-// display samples, not raw command stdout/stderr.
-type Cluster struct {
-	ToolName       string  `json:"tool_name"`
-	CommandFamily  string  `json:"command_family"`
-	ErrorSignature string  `json:"error_signature"`
-	Count          int     `json:"count"`
-	Sessions       int     `json:"distinct_sessions"`
-	Projects       int     `json:"distinct_projects"`
-	FirstSeen      string  `json:"first_seen"`
-	LastSeen       string  `json:"last_seen"`
-	SampleCommand  string  `json:"sample_command"`
-	SampleError    string  `json:"sample_error"`
-	SampleRef      string  `json:"sample_ref,omitempty"`
-	Score          float64 `json:"score"`
-}
-
-// Clusters returns failing-invocation clusters ranked by a recurrence score.
-// limit<=0 uses the default page size; positive limits are clamped to MaxClusterLimit.
-func Clusters(db *sql.DB, limit int) ([]Cluster, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > MaxClusterLimit {
-		limit = MaxClusterLimit
-	}
-	limitClause := " limit ?"
-	args := []any{limit}
-	q := `
-with grouped as (
-  select tool_name, command_family, error_signature,
-         count(*) as cnt,
-         count(distinct session_key) as sessions,
-         count(distinct project_key) as projects,
-         min(timestamp) as first_seen,
-         max(timestamp) as last_seen
-  from tool_invocations
-  where is_error=1
-  group by tool_name, command_family, error_signature
-)
-select tool_name, command_family, error_signature, cnt, sessions, projects,
-       first_seen, last_seen,
-       (cast(cnt as real) * (1.0 + cast(sessions-1 as real) + (cast(projects-1 as real) * 0.5))) as score
-from grouped
-order by score desc, cnt desc, sessions desc, projects desc, last_seen desc,
-         tool_name asc, command_family asc, error_signature asc` + limitClause
-	rows, err := db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Cluster
-	for rows.Next() {
-		var c Cluster
-		if err := rows.Scan(&c.ToolName, &c.CommandFamily, &c.ErrorSignature,
-			&c.Count, &c.Sessions, &c.Projects, &c.FirstSeen, &c.LastSeen, &c.Score); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range out {
-		if err := attachSample(db, &out[i]); err != nil {
-			return nil, err
-		}
-	}
-	if out == nil {
-		out = []Cluster{}
-	}
-	return out, nil
-}
-
-// attachSample fills the normalized sample command/error/ref for a cluster from
-// its most recent failing invocation — a single real row, so the ref resolves.
-func attachSample(db *sql.DB, c *Cluster) error {
-	var sessionKey, entryID string
-	err := db.QueryRow(`
-select session_key, entry_id, command, outcome_text
-from tool_invocations
-where is_error=1 and tool_name=? and command_family=? and error_signature=?
-order by timestamp desc, session_key desc, entry_id desc, tool_key desc
-limit 1`, c.ToolName, c.CommandFamily, c.ErrorSignature).Scan(&sessionKey, &entryID, &c.SampleCommand, &c.SampleError)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if ref, err := messageRefText(sessionKey, entryID); err == nil {
-		c.SampleRef = ref
-	}
-	return nil
-}
-
-// clusterScore favors failures that recur AND spread: a single noisy session
-// shouldn't outrank a failure hit across many sessions/projects.
 func fallbackErrorSignature(inv ToolInvocation) string {
 	if inv.ExitCodeValid {
 		return fmt.Sprintf("exit_code:%d", inv.ExitCode)
@@ -333,12 +235,15 @@ func fallbackErrorSignature(inv ToolInvocation) string {
 	return "tool_error"
 }
 
-func clusterScore(count, sessions, projects int) float64 {
-	if count <= 0 {
+// clusterScore favors signals that recur AND spread: a single noisy session
+// shouldn't outrank one hit across many sessions/projects. `weight` is the
+// recurrence count being scored — failing-invocation count for error clusters,
+// resolved-episode count for skill candidates.
+func clusterScore(weight, sessions, projects int) float64 {
+	if weight <= 0 {
 		return 0
 	}
-	spread := 1.0 + float64(sessions-1) + float64(projects-1)*0.5
-	return float64(count) * spread
+	return float64(weight) * spread(sessions, projects)
 }
 
 func sortToolInvocations(invs []ToolInvocation) {

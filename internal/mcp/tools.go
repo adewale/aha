@@ -62,10 +62,12 @@ var serverInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 // AddTool calls in registerTools and a test in tools_test.go will fail
 // loudly if the registered set drifts.
 var ToolNames = []string{
-	"clusters",
 	"conflicts",
 	"corpus_size",
 	"doctor",
+	"incident_trajectory",
+	"incidents",
+	"overview",
 	"read",
 	"search",
 	"status",
@@ -79,14 +81,16 @@ var ToolNames = []string{
 // code-mode LLM reading the surface gets the same descriptions it would
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
-	"search":      "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-	"read":        "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
-	"status":      "Return corpus health summary: counts and disk usage.",
-	"verify":      "Run read-only corpus invariant checks (no repair).",
-	"conflicts":   "List quarantined merge conflicts.",
-	"corpus_size": "Return corpus on-disk size breakdown.",
-	"doctor":      "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
-	"clusters":    "Rank recurring tool-call failure clusters (by tool, command family, and normalized error signature) to surface candidates for new skills. Each cluster carries a ref into a sample failing command without exposing raw tool output.",
+	"search":              "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+	"read":                "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
+	"status":              "Return corpus health summary: counts and disk usage.",
+	"verify":              "Run read-only corpus invariant checks (no repair).",
+	"conflicts":           "List quarantined merge conflicts.",
+	"corpus_size":         "Return corpus on-disk size breakdown.",
+	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+	"incidents":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
+	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
+	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -119,11 +123,22 @@ type ReadInput struct {
 	After   *int   `json:"after,omitempty" jsonschema:"Lines of context after the target entry (window mode only, default 5; explicit 0 is honored)"`
 }
 
-// ClustersInput parameterizes the error-cluster tool. Clusters group failing
-// tool invocations by (tool, command family, error signature) so a dashboard
-// can surface recurring failures worth turning into a skill.
-type ClustersInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Cap on returned clusters (default 50, max 200)"`
+// IncidentsInput parameterizes the failure-and-fix view, with optional
+// facet filters.
+type IncidentsInput struct {
+	Limit   int    `json:"limit,omitempty" jsonschema:"Cap on returned incidents (default 50, max 200)"`
+	Project string `json:"project,omitempty" jsonschema:"Filter to one project key"`
+	Source  string `json:"source,omitempty" jsonschema:"Filter to one source adapter (pi, claude-code, codex, opencode)"`
+	Machine string `json:"machine,omitempty" jsonschema:"Filter to one machine id"`
+	Tool    string `json:"tool,omitempty" jsonschema:"Filter to one tool name"`
+	State   string `json:"state,omitempty" jsonschema:"Filter by incident state: unresolved, partial, or resolved"`
+}
+
+// IncidentTrajectoryInput names the resolving-success ref to reconstruct an arc
+// from.
+type IncidentTrajectoryInput struct {
+	Ref     string `json:"ref" jsonschema:"Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref"`
+	Ordinal *int   `json:"ordinal,omitempty" jsonschema:"Resolving invocation ordinal from the incident path sample_ordinal; required when one transcript entry resolved multiple incidents"`
 }
 
 // EmptyInput is used as the In parameter for tools that take no arguments.
@@ -240,22 +255,42 @@ func doCorpusSize(b Backend) (corpus.SizeReport, error) {
 	return corpus.Size(b.Store())
 }
 
-func doClusters(b Backend, in ClustersInput) ([]corpus.Cluster, error) {
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > corpus.MaxClusterLimit {
-		limit = corpus.MaxClusterLimit
-	}
-	rows, err := corpus.Clusters(b.DB(), limit)
+// doIncidents passes the requested limit straight through; the corpus layer
+// owns the default (50) and the MaxClusterLimit clamp.
+func doIncidents(b Backend, in IncidentsInput) ([]corpus.Incident, error) {
+	rows, err := corpus.Incidents(b.DB(), corpus.IncidentFilter{
+		Limit:   in.Limit,
+		Project: in.Project,
+		Source:  in.Source,
+		Machine: in.Machine,
+		Tool:    in.Tool,
+		State:   in.State,
+	})
 	if err != nil {
 		return nil, err
 	}
 	if rows == nil {
-		rows = []corpus.Cluster{}
+		rows = []corpus.Incident{}
 	}
 	return rows, nil
+}
+
+func doIncidentTrajectory(b Backend, in IncidentTrajectoryInput) ([]corpus.TrajectoryStep, error) {
+	if in.Ref == "" {
+		return nil, fmt.Errorf("missing required argument for incident_trajectory: ref")
+	}
+	steps, err := corpus.IncidentTrajectory(b.DB(), in.Ref, in.Ordinal)
+	if err != nil {
+		return nil, err
+	}
+	if steps == nil {
+		steps = []corpus.TrajectoryStep{}
+	}
+	return steps, nil
+}
+
+func doOverview(b Backend) (corpus.Overview, error) {
+	return corpus.CorpusOverview(b.DB())
 }
 
 func doDoctor(b Backend) (map[string]any, error) {
@@ -312,7 +347,7 @@ func doDoctor(b Backend) (map[string]any, error) {
 //     (as a TextContent block) AND CallToolResult.StructuredContent from
 //     the same bytes. We return nil for the *CallToolResult.
 //
-//   - List-typed tools (search, read, clusters, conflicts) declare Out=any so the
+//   - List-typed tools (search, read, incidents, conflicts) declare Out=any so the
 //     SDK skips output-schema derivation — array schemas would otherwise
 //     panic the SDK with "output schema must have type object" (which
 //     matches the official Python SDK's Pydantic Dict[str, Any] constraint
@@ -444,15 +479,39 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "clusters",
-		Description: ToolDescriptions["clusters"],
+		Name:        "incidents",
+		Description: ToolDescriptions["incidents"],
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, in ClustersInput) (*mcp.CallToolResult, any, error) {
-		out, err := doClusters(b, in)
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentsInput) (*mcp.CallToolResult, any, error) {
+		out, err := doIncidents(b, in)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
 		return textResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "incident_trajectory",
+		Description: ToolDescriptions["incident_trajectory"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentTrajectoryInput) (*mcp.CallToolResult, any, error) {
+		out, err := doIncidentTrajectory(b, in)
+		if err != nil {
+			return errorResult(err), nil, nil
+		}
+		return textResult(out), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "overview",
+		Description: ToolDescriptions["overview"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.Overview, error) {
+		out, err := doOverview(b)
+		if err != nil {
+			return errorResult(err), corpus.Overview{}, nil
+		}
+		return nil, out, nil
 	})
 }
 
@@ -530,12 +589,23 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doDoctor(b)
-	case "clusters":
-		in, err := decodeInput[ClustersInput](raw, name)
+	case "incidents":
+		in, err := decodeInput[IncidentsInput](raw, name)
 		if err != nil {
 			return nil, err
 		}
-		return doClusters(b, in)
+		return doIncidents(b, in)
+	case "incident_trajectory":
+		in, err := decodeInput[IncidentTrajectoryInput](raw, name)
+		if err != nil {
+			return nil, err
+		}
+		return doIncidentTrajectory(b, in)
+	case "overview":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return doOverview(b)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", name)
 }

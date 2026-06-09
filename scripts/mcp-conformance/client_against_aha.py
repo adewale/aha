@@ -23,7 +23,9 @@ from mcp.client.stdio import stdio_client
 EXPECTED_TOOLS = [
     "search",
     "read",
-    "clusters",
+    "incidents",
+    "incident_trajectory",
+    "overview",
     "status",
     "verify",
     "conflicts",

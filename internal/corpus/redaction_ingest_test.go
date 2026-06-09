@@ -187,18 +187,18 @@ func TestClustersDoNotExposeToolOutputWhenIndexToolOutputDisabled(t *testing.T) 
 	}
 	store := ingestWithRedactionPolicy(t, "cluster-no-tool-output", lines, nil, "none-v1", false)
 	defer store.Close()
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(clusters) != 1 {
 		t.Fatalf("clusters=%+v", clusters)
 	}
-	if strings.Contains(clusters[0].ErrorSignature, secretPhrase) || strings.Contains(clusters[0].SampleError, secretPhrase) {
-		t.Fatalf("cluster exposed non-indexed tool output: %+v", clusters[0])
+	if strings.Contains(clusters[0].ErrorSignature, secretPhrase) {
+		t.Fatalf("incident exposed non-indexed tool output: %+v", clusters[0])
 	}
-	if clusters[0].ErrorSignature != "tool_error" || clusters[0].SampleError != "tool_error" {
-		t.Fatalf("cluster should fail closed to generic signature, got %+v", clusters[0])
+	if clusters[0].ErrorSignature != "tool_error" {
+		t.Fatalf("incident should fail closed to a generic signature, got %+v", clusters[0])
 	}
 	var persistedText string
 	if err := store.DB.QueryRow(`select coalesce(group_concat(text,'\n'),'') from messages`).Scan(&persistedText); err != nil {
@@ -222,16 +222,16 @@ func TestClusterSignaturesApplyExtraRedactionBeforeNormalization(t *testing.T) {
 	}
 	store := ingestWithRedactionPolicy(t, "cluster-extra-redaction", lines, r, "v1", true)
 	defer store.Close()
-	clusters, err := corpus.Clusters(store.DB, 0)
+	clusters, err := corpus.Incidents(store.DB, corpus.IncidentFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(clusters) != 1 {
 		t.Fatalf("clusters=%+v", clusters)
 	}
-	combined := clusters[0].ErrorSignature + "\n" + clusters[0].SampleError
+	combined := clusters[0].ErrorSignature
 	if strings.Contains(combined, strings.ToLower(secret)) || strings.Contains(combined, secret) {
-		t.Fatalf("cluster leaked extra-redacted secret: %+v", clusters[0])
+		t.Fatalf("incident leaked extra-redacted secret: %+v", clusters[0])
 	}
 	if !strings.Contains(combined, "[redacted:acme_secret]") {
 		t.Fatalf("cluster missing extra redaction marker: %+v", clusters[0])

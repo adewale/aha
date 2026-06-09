@@ -572,7 +572,21 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	if err := w.insertToolInvocations(sessionKey, projectKey(rawCWD), manifest.MachineID, ps.Entries, existingEntries); err != nil {
 		return IngestReport{}, err
 	}
+	if err := w.insertFailureEpisodes(sessionKey); err != nil {
+		return IngestReport{}, err
+	}
 	return rep, nil
+}
+
+// insertFailureEpisodes rebuilds the session's failure episodes from its stored
+// (already-redacted) tool_invocations within the same transaction, so the
+// projection stays a pure function of the corpus and never reaches around the
+// redaction boundary. It is a full per-session recompute (delete + reinsert),
+// so re-ingesting an unchanged session is a no-op and a resumed session whose
+// resolving success has now arrived correctly flips its abandoned episode to
+// resolved rather than keeping a stale row.
+func (w corpusWriter) insertFailureEpisodes(sessionKey string) error {
+	return rebuildFailureEpisodesForSession(w.tx, sessionKey)
 }
 
 func (w corpusWriter) insertToolInvocations(sessionKey, projectKey, machineID string, entries []model.ParsedEntry, present map[string]string) error {
@@ -634,7 +648,7 @@ func (w corpusWriter) storedToolOutcome(inv ToolInvocation) (signature, outcome 
 		signature = fallbackErrorSignature(inv)
 	}
 	// Store only the normalized/redacted display signature, never the raw tool
-	// result body, so clusters do not become a second raw-output surface.
+	// result body, so incidents do not become a second raw-output surface.
 	return signature, signature, sigHits, outcomeHits
 }
 

@@ -50,7 +50,11 @@ func Generate() []byte {
 		{"VerifyReport", reflect.TypeOf(corpus.VerifyReport{})},
 		{"Conflict", reflect.TypeOf(corpus.Conflict{})},
 		{"SizeReport", reflect.TypeOf(corpus.SizeReport{})},
-		{"Cluster", reflect.TypeOf(corpus.Cluster{})},
+		{"ResolutionPath", reflect.TypeOf(corpus.ResolutionPath{})},
+		{"Incident", reflect.TypeOf(corpus.Incident{})},
+		{"TrajectoryStep", reflect.TypeOf(corpus.TrajectoryStep{})},
+		{"NamedCount", reflect.TypeOf(corpus.NamedCount{})},
+		{"Overview", reflect.TypeOf(corpus.Overview{})},
 	} {
 		writeStructInterface(&b, e.name, e.t, known)
 		known[e.name] = true
@@ -165,7 +169,8 @@ export type DoctorReport = Record<string, unknown>;
 func inputInterfaces() string {
 	var b bytes.Buffer
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
-	writeStructInterfaceWithDocs(&b, "ClustersArgs", reflect.TypeOf(mcp.ClustersInput{}))
+	writeStructInterfaceWithDocs(&b, "IncidentsArgs", reflect.TypeOf(mcp.IncidentsInput{}))
+	writeStructInterfaceWithDocs(&b, "IncidentTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
@@ -260,9 +265,16 @@ export function aha(transport: Transport) {
 		case "doctor":
 			b.WriteString(`    doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
 `)
-		case "clusters":
-			b.WriteString(`    clusters: (args: ClustersArgs = {}) =>
-      transport.call("clusters", args as unknown as Record<string, unknown>) as Promise<Cluster[]>,
+		case "incidents":
+			b.WriteString(`    incidents: (args: IncidentsArgs = {}) =>
+      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+`)
+		case "incident_trajectory":
+			b.WriteString(`    incident_trajectory: (args: IncidentTrajectoryArgs) =>
+      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+`)
+		case "overview":
+			b.WriteString(`    overview: () => transport.call("overview", {}) as Promise<Overview>,
 `)
 		}
 	}
@@ -350,10 +362,11 @@ func writeStructInterfaceWithDocs(b *bytes.Buffer, name string, t reflect.Type) 
 // shipping a `unknown` for a new field is preferable to crashing
 // regeneration entirely.
 func goTypeToTS(t reflect.Type, fieldName string, known map[string]bool) string {
-	// Special-case the Ref interface field on search.Result: a Go interface
-	// has no concrete reflect.Type until runtime, but every variant
-	// marshals to a discriminated JSON shape.
-	if fieldName == "Ref" {
+	// Special-case model.Ref interface fields (currently search.Result.Ref): a
+	// Go interface has no concrete reflect.Type until runtime, but every variant
+	// marshals to a discriminated JSON shape. Plain string fields named Ref (for
+	// canonical ref wire text) must stay string.
+	if t.Kind() == reflect.Interface && t.PkgPath() == "github.com/adewale/aha/internal/model" && t.Name() == "Ref" {
 		return "Ref"
 	}
 	switch t.Kind() {

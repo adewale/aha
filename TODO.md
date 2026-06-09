@@ -6,7 +6,7 @@
 - Add explicit agent documentation/skill for `aha`:
   - teach the required `search -> read -> answer` workflow;
   - state that snippets are leads, not evidence;
-  - list read-only commands (`search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `depot init`, `depot use`, `depot verify --repair`, `depot compact`);
+  - list read-only commands (`search`, `read`, `incidents`, `status`, `verify`, `conflicts`, `corpus size`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `corpus vacuum`, `corpus prune-orphans --force`, `depot init`, `depot use`, `depot verify --repair`, `depot compact`);
   - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, `verify --json`, and JSON error envelopes;
   - explain privacy caveats: v1 does not redact secrets, R2 is opt-in upload, and bundles/corpora are private;
   - show how an agent should cite/quote refs in its own notes;
@@ -20,7 +20,7 @@
 ## Make the aggregated corpus more accessible
 
 - Explore additional search forms beyond SQLite FTS: structured filters, saved searches, semantic/vector search, hybrid ranking, query expansion, and explain/debug output for rankings.
-- Continue hardening the MCP interface exposing `search`, `read`, `clusters`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor`; defer any mutating or long-running daemon surface.
+- Continue hardening the MCP interface exposing `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor`; defer any mutating or long-running daemon surface.
 - Continue improving `doctor`: source, corpus, depot, and common R2 misconfiguration diagnostics exist; remaining depth includes schema migration details, bundle blob-store checks, adapter fixture/version drift checks, and optional R2 bucket setting verification where Cloudflare exposes it.
 - Add multi-read or batch-read for agent workflows that need to retrieve several hits from one search. A likely syntax is `aha read --refs-file refs.txt --json` or `aha read <ref1> <ref2> ... --json`, returning grouped context per ref.
 

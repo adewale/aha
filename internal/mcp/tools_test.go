@@ -206,24 +206,24 @@ func TestEmptySearchReturnsList(t *testing.T) {
 	}
 }
 
-func TestToolsCallClustersReturnsList(t *testing.T) {
+func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	session, ctx, _ := connectPair(t)
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "clusters",
-		Arguments: map[string]any{"limit": 1},
+		Name:      "incidents",
+		Arguments: map[string]any{"limit": 1, "state": "unresolved"},
 	})
 	if err != nil {
-		t.Fatalf("CallTool(clusters): %v", err)
+		t.Fatalf("CallTool(incidents): %v", err)
 	}
 	if res.IsError {
-		t.Fatalf("clusters returned isError: %s", contentText(t, res))
+		t.Fatalf("incidents returned isError: %s", contentText(t, res))
 	}
-	var clusters []corpus.Cluster
-	if err := json.Unmarshal([]byte(contentText(t, res)), &clusters); err != nil {
-		t.Fatalf("clusters payload not a list: %v\n%s", err, contentText(t, res))
+	var incidents []corpus.Incident
+	if err := json.Unmarshal([]byte(contentText(t, res)), &incidents); err != nil {
+		t.Fatalf("incidents payload not a list: %v\n%s", err, contentText(t, res))
 	}
-	if clusters == nil {
-		t.Fatalf("clusters payload must be [] not null: %s", contentText(t, res))
+	if incidents == nil {
+		t.Fatalf("incidents payload must be [] not null: %s", contentText(t, res))
 	}
 }
 
@@ -323,9 +323,6 @@ func TestCallToolEmptySearchReturnsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
-	results, ok := out.([]struct{})
-	_ = results
-	_ = ok
 	// The result is []search.Result; verify it's not a nil slice by JSON
 	// marshalling and asserting we get "[]" rather than "null".
 	body, _ := json.Marshal(out)
@@ -377,7 +374,8 @@ func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 		{"search", map[string]any{"query": "needle", "limit": 5}},
 		{"search", map[string]any{"query": "definitelynotinthecorpus"}},
 		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
-		{"clusters", map[string]any{"limit": 1}},
+		{"incidents", map[string]any{"limit": 5}},
+		{"overview", nil},
 	}
 
 	for _, tc := range cases {

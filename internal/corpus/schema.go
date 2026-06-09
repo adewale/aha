@@ -205,6 +205,8 @@ var migrations = []migration{
 	}},
 	{version: 12, apply: migrateRedactionEvents},
 	{version: 13, apply: migrateToolInvocations},
+	{version: 14, apply: migrateFailureEpisodes},
+	{version: 15, apply: migrateFailureEpisodeResolveOrdinals},
 }
 
 func migrateRedactionEvents(db *sql.DB) error {
