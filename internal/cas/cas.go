@@ -103,17 +103,29 @@ func (s *Store) Open(key model.BlobKey) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	zr, err := zstd.NewReader(f)
+	return VerifyReader(f, key)
+}
+
+// VerifyReader wraps a stream of zstd-compressed bytes (a stored blob from
+// any backend) in a reader of the uncompressed content that verifies the
+// content hashes to key at EOF. Corruption surfaces as a read error before
+// the bytes can be trusted.
+func VerifyReader(rc io.ReadCloser, key model.BlobKey) (io.ReadCloser, error) {
+	if !key.Valid() {
+		_ = rc.Close()
+		return nil, fmt.Errorf("cas: invalid blob key")
+	}
+	zr, err := zstd.NewReader(rc)
 	if err != nil {
-		_ = f.Close()
+		_ = rc.Close()
 		return nil, err
 	}
-	return &verifyingReader{key: key, f: f, zr: zr, h: sha256.New()}, nil
+	return &verifyingReader{key: key, f: rc, zr: zr, h: sha256.New()}, nil
 }
 
 type verifyingReader struct {
 	key      model.BlobKey
-	f        *os.File
+	f        io.Closer
 	zr       *zstd.Decoder
 	h        stdhash.Hash
 	verified bool
