@@ -1,11 +1,12 @@
 # Depot lifecycle
 
-A **depot** is the durable store for your agent-history *bundles* — immutable
-`tar.zst` snapshots — plus a small catalog that records what each machine has
-pushed. It sits between your local agent histories and your local search corpus:
+A **depot** is the durable, content-addressed store for your agent history:
+immutable file-version **blobs** plus small per-machine **snapshot manifests**
+(docs/depot-v2-spec.md). It sits between your local agent histories and your
+local search corpus:
 
 ```text
-local agent histories → snapshot bundle → depot → local corpus → search/read
+local agent histories → push (blobs + manifest) → depot → pull → local corpus → search/read
 ```
 
 This document captures a depot's lifecycle: the states it moves through, the
@@ -45,12 +46,12 @@ Provisioning lifecycle of a single depot
 ----------------------------------------
                 aha depot init                  snapshot / refresh
   Uninitialized ───────────────▶ Initialized ────────────────▶ Populated
-   (no depot.json)                (depot.json marker)            (bundles + catalog)
-        │                          ↺ init (idempotent)           ↺ snapshot · ls · verify · compact
+   (no marker)                    (aha-depot.json marker)        (blobs + manifests + pointers)
+        │                          ↺ init (idempotent)           ↺ snapshot · ls · verify
         │  first snapshot / refresh  →  auto-init + populate
         └────────────────────────────────────────────────────────▶ Populated
 
-  Populated ⇄ Degraded   — marker missing / catalog drift; heal with `verify --repair`
+  Populated ⇄ Degraded   — marker missing / dangling pointer; verify reports it
   any state → (rm dir / delete bucket — external, not aha) → Uninitialized
 
 Selection — which initialized depot is the default (a config pointer)
@@ -62,24 +63,31 @@ Selection — which initialized depot is the default (a config pointer)
 
 ### Provisioning states
 
-1. **Uninitialized** — the backing store has no `depot.json` marker **and no
-   bundle/catalog evidence**: a brand-new local default, or a bucket created in
+1. **Uninitialized** — the backing store has no `aha-depot.json` marker **and
+   no snapshot evidence**: a brand-new local default, or a bucket created in
    the dashboard but never provisioned. `aha doctor` reports it reachable with
    `initialized: false` (`ok: true`) and an `aha depot init ...` next-action
-   hint, not as an error.
-2. **Initialized** — the `depot.json` marker is present (`schema: aha-depot/v1`,
-   `layout: v1`). Reached by `aha depot init` **or implicitly by the first
-   `aha snapshot` / `aha refresh`**, which auto-create the dir/bucket and marker
-   before writing.
-3. **Populated** — at least one bundle under `bundles/v1/<sha>.tar.zst` is
-   recorded in a per-machine catalog shard `catalog/v1/<machine>.json`.
-4. **Degraded** (a sub-state of Initialized/Populated) — populated depot evidence
-   exists but the marker is missing, or the catalog and bundle objects have
-   drifted. `aha depot verify` flags it and `aha depot verify --repair` heals it
-   by rebuilding the catalog/marker from the bundle objects.
-5. **Decommissioned** — the backing store was removed **outside `aha`** (`rm` the
-   directory, or delete the bucket and revoke its token). A default *local* depot
-   then reads as Uninitialized again.
+   hint, not as an error. A directory or bucket holding a **v1 depot**
+   (`depot.json`) is refused outright: there is no migration; recover old
+   bundles via `aha ingest <bundle>`.
+2. **Initialized** — the `aha-depot.json` marker is present
+   (`schema: aha-depot/v2`, `layout: v2`). Reached by `aha depot init` **or
+   implicitly by the first `aha snapshot` / `aha refresh`**, which auto-create
+   the dir/bucket and marker before writing.
+3. **Populated** — at least one machine namespace exists: blobs under
+   `blobs/v2/`, a manifest under `machines/<id>/manifests/`, a
+   `machines/<id>/latest` pointer, and the machine listed in
+   `machines/index.json`.
+4. **Degraded** (a sub-state of Initialized/Populated) — snapshot evidence
+   exists but the marker is missing, a pointer dangles, a manifest fails its
+   identity check, or a referenced blob is absent. `aha depot verify` reports
+   it (`--deep` also verifies blob content and historical manifests). Because
+   every object is immutable and write-once, the fix is re-pushing from the
+   machine that owns the namespace — there is no repair that could guess at
+   content.
+5. **Decommissioned** — the backing store was removed **outside `aha`** (`rm`
+   the directory, or delete the bucket and revoke its token). A default
+   *local* depot then reads as Uninitialized again.
 
 ### Selection (orthogonal to the states above)
 
@@ -94,12 +102,12 @@ the default leaves every depot's data untouched.
 |---|---|---|---|---|
 | `aha depot init <addr>` | Uninitialized → Initialized (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
 | `aha depot use <addr>` | requires Initialized | sets default = `<addr>` | yes | Switches the default to an already-initialized `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
-| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then builds a bundle and pushes it (`bundles/v1/<sha>.tar.zst` + catalog), atomic write, skip-if-present. Does not touch the corpus. |
-| `aha refresh` | same as `snapshot` → Populated | unchanged | yes | `snapshot` (auto-init + push, or reuse unchanged state), then `ingest` pending depot bundles into the local corpus. |
-| `aha ingest` | reads Populated (no provisioning) | unchanged | yes | Reads bundles new to this machine from the depot and merges them into the local corpus. |
-| `aha depot ls` | reads Initialized/Populated | unchanged | yes | Lists the catalog refs across all machines' shards. |
-| `aha depot verify [--deep] [--repair]` | Degraded → Initialized/Populated (with `--repair`) | unchanged | yes | Quick: marker + catalog↔object metadata. `--deep`: re-hashes/downloads bundle bytes. `--repair`: rebuilds catalog/marker from the bundle objects. |
-| `aha depot compact` | Populated (in place) | unchanged | yes | Deduplicates repairable catalog refs by bundle SHA without downloading bundle bytes. |
+| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognized from the pointer alone (zero writes). Does not touch the corpus and never reads another machine's namespace. |
+| `aha refresh` | same as `snapshot` → Populated | unchanged | yes | Push, then pull every machine's latest snapshot into the local corpus, fetching only unknown content. |
+| `aha ingest` | reads Populated (no provisioning) | unchanged | yes | Pull-only: anti-entropy the corpus against every machine's latest snapshot. |
+| `aha export` | reads Populated | unchanged | yes | Materializes a machine's latest snapshot as one portable v1 `bundle.tar.zst`. |
+| `aha depot ls` | reads Initialized/Populated | unchanged | yes | Lists each machine's latest snapshot (identity, capture time, file count). |
+| `aha depot verify [--deep]` | reads (reports Degraded) | unchanged | yes | Quick: marker, index, pointers resolve, manifest identities, blob presence. `--deep`: verifies blob content and audits historical manifests. |
 
 `--depot <addr>` on `snapshot` / `refresh` / `ingest` / `status` / `doctor` runs
 that one command against `<addr>` without moving the default pointer. Because the
@@ -110,19 +118,25 @@ r2:other` can create/initialize `r2:other` as a side effect.
 
 ```text
 <depot>/
-  depot.json                       # marker: schema, depot_id, layout, created_*
-  bundles/v1/<sha>.tar.zst         # immutable history bundles, keyed by content hash
-  catalog/v1/<safe-machine-id>.json # per-machine catalog shard (append-only)
+  aha-depot.json                                # marker: schema aha-depot/v2
+  blobs/v2/<sha256>.zst                         # one compressed file version, write-once
+  machines/index.json                           # machine registry (lets pull avoid LIST)
+  machines/<machine>/manifests/<sha256>.json    # snapshot manifests, write-once
+  machines/<machine>/latest                     # pointer, conditional PUT
 ```
 
-- **`depot.json`** lets `init` recognize an existing depot and lets `verify`
-  check the layout version. It is the restic repo-config / kopia format-blob
-  analog.
-- **Bundles** are immutable and content-addressed; a re-push of identical bytes
-  is skipped.
-- **Catalog shards** are per-machine and merged on read, so two machines never
-  contend on the same object. The catalog is an acceleration/provenance layer:
-  `aha depot verify --repair` can rebuild it entirely from `bundles/v1/*`.
+- **`aha-depot.json`** lets `init` recognize an existing depot and lets
+  `verify` check the layout version — the restic repo-config analog.
+- **Blobs** are content-addressed file versions, stored once ever; identical
+  content across snapshots and machines is one object by construction.
+- **Manifests** are logically full (every snapshot lists the machine's whole
+  state) and identified by their canonical hash, so snapshots cannot collide
+  and a re-push of unchanged state writes nothing.
+- **Namespaces** are per-machine: a writer never reads or writes outside its
+  own `machines/<id>/` prefix plus the shared blob space and index, so
+  machines never contend and contribute-only machines never download.
+- The depot **never deletes** (no GC, no retention, no compaction): losing
+  history is worse than storing it.
 
 ## Walkthrough
 
@@ -168,20 +182,18 @@ aha depot use r2:aha-depot         # back to R2
 ## Maintenance
 
 ```bash
-aha depot ls --json                 # what's in the shared pool
-aha depot verify --json             # quick: marker + catalog/object metadata
-aha depot verify --deep --json      # re-hash/download bundle bytes (slow, explicit)
-aha depot verify --repair --json    # rebuild catalog/marker from bundle objects
-aha depot compact --json            # dedupe catalog refs without downloading bytes
+aha depot ls --json                 # each machine's latest snapshot
+aha depot verify --json             # quick: marker, index, pointers, manifests, blob presence
+aha depot verify --deep --json      # also verify blob content + historical manifests (slow, explicit)
 ```
 
 ## Decommissioning
 
 Depots are not deleted by `aha`. To stop using one, switch the default away
 (`aha depot use <other>`) and then remove the backing store yourself: delete the
-local directory, or delete the R2 bucket and revoke its API token. Bundles are
-immutable and content-addressed, so a depot can be safely abandoned without
-affecting any corpus already ingested from it.
+local directory, or delete the R2 bucket and revoke its API token. Blobs and
+manifests are immutable and content-addressed, so a depot can be safely
+abandoned without affecting any corpus already ingested from it.
 
 ## Where the configuration lives
 

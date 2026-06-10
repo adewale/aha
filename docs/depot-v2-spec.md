@@ -2,7 +2,7 @@
 title: Depot v2 — Content-Addressed Snapshots Spec
 kind: spec
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-10
 tags:
   - aha
   - depot
@@ -16,7 +16,7 @@ tags:
   - go
   - specification
 source_type: design
-status: proposed
+status: implemented
 aliases:
   - depot v2
   - CAS depot
@@ -27,7 +27,8 @@ aliases:
 
 ## Status and relationship to v1
 
-This is a **proposed** design. It supersedes the *bundle-store layout* of
+This design is **implemented** (phases 0-7 below are complete; the phase plan
+is retained as the record of how, and of which tests pin what). It supersedes the *bundle-store layout* of
 `docs/r2-snapshot-aggregation-spec.md` while keeping everything else that spec
 locked in: the guiding principle (**data loss outweighs data theft**), the
 trust boundaries in `docs/trust.md` (network only inside `internal/depot` +
