@@ -5,6 +5,8 @@ Branch: `claude/correctness-by-construction-cgcFx`
 Baseline branch point: pre-performance-plan notes in `docs/performance-scalability-plan.md`
 Machine: Apple M2 Ultra, darwin/arm64
 
+*Historical capture: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The catalog/bundle depot benchmarks recorded here measured the v1 bundle store, which was replaced by content-addressed snapshots in June 2026.*
+
 These numbers are directional benchmark captures, not CI thresholds. Unit tests guard algorithmic hazards with query plans, property tests, and fake-driver operation counters; benchmarks show magnitude and regressions.
 
 ## Validation commands

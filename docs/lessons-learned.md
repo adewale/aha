@@ -2,6 +2,8 @@
 
 This document captures the implementation lessons from the Agent History Aggregator (`aha`) rollback/reimplementation cycles. It is intentionally blunt: these are the things that changed the product, tests, architecture, or process.
 
+*Historical record: the entries below predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). Bundle/catalog depot mechanics referenced in earlier cycles were replaced by content-addressed snapshots in June 2026; the lessons stand as recorded.*
+
 ## Cycle ledger summary
 
 | Cycle | Main lesson | Outcome |

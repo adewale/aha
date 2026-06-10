@@ -25,6 +25,8 @@ aliases:
 
 # Agent History Aggregator Spec
 
+*Historical: this is the original v1 spec and predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalog snapshot mechanics described here were replaced by content-addressed snapshots (write-once blobs + per-machine manifests) in June 2026; the v1 `tar.zst` bundle format survives only behind `aha export` / `aha ingest <bundle.tar.zst>`. The product boundary, adapters, corpus, and trust posture remain.*
+
 ## Product boundary
 
 Agent History Aggregator, `aha` for short, is an open-source Go CLI that archives, merges, and searches coding-agent session histories across machines.

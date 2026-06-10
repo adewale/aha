@@ -3,6 +3,8 @@
 Original audit date: 2026-05-19
 Updated: 2026-05-25
 
+*Historical: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalog depot mechanics analyzed here were replaced by content-addressed snapshots in June 2026; depot-related complexity rows and risks below describe the v1 design.*
+
 Scope: snapshot/archive, ingest, search, depot, status, verify, and refresh flows in the current Go/SQLite implementation.
 
 ## Summary

@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">15,706</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">15,772</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">20</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -2105,10 +2105,12 @@ footer a:hover { color: var(--ink-2); }
   <div class="section-head">
     <h2>Pipeline</h2>
     <p>
-      Local histories become snapshot bundles, which land in a depot, which an
-      ingest step compiles into a corpus, which search and read query. Each
-      labeled stage owns one thing; the package names are printed directly,
-      and hover/click only reveals secondary notes.
+      Capture diffs local histories against the last snapshot, push uploads
+      only the blobs the parent snapshot doesn't carry plus one manifest and
+      a pointer move, pull anti-entropies every machine's latest snapshot
+      into a corpus, which search and read query. Each labeled stage owns one
+      thing; the package names are printed directly, and hover/click only
+      reveals secondary notes.
     </p>
   </div>
 
@@ -2140,30 +2142,30 @@ footer a:hover { color: var(--ink-2); }
         <circle cx="115" cy="170" r="3" fill="var(--ink-2)"/>
       </g>
 
-      <!-- Stage 2: snapshot bundle -->
-      <g class="grp" data-pkg="internal/archive" data-info="Capture, then manifest.json plus copied raw files, then a deterministic tar.zst. Determinism rules: sorted manifest and files, normalized tar metadata, fixed zstd encoder, length-prefixed state signature.">
-        <text x="370" y="40" class="title" text-anchor="middle">snapshot bundle</text>
-        <text x="370" y="62" text-anchor="middle" class="lbl">manifest.json</text>
-        <text x="370" y="80" text-anchor="middle" class="lbl">stable file copies</text>
-        <text x="370" y="98" text-anchor="middle" class="lbl">deterministic tar.zst</text>
-        <text x="370" y="124" text-anchor="middle" class="good">content-addressed</text>
+      <!-- Stage 2: snapshot (capture-as-diff) -->
+      <g class="grp" data-pkg="internal/archive" data-info="CaptureState stats and hashes each source file (an advisory size/mtime/inode cache skips re-reading unchanged files; the racy-mtime rule keeps it honest) and builds a logically-full snapshot manifest. Capture never parses sessions; entry counts are ingest-derived corpus facts.">
+        <text x="370" y="40" class="title" text-anchor="middle">snapshot (capture-as-diff)</text>
+        <text x="370" y="62" text-anchor="middle" class="lbl">stat + hash sources</text>
+        <text x="370" y="80" text-anchor="middle" class="lbl">advisory capture cache</text>
+        <text x="370" y="98" text-anchor="middle" class="lbl">canonical manifest</text>
+        <text x="370" y="124" text-anchor="middle" class="good">never parses</text>
         <text x="370" y="160" text-anchor="middle" class="lbl">internal/archive</text>
         <circle cx="370" cy="170" r="4" fill="var(--sage)"/>
       </g>
 
       <!-- Stage 3: depot -->
-      <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Bundle objects are durable truth; catalog shards are repairable.">
+      <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Content-addressed blobs are write-once and stored once ever; per-machine manifests + a latest pointer (conditional PUT) replace catalog shards. The depot never deletes, and steady-state paths never LIST.">
         <text x="640" y="40" class="title" text-anchor="middle">depot</text>
-        <text x="640" y="62" text-anchor="middle" class="lbl">bundles/v1/&lt;sha&gt;.tar.zst</text>
-        <text x="640" y="80" text-anchor="middle" class="lbl">catalog/v1/&lt;machine&gt;.json</text>
-        <text x="640" y="98" text-anchor="middle" class="lbl">depot.json (marker)</text>
-        <text x="640" y="124" text-anchor="middle" class="good">local by default</text>
+        <text x="640" y="62" text-anchor="middle" class="lbl">blobs/v2/&lt;sha&gt;.zst</text>
+        <text x="640" y="80" text-anchor="middle" class="lbl">machines/&lt;id&gt;/manifests + latest</text>
+        <text x="640" y="98" text-anchor="middle" class="lbl">aha-depot.json (marker)</text>
+        <text x="640" y="124" text-anchor="middle" class="good">write-once · no delete</text>
         <text x="640" y="160" text-anchor="middle" class="lbl">internal/depot</text>
         <circle cx="640" cy="170" r="4" fill="var(--sage)"/>
       </g>
 
       <!-- Stage 4: corpus -->
-      <g class="grp" data-pkg="internal/corpus" data-info="Derived SQLite + FTS5 + blobs. Append-only ingest, trigger-maintained FTS. Rebuildable from depot.">
+      <g class="grp" data-pkg="internal/corpus" data-info="Derived SQLite + FTS5 + blobs, keyed by snapshots(manifest_sha256). Append-only ingest, trigger-maintained FTS, parse-once provenance in session_versions. Rebuildable from depot.">
         <text x="910" y="40" class="title" text-anchor="middle">corpus</text>
         <text x="910" y="62" text-anchor="middle" class="lbl">corpus.db (SQLite + FTS5)</text>
         <text x="910" y="80" text-anchor="middle" class="lbl">blobs/ &nbsp; images/</text>
@@ -2185,20 +2187,20 @@ footer a:hover { color: var(--ink-2); }
       <circle cx="1100" cy="170" r="3" fill="var(--ink-2)"/>
 
       <!-- arrow labels (transition verbs) sit BELOW the spine -->
-      <text x="240" y="195" class="lbl" text-anchor="middle">discover / parse</text>
-      <text x="505" y="195" class="lbl" text-anchor="middle">PutBundle</text>
-      <text x="775" y="195" class="lbl" text-anchor="middle">ingest pending</text>
+      <text x="240" y="195" class="lbl" text-anchor="middle">discover / stat / hash</text>
+      <text x="505" y="195" class="lbl" text-anchor="middle">push: new blobs + manifest + pointer</text>
+      <text x="775" y="195" class="lbl" text-anchor="middle">pull: anti-entropy</text>
       </svg>
       <figcaption>
-      <b>Figure.</b> Bundle bytes are the durable evidence. Catalogs and the corpus are deliberately rebuildable; search and read only query the local corpus.
+      <b>Figure.</b> Blob and manifest bytes are the durable evidence. Pointers and the corpus are deliberately rebuildable; search and read only query the local corpus.
     </figcaption>
     </figure>
 
-    <div class="pkg-info" id="pkg-info">Static read: local sources → deterministic bundle → depot → derived corpus → search/read. Hover or click a stage for the package-level ownership note.</div>
+    <div class="pkg-info" id="pkg-info">Static read: local sources → capture-as-diff → push (blobs + manifest + pointer) → depot → pull (anti-entropy) → derived corpus → search/read. Hover or click a stage for the package-level ownership note.</div>
   </div>
 
   <h3 class="sub">CLI surface</h3>
-  <p class="cli-line"><code>snapshot</code> · <code>refresh</code> · <code>ingest</code> · <code>search</code> · <code>read</code> · <code>status</code> · <code>verify</code> · <code>conflicts</code> · <code>corpus</code> · <code>depot</code> · <code>doctor</code> · <code>init</code></p>
+  <p class="cli-line"><code>snapshot</code> · <code>refresh</code> · <code>ingest</code> · <code>export</code> · <code>search</code> · <code>read</code> · <code>incidents</code> · <code>status</code> · <code>verify</code> · <code>conflicts</code> · <code>corpus</code> · <code>depot</code> · <code>doctor</code> · <code>init</code> · <code>mcp</code> · <code>serve</code></p>
   <p class="cli-note">Every command emits <code><span>-</span><span>-</span>json</code>; refs round-trip; search emits copy-pastable <code>ref_text</code>; read accepts <code>msg:v1</code>, <code>session:v1</code>, <code>artifact:v1</code>.</p>
 
   <h3 class="sub">Invariants</h3>
@@ -2207,13 +2209,13 @@ footer a:hover { color: var(--ink-2); }
     <dd>Only <code>internal/depot</code> may import network packages. A static test guards it.</dd>
 
     <dt>Durability</dt>
-    <dd>Bundle bytes are truth. Catalog shards and corpus are derived and repairable from those bytes.</dd>
+    <dd>Blob and manifest bytes are truth, write-once, never deleted. Pointers, the machines index, and the corpus are derived and rebuildable from those bytes.</dd>
 
     <dt>Identity</dt>
-    <dd>SHA-256 over length-prefixed tuples, returned as opaque sealed types, with raw string concatenation kept out of the boundary.</dd>
+    <dd>Snapshot identity is the SHA-256 of the manifest's canonical encoding; session identity is SHA-256 over length-prefixed tuples. Both are opaque sealed types; raw string concatenation is kept out of the boundary.</dd>
 
     <dt>Determinism</dt>
-    <dd>Sorted manifest, normalized tar metadata, fixed zstd encoder. Repeat and shuffle byte-equality are property tests, not promises.</dd>
+    <dd>Canonical manifest encoding: sorted file list, fixed JSON serialization, decode∘encode = id. Equal states ⇒ byte-equal manifests ⇒ equal identity; a property test, not a promise.</dd>
   </dl>
 </section>
 
@@ -2256,65 +2258,65 @@ footer a:hover { color: var(--ink-2); }
       <div class="noun" data-id="adapter"
            data-def="Source-specific code that discovers and parses JSONL files. Declares its capabilities (HasSubagents, HasStableEntryIDs, CanLinkSubagents…)."
            data-example="adapters.Pi  ·  adapters.ClaudeCode  ·  adapters.CodexCLI"
-           data-rel="source,bundle">
+           data-rel="source,blob">
         <div class="noun-name">Adapter</div>
         <div class="noun-tag">discover · parse</div>
       </div>
     </div>
 
-    <div class="noun-arrow">↓ <span>snapshot</span> ↓</div>
+    <div class="noun-arrow">↓ <span>capture (stat · hash)</span> ↓</div>
 
     <div class="noun-tier">
       <div class="noun-tier-h">evidence  ·  immutable</div>
-      <div class="noun primary" data-id="bundle"
-           data-def="A deterministic tar.zst snapshot. Contains one manifest.json plus the raw source files copied byte-for-byte. Content-addressed by SHA-256 of the compressed bytes."
-           data-example="b5ce6ccd…f47.tar.zst  (machine=ade-mbp, captured=2024-01-01T10:00:00Z)"
+      <div class="noun" data-id="blob"
+           data-def="One zstd-compressed file version, addressed by the SHA-256 of its uncompressed bytes. Write-once: identical content across snapshots and machines is one object by construction, ever. Reads re-verify the hash before bytes are trusted."
+           data-example="blobs/v2/e5f60123….zst  (one session/artifact file version)"
            data-rel="adapter,manifest,depot">
-        <div class="noun-name">Bundle</div>
-        <div class="noun-tag">tar.zst · sha256-addressed</div>
+        <div class="noun-name">Blob</div>
+        <div class="noun-tag">content-addressed · write-once</div>
       </div>
-      <div class="noun" data-id="manifest"
-           data-def="The bundle's table of contents and provenance. Schema, machine_id, source/policy/adapters, plus a sorted list of files with their content addresses. Volatile fields (bundle_id, captured_at) excluded from the state signature."
-           data-example="{schema:&quot;aha-manifest/v2&quot;, files:[{sha256:&quot;e5f6…&quot;, …}], bundle_id:…, captured_at:…}"
-           data-rel="bundle,bundleref">
-        <div class="noun-name">Manifest</div>
-        <div class="noun-tag">JSON · sorted</div>
+      <div class="noun primary" data-id="manifest"
+           data-def="The logically-full description of one machine's captured state: machine identity, capture metadata, policy, adapters, and a sorted list of files with their blob addresses. Identity = SHA-256 of the canonical encoding; equal states serialize byte-equal, so identity cannot be forged or collide. The state digest (SnapshotStateSHA256) additionally excludes captured_at/created_by."
+           data-example="{schema:&quot;aha-snapshot-manifest/v2&quot;, machine_id:&quot;ade-mbp&quot;, files:[{sha256:&quot;e5f6…&quot;, …}]}"
+           data-rel="blob,depot,pointer">
+        <div class="noun-name">Snapshot manifest</div>
+        <div class="noun-tag">canonical JSON · sha256 identity</div>
       </div>
     </div>
 
-    <div class="noun-arrow">↓ <span>publish</span> ↓</div>
+    <div class="noun-arrow">↓ <span>push</span> ↓</div>
 
     <div class="noun-tier">
       <div class="noun-tier-h">storage  ·  durable truth</div>
       <div class="noun primary" data-id="depot"
-           data-def="A content-addressed store of bundles, addressed as local:PATH or r2:BUCKET. The only package allowed to import network libraries. Static test enforces."
+           data-def="A content-addressed store of blobs plus per-machine snapshot manifests, addressed as local:PATH or r2:BUCKET. Never deletes; steady-state paths never LIST. The only package allowed to import network libraries. Static tests enforce all three."
            data-example="local:~/.aha/depot  ·  r2:aha-depot"
-           data-rel="bundle,catalog">
+           data-rel="blob,manifest,pointer,machinesindex">
         <div class="noun-name">Depot</div>
         <div class="noun-tag">local · r2</div>
       </div>
-      <div class="noun" data-id="catalog"
-           data-def="A per-machine repairable JSON listing of BundleRefs in a depot. Not absolute truth; rebuildable from bundle objects by `aha depot verify --repair`."
-           data-example="catalog/v1/ade-mbp.json  ·  catalog/v1/work-laptop.json"
-           data-rel="depot,bundleref">
-        <div class="noun-name">Catalog shard</div>
-        <div class="noun-tag">per machine · repairable</div>
+      <div class="noun" data-id="pointer"
+           data-def="machines/&lt;id&gt;/latest: a tiny JSON object naming the machine's latest manifest_sha256. Moved by conditional PUT (retry on conflict). Reading it alone is enough to recognize unchanged state — push writes nothing when the parent's state digest matches."
+           data-example="machines/ade-mbp/latest  →  {manifest_sha256:&quot;b5ce6c…&quot;}"
+           data-rel="depot,manifest">
+        <div class="noun-name">Latest pointer</div>
+        <div class="noun-tag">per machine · conditional PUT</div>
       </div>
-      <div class="noun" data-id="bundleref"
-           data-def="The metadata for one bundle in a catalog: bundle_sha256, machine_id, captured_at, state_sha256, manifest_sha256, bytes, sessions count, filename, key. state_sha256 is the field that makes zero-fetch refresh possible."
-           data-example="{bundle_sha256:&quot;b5ce…&quot;, state_sha256:&quot;78bf…&quot;, captured_at:&quot;2024-01-01&quot;}"
-           data-rel="bundle,manifest">
-        <div class="noun-name">BundleRef</div>
-        <div class="noun-tag">catalog entry</div>
+      <div class="noun" data-id="machinesindex"
+           data-def="machines/index.json: the registry of machine namespaces, appended (conditional PUT with retry) only on a machine's first-ever push. Exists so pull discovers machines with one GET instead of a LIST."
+           data-example="{machines:[&quot;ade-mbp&quot;,&quot;work-laptop&quot;]}"
+           data-rel="depot,pointer">
+        <div class="noun-name">Machines index</div>
+        <div class="noun-tag">one GET · no LIST</div>
       </div>
     </div>
 
-    <div class="noun-arrow">↓ <span>ingest</span> ↓</div>
+    <div class="noun-arrow">↓ <span>pull (anti-entropy)</span> ↓</div>
 
     <div class="noun-tier">
       <div class="noun-tier-h">query  ·  derived, rebuildable</div>
       <div class="noun primary" data-id="corpus"
-           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth – entirely rebuildable from depot bundles."
+           data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth – entirely rebuildable from depot snapshots."
            data-example="~/.aha/corpus.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
            data-rel="depot,session,entry,artifact">
         <div class="noun-name">Corpus</div>
@@ -2386,7 +2388,7 @@ footer a:hover { color: var(--ink-2); }
   </div>
 
   <div class="noun-detail" id="noun-detail">
-    <p class="cli-note" style="margin:0">Static read: evidence flows from read-only sources to immutable bundles to durable depot bytes to a rebuildable corpus to sealed refs. Hover any noun to deepen; click to pin.</p>
+    <p class="cli-note" style="margin:0">Static read: evidence flows from read-only sources to content-addressed blobs and snapshot manifests to durable depot bytes to a rebuildable corpus to sealed refs. Hover any noun to deepen; click to pin.</p>
   </div>
 
   <h3 class="sub">The same message, through every abstraction</h3>
@@ -2397,10 +2399,10 @@ footer a:hover { color: var(--ink-2); }
   <ol class="trace" id="msg-trace">
     <li><span class="trace-step">A</span><span class="trace-noun">Source file</span><code class="trace-val">~/.claude/projects/aha/session.jsonl, line 42</code></li>
     <li><span class="trace-step">B</span><span class="trace-noun">Adapter parses</span><code class="trace-val">ParsedEntry{ entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
-    <li><span class="trace-step">C</span><span class="trace-noun">Bundle contains</span><code class="trace-val">files/claude-code/projects/aha/session.jsonl   (file_sha256: e5f60123…)</code></li>
+    <li><span class="trace-step">C</span><span class="trace-noun">Capture hashes the file</span><code class="trace-val">blob key e5f60123…   (sha256 of the file's bytes; cache hit skips the read)</code></li>
     <li><span class="trace-step">D</span><span class="trace-noun">Manifest lists it</span><code class="trace-val">{ source:"claude-code", path:"files/…/session.jsonl", sha256:"e5f60123…", bytes:38912 }</code></li>
-    <li><span class="trace-step">E</span><span class="trace-noun">Depot stores bundle</span><code class="trace-val">bundles/v1/b5ce6ccd…f47.tar.zst</code></li>
-    <li><span class="trace-step">F</span><span class="trace-noun">Catalog ref</span><code class="trace-val">{ bundle_sha256:"b5ce6c…", machine_id:"ade-mbp", state_sha256:"78bf99…" }</code></li>
+    <li><span class="trace-step">E</span><span class="trace-noun">Depot stores blob + manifest</span><code class="trace-val">blobs/v2/e5f60123….zst  ·  machines/ade-mbp/manifests/b5ce6ccd….json</code></li>
+    <li><span class="trace-step">F</span><span class="trace-noun">Pointer moves</span><code class="trace-val">machines/ade-mbp/latest  →  { manifest_sha256:"b5ce6c…" }   (conditional PUT)</code></li>
     <li><span class="trace-step">G</span><span class="trace-noun">Corpus sessions row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", source:"claude-code", project_key:"aha" }</code></li>
     <li><span class="trace-step">H</span><span class="trace-noun">Corpus entries row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", line_no:42, entry_sha256:"f1e2…" }</code></li>
     <li><span class="trace-step">I</span><span class="trace-noun">Corpus messages row</span><code class="trace-val">{ session_key:"sk1_a1b2c3…", entry_id:"evt-42", role:"user", text:"migrate db…" }</code></li>
@@ -2421,61 +2423,61 @@ footer a:hover { color: var(--ink-2); }
     <p class="cli-note" style="margin:0">Static read: leaves define identity and helpers; I/O packages preserve evidence; corpus/search are derived stores; cli is the only top-level orchestrator. Hover a package for importers.</p>
   </div>
 
-  <h3 class="sub">Anatomy of a bundle</h3>
+  <h3 class="sub">Anatomy of a snapshot</h3>
   <p class="cli-note">
-    A bundle is a single deterministic <code>tar.zst</code>. One
-    <code>manifest.json</code> at the root, then the raw source files copied
-    verbatim, each entry's tar metadata normalized. Click to expand.
+    A snapshot is not one file: it is a small manifest under the machine's
+    namespace plus the content-addressed blobs it references, with
+    <code>machines/&lt;id&gt;/latest</code> naming the newest manifest.
+    Unchanged blobs are shared with every earlier snapshot — logically full,
+    physically incremental. (One portable <code>tar.zst</code> view still
+    exists: <code>aha export</code> materializes it on demand.)
   </p>
   <div class="bundle-anatomy" id="bundle-anatomy">
     <div class="tar-tree">
-      <div class="tar-row" data-info="The only file the bundle reader trusts to interpret. Schema, machine_id, captured_at, the list of files with their SHAs and source paths, the source/policy/adapters config snapshot. State signature hashes a subset of this excluding bundle_id and captured_at.">
-        <span class="tar-sha">a1b2c3d4…</span>
-        <span class="tar-path">manifest.json</span>
+      <div class="tar-row" data-info="The only object the reader trusts to interpret. Machine identity, capture metadata, policy, adapters, and the sorted file list with blob addresses. Write-once; on read the content must hash back to the key, so a corrupt or tampered manifest cannot be parsed. The state digest (SnapshotStateSHA256) hashes the same document with captured_at/created_by neutralized.">
+        <span class="tar-sha">b5ce6ccd…</span>
+        <span class="tar-path">machines/ade-mbp/manifests/b5ce6ccd….json</span>
         <span class="tar-size">4.2 KB</span>
       </div>
-      <div class="tar-row" data-info="Raw Pi JSONL file, byte-for-byte copy. file_sha256 is the dedup key in the corpus blob store.">
+      <div class="tar-row" data-info="The machine's latest-snapshot pointer: {manifest_sha256}. The only mutable object in the namespace, moved by conditional PUT with retry-on-conflict. Push reads it (plus the parent manifest) as the diff baseline; pull reads it to learn the machine's current state with one GET.">
+        <span class="tar-sha">pointer</span>
+        <span class="tar-path">machines/ade-mbp/latest</span>
+        <span class="tar-size">0.1 KB</span>
+      </div>
+      <div class="tar-row" data-info="Raw Pi JSONL file version, zstd-compressed, addressed by the SHA-256 of its uncompressed bytes. Write-once and stored once ever: a later snapshot listing the same content adds no object.">
         <span class="tar-sha">e5f60123…</span>
-        <span class="tar-path">files/pi/sessions/01HEXAMPLE.jsonl</span>
+        <span class="tar-path">blobs/v2/e5f60123….zst</span>
         <span class="tar-size">38 KB</span>
       </div>
-      <div class="tar-row" data-info="A Claude Code session file. Each agent's session lands in its own path under files/.">
+      <div class="tar-row" data-info="A Claude Code session file version. When this session grows, the next snapshot lists a new blob for the new version; this one stays for the snapshot that observed it (the depot never deletes).">
         <span class="tar-sha">b7c89def…</span>
-        <span class="tar-path">files/claude-code/projects/aha/session.jsonl</span>
+        <span class="tar-path">blobs/v2/b7c89def….zst</span>
         <span class="tar-size">214 KB</span>
       </div>
-      <div class="tar-row" data-info="Subagent files (agent-*.jsonl) are detected by adapter and tagged is_subagent=true. Currently linked to no parent because the Claude adapter declares CanLinkSubagents=false.">
+      <div class="tar-row" data-info="Subagent files (agent-*.jsonl) are detected by adapter and tagged is_subagent=true at ingest. Currently linked to no parent because the Claude adapter declares CanLinkSubagents=false.">
         <span class="tar-sha">04ff5678…</span>
-        <span class="tar-path">files/claude-code/projects/aha/agent-abc.jsonl</span>
+        <span class="tar-path">blobs/v2/04ff5678….zst</span>
         <span class="tar-size">12 KB</span>
       </div>
-      <div class="tar-row" data-info="Codex rollout file. The Codex adapter only accepts rollout-*.jsonl and history.jsonl to avoid picking up stray files in the sessions root.">
-        <span class="tar-sha">9abcdef0…</span>
-        <span class="tar-path">files/codex/sessions/rollout-2024-01-01.jsonl</span>
-        <span class="tar-size">71 KB</span>
-      </div>
-      <div class="tar-row" data-info="Tool/agent output artifacts (text and images). Preserved verbatim. Text artifacts are FTS-indexed at ingest; image artifacts have their blobs preserved when include_images=true.">
+      <div class="tar-row" data-info="Tool/agent output artifacts (text and images) are blobs too. Preserved verbatim; text artifacts are FTS-indexed at ingest, image artifacts kept when include_images=true.">
         <span class="tar-sha">deadbeef…</span>
-        <span class="tar-path">files/claude-code/artifacts/edit-foo.txt</span>
+        <span class="tar-path">blobs/v2/deadbeef….zst</span>
         <span class="tar-size">2.1 KB</span>
       </div>
     </div>
 
     <div class="manifest-view">
-      <div class="manifest-head">manifest.json &nbsp; <span class="cli-note" style="margin:0;font-size:var(--t-xs)">JSON-canonical; sorted; deterministic</span></div>
+      <div class="manifest-head">machines/ade-mbp/manifests/b5ce6ccd….json &nbsp; <span class="cli-note" style="margin:0;font-size:var(--t-xs)">canonical encoding; sorted files; identity = sha256 of these bytes</span></div>
 <pre><code>{
-  "schema":         "aha-manifest/v2",
-  "bundle_id":      "bndl-<span class="vol">2024-01-01T10:00:00Z-abc123</span>",   <span class="lbl">// volatile</span>
-  "machine_id":     "ade-mbp",
-  "captured_at":    "<span class="vol">2024-01-01T10:00:00Z</span>",                <span class="lbl">// volatile</span>
-  "created_by":     "aha 0.x",
-  "implementation": { "language":"go","archive":"tar.zst" },
-  "source":         { "host_os":"darwin","hostname_hash":"..." },
-  "policy":         { "redaction":"none-v1","include_images":true,
-                      "index_tool_output":false },
-  "counts":         { "session_files":4,"artifact_files":2 },
-  "adapters":       [ { "name":"pi","version":"1","capabilities":{...} },
-                      { "name":"claude-code","version":"1","capabilities":{...} } ],
+  "schema":      "aha-snapshot-manifest/v2",
+  "machine_id":  "ade-mbp",
+  "captured_at": "<span class="vol">2024-01-01T10:00:00Z</span>",   <span class="lbl">// in the identity, not the state digest</span>
+  "created_by":  "<span class="vol">aha 0.x</span>",                <span class="lbl">// in the identity, not the state digest</span>
+  "source":      { "host_os":"darwin","hostname_hash":"..." },
+  "policy":      { "redaction":"none-v1","include_images":true,
+                   "index_tool_output":false },
+  "adapters":    [ { "name":"pi","version":"1","capabilities":{...} },
+                   { "name":"claude-code","version":"1","capabilities":{...} } ],
   "files": [
     { "source":"pi",          "path":"files/pi/sessions/01HEX.jsonl",      "sha256":"e5f60123…", "bytes":38912 },
     { "source":"claude-code", "path":"files/claude-code/.../session.jsonl","sha256":"b7c89def…", "bytes":219136 },
@@ -2487,10 +2489,11 @@ footer a:hover { color: var(--ink-2); }
 
   <h3 class="sub">Corpus schema</h3>
   <p class="cli-note">
-    Twelve tables. Three families: <em>bundle metadata</em> at the top
-    (immutable provenance), <em>agent content</em> in the middle (append-only,
-    where the data lives), and <em>derived indexes</em> at the bottom
-    (FTS, path tokens – rebuildable from above).
+    Three families: <em>snapshot metadata</em> at the top
+    (immutable provenance, keyed by <code>manifest_sha256</code>), <em>agent
+    content</em> in the middle (append-only, where the data lives), and
+    <em>derived indexes</em> at the bottom (FTS, path tokens – rebuildable
+    from above).
   </p>
   <div class="schema-er" id="schema-er">
     <div class="er-family">
@@ -2618,9 +2621,9 @@ footer a:hover { color: var(--ink-2); }
       </tr>
       <tr>
         <td class="row-name">archive</td>
-        <td>file → bundle</td>
-        <td>copies bytes, hashes, validates manifest</td>
-        <td>budget checks; path-policy tests reject <code>..</code>, abs paths, backslashes</td>
+        <td>file → snapshot</td>
+        <td>stats, hashes, copies bytes; never parses</td>
+        <td>manifest validation (file-count cap); path-policy tests reject <code>..</code>, abs paths, backslashes</td>
       </tr>
       <tr class="topical">
         <td class="row-name">depot</td>
@@ -2636,7 +2639,7 @@ footer a:hover { color: var(--ink-2); }
       </tr>
       <tr class="topical">
         <td class="row-name">corpus</td>
-        <td>bundle → SQLite</td>
+        <td>snapshot → SQLite</td>
         <td>derived; rebuildable</td>
         <td>append-only triggers; <code>aha verify</code> +  <code><span>-</span><span>-</span>repair-fts</code> reconstructs</td>
       </tr>
@@ -2663,7 +2666,7 @@ footer a:hover { color: var(--ink-2); }
       <tr>
         <td class="row-name"><code>DELETE FROM entries WHERE …</code></td>
         <td>Trigger <code>entries_no_delete</code> aborts with <em>"entries are append-only"</em>. The transaction rolls back. A static test in <code>internal/testquality</code> also blocks this from production code at CI time.</td>
-        <td class="col-right">If the row is wrong, <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and re-ingest from depot bundles selectively.</td>
+        <td class="col-right">If the row is wrong, <code>aha verify <span>-</span><span>-</span>repair-fts</code> rebuilds derived FTS; corpus identity stays. To genuinely remove evidence, drop the corpus and rebuild it from the depot (or from exported bundles) selectively.</td>
       </tr>
       <tr>
         <td class="row-name"><code>UPDATE entries SET role=…</code></td>
@@ -2818,24 +2821,27 @@ func FormatRef(r Ref) string {
   <!-- ----------------------------------- 3: STATE SIG ------------------- -->
   <div class="mech">
     <div class="side">
-      <h3>The manifest <em>state</em> signature</h3>
-      <div class="where">internal/archive/archive.go</div>
+      <h3>Snapshot identity and the <em>state</em> digest</h3>
+      <div class="where">internal/model/snapshot_manifest.go</div>
     </div>
     <div class="body">
       <p>
-        <code>refresh</code> needs to answer "is the source state the same as
-        the last bundle I made?" but the bundle SHA changes every time, because
-        <code>bundle_id</code> and <code>captured_at</code> are unique per
-        capture. The fix is a second hash that <em>excludes</em> the volatile
-        fields. If the catalog already has a ref with the same
-        <code>state_sha256</code>, <code>refresh</code> reuses it. Zero fetch.
+        A snapshot's identity is the SHA-256 of its manifest's canonical
+        encoding — there is no separate name to police. But push needs to
+        answer "did anything change since the parent snapshot?", and the
+        identity moves every capture because <code>captured_at</code> and
+        <code>created_by</code> are part of it. The fix is a second hash,
+        <code>model.SnapshotStateSHA256</code>, that neutralizes the
+        capture-time fields. When the parent manifest (one pointer GET + one
+        manifest GET) has the same state digest, push reuses the parent
+        snapshot: zero blob uploads, zero writes, zero content reads.
       </p>
 
       <div class="state-sig" id="state-sig">
         <div class="ss-fields">
           <div class="ss-row" data-field="schema" data-stable="1">
             <span class="ss-name">schema</span>
-            <input type="text" data-key="schema" value="aha-manifest/v2"/>
+            <input type="text" data-key="schema" value="aha-snapshot-manifest/v2"/>
             <span class="ss-tag stable">stable</span>
           </div>
           <div class="ss-row" data-field="machine_id" data-stable="1">
@@ -2859,30 +2865,30 @@ func FormatRef(r Ref) string {
             <span class="ss-tag stable">stable</span>
           </div>
           <div class="ss-divider"></div>
-          <div class="ss-row" data-field="bundle_id" data-stable="0">
-            <span class="ss-name">bundle_id</span>
-            <input type="text" data-key="bundle_id" value="bndl-2024-01-01T10:00:00-abc123"/>
-            <span class="ss-tag volatile">volatile</span>
-          </div>
           <div class="ss-row" data-field="captured_at" data-stable="0">
             <span class="ss-name">captured_at</span>
             <input type="text" data-key="captured_at" value="2024-01-01T10:00:00Z"/>
+            <span class="ss-tag volatile">volatile</span>
+          </div>
+          <div class="ss-row" data-field="created_by" data-stable="0">
+            <span class="ss-name">created_by</span>
+            <input type="text" data-key="created_by" value="aha 0.x"/>
             <span class="ss-tag volatile">volatile</span>
           </div>
         </div>
 
         <div class="ss-output">
           <div class="ss-hash">
-            <div class="ss-hash-label">bundle_sha256 <span class="ss-hash-help">all fields</span></div>
+            <div class="ss-hash-label">manifest_sha256 (identity) <span class="ss-hash-help">all fields</span></div>
             <code class="ss-hash-value" id="ss-bundle-sha">computing...</code>
             <div class="ss-hash-bar"><div id="ss-bundle-bar"></div></div>
           </div>
           <div class="ss-hash">
-            <div class="ss-hash-label">state_sha256 <span class="ss-hash-help">stable fields only</span></div>
+            <div class="ss-hash-label">state digest (SnapshotStateSHA256) <span class="ss-hash-help">capture-time fields neutralized</span></div>
             <code class="ss-hash-value" id="ss-state-sha">computing...</code>
             <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
           </div>
-          <p class="ss-hint">Edit any field. Volatile-only edits move the bundle hash but leave the state hash <b>unchanged</b> – that's the property <code>refresh</code> relies on to skip re-fetching.</p>
+          <p class="ss-hint">Edit any field. Volatile-only edits move the identity but leave the state digest <b>unchanged</b> – that's the property <code>push</code> relies on to recognize an unchanged machine from the parent pointer alone and write nothing.</p>
           <div style="display:flex; gap:var(--s-2); flex-wrap:wrap;">
             <button class="copy-btn" data-copy-cmd="manifest-full">copy as manifest JSON</button>
             <button class="copy-btn" data-copy-cmd="manifest-state">copy as state struct JSON</button>
@@ -3235,50 +3241,49 @@ create index idx_session_path_tokens_token_session
   <h3 class="sub">Stages, fully spelled out</h3>
   <div class="ingest-stages">
     <div class="stage">
-      <div class="role">bundlePlanner.Prepare</div>
-      <h4>Plan</h4>
+      <div class="role">corpus.IngestSnapshot (depot pull)</div>
+      <h4>Anti-entropy (one tx)</h4>
       <ol>
-        <li>stage tar.zst into a temp file</li>
-        <li>compute actual SHA-256</li>
-        <li>compare to expectedSHA if given</li>
-        <li>read &amp; validate manifest.json</li>
-        <li>budget checks (entries, bytes, per-file)</li>
-        <li>plan = { staging, sha, manifest }</li>
+        <li>canonical-encode manifest ⇒ identity; known identity ⇒ duplicate row, zero work</li>
+        <li>per session file: version proven present ⇒ provenance row only — no fetch, no parse</li>
+        <li>unknown content: local blob store first, depot fetch last</li>
+        <li>fetched bytes spool, verify sha, parse once</li>
+        <li>triggers mirror FTS, quarantine conflicts</li>
+        <li>tx.Commit()</li>
       </ol>
-      <div class="end good">on failure: nothing in corpus changes</div>
+      <div class="end good">cost is O(new file versions), never O(history)</div>
+    </div>
+    <div class="stage">
+      <div class="role">Ingestor.IngestBundle (v1 import)</div>
+      <h4>Import a bundle file</h4>
+      <ol>
+        <li>spool tar.zst, compute SHA-256</li>
+        <li>read &amp; validate manifest.json; budget checks</li>
+        <li>identity = canonical manifest hash (same keying as snapshots)</li>
+        <li>same writer, same per-file skips, one tx</li>
+      </ol>
+      <div class="end good">export ∘ import answers searches identically to a depot pull (pinned)</div>
     </div>
     <div class="stage">
       <div class="role">corpusWriter</div>
-      <h4>Write (one tx)</h4>
+      <h4>Shared write machinery</h4>
       <ol>
-        <li>recordBundleAttempt; duplicate ⇒ skip + commit</li>
+        <li>recordIngestAttempt; duplicate ⇒ skip + commit</li>
         <li>PrepareStatements (transaction-scoped)</li>
         <li>InsertMachineAndSources</li>
-        <li>StreamManifestFiles, per-session prefetch</li>
+        <li>per-session entry-hash prefetch</li>
         <li>insert entries, messages, artifacts, images</li>
-        <li>triggers mirror FTS, quarantine conflicts</li>
       </ol>
-      <div class="end warn">tx held open; not yet committed</div>
-    </div>
-    <div class="stage">
-      <div class="role">blobPublisher.PromoteBundle</div>
-      <h4>Publish, then commit</h4>
-      <ol>
-        <li>atomic rename staging → blobs/bundles/&lt;sha&gt;.tar.zst</li>
-        <li>tx.Commit()</li>
-      </ol>
-      <div class="end good">on success: bundle &amp; rows become visible together</div>
-      <div class="end bad" style="margin-top: var(--s-2); border-top: 0;">on commit-fail: promoted blob removed; no orphans</div>
+      <div class="end good">on failure: tx rolls back; the corpus never stores bundle objects</div>
     </div>
   </div>
 
   <div class="hooks">
     <h4>Failure-injection hooks (test only)</h4>
-    <div class="pair"><code>afterManifestFiles</code><span>simulate a crash between writes and promote</span></div>
-    <div class="pair"><code>afterBundlePromoteBeforeCommit</code><span>simulate a crash after blob promote but before commit</span></div>
+    <div class="pair"><code>afterManifestFiles</code><span>simulate a crash before commit</span></div>
     <p>
-      Tests assert: corpus rows roll back, the promoted blob is removed, no
-      orphans, <code>ingest_attempts</code> records the duplicate. On
+      Tests assert: corpus rows roll back, no bundle-shaped artifacts are
+      left behind, <code>ingest_attempts</code> records the duplicate. On
       <code>SQLITE_BUSY</code> the ingestor retries up to 20 times with a
       pluggable <code>clock.Sleeper</code> / <code>clock.Backoff</code>, so
       contention tests are deterministic.
@@ -3325,19 +3330,19 @@ create index idx_session_path_tokens_token_session
       <tr><th></th><th>Mechanism</th><th>Key</th><th>Where</th><th>Effect</th><th>Scope</th></tr>
     </thead>
     <tbody>
-      <tr class="topical" data-info="If two captures produce byte-identical tar.zst, the depot stores one object. Local checks the target path exists; R2 uses S3 object existence.">
+      <tr class="topical" data-info="Every file version is one write-once depot object keyed by its content hash. Identical content across snapshots and machines is one object by construction, not by detection.">
         <th class="row-num">1</th>
-        <td class="row-name">Bundle object</td>
-        <td><code>bundle_sha256</code></td>
-        <td>depot <code>bundles/v1/&lt;sha&gt;.tar.zst</code></td>
-        <td>identical bytes share one object</td>
+        <td class="row-name">Blob object</td>
+        <td><code>file sha256</code></td>
+        <td>depot <code>blobs/v2/&lt;sha&gt;.zst</code></td>
+        <td>identical content is one object, ever</td>
         <td>cross-machine</td>
       </tr>
-      <tr data-info="The corpus.bundles table has UNIQUE(bundle_sha256). Re-ingest of the same SHA records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
+      <tr data-info="snapshots is keyed by the canonical manifest hash. Re-ingest of a known identity records an ingest_attempts row marked duplicate=1 and skips the rest of the transaction.">
         <th class="row-num">2</th>
-        <td class="row-name">Corpus bundle row</td>
-        <td><code>bundle_sha256 UNIQUE</code></td>
-        <td>corpus <code>bundles</code>, <code>ingest_attempts</code></td>
+        <td class="row-name">Snapshot identity</td>
+        <td><code>manifest_sha256 PK</code></td>
+        <td>corpus <code>snapshots</code>, <code>ingest_attempts</code></td>
         <td>duplicate ingest is recorded, not done</td>
         <td>per corpus</td>
       </tr>
@@ -3349,26 +3354,26 @@ create index idx_session_path_tokens_token_session
         <td>raw bytes reused across bundles</td>
         <td>per corpus</td>
       </tr>
-      <tr class="topical" data-info="Catalog refs carry state_sha256 which excludes the volatile bundle_id and captured_at fields. Equal state hash means unchanged source state.">
+      <tr class="topical" data-info="SnapshotStateSHA256 digests the manifest with captured_at/created_by normalized away. Equal state digest against the parent snapshot means unchanged source state: the push reuses the parent identity and writes nothing.">
         <th class="row-num">4</th>
         <td class="row-name">State equivalence</td>
-        <td><code>state_sha256</code></td>
-        <td>catalog refs</td>
-        <td>unchanged source reuses a ref without fetch</td>
+        <td><code>snapshot state digest</code></td>
+        <td>parent manifest at push</td>
+        <td>unchanged machine pushes zero bytes</td>
         <td>per machine</td>
       </tr>
-      <tr data-info="No-arg ingest computes the set difference between catalog and corpus.">
+      <tr data-info="No-arg ingest checks each machine's latest pointer against the snapshots table with a point lookup — pointers and manifests are tiny; blobs are fetched only for unknown content.">
         <th class="row-num">5</th>
         <td class="row-name">Pending set</td>
-        <td><code>catalog − corpus</code></td>
+        <td><code>latest − snapshots</code></td>
         <td><code>aha ingest</code> (no args)</td>
-        <td>fetches only new refs; scales by new bundles, not catalog size</td>
+        <td>fetches only machines with new snapshots; O(machines)</td>
         <td>per ingest</td>
       </tr>
     </tbody>
   </table>
 
-  <div class="dedup-info" id="dedup-info">Static read: duplicate work is rejected first by bundle SHA, then corpus bundle row, then file blob SHA; state and pending sets avoid unnecessary fetches. Hover a row for the operational detail.</div>
+  <div class="dedup-info" id="dedup-info">Static read: duplicate work is rejected first by the content address (one object ever), then snapshot identity, then file blob SHA; state digests and pointer comparisons avoid unnecessary fetches. Hover a row for the operational detail.</div>
 </section>
 
 
@@ -3829,7 +3834,7 @@ updateRef();
       if (!last) { logLine('no entry to duplicate; insert one first.', 'warn'); return; }
       const orig = state.entries.find(e => e.entry_id === last);
       const h = orig.hash;
-      // bundle-attempt-style duplicate tracking (mirrors recordBundleAttempt
+      // snapshot-identity duplicate tracking (mirrors recordIngestAttempt
       // in corpus/ingest.go: existing SHA + same id ⇒ duplicate row, skip).
       state.attempts.push({ _k: 'att-'+(state.attempts.length+1), entry_id: last, kind: `re-insert ${last}`, flag: 'duplicate=1' });
       logLine(`silent dedup: ${last} already exists with hash ${h}; recorded as duplicate attempt.`, 'ok',

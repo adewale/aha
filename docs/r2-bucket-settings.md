@@ -1,6 +1,6 @@
 # Recommended Cloudflare R2 Settings
 
-`aha` R2 depots contain unredacted agent-history bundles. Treat the bucket as private sensitive storage.
+`aha` R2 depots contain unredacted agent-history blobs and snapshot manifests. Treat the bucket as private sensitive storage.
 
 ## Bucket posture
 
@@ -33,7 +33,7 @@ Recommended token shape:
 - Permission: **Object Read & Write** for machines that run `aha snapshot` or `aha refresh`.
 - Scope: restrict the token to the specific depot bucket when Cloudflare offers bucket scoping.
 - Use separate tokens per machine so a lost laptop can be revoked without rotating every client.
-- Use **Object Read only** only for hosts that will ingest/read depot bundles but never publish snapshots.
+- Use **Object Read only** only for hosts that will pull/read depot snapshots but never push.
 - Use admin permissions only for one-time bucket creation/administration; do not use broad admin tokens for daily `aha refresh`.
 - Store secrets in environment variables or an OS/secret-manager mechanism, not in repo files or `aha` config.
 
@@ -107,12 +107,12 @@ The S3 region should be `auto`.
 
 ## Durability and auditability
 
-Because bundles are content-addressed, accidental mutation is detectable. Accidental deletion is the bigger risk.
+Because blobs and manifests are content-addressed, accidental mutation is detectable. Accidental deletion is the bigger risk — `aha` itself never deletes depot objects.
 
 Recommended bucket controls where available for your account/bucket:
 
 - Enable object versioning or retention/object-lock style controls if Cloudflare exposes them for the bucket.
-- Use lifecycle rules cautiously; do not expire `bundles/v1/*` unless you intentionally want to destroy history.
+- Use lifecycle rules cautiously; do not expire `blobs/v2/*` or `machines/*` unless you intentionally want to destroy history.
 - Enable access logs, audit logs, or event notifications where available so object writes/deletes are observable.
 - Consider a second backup/export path for the bucket if the depot is your only durable copy.
 

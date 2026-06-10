@@ -2,6 +2,8 @@
 
 Date: 2026-05-25
 
+*Historical: predates depot v2 ([../depot-v2-spec.md](../depot-v2-spec.md)). Findings that reference bundle/catalog depot code (`PutBundleKnown`, catalog verify/compact/repair) describe v1 machinery that was replaced by content-addressed snapshots in June 2026.*
+
 Scope: production Go code under `cmd/aha` and `internal/*`. Test fixtures and generated docs were excluded unless duplication creates maintenance risk.
 
 ## Result

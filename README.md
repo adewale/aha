@@ -62,9 +62,9 @@ Many users start with:
 
 ## Privacy warning
 
-By default, `aha` preserves today's `none-v1` behavior: bundles and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
+By default, `aha` preserves today's `none-v1` behavior: depot snapshots and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `tool_invocations`, `entries.raw_json`, artifacts, and FTS) at ingest. Bundles remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
+Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `tool_invocations`, `entries.raw_json`, artifacts, and FTS) at ingest. Depot blobs remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
 
 ## Install / build
 
@@ -175,7 +175,7 @@ See `docs/patterns-and-interventions.md` for the manual classifier and artifact 
 | Claude History Explorer | Claude Code history only | On-demand parsing/regex-style local exploration | Browse/search Claude sessions directly | Lightweight Claude-only exploration |
 | QMD-style workflows | Usually document/session search with agent-oriented outputs | Depends on QMD setup | Treat snippets as leads, then retrieve cited context | Query/read discipline and citation-like workflows |
 
-`aha` borrows the QMD lesson that snippets are leads, not evidence: agents should search, read the returned refs, then answer from retrieved context. It differs from Claude History Explorer by snapshotting immutable multi-source bundles and merging them into a reusable local corpus instead of searching one live Claude tree on demand.
+`aha` borrows the QMD lesson that snippets are leads, not evidence: agents should search, read the returned refs, then answer from retrieved context. It differs from Claude History Explorer by capturing immutable multi-source content-addressed snapshots and merging them into a reusable local corpus instead of searching one live Claude tree on demand.
 
 ## Core journeys
 
@@ -186,7 +186,7 @@ aha init --accept-secrets
 aha refresh
 ```
 
-`refresh` is the short path: snapshot configured sources, reuse an unchanged depot bundle when state metadata proves nothing changed, then ingest pending/new bundles into the configured corpus.
+`refresh` is the short path: push only new file versions from configured sources (an unchanged machine writes nothing to the depot), then pull snapshots the corpus has not seen — fetching only unknown blobs.
 
 ### Routine update
 
@@ -231,7 +231,7 @@ See `docs/command-inventory.md` for the human command inventory and `docs/comman
 | Codex | `~/.codex/sessions` | JSONL rollout/session files |
 | OpenCode | `$XDG_DATA_HOME/opencode` when set, otherwise `~/.local/share/opencode` | SQLite database (`opencode.db`), converted to JSONL during discovery |
 
-A source is read-only during snapshot. For JSONL sources, raw files are copied into the bundle and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the bundle stores those JSONL files. The source database is copied (with any WAL/SHM sidecars that are present) into a private export cache before reading and is never written to. `$OPENCODE_DB` is an exclusive database-path override; when it is not set, release-channel databases (`opencode-*.db`) beside the default are picked up automatically. The export cache defaults under the user cache directory (`.../aha/opencode-export/<db-hash>/`), uses private directory/file modes, and can be redirected with `AHA_OPENCODE_EXPORT_DIR` or size-limited with `AHA_OPENCODE_MAX_DB_BYTES`.
+A source is read-only during snapshot. For JSONL sources, raw files are stored as content-addressed blobs listed in the snapshot manifest and preserved for provenance. OpenCode's SQLite database is converted to deterministic, lossless JSONL during discovery — the original `data` JSON of every `session`/`message`/`part` row is preserved verbatim, and the snapshot stores those JSONL files. The source database is copied (with any WAL/SHM sidecars that are present) into a private export cache before reading and is never written to. `$OPENCODE_DB` is an exclusive database-path override; when it is not set, release-channel databases (`opencode-*.db`) beside the default are picked up automatically. The export cache defaults under the user cache directory (`.../aha/opencode-export/<db-hash>/`), uses private directory/file modes, and can be redirected with `AHA_OPENCODE_EXPORT_DIR` or size-limited with `AHA_OPENCODE_MAX_DB_BYTES`.
 
 ### Verifying an adapter against a real machine
 
@@ -248,7 +248,7 @@ scripts/smoketest.sh codex ~/.codex/sessions
 |---|---|
 | Config | `~/.config/aha/config.jsonc` |
 | Corpus | `~/.aha` |
-| Depot | `~/.aha/depot` local bundle store |
+| Depot | `~/.aha/depot` local content-addressed snapshot store |
 | Machine ID | sanitized local hostname |
 | Tool output indexing | off |
 | Redaction | `none-v1` (set `v1` to redact indexed projections at ingest) |
@@ -286,9 +286,9 @@ For coding agents using `aha`:
 
 ## Accepted v1 limits
 
-- Redaction is pattern-based and applies to derived corpus projections only; raw bundles remain unredacted.
+- Redaction is pattern-based and applies to derived corpus projections only; raw depot blobs remain unredacted.
 - No Windows support until v2.
-- `include_images=false` suppresses normalized image assets/blobs, but raw bundles/session JSON may still contain embedded image bytes.
+- `include_images=false` suppresses normalized image assets/blobs, but raw depot blobs/session JSON may still contain embedded image bytes.
 - `read` shows file-order context, not source-native branch/thread reconstruction.
 - Tool output is preserved in raw files but not indexed by default.
 - Conflict UX can improve.
@@ -312,7 +312,8 @@ For coding agents using `aha`:
 - `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
 - `docs/research/openinference.md` — OpenInference semantic-convention reference.
 - `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.
-- `docs/agent-history-aggregator-spec.md` — full v1 spec.
+- `docs/depot-v2-spec.md` — content-addressed snapshot depot (blobs + manifests): the current depot design.
+- `docs/agent-history-aggregator-spec.md` — full v1 spec (historical; the depot portions are superseded by `docs/depot-v2-spec.md`).
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
 - `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.

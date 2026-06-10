@@ -66,7 +66,7 @@ aha verify --json
 aha verify --repair-fts --json
 ```
 
-`verify` is read-only by default and JSON output includes corpus/FTS row-count stats so humans and agents can see what was checked. `--repair-fts` rebuilds derived FTS rows from `messages` and `artifacts` and reports deleted/inserted FTS row counters; raw bundle/corpus rows remain the source of truth.
+`verify` is read-only by default and JSON output includes corpus/FTS row-count stats so humans and agents can see what was checked. `--repair-fts` rebuilds derived FTS rows from `messages` and `artifacts` and reports deleted/inserted FTS row counters; depot blobs and base corpus rows remain the source of truth.
 
 ## Optional profiling
 

@@ -118,7 +118,7 @@ Then ingest all configured local sessions:
 aha refresh --json
 ```
 
-This snapshots local histories into the local depot, then ingests pending/new bundles into the SQLite + FTS corpus.
+This pushes local histories into the local depot as content-addressed blobs plus a snapshot manifest (unchanged files are never re-uploaded), then pulls new snapshots into the SQLite + FTS corpus.
 
 ## 5. Verify the corpus
 
@@ -181,7 +181,7 @@ configure a depot here — this step **opts into R2 as your default depot**, and
 you can switch back to local at any time.
 
 > For the full set of depot states and transitions — init, use, snapshot,
-> verify, compact — see [`depot-lifecycle.md`](depot-lifecycle.md).
+> verify — see [`depot-lifecycle.md`](depot-lifecycle.md).
 
 R2 requires two separate things:
 
@@ -273,8 +273,10 @@ aha depot use r2:aha-depot         # back to R2
 
 `aha depot use` only switches to a depot that is already initialized. If an
 empty bucket has no depot marker yet, it points you at `aha depot init`; if a
-populated depot is missing its marker or has catalog drift, it points you at
-`aha depot verify --repair` instead.
+depot has problems, it points you at `aha depot verify --deep` to diagnose.
+Note that `aha depot init` refuses a bucket holding a v1 (`bundles/v1` +
+`catalog/v1`) depot — there is no migration; recover a v1 depot by importing
+its bundle files with `aha ingest <bundle.tar.zst>` and pushing fresh.
 
 ### Add another machine
 
@@ -288,8 +290,9 @@ aha refresh                  # share history through R2
 
 ### Deep verification
 
-`aha depot verify` is quick by default. For a full byte-hash check — it downloads
-and reads bundle bytes — run it explicitly:
+`aha depot verify` is quick by default (pointers resolve to well-formed
+manifests). For a full byte-hash check — it fetches every referenced blob and
+verifies its hash — run it explicitly:
 
 ```bash
 aha depot verify --deep --json

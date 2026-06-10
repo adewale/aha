@@ -2,7 +2,7 @@
 title: R2 Snapshot Aggregation Spec
 kind: spec
 created: 2026-05-23
-updated: 2026-05-23
+updated: 2026-06-10
 tags:
   - agents
   - session-history
@@ -16,7 +16,7 @@ tags:
   - cli
   - specification
 source_type: design
-status: proposed
+status: superseded by docs/depot-v2-spec.md
 aliases:
   - R2 Snapshot Aggregation
   - Depot
@@ -24,6 +24,22 @@ aliases:
 ---
 
 # R2 Snapshot Aggregation Spec
+
+> **Superseded (June 2026).** The bundle-store layout this spec describes was
+> replaced wholesale by the content-addressed snapshot depot in
+> [`docs/depot-v2-spec.md`](depot-v2-spec.md). Still true and still in force:
+> the guiding principle (**data loss outweighs data theft**), the trust posture
+> and network boundary (`docs/trust.md`), local-by-default with R2 as explicit
+> opt-in, the rule that the corpus is always rebuildable from the depot, and
+> the R2 credential/bucket guidance (`docs/r2-bucket-settings.md`). Replaced:
+> the `bundles/v1/` + `catalog/v1/` key layout, the monolithic `tar.zst`
+> bundle as the depot's unit of storage, the `BundleRef` catalog schema and
+> shard merge/repair, `state_sha256` signatures, bundle budgets, and
+> `depot compact` — superseded by write-once `blobs/v2/<sha256>.zst` file
+> blobs, per-machine snapshot manifests, `latest` pointers, and a machines
+> index. The v1 bundle *file* format survives only behind `aha export` /
+> `aha ingest <bundle.tar.zst>`. The remainder of this document is preserved
+> unedited as the historical v1 depot design.
 
 ## Status and relationship to v1
 
