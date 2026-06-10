@@ -157,11 +157,16 @@ Consequences encoded in this design:
 
 ```text
 <depot root or bucket>/
-  aha-depot/v2                                  # marker object/file
+  aha-depot.json                                # marker (schema aha-depot/v2)
   blobs/v2/<sha256>.zst                         # one compressed file version, write-once
+  machines/index.json                           # machine-namespace registry, conditional PUT
   machines/<machine_id>/manifests/<sha256>.json # one snapshot manifest, write-once
   machines/<machine_id>/latest                  # pointer {manifest_sha256}, conditional PUT
 ```
+
+The **machines index** exists so pull can discover machine namespaces with a
+single GET instead of a LIST (I6). It is appended to (conditional PUT with
+retry) only on a machine's first-ever push.
 
 A **manifest** is the deterministic JSON serialization of a snapshot:
 machine identity, capture metadata, adapter versions, policy, and the full

@@ -11,7 +11,6 @@ import (
 	stdhash "hash"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -567,13 +566,7 @@ func ValidateManifestSemantics(m model.Manifest) error {
 }
 
 func validateArchiveDataPath(name string) error {
-	if name == "" || name == "." || name == ".." || path.IsAbs(name) || path.Clean(name) != name || strings.Contains(name, "\\") || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || strings.HasPrefix(name, "./") || strings.Contains(name, "/./") {
-		return fmt.Errorf("unsafe archive path: %s", name)
-	}
-	if name == "manifest.json" || name == "checksums/sha256sums.txt" || strings.HasPrefix(name, "checksums/") {
-		return fmt.Errorf("unsafe archive path: %s", name)
-	}
-	return nil
+	return model.ValidateSourceDataPath(name)
 }
 
 func CanonicalManifest(m model.Manifest) ([]byte, error) {
