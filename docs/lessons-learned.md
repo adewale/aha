@@ -2,7 +2,7 @@
 
 This document captures the implementation lessons from the Agent History Aggregator (`aha`) rollback/reimplementation cycles. It is intentionally blunt: these are the things that changed the product, tests, architecture, or process.
 
-*Historical record: the entries below predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). Bundle/catalog depot mechanics referenced in earlier cycles were replaced by content-addressed snapshots in June 2026; the lessons stand as recorded.*
+*The cycle-1 to cycle-10 sections predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)); bundle/catalog depot mechanics they reference were replaced by content-addressed snapshots in June 2026, and those lessons stand as recorded. The "Depot v2 lessons" section records that conversion.*
 
 ## Cycle ledger summary
 
@@ -18,6 +18,7 @@ This document captures the implementation lessons from the Agent History Aggrega
 | 8 | Ingest must be bundle-pure. | Pi identity now comes from bundled bytes, not mutable live paths. |
 | 9 | Release readiness needs first-class lessons, classified open questions, and CI/release hardening. | Added this document and tightened spec classification; review caught stale spec cycle counts. |
 | 10 | Process accounting needs regression tests too. | Added doc-sync coverage for current cycle/attempt/rollback counts. |
+| 11 | Asymptotic class beats constant tuning: the depot was a Shlemiel the Painter. | Depot v2: content-addressed snapshots; O(delta) push/pull; v1 deleted outright. |
 
 Current counts after cycle 10:
 
@@ -35,6 +36,127 @@ Current counts after cycle 10:
 - Post-v1 release-hardening tasks: large-corpus performance validation, more anonymized real Claude fixtures, and release notes.
 - V2/later items: redaction/public dataset prep, Windows support, configurable project grouping, opt-in tool-output indexing, source-native branch/thread reads, conflict UX refinements, and OCR/captioning.
 - Accepted residual regrets are documented below; none are P0/P1 for v1.
+
+## Depot v2 lessons (June 2026)
+
+The eleventh cycle replaced the bundle/catalog depot with content-addressed
+snapshots (spec, phases, and invariants in
+[docs/depot-v2-spec.md](depot-v2-spec.md)). These are the lessons that cycle
+earned.
+
+### Scalability and design
+
+- Audit growth by asymptotic class against wall time, not by profiling
+  constants. The depot was correct, well-profiled, and quadratic: every
+  refresh re-read, re-parsed, and re-uploaded total history. The performance
+  plan's blind spot was a true-but-misleading row — "ingest is linear in new
+  entries" held per bundle while every bundle contained all old entries.
+- Research the design space before designing. Forty years of prior art
+  (restic/borg/kopia, git, ZFS/Time Machine, Dynamo) converge on the same
+  shape — a scan layer that skips reading unchanged inputs and a storage
+  layer that skips storing known data — and consistently graduated away from
+  delta chains toward logically-full, physically-incremental manifests.
+  Reading that first meant v2 was chosen, not invented.
+- Price the platform into the architecture. R2's model (free egress, cheap
+  ops, storage as the only compounding charge, LIST as the one op-cost trap)
+  flipped the usual verdicts: many small objects are fine, re-downloads cost
+  time not money, and "never LIST on steady-state paths" was worth promoting
+  from guideline to invariant carried by the interface shape.
+- The no-users window is a license to delete, and deletion compounds: most
+  v1 machinery existed to manage problems monolithic bundles created
+  (budgets, state signatures, catalog merge/repair/compaction, duplicate
+  detection, corpus bundle hoarding). The conversion ended net-negative in
+  code while gaining a storage engine. Keep exactly one format bridge
+  (`export`/`import`) instead of dual-format drivers.
+- Identity should be content, not names. Replacing `bundle_id` (policed for
+  emptiness, uniqueness, reuse) with the canonical manifest hash deleted a
+  class of checks and a class of tests; "same id, different content" went
+  from an error to two snapshots.
+- Equality must be over the state you mean, not the encoding you have. The
+  first reuse check compared manifest identity, which embeds `captured_at` —
+  so an unchanged machine would never be "unchanged" across days. State
+  digests (volatile fields normalized) and identities are different
+  questions; keep both, never substitute one for the other.
+- Decode only canonical bytes. Requiring decode∘encode to reproduce the
+  input byte-for-byte means one logical manifest has exactly one identity;
+  fuzzing then proves it rather than sampling it.
+
+### Construction versus chaos
+
+- Typestate and fault injection answer different questions. Receipts and
+  published-snapshot types made *dangling references* unrepresentable, but
+  could not see the *ordering of two conditional writes*: the
+  fault-injection sweep (fail every primitive operation once; require clean
+  deep-verify and a convergent retry) found the index being written before
+  the pointer, leaving an indexed machine with no pointer after a crash.
+  Construction-time guarantees need a chaos-shaped test for everything the
+  type system cannot say.
+- A discovery layer must only name complete states. Publish ordering extends
+  past the data (blobs → manifest → pointer) to the index that makes the
+  namespace discoverable: pointer first, index last, so a crash leaves an
+  invisible-but-consistent namespace that the next push heals.
+- An advisory cache is a work-skipping hint, never a correctness input.
+  Every consumer needs a `--force` bypass; corruption must self-heal to a
+  slow full pass; and the racy-mtime anchor must cover the whole capture
+  window (cache-open time), not the save time — anchoring at save left a
+  coarse-mtime-granularity window where a mid-capture edit would be trusted.
+- Conditional-write self-healing falls out of reading your own etag: a
+  corrupt pointer is replaced, not retried forever, because the If-Match
+  value came from reading the corrupt object itself. Say so in a comment;
+  an auditor flagged it as an infinite loop because the property is
+  non-obvious.
+
+### Confidence techniques (from adewale/testing-best-practices)
+
+- Choose techniques by trigger, not by enthusiasm: fault injection because
+  the protocol is state-dependent; differential testing because two drivers
+  implement one contract; metamorphic because history-replay vs latest-only
+  has no cheap oracle; exhaustive because rune-level sanitization makes the
+  short-input domain compose to all lengths; fuzzing because codecs parse
+  untrusted bytes. Mutation testing was deliberately deferred to
+  nightly-on-critical-modules.
+- Fuzzers audit test oracles too. The blob-verification fuzzer's first
+  finding was a test bug: zstd has many valid encodings of one plaintext, so
+  the oracle had to check meaning (decompressed content, independently
+  decoded) rather than representation (compressed framing). Keep the
+  counterexample as seed corpus.
+- Deleting a test class is a debt even when its subject is gone. The v1
+  driver contract, state-machine, and fuzz tests were deleted with v1;
+  confidence only recovered when each got a v2 successor at equal or higher
+  standard (differential drivers, rapid state machine with a write-once
+  shadow tree, codec fuzzers). Track test classes, not test counts.
+- Adversarial line-by-line audits earn their cost but must be re-verified:
+  two parallel audits found the real O(n²) carried-blob lookup, the lost
+  decompression budget, and the cache race — and also confidently reported
+  two non-bugs. Every audit claim gets checked against the code before a
+  fix is written.
+- Drift tests only protect what they anchor. Of five hard-coded sidebar
+  numbers in the interactive explorer, the one without a drift anchor was
+  the one that rotted. If a doc states a derivable fact, derive it in a test
+  or expect it to lie eventually.
+- A live-service smoke test should assert the same acceptance properties as
+  the fakes, not just liveness — and when production code cannot delete by
+  invariant, the test cleans its own namespace with raw SDK calls, because
+  test code is not bound by production invariants.
+
+### Process
+
+- Skip-work claims become proofs when the skip key is committed atomically
+  with the work it vouches for: a `session_versions` row in the same
+  transaction as its entries makes "already ingested" a lookup, not a
+  heuristic — and the skip key must include identity and path, never
+  content alone (byte-identical files from different sessions are different
+  facts).
+- Parallel agents need disjoint write scopes and mechanical verification.
+  Read-only audits parallelize perfectly; doc agents with non-overlapping
+  file scopes mostly work — but agents can die mid-task, so partial work is
+  only trusted after a sweep that would catch incompleteness (stale-token
+  greps plus drift tests), never on the agent's word.
+- A PR is an argument, not an announcement: prove the suite is green, name
+  which tests were observed red before each fix, and flag the one thing the
+  author genuinely could not verify (the live-bucket run) with the exact
+  command for the maintainer — per the good-pr maxim that maintainers own
+  every merged line.
 
 ## Claude History Explorer comparison lessons
 
