@@ -133,3 +133,45 @@ func TestPushV2FirstPushUploadsEverything(t *testing.T) {
 		t.Fatalf("pointer after first push: %v ok=%v err=%v", latest, ok, err)
 	}
 }
+
+// TestPushV2UnchangedStateWithNewTimestampIsReused pins that reuse is
+// decided by captured STATE, not by capture time: a daily refresh of an
+// unchanged machine reuses the parent snapshot (zero writes) even though
+// captured_at differs, and reports the parent's identity.
+func TestPushV2UnchangedStateWithNewTimestampIsReused(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeS3(t)
+	defer f.Close()
+	v2 := depot.NewV2FromR2(f.Depot("bucket"))
+	if err := v2.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	state := map[string]string{"a.jsonl": "same bytes"}
+	m1 := snapshotManifestFor("mach-a", sessionFile("same bytes", "a.jsonl"))
+	first, err := depot.PushV2(ctx, v2, m1, newMapBlobSource(t, state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2 := snapshotManifestFor("mach-a", sessionFile("same bytes", "a.jsonl"))
+	m2.CapturedAt = "2026-06-10T00:00:00Z"
+	f.resetCounts()
+	src := newMapBlobSource(t, state)
+	second, err := depot.PushV2(ctx, v2, m2, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Reused {
+		t.Fatalf("unchanged state with new timestamp not reused: %+v", second)
+	}
+	if second.ManifestSHA256() != first.ManifestSHA256() {
+		t.Fatalf("reuse must report the parent identity: %s vs %s", second.ManifestSHA256(), first.ManifestSHA256())
+	}
+	if len(src.requests) != 0 {
+		t.Fatalf("reused push read blobs: %v", src.requests)
+	}
+	for op := range f.opsSnapshot() {
+		if strings.HasPrefix(op, "PUT ") {
+			t.Fatalf("reused push wrote %q", op)
+		}
+	}
+}

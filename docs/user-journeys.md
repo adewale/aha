@@ -1,6 +1,8 @@
 # User Journeys and Defaults
 
-`aha` is optimized for a local-first archive workflow: snapshot private histories, ingest immutable bundles, then search the corpus. The defaults come from the journeys below.
+`aha` is optimized for a local-first archive workflow: push private histories
+to a content-addressed depot as immutable snapshots, pull them into a local
+corpus, then search it. The defaults come from the journeys below.
 
 Design rules:
 
@@ -24,7 +26,7 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `refresh` snapshots configured sources, reuses unchanged depot state when possible, and ingests pending depot bundles into the local corpus.
+- `refresh` pushes this machine's state to the depot (unchanged state is recognized from the depot pointer alone; only new file versions upload) and pulls every machine's latest snapshot into the local corpus, fetching only unknown content.
 - The user should not need to remember Pi/Claude/Codex paths for the standard layout.
 
 Defaults used:
@@ -74,22 +76,49 @@ Rationale:
 - Results must be readable without knowing the source agent's file format.
 - Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Incidents store normalized command/error signatures for ranking, not raw tool output samples.
 
-## Journey 4: create a repo and ingest bundles
+## Journey 4: hand someone one file (export/import)
 
-User goal: “Create a separate aggregation repo and put bundles into it.”
+User goal: “Give a colleague (or another machine without depot access) my history as a single file.”
 
 ```bash
-aha ingest --repo ~/aha-work ~/Downloads/aha-sessions-work-mac.tar.zst
+aha export --machine work-mac --out work-mac.tar.zst
+aha ingest --repo ~/aha-work work-mac.tar.zst
 aha search --repo ~/aha-work "query" --machine work-mac
 ```
 
 Rationale:
 
+- `export` materializes a machine's latest depot snapshot as one portable v1 `bundle.tar.zst`; `ingest <file>` imports it. These two commands are the only place the v1 bundle format survives.
+- Snapshot identity and machine provenance come from the manifest.
 - Ingest creates the repo/corpus directory if needed.
-- Bundle identity and machine provenance come from the manifest.
-- Explicit bundle-path ingest imports into the corpus; publishing to a depot is done by `snapshot`/`refresh --depot`.
-- Users should not need to rename files or edit config before import.
-- Duplicate imports should be harmless.
+- Duplicate imports are harmless (identity is the manifest hash).
+
+## Journey 4½: bootstrap a new machine
+
+User goal: “New laptop; give me my whole cross-machine history.”
+
+```bash
+aha init --accept-secrets
+aha refresh
+```
+
+Rationale:
+
+- The pull half of `refresh` discovers every machine in the depot (one index read), fetches each latest manifest, and downloads only blobs the fresh corpus lacks — each file version is parsed exactly once.
+- No restore command is needed: the corpus is a rebuildable index over the depot by construction.
+
+## Journey 4¾: contribute-only machines
+
+User goal: “This box should publish its history and never download anyone else's.”
+
+```bash
+aha snapshot
+```
+
+Rationale:
+
+- `snapshot` is push-only: it reads its own latest manifest as the diff baseline (a few KB), uploads only new file versions, and never touches another machine's namespace — guaranteed by the depot's per-machine write handles, not by convention.
+- No corpus is required on the machine.
 
 ## Journey 5: automation
 
@@ -171,9 +200,9 @@ Rationale:
 |---|---|
 | `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default local depot/corpus dirs, and privacy acknowledgement set to false. |
 | `aha init --accept-secrets` | Same as `init`, but records one-time privacy acknowledgement. |
-| `aha refresh` | Snapshot configured sources or reuse an unchanged depot bundle when `state_sha256` metadata matches, then ingest pending/new depot bundles into configured corpus. Supports `--session` and `--max-sessions` for 1-to-all local-session scope. |
-| `aha snapshot` | Use config/default machine ID, sources, and depot. Supports `--session` and `--max-sessions`; requires prior privacy acknowledgement. |
-| `aha ingest` | Ingest explicit bundle paths, or ingest from the configured depot when no paths are given. `--repo` is an alias for the corpus directory. |
+| `aha refresh` | Push state to the configured depot (unchanged state reuses the parent snapshot; only new file versions upload), then pull every machine's latest snapshot into the configured corpus. Supports `--session`/`--max-sessions` scoping and `--force` to bypass the capture cache. |
+| `aha snapshot` | Push-only: capture and publish to the configured depot without a corpus. Supports `--session`, `--max-sessions`, `--force`; requires prior privacy acknowledgement. |
+| `aha ingest` | Pull every machine's latest depot snapshot when no paths are given, or import explicit v1 bundle files. `--repo` is an alias for the corpus directory. |
 | `aha search <query>` | Search configured corpus, limit 20. |
 | `aha read ...` | Read from configured corpus. |
 | `aha status` / `aha verify` / `aha conflicts` | Inspect configured corpus; `verify --repair-fts` repairs derived FTS rows. |
@@ -182,15 +211,16 @@ Rationale:
 
 | Command | Reason |
 |---|---|
-| `refresh` | Common local operation: make the aggregation corpus current in one step, scoped from one to all local sessions. |
-| `snapshot` | Capture immutable evidence without changing the corpus; useful for backup, copy, deterministic testing, and scoped local-session bundles. |
-| `ingest` | Create/open a repo and merge copied/existing bundles; useful for multi-machine history and parser/schema reruns. |
+| `refresh` | Common local operation: make the depot and corpus current in one step, scoped from one to all local sessions. |
+| `snapshot` | Push immutable evidence to the depot without touching a corpus; the contribute-only machine's whole interface. |
+| `ingest` | Create/open a repo and pull depot snapshots (or import exported bundle files); useful for multi-machine history and parser/schema reruns. |
+| `export` | Materialize a machine's latest snapshot as one portable file for hand-off. |
 | `search` | Primary retrieval action. |
 | `read` | Context expansion around compact search results. |
 | `status` | Explain corpus health and counts. |
 | `verify` | Check corpus invariants and optionally repair derived FTS rows. |
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
-| `depot` | Initialize, list, and verify the durable bundle store. |
+| `depot` | Initialize, list machine snapshots, and verify the durable content-addressed store. |
 | `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |
 | `mcp` | Expose read tools to coding agents over stdio MCP without per-call subprocesses. |
 | `serve` | Read-only local dashboard over the same tool surface for human browsing. |
@@ -200,8 +230,8 @@ Rationale:
 
 Use flags for:
 
-- deterministic test bundles (`--captured-at`, `--bundle-id`);
-- copied bundles from another machine;
+- deterministic test snapshots (`--captured-at`);
+- exported bundles from another machine;
 - multiple corpora;
 - nonstandard Pi, Claude Code, Codex, or OpenCode roots;
 - temporary workspaces and CI.

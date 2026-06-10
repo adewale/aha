@@ -67,6 +67,22 @@ func (v BlobKey) String() string        { return v.value }
 func (v ManifestSHA256) Valid() bool    { return len(v.value) == 64 && isLowerHex(v.value) }
 func (v BlobKey) Valid() bool           { return len(v.value) == 64 && isLowerHex(v.value) }
 
+// SnapshotStateSHA256 digests the capture-time-invariant state of a
+// manifest: everything except when it was captured and by which build.
+// Two snapshots of an unchanged machine on different days have different
+// identities (provenance) but equal state digests, which is what lets a
+// push recognize "nothing changed" from the parent pointer alone.
+func SnapshotStateSHA256(m SnapshotManifest) (SHA256Hex, error) {
+	m.CapturedAt = "state"
+	m.CreatedBy = "state"
+	b, _, err := EncodeSnapshotManifest(m)
+	if err != nil {
+		return SHA256Hex{}, err
+	}
+	sum := sha256.Sum256(b)
+	return SHA256Hex{value: hex.EncodeToString(sum[:])}, nil
+}
+
 // EncodeSnapshotManifest validates m, normalizes it (files sorted by
 // relative path), and returns the canonical bytes plus their SHA-256
 // identity. Invalid manifests cannot be encoded, so they can never acquire

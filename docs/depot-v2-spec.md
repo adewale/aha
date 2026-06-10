@@ -270,7 +270,7 @@ bundles create.
 | Bundle budgets + `ValidateManifestBudgets` (the 2 GiB cliff) | monolithic artifact size |
 | `ManifestStateSHA256`, `state_sha256` plumbing, `findDepotBundleWithSameState`, `SkipIfUnchanged` | cheap "did anything change?" — replaced by manifest diff, which also says *what* changed |
 | Bundle-level duplicate detection (`recordBundleAttempt` dedup) | duplicates are unrepresentable under I1 |
-| `PromoteBundle`, corpus bundle blobs, `referencedBlobPaths`, `corpus prune-orphans` | per-corpus copies of full-history bundles |
+| `PromoteBundle`, corpus bundle blobs, and their verify/prune plumbing | per-corpus copies of full-history bundles (`corpus prune-orphans` survives for file/image blobs orphaned by rolled-back ingests) |
 | Catalog shard merge/repair + `depot compact` | multi-writer catalog reconciliation — replaced by per-machine pointers (I3) + conditional PUT |
 | Deterministic `tar.zst` writer/reader in `internal/archive` (kept only behind `export`/`import`) | the bundle file format |
 | `bundle_id` and its validity policing | naming — replaced by manifest SHA (I4) |
@@ -296,8 +296,10 @@ The daily journeys in `docs/user-journeys.md` (1–3, 5–8) are preserved
   `user-journeys.md`): `aha init && aha refresh` against an existing depot =
   pointer GETs + manifest GETs + only-needed blob fetches + parse-once. Free
   egress makes this the multi-machine pitch made real.
-- **Deleted commands:** `corpus prune-orphans`, `depot compact` (reasons
-  above). Net command count: −2 admin, +1 export.
+- **Deleted commands:** `depot compact` (per-machine pointers replaced
+  catalog shards). `corpus prune-orphans` survives: file/image blobs from
+  rolled-back ingests can still orphan. Net command count: −1 subcommand,
+  +1 export.
 - `depot verify` reworked: quick = pointers resolve to manifests, manifests
   well-formed; `--deep` = every referenced blob present with matching hash
   (many small GETs — Class B, cheap in dollars, slower than streaming one

@@ -45,9 +45,23 @@ func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src Bl
 	if err != nil {
 		return res, err
 	}
-	if hasParent && parent.SHA() == sha {
-		res.Reused = true
-		return res, nil
+	if hasParent {
+		// Reuse is decided by captured state, not capture time: an
+		// unchanged machine refreshed on a new day reuses the parent
+		// snapshot and reports the parent's identity.
+		parentState, err := model.SnapshotStateSHA256(parent.Manifest())
+		if err != nil {
+			return res, err
+		}
+		state, err := model.SnapshotStateSHA256(manifest)
+		if err != nil {
+			return res, err
+		}
+		if parentState == state {
+			res.manifestSHA = parent.SHA()
+			res.Reused = true
+			return res, nil
+		}
 	}
 	receipts := make([]BlobReceipt, 0, len(manifest.Files))
 	seen := make(map[string]bool, len(manifest.Files))

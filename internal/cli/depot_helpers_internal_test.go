@@ -96,23 +96,6 @@ func TestCaptureDepotR2ConfigLocalNoop(t *testing.T) {
 	}
 }
 
-func TestDepotUseVerificationIsQuick(t *testing.T) {
-	d := &selectionVerifyDriver{report: depot.VerifyReport{Problems: []string{"missing depot marker"}}}
-	report, err := verifyDepotQuick(context.Background(), d)
-	if err != nil {
-		t.Fatalf("verifyDepotQuick: %v", err)
-	}
-	if report.Deep {
-		t.Fatalf("depot selection must use quick verification, got deep report: %+v", report)
-	}
-	if d.deepCalls != 0 {
-		t.Fatalf("depot selection called deep Verify %d times", d.deepCalls)
-	}
-	if d.quickCalls != 1 {
-		t.Fatalf("depot selection quick calls = %d, want 1", d.quickCalls)
-	}
-}
-
 func TestDepotUninitializedSignal(t *testing.T) {
 	cases := []struct {
 		name   string

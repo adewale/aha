@@ -40,7 +40,7 @@ func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "server"}, io.Discard, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, io.Discard, io.Discard); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 	store, err := corpus.OpenExisting(corpusDir)

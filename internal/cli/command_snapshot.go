@@ -7,12 +7,9 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
-	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/depot"
-	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
 )
@@ -23,14 +20,14 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 type snapshotRequest struct {
-	Config          model.Config
-	DepotOverride   string
-	CapturedAt      string
-	BundleID        string
-	SessionFilters  []string
-	MaxSessions     int
-	JSON            bool
-	SkipIfUnchanged bool
+	Config         model.Config
+	DepotOverride  string
+	CapturedAt     string
+	SessionFilters []string
+	MaxSessions    int
+	JSON           bool
+	// Force bypasses the advisory capture cache (full re-read).
+	Force bool
 }
 
 func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
@@ -38,15 +35,14 @@ func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	finalizeSnapshotMetadata(&req)
-	path, sha, err := writeSnapshot(req)
+	res, err := pushSnapshotV2(req)
 	if err != nil {
 		return err
 	}
 	if req.JSON {
-		return writeJSON(stdout, map[string]any{"bundle": path, "sha256": sha, "bundle_id": req.BundleID, "captured_at": req.CapturedAt})
+		return writeJSON(stdout, pushResultJSON(res))
 	}
-	fmt.Fprintf(stdout, "%s\nsha256:%s\n", path, sha)
+	printPushResult(stdout, res)
 	return nil
 }
 
@@ -63,25 +59,23 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	req.SkipIfUnchanged = *snapshotFlags.capturedAt == "" && *snapshotFlags.bundleID == ""
 	applyCorpusOverride(&req.Config, *repoDir, *corpusDir)
 	if err := safety.ValidateWriteOutsideSources(req.Config, req.Config.CorpusDir, "corpus"); err != nil {
 		return err
 	}
-	finalizeSnapshotMetadata(&req)
-	path, sha, err := writeSnapshot(req)
+	res, err := pushSnapshotV2(req)
 	if err != nil {
 		return err
 	}
 	if !*snapshotFlags.jsonOut {
-		fmt.Fprintf(stdout, "%s\nsha256:%s\n", path, sha)
+		printPushResult(stdout, res)
 	}
 	store, err := openCorpusForCommand(req.Config, true)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	drv, err := depotDriverForConfig(req.Config, req.DepotOverride)
+	v2, err := depotV2ForConfig(req.Config, req.DepotOverride)
 	if err != nil {
 		return err
 	}
@@ -89,14 +83,22 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reports, err := ingestFromDepotWith(stdout, ing, drv, *snapshotFlags.jsonOut)
+	reports, err := pullFromDepotV2(stdout, ing, v2, *snapshotFlags.jsonOut)
 	if err != nil {
 		return err
 	}
 	if *snapshotFlags.jsonOut {
-		return writeJSON(stdout, map[string]any{"bundle": path, "sha256": sha, "report": summarizeReports(reports), "reports": reports})
+		return writeJSON(stdout, map[string]any{"push": pushResultJSON(res), "report": summarizeReports(reports), "reports": reports})
 	}
 	return nil
+}
+
+func pushResultJSON(res depot.PushResult) map[string]any {
+	return map[string]any{"manifest_sha256": res.ManifestSHA256().String(), "reused": res.Reused, "files": res.Files, "blobs_uploaded": res.BlobsUploaded, "blobs_carried": res.BlobsCarried}
+}
+
+func printPushResult(stdout io.Writer, res depot.PushResult) {
+	fmt.Fprintf(stdout, "snapshot %s files=%d uploaded=%d carried=%d reused=%v\n", res.ManifestSHA256(), res.Files, res.BlobsUploaded, res.BlobsCarried, res.Reused)
 }
 
 func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapshotRequest, error) {
@@ -115,8 +117,8 @@ type snapshotFlagSet struct {
 	configPath    *string
 	acceptSecrets *bool
 	capturedAt    *string
-	bundleID      *string
 	maxSessions   *int
+	force         *bool
 	jsonOut       *bool
 	sourceFlags   multiFlag
 	sessionFlags  multiFlag
@@ -129,8 +131,8 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 	flags.configPath = fs.String("config", "", "JSONC config path")
 	flags.acceptSecrets = fs.Bool("accept-secrets", false, "acknowledge raw bundle privacy warning")
 	flags.capturedAt = fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
-	flags.bundleID = fs.String("bundle-id", "", "bundle id (advanced deterministic testing)")
 	flags.maxSessions = fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
+	flags.force = fs.Bool("force", false, "bypass the capture cache and re-read every source file")
 	flags.jsonOut = fs.Bool("json", false, "JSON output")
 	fs.Var(&flags.sourceFlags, "source", "source spec type=path (repeatable)")
 	fs.Var(&flags.sessionFlags, "session", "session id/path match to snapshot (repeatable)")
@@ -138,24 +140,16 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 }
 
 func (f *snapshotFlagSet) buildRequest(stderr io.Writer) (snapshotRequest, error) {
-	req, err := buildSnapshotRequest(*f.configPath, *f.machine, *f.depotAddr, *f.acceptSecrets, *f.capturedAt, *f.bundleID, f.sourceFlags, f.sessionFlags, *f.maxSessions, stderr)
+	req, err := buildSnapshotRequest(*f.configPath, *f.machine, *f.depotAddr, *f.acceptSecrets, *f.capturedAt, f.sourceFlags, f.sessionFlags, *f.maxSessions, stderr)
 	if err != nil {
 		return snapshotRequest{}, err
 	}
 	req.JSON = *f.jsonOut
+	req.Force = *f.force
 	return req, nil
 }
 
-func finalizeSnapshotMetadata(req *snapshotRequest) {
-	if req.CapturedAt == "" {
-		req.CapturedAt = ahaclock.RealClock{}.Now().Format(time.RFC3339)
-	}
-	if req.BundleID == "" {
-		req.BundleID = hash.RandomID()
-	}
-}
-
-func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets bool, capturedAt, bundleID string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
+func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets bool, capturedAt string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return snapshotRequest{}, err
@@ -180,7 +174,7 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 		cfg.AcceptSecretsWarning = true
 	}
 	if !acceptSecrets && !cfg.AcceptSecretsWarning {
-		fmt.Fprintln(stderr, "Bundles are raw provenance and may contain prompts, source code, tool output, images, tokens, and private paths. Treat bundles as private even when corpus redaction is enabled. Pass --accept-secrets to continue.")
+		fmt.Fprintln(stderr, "Snapshots are raw provenance and may contain prompts, source code, tool output, images, tokens, and private paths. Treat depot contents as private even when corpus redaction is enabled. Pass --accept-secrets to continue.")
 		return snapshotRequest{}, errors.New("secrets warning not acknowledged")
 	}
 	if maxSessions < 0 {
@@ -199,5 +193,5 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 			return snapshotRequest{}, err
 		}
 	}
-	return snapshotRequest{Config: cfg, DepotOverride: depotAddr, CapturedAt: capturedAt, BundleID: bundleID, SessionFilters: []string(sessionFlags), MaxSessions: maxSessions}, nil
+	return snapshotRequest{Config: cfg, DepotOverride: depotAddr, CapturedAt: capturedAt, SessionFilters: []string(sessionFlags), MaxSessions: maxSessions}, nil
 }

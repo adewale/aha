@@ -119,12 +119,14 @@ func TestRefreshJSONUsesStableLowercaseReportKeys(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--json", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "json-contract"}, &out, &out); err != nil {
+	if err := cli.Run([]string{"refresh", "--json", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}, &out, &out); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		Bundle string `json:"bundle"`
-		SHA256 string `json:"sha256"`
+		Push struct {
+			ManifestSHA256 string `json:"manifest_sha256"`
+			Reused         bool   `json:"reused"`
+		} `json:"push"`
 		Report struct {
 			Sessions  int  `json:"sessions"`
 			Entries   int  `json:"entries"`
@@ -137,7 +139,7 @@ func TestRefreshJSONUsesStableLowercaseReportKeys(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("refresh JSON did not decode: %v\n%s", err, out.String())
 	}
-	if payload.Bundle == "" || payload.SHA256 == "" || payload.Report.Sessions != 1 || payload.Report.Entries == 0 || payload.Report.Messages == 0 {
+	if payload.Push.ManifestSHA256 == "" || payload.Push.Reused || payload.Report.Sessions != 1 || payload.Report.Entries == 0 || payload.Report.Messages == 0 {
 		t.Fatalf("bad refresh JSON payload: %+v", payload)
 	}
 	var raw map[string]any

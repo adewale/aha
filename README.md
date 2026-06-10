@@ -2,7 +2,7 @@
 
 `aha` is a local, cross-agent, cross-machine archive of your coding-agent history — the substrate for examining your own behaviour and (eventually) turning those patterns into better skills, prompts, and workflows.
 
-It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with deterministic `tar.zst` bundles and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. `aha incidents` surfaces recurring tool-call failures alongside the fixes that resolved them; it does not write skills for you.
+It captures Pi, Claude Code, Codex, and OpenCode sessions from every machine you work on into a single private SQLite + FTS5 corpus with content-addressed depot snapshots and stable agent-friendly refs. Browse it in a local dashboard, search it from the CLI, or wire it up so your own coding agents can read the depot. `aha incidents` surfaces recurring tool-call failures alongside the fixes that resolved them; it does not write skills for you.
 
 Use it when you've accumulated enough coding-agent conversations that you want to understand how you and your agents work — not just re-find snippets.
 
@@ -45,7 +45,7 @@ Many users start with:
 - **One corpus for multiple agents on multiple machines**: Pi, Claude Code, Codex, and OpenCode today across every machine you work from; more adapters later.
 - **Built for pattern-finding**: a stable schema and a typed retrieval surface so you (or an agent on your behalf) can ask "what do I keep doing", "where did this go wrong before", "have I asked this already".
 - **Private by default**: everything stays on your machine unless you explicitly configure a remote depot such as R2.
-- **Portable history**: deterministic `tar.zst` bundles + a local-or-R2 depot; share a depot, copy a bundle from another machine, or `aha ingest` it.
+- **Portable history**: content-addressed snapshots in a local-or-R2 depot — unchanged files never upload twice; share a depot, or hand someone one file via `aha export` / `aha ingest`.
 - **Better than snippets**: search finds leads; `read` retrieves full context so humans and agents do not answer from fragments.
 - **Agent-friendly retrieval**: JSON, refs, Markdown, a read-only MCP server, and a typed TypeScript client for code-mode runtimes.
 - **Auditable trust claims**: read-only source access, local-by-default behaviour, and network boundaries are tested.
