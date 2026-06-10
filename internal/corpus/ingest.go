@@ -19,6 +19,7 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/cas"
 	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
@@ -1060,27 +1061,16 @@ func spoolEntry(root string, r io.Reader) (string, string, int64, error) {
 }
 
 func storeFileBlobFromPath(root, sha, path string) error {
-	finalPath := filepath.Join(root, "blobs", "files", sha+".zst")
-	return fileutil.AtomicWrite(finalPath, fileutil.AtomicOptions{TempPattern: sha + "-*.tmp", ExistingOK: true}, func(out *os.File) error {
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		enc, err := pooledZstdWriter(out)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(enc, in)
-		closeEncErr := enc.Close()
-		if closeEncErr == nil {
-			putZstdWriter(enc)
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeEncErr
-	})
+	key, err := model.NewBlobKey(sha)
+	if err != nil {
+		return err
+	}
+	store, err := cas.Open(filepath.Join(root, "blobs", "files"))
+	if err != nil {
+		return err
+	}
+	_, err = store.PutFile(key, path)
+	return err
 }
 
 func pooledZstdWriter(w io.Writer) (*zstd.Encoder, error) {
