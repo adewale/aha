@@ -102,8 +102,8 @@ func TestDepotUninitializedSignal(t *testing.T) {
 		want   bool
 	}{
 		{"empty missing marker", depot.VerifyReport{Problems: []string{"missing depot marker"}}, true},
-		{"missing marker with catalog refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Catalogs: 1}, false},
-		{"missing marker with bundle refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Bundles: 1}, false},
+		{"missing marker with catalog refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Machines: 1}, false},
+		{"missing marker with bundle refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Manifests: 1}, false},
 		{"no problems", depot.VerifyReport{}, false},
 		{"invalid marker", depot.VerifyReport{Problems: []string{"invalid depot marker: bad schema"}}, false},
 		{"marker plus other", depot.VerifyReport{Problems: []string{"missing depot marker", "catalog missing bundle x"}}, false},

@@ -99,7 +99,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		if *jsonOut {
 			return writeJSON(stdout, report)
 		}
-		fmt.Fprintf(stdout, "manifests=%d machines=%d deep=%v problems=%d\n", report.Bundles, report.Catalogs, report.Deep, len(report.Problems))
+		fmt.Fprintf(stdout, "manifests=%d machines=%d deep=%v problems=%d\n", report.Manifests, report.Machines, report.Deep, len(report.Problems))
 		for _, p := range report.Problems {
 			fmt.Fprintf(stdout, "problem: %s\n", p)
 		}
@@ -210,5 +210,5 @@ func captureDepotR2Config(cfg *model.Config) error {
 // reachable but not yet provisioned (its marker is absent), as opposed to
 // one with real problems.
 func depotUninitialized(report depot.VerifyReport) bool {
-	return report.Bundles == 0 && report.Catalogs == 0 && len(report.Problems) == 1 && report.Problems[0] == "missing depot marker"
+	return report.Manifests == 0 && report.Machines == 0 && len(report.Problems) == 1 && report.Problems[0] == "missing depot marker"
 }

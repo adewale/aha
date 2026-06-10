@@ -5,7 +5,7 @@ Status: v1.1 implemented for corpus projections. Later sections marked v1.2+ rem
 ## Why
 
 V1 ships with `"redaction": "none-v1"` and the README warns users to treat
-bundles and corpora as private. That's defensible posture but a real adoption
+depot snapshots and corpora as private. That's defensible posture but a real adoption
 blocker:
 
 - Coding-agent transcripts routinely contain secrets that landed there by
@@ -34,9 +34,9 @@ in the first place.*
   grouped by pattern, are persisted and surfaced via `aha status` and the
   dashboard. "How much was redacted" is part of the trust model the user
   can verify.
-- **Bundles stay raw.** Bundles are content-addressed, deterministic, and
-  exist for provenance and recovery. Redaction is applied to the *derived
-  index*, not the source-of-truth bundle.
+- **Depot snapshots stay raw.** Blobs and manifests are content-addressed,
+  deterministic, and exist for provenance and recovery. Redaction is applied
+  to the *derived index*, never the source-of-truth depot content.
 - **Opt-out is explicit.** `config.redaction = "none-v1"` (the existing
   default) preserves today's behaviour; the new default `"v1"` turns on
   the redactor.
@@ -53,10 +53,10 @@ in the first place.*
   miss novel secret formats.
 - **Bundle-time redaction.** Bundles preserve raw evidence; redacting them
   would break content addressing and remove the recovery path. A future
-  `aha snapshot --redact` flag could opt in, but it's not v1.1.
+  redacted-push mode could opt in, but it's not v1.1.
 - **Reversible / format-preserving redaction.** Replacing a secret with
   `[REDACTED:<type>]` is irreversible by design. If you need the original,
-  the bundle still has it.
+  the depot blob still has it.
 - **Encrypting the corpus.** Out of scope; a separate proposal.
 
 ## Threat model
@@ -65,16 +65,16 @@ In scope:
 1. A user `aha search`es and a secret appears in the result snippet.
 2. A coding agent calls the MCP `search`/`read` tool and a secret shows up in
    the tool result text content.
-3. A teammate runs `aha read` on a shared depot bundle and sees a credential
-   that was never meant to leave the original machine.
+3. A teammate pulls a shared depot and `aha read` shows a credential that
+   was never meant to leave the original machine.
 4. The dashboard renders a session and a `.env` line is visible.
 5. The user accidentally screen-shares the dashboard.
 6. The user pastes an `aha read` output into a public bug report.
 
 Out of scope:
-1. An attacker with full read access to `~/.aha/`. The bundles are raw; an
-   attacker who can read them can read the secrets. Redaction is about the
-   projection surface, not the storage substrate.
+1. An attacker with full read access to `~/.aha/`. Depot blobs and corpus
+   file blobs are raw; an attacker who can read them can read the secrets.
+   Redaction is about the projection surface, not the storage substrate.
 2. The original source files (`~/.claude/projects/...`, `~/.codex/sessions/...`).
    aha is read-only with respect to those. If your secret is in your Claude
    Code transcript, it's already on disk before aha ever runs.
@@ -87,13 +87,13 @@ aha has two "tiers" of state. Redaction applies to *exactly one* of them.
 | Tier         | Examples                                                                  | Redacted? | Why                                                                |
 | ------------ | ------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------ |
 | Source       | `~/.claude/projects/*.jsonl`, `~/.codex/sessions/...`                     | No        | Read-only by design; aha never writes there.                       |
-| Bundles      | `~/.aha/depot/bundles/v1/<sha>.tar.zst`                                  | No        | Content-addressed; bundles are the recovery + provenance path.     |
+| Depot        | `~/.aha/depot/blobs/v2/<sha>.zst` + snapshot manifests                    | No        | Content-addressed; blobs/manifests are the recovery + provenance path. |
 | Corpus index | `messages.text`, `messages.command`, `tool_invocations.command`, `tool_invocations.command_family`, `tool_invocations.error_signature`, `tool_invocations.outcome_text`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha read` consumer can observe. |
 
 `entries.raw_json` is included even though it is the "parsed source bytes."
 That's deliberate: `aha read --json` returns `raw_json`, and the MCP `read`
 tool returns it via `corpus.ReadCanonical`. Leaving it raw would defeat the
-goal. The bundle remains the unredacted source of truth.
+goal. The depot blob remains the unredacted source of truth.
 
 ## Patterns
 
@@ -177,7 +177,7 @@ Three changes to `internal/corpus/schema.go`:
 - `aha verify` reports orphan redaction rows/events and unknown session
   `redaction_level` values.
 - `aha read --json` returns already-redacted `raw_json` from the corpus
-  projection; bundles remain raw.
+  projection; depot content remains raw.
 - `aha doctor --json` / MCP `doctor` include the same redaction counts and
   level breakdown in the corpus diagnostics.
 - Dashboard integration is still follow-up UI work.
@@ -211,7 +211,7 @@ When the config redaction level changes:
 - Existing sessions keep their stamped `redaction_level`. They are *not*
   silently re-redacted on read.
 - A new command `aha reindex [--from-level LEVEL] [--session ID...]`
-  rebuilds the corpus projection from the bundles using the *current*
+  rebuilds the corpus projection from the depot using the *current*
   redaction config. This is the supported migration path.
 - `aha status` surfaces the per-level counts so operators can see mixed
   `none-v1` / `v1` corpora before running a reindex workflow.

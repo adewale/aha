@@ -20,8 +20,8 @@ type Address struct {
 }
 
 type VerifyReport struct {
-	Bundles         int      `json:"bundles"`
-	Catalogs        int      `json:"catalogs"`
+	Manifests       int      `json:"manifests"`
+	Machines        int      `json:"machines"`
 	Repaired        bool     `json:"repaired"`
 	Deep            bool     `json:"deep"`
 	BytesRead       int64    `json:"bytes_read"`

@@ -379,7 +379,7 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 	if err != nil {
 		return report, err
 	}
-	report.Catalogs = len(machines)
+	report.Machines = len(machines)
 	checkedBlobs := map[string]bool{}
 	checkManifest := func(machine string, sha model.ManifestSHA256) error {
 		manifest, err := v.Manifest(ctx, machine, sha)
@@ -387,7 +387,7 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 			report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest %s: %v", machine, sha, err))
 			return nil
 		}
-		report.Bundles++
+		report.Manifests++
 		for _, f := range manifest.Files {
 			key, err := model.NewBlobKey(f.SHA256)
 			if err != nil {

@@ -129,7 +129,7 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 	flags.machine = fs.String("machine", "", "machine id")
 	flags.depotAddr = fs.String("depot", "", "depot address")
 	flags.configPath = fs.String("config", "", "JSONC config path")
-	flags.acceptSecrets = fs.Bool("accept-secrets", false, "acknowledge raw bundle privacy warning")
+	flags.acceptSecrets = fs.Bool("accept-secrets", false, "acknowledge raw snapshot privacy warning")
 	flags.capturedAt = fs.String("captured-at", "", "capture timestamp (advanced deterministic testing)")
 	flags.maxSessions = fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
 	flags.force = fs.Bool("force", false, "bypass the capture cache and re-read every source file")

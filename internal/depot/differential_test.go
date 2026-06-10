@@ -97,7 +97,7 @@ func observe(t *testing.T, ctx context.Context, v2 *depot.V2) map[string]any {
 			t.Fatal(err)
 		}
 		problems = append(problems, report.Problems...)
-		counts[map[bool]string{false: "quick", true: "deep"}[deep]] = report.Bundles*1000 + report.Catalogs
+		counts[map[bool]string{false: "quick", true: "deep"}[deep]] = report.Manifests*1000 + report.Machines
 	}
 	out["verify-problems"] = problems
 	out["verify-counts"] = counts

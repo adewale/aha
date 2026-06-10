@@ -163,7 +163,7 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 		return out
 	}
 	out["ok"] = true
-	for _, key := range []string{"bundles", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "redactions", "redaction_events", "redaction_hits", "redaction_levels", "redactions_by_pattern", "index_size_bytes"} {
+	for _, key := range []string{"snapshots", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "redactions", "redaction_events", "redaction_hits", "redaction_levels", "redactions_by_pattern", "index_size_bytes"} {
 		out[key] = stats[key]
 	}
 	return out
@@ -203,8 +203,8 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
-	out["manifests"] = report.Bundles
-	out["machines"] = report.Catalogs
+	out["manifests"] = report.Manifests
+	out["machines"] = report.Machines
 	if depotUninitialized(report) {
 		// Reachable with valid credentials, just not provisioned yet: guide the
 		// user to initialize it rather than reporting it as broken.

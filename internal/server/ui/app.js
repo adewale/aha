@@ -38,7 +38,7 @@ async function refreshStatus() {
   try {
     const s = await call("/api/status");
     $("status-strip").textContent =
-      `${s.sessions || 0} sessions · ${s.entries || 0} entries · ${s.messages || 0} messages · ${s.artifacts || 0} artifacts · ${s.bundles || 0} bundles`;
+      `${s.sessions || 0} sessions · ${s.entries || 0} entries · ${s.messages || 0} messages · ${s.artifacts || 0} artifacts · ${s.snapshots || 0} snapshots`;
   } catch (e) {
     $("status-strip").textContent = `status error: ${e.message}`;
   }
