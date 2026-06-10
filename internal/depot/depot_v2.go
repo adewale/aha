@@ -276,21 +276,24 @@ func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.Snaps
 
 const conditionalPutAttempts = 5
 
-// SetLatest moves the machine's pointer to a published snapshot and
-// registers the machine in the index on first push. An already-current
-// pointer is left untouched (steady-state pushes write nothing).
+// SetLatest moves the machine's pointer to a published snapshot and then
+// registers the machine in the index (first push only). The pointer is
+// written BEFORE the index entry: the index is the discovery layer, so it
+// must only ever name machines whose namespace is complete — a crash
+// between the two leaves an undiscoverable but consistent namespace that
+// the next push heals, never an indexed machine with no pointer (pinned
+// by the fault-injection sweep). An already-current pointer is left
+// untouched (steady-state pushes write nothing).
 func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) error {
 	if pub.machine != m.machine || !pub.sha.Valid() {
 		return fmt.Errorf("SetLatest requires a snapshot published by this machine's handle")
-	}
-	if err := m.ensureInMachinesIndex(ctx); err != nil {
-		return err
 	}
 	key := LatestPointerKey(m.machine)
 	pointer, err := EncodeLatestPointer(pub.sha)
 	if err != nil {
 		return err
 	}
+	wrote := false
 	for attempt := 0; attempt < conditionalPutAttempts; attempt++ {
 		b, etag, err := m.v.store.get(ctx, key)
 		switch {
@@ -304,15 +307,19 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 			// PUT below replaces it with a valid pointer (self-heal).
 			current, decodeErr := DecodeLatestPointer(b)
 			if decodeErr == nil && current == pub.sha {
-				return nil
+				wrote = true
 			}
 		}
-		err = m.v.store.putBytesConditional(ctx, key, "application/json", pointer, etag)
-		if err == nil {
-			return nil
+		if !wrote {
+			err = m.v.store.putBytesConditional(ctx, key, "application/json", pointer, etag)
+			if err == nil {
+				wrote = true
+			} else if !errors.Is(err, errPreconditionFailed) {
+				return err
+			}
 		}
-		if !errors.Is(err, errPreconditionFailed) {
-			return err
+		if wrote {
+			return m.ensureInMachinesIndex(ctx)
 		}
 	}
 	return fmt.Errorf("latest pointer update conflict for %s", key)

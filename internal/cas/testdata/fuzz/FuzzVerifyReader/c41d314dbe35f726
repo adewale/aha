@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("(\xb5/\xfd\x040\xa1\x00\x00the one true content\x0e\x16\xc4|")
