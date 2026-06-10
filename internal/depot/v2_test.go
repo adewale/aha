@@ -293,11 +293,11 @@ func TestV2BlobAndManifestObjectsAreWriteOnce(t *testing.T) {
 // directory holding a v1 depot cannot be initialized as v2.
 func TestV2InitRefusesV1Depot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "depot")
-	v1, err := depot.NewLocal(root)
-	if err != nil {
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := v1.Init(context.Background()); err != nil {
+	// A v1 depot is identified by its depot.json marker.
+	if err := os.WriteFile(filepath.Join(root, "depot.json"), []byte(`{"schema":"aha-depot/v1","layout":"v1"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	v2, err := depot.NewLocalV2(root)

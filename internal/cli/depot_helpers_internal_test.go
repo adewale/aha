@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,37 +115,6 @@ func TestDepotUninitializedSignal(t *testing.T) {
 			}
 		})
 	}
-}
-
-type selectionVerifyDriver struct {
-	report     depot.VerifyReport
-	deepCalls  int
-	quickCalls int
-}
-
-func (d *selectionVerifyDriver) Address() depot.Address {
-	return depot.Address{Type: "test", Location: "depot"}
-}
-func (d *selectionVerifyDriver) Init(context.Context) error { return nil }
-func (d *selectionVerifyDriver) PutBundle(context.Context, string) (depot.BundleRef, bool, error) {
-	return depot.BundleRef{}, false, nil
-}
-func (d *selectionVerifyDriver) List(context.Context) ([]depot.BundleRef, error)      { return nil, nil }
-func (d *selectionVerifyDriver) Fetch(context.Context, depot.BundleRef, string) error { return nil }
-func (d *selectionVerifyDriver) Verify(context.Context, bool) (depot.VerifyReport, error) {
-	d.deepCalls++
-	r := d.report
-	r.Deep = true
-	return r, nil
-}
-func (d *selectionVerifyDriver) VerifyWithOptions(_ context.Context, opts depot.VerifyOptions) (depot.VerifyReport, error) {
-	if opts.Deep || opts.Repair {
-		return d.Verify(context.Background(), opts.Repair)
-	}
-	d.quickCalls++
-	r := d.report
-	r.Deep = false
-	return r, nil
 }
 
 func configWriteForTest(t *testing.T, cfg model.Config) (string, error) {
