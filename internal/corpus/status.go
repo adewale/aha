@@ -7,7 +7,7 @@ import (
 
 func Status(db *sql.DB, root string) (map[string]any, error) {
 	stats := map[string]any{"corpus_dir": root}
-	for _, table := range []string{"machines", "bundles", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
+	for _, table := range []string{"machines", "snapshots", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
 		var n int
 		if err := db.QueryRow("select count(*) from " + table).Scan(&n); err != nil {
 			return nil, fmt.Errorf("status count %s: %w", table, err)
@@ -89,8 +89,10 @@ type Conflict struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-func BundleSHAs(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`select bundle_sha256 from bundles`)
+// SnapshotManifestSHAs returns the manifest identities of every ingested
+// snapshot — the corpus side of the depot anti-entropy comparison.
+func SnapshotManifestSHAs(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`select manifest_sha256 from snapshots`)
 	if err != nil {
 		return nil, err
 	}

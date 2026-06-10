@@ -78,7 +78,7 @@ func depotBehindReportFromDriver(store *corpus.Store, drv depot.Driver) (depotBe
 	if err != nil {
 		return depotBehindReport{}, err
 	}
-	ingested, err := corpus.BundleSHAs(store.DB)
+	ingested, err := corpus.SnapshotManifestSHAs(store.DB)
 	if err != nil {
 		return depotBehindReport{}, err
 	}
@@ -96,15 +96,20 @@ func uniqueDepotRefs(refs []depot.BundleRef) int {
 	return len(seen)
 }
 
+// depotBehindFromRefs counts catalog refs whose snapshot identity the
+// corpus has not ingested (metadata-only; zero fetches).
 func depotBehindFromRefs(refs []depot.BundleRef, ingested map[string]bool) int {
 	behind := 0
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		sha := ref.BundleSHA256
-		if sha == "" || seen[sha] || ingested[sha] {
+		if sha == "" || seen[sha] {
 			continue
 		}
 		seen[sha] = true
+		if ref.ManifestSHA256 != "" && ingested[ref.ManifestSHA256] {
+			continue
+		}
 		behind++
 	}
 	return behind

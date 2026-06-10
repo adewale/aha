@@ -2,8 +2,6 @@ package corpus
 
 import (
 	"database/sql"
-	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -18,7 +16,7 @@ type VerifyStats struct {
 	Artifacts       int `json:"artifacts"`
 	FTSMessages     int `json:"fts_messages"`
 	FTSArtifacts    int `json:"fts_artifacts"`
-	Bundles         int `json:"bundles"`
+	Snapshots       int `json:"snapshots"`
 	Redactions      int `json:"redactions"`
 	RedactionEvents int `json:"redaction_events"`
 	ToolInvocations int `json:"tool_invocations"`
@@ -49,7 +47,7 @@ func Verify(store *Store) (VerifyReport, error) {
 		{&report.Stats.Artifacts, `select count(*) from artifacts`},
 		{&report.Stats.FTSMessages, `select count(*) from fts_messages`},
 		{&report.Stats.FTSArtifacts, `select count(*) from fts_artifacts`},
-		{&report.Stats.Bundles, `select count(*) from bundles`},
+		{&report.Stats.Snapshots, `select count(*) from snapshots`},
 		{&report.Stats.Redactions, `select count(*) from redactions`},
 		{&report.Stats.RedactionEvents, `select count(*) from redaction_events`},
 		{&report.Stats.ToolInvocations, `select count(*) from tool_invocations`},
@@ -68,7 +66,7 @@ func Verify(store *Store) (VerifyReport, error) {
 	}{
 		{"orphan_messages", "messages without backing entries", `select count(*) from messages m left join entries e on e.session_key=m.session_key and e.entry_id=m.entry_id where e.session_key is null`},
 		{"orphan_entry_assets", "entry_assets without backing entries", `select count(*) from entry_assets a left join entries e on e.session_key=a.session_key and e.entry_id=a.entry_id where e.session_key is null`},
-		{"orphan_artifacts", "artifacts without backing bundles", `select count(*) from artifacts a left join bundles b on b.bundle_id=a.bundle_id where b.bundle_id is null`},
+		{"orphan_artifacts", "artifacts without backing snapshots", `select count(*) from artifacts a left join snapshots s on s.manifest_sha256=a.manifest_sha256 where s.manifest_sha256 is null`},
 		{"orphan_fts_messages", "fts_messages rows without backing messages", `select count(*) from fts_messages f left join messages m on m.rowid=f.rowid where m.rowid is null`},
 		{"missing_fts_messages", "messages without fts_messages rows", missingFTSMessagesQuery},
 		{"orphan_fts_artifacts", "fts_artifacts rows without backing artifacts", `select count(*) from fts_artifacts f left join artifacts a on a.artifact_id=f.rowid where a.artifact_id is null`},
@@ -86,31 +84,6 @@ func Verify(store *Store) (VerifyReport, error) {
 		if count > 0 {
 			report.Problems = append(report.Problems, VerifyProblem{Code: check.code, Message: check.message, Count: count})
 		}
-	}
-	rows, err := store.DB.Query(`select bundle_id,bundle_sha256 from bundles where bundle_sha256<>''`)
-	if err != nil {
-		return report, err
-	}
-	defer rows.Close()
-	missingBundles := 0
-	for rows.Next() {
-		var id, sha string
-		if err := rows.Scan(&id, &sha); err != nil {
-			return report, err
-		}
-		if _, err := os.Stat(filepath.Join(store.Root, "blobs", "bundles", sha+".tar.zst")); err != nil {
-			if os.IsNotExist(err) {
-				missingBundles++
-				continue
-			}
-			return report, fmt.Errorf("stat bundle blob %s/%s: %w", id, sha, err)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return report, err
-	}
-	if missingBundles > 0 {
-		report.Problems = append(report.Problems, VerifyProblem{Code: "missing_bundle_blob", Message: "bundle rows without promoted bundle blobs", Count: missingBundles})
 	}
 	return report, nil
 }

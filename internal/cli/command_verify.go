@@ -49,7 +49,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 			FTSRepair   *corpus.FTSRepairReport `json:"fts_repair,omitempty"`
 		}{VerifyReport: report, RepairedFTS: *repairFTS, FTSRepair: repair})
 	}
-	fmt.Fprintf(stdout, "root=%s problems=%d repaired_fts=%v messages=%d artifacts=%d fts_messages=%d fts_artifacts=%d bundles=%d\n", report.Root, len(report.Problems), *repairFTS, report.Stats.Messages, report.Stats.Artifacts, report.Stats.FTSMessages, report.Stats.FTSArtifacts, report.Stats.Bundles)
+	fmt.Fprintf(stdout, "root=%s problems=%d repaired_fts=%v messages=%d artifacts=%d fts_messages=%d fts_artifacts=%d snapshots=%d\n", report.Root, len(report.Problems), *repairFTS, report.Stats.Messages, report.Stats.Artifacts, report.Stats.FTSMessages, report.Stats.FTSArtifacts, report.Stats.Snapshots)
 	if *repairFTS {
 		fmt.Fprintf(stdout, "fts_repair deleted_messages=%d inserted_messages=%d deleted_artifacts=%d inserted_artifacts=%d\n", repairReport.DeletedMessageRows, repairReport.InsertedMessageRows, repairReport.DeletedArtifactRows, repairReport.InsertedArtifactRows)
 	}

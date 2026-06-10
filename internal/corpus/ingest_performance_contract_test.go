@@ -127,10 +127,10 @@ func TestKnownFileBlobSkipsRecompression(t *testing.T) {
 	if err := os.WriteFile(blobPath, []byte("sentinel-existing-blob"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, "existing-file-owner", strings.Repeat("a", 64), "m", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", `{}`); err != nil {
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`, strings.Repeat("a", 64), "m", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", `{}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.Exec(`insert into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`, sha, "session", len(data), blobRel, "existing-file-owner"); err != nil {
+	if _, err := store.DB.Exec(`insert into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_manifest_sha256) values(?,?,?,?,?)`, sha, "session", len(data), blobRel, strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := corpus.IngestBundle(store, registry, path); err != nil {

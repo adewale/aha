@@ -17,23 +17,25 @@ func TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty(t *testing.T)
 	prop := func(catalogInputs, duplicateInputs, ingestedInputs []string) bool {
 		var refs []depot.BundleRef
 		catalogSet := map[string]bool{}
+		manifestOf := map[string]string{}
 		for _, input := range append(append([]string{}, catalogInputs...), duplicateInputs...) {
 			sha := statusPropSHA(input)
 			catalogSet[sha] = true
-			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha)})
+			manifestOf[sha] = statusPropSHA(input + "-manifest")
+			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha), ManifestSHA256: manifestOf[sha]})
 		}
 		// Add duplicates deliberately: many trivial bundle refs should affect metadata cardinality, not work units.
 		for _, input := range duplicateInputs {
 			sha := statusPropSHA(input)
-			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha)})
+			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha), ManifestSHA256: manifestOf[sha]})
 		}
 		ingested := map[string]bool{}
 		for _, input := range ingestedInputs {
-			ingested[statusPropSHA(input)] = true
+			ingested[statusPropSHA(input+"-manifest")] = true
 		}
 		want := 0
 		for sha := range catalogSet {
-			if !ingested[sha] {
+			if !ingested[manifestOf[sha]] {
 				want++
 			}
 		}
@@ -51,14 +53,15 @@ func TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles(t *testin
 	}
 	defer store.Close()
 	ingestedSHA := statusPropSHA("ingested")
-	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, "ingested", ingestedSHA, "machine", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "{}"); err != nil {
+	ingestedManifestSHA := statusPropSHA("ingested-manifest")
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`, ingestedManifestSHA, "machine", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "{}"); err != nil {
 		t.Fatal(err)
 	}
 	pendingSHA := statusPropSHA("pending")
 	drv := &countingStatusDepot{refs: []depot.BundleRef{
-		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA)},
-		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA)},
-		{BundleSHA256: ingestedSHA, Key: depot.BundleKey(ingestedSHA)},
+		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA), ManifestSHA256: statusPropSHA("pending-manifest")},
+		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA), ManifestSHA256: statusPropSHA("pending-manifest")},
+		{BundleSHA256: ingestedSHA, Key: depot.BundleKey(ingestedSHA), ManifestSHA256: ingestedManifestSHA},
 	}}
 	behind, err := depotBehindCountFromDriver(store, drv)
 	if err != nil {

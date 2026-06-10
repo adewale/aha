@@ -15,6 +15,9 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
+// The corpus never stores bundle blobs under depot v2; the no-bundle-blob
+// assertions below pin that an interrupted bundle import leaves neither
+// database rows nor any bundle-shaped artifact behind.
 func TestIngestFailureAfterFileBlobsRollsBackDatabaseAndLeavesNoBundleBlob(t *testing.T) {
 	bundlePath := writeFailureBundle(t, t.TempDir(), "failure-after-files")
 	store := openFailureStore(t)
@@ -30,20 +33,6 @@ func TestIngestFailureAfterFileBlobsRollsBackDatabaseAndLeavesNoBundleBlob(t *te
 	if matches, err := filepath.Glob(filepath.Join(store.Root, "blobs", "files", "*.zst")); err != nil || len(matches) == 0 {
 		t.Fatalf("expected repairable content-addressed file blobs before injected failure, matches=%v err=%v", matches, err)
 	}
-}
-
-func TestIngestFailureAfterBundlePromoteRemovesOrphanBundleBlob(t *testing.T) {
-	bundlePath := writeFailureBundle(t, t.TempDir(), "failure-after-promote")
-	store := openFailureStore(t)
-	boom := errors.New("after bundle promote")
-	ing := Ingestor{Store: store, Registry: adapters.Builtins(), hooks: ingestHooks{afterBundlePromoteBeforeCommit: func() error { return boom }}}
-	_, err := ing.IngestBundle(bundlePath)
-	if !errors.Is(err, boom) {
-		t.Fatalf("IngestBundle err=%v, want injected error", err)
-	}
-	assertIngestDatabaseRolledBack(t, store)
-	assertNoFinalBundleBlob(t, store, bundlePath)
-	assertNoStagingBundleBlobs(t, store)
 }
 
 func writeFailureBundle(t *testing.T, root, bundleID string) string {
@@ -75,7 +64,7 @@ func openFailureStore(t *testing.T) *Store {
 
 func assertIngestDatabaseRolledBack(t *testing.T, store *Store) {
 	t.Helper()
-	for _, table := range []string{"bundles", "ingest_attempts", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "fts_messages", "fts_artifacts"} {
+	for _, table := range []string{"snapshots", "ingest_attempts", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "fts_messages", "fts_artifacts"} {
 		if got := countRows(t, store, table); got != 0 {
 			t.Fatalf("%s rows=%d want 0 after rollback", table, got)
 		}

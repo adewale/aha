@@ -17,7 +17,7 @@ func ingestFromDepotWith(stdout io.Writer, ing corpus.Ingestor, drv depot.Driver
 	if err != nil {
 		return nil, err
 	}
-	ingested, err := corpus.BundleSHAs(store.DB)
+	ingested, err := corpus.SnapshotManifestSHAs(store.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -56,11 +56,17 @@ func ingestFromDepotWith(stdout io.Writer, ing corpus.Ingestor, drv depot.Driver
 	return reports, nil
 }
 
+// pendingDepotRefs filters catalog refs to those whose snapshot identity
+// (canonical manifest sha) the corpus has not ingested. Refs without
+// manifest metadata are fetched; ingest itself dedups by identity.
 func pendingDepotRefs(refs []depot.BundleRef, ingested map[string]bool) []depot.BundleRef {
 	out := refs[:0]
 	seen := map[string]bool{}
 	for _, ref := range refs {
-		if ref.BundleSHA256 == "" || ingested[ref.BundleSHA256] || seen[ref.BundleSHA256] {
+		if ref.BundleSHA256 == "" || seen[ref.BundleSHA256] {
+			continue
+		}
+		if ref.ManifestSHA256 != "" && ingested[ref.ManifestSHA256] {
 			continue
 		}
 		seen[ref.BundleSHA256] = true

@@ -170,7 +170,7 @@ func artifactSQL(q string, f Filters) (string, []any) {
 		projectExists:   "exists(select 1 from sessions psp indexed by idx_sessions_project where psp.project_key=? and psp.session_key=a.parent_session_key)",
 	})
 	vals = append(vals, f.Limit)
-	return `select bm25(fts_artifacts) score,coalesce(b.captured_at,''),a.source_name,a.machine_id,a.raw_path,snippet(fts_artifacts,1,'[',']','…',12),coalesce(a.parent_session_key,''),a.artifact_sha256 from fts_artifacts join artifacts a on a.artifact_id=fts_artifacts.artifact_id left join bundles b on b.bundle_id=a.bundle_id left join sessions ps on ps.session_key=a.parent_session_key where ` + strings.Join(where, " and ") + ` order by score,coalesce(b.captured_at,''),a.raw_path,a.artifact_sha256 limit ?`, vals
+	return `select bm25(fts_artifacts) score,coalesce(b.captured_at,''),a.source_name,a.machine_id,a.raw_path,snippet(fts_artifacts,1,'[',']','…',12),coalesce(a.parent_session_key,''),a.artifact_sha256 from fts_artifacts join artifacts a on a.artifact_id=fts_artifacts.artifact_id left join snapshots b on b.manifest_sha256=a.manifest_sha256 left join sessions ps on ps.session_key=a.parent_session_key where ` + strings.Join(where, " and ") + ` order by score,coalesce(b.captured_at,''),a.raw_path,a.artifact_sha256 limit ?`, vals
 }
 
 func queryArtifacts(db *sql.DB, q string, f Filters) ([]Result, error) {

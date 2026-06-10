@@ -22,7 +22,7 @@ func TestIngestBundleWithExpectedSHARejectsMismatchBeforePromotion(t *testing.T)
 		t.Fatalf("err=%v, want bundle sha mismatch", err)
 	}
 	var bundles int
-	if scanErr := store.DB.QueryRow(`select count(*) from bundles`).Scan(&bundles); scanErr != nil {
+	if scanErr := store.DB.QueryRow(`select count(*) from snapshots`).Scan(&bundles); scanErr != nil {
 		t.Fatal(scanErr)
 	}
 	if bundles != 0 {

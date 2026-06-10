@@ -19,7 +19,7 @@ func TestSchemaRejectsInvalidStates(t *testing.T) {
 	if _, err := store.DB.Exec(`insert into messages(session_key,entry_id,role,text) values('missing','e','user','text')`); err == nil || !strings.Contains(err.Error(), "message entry missing") {
 		t.Fatalf("orphan message err=%v", err)
 	}
-	if _, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,raw_path,relative_path) values('a','pi','m','missing','artifact','r','rel')`); err == nil || !strings.Contains(err.Error(), "artifact bundle missing") {
+	if _, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path) values('a','pi','m','ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff','artifact','r','rel')`); err == nil || !strings.Contains(err.Error(), "artifact snapshot missing") {
 		t.Fatalf("orphan artifact err=%v", err)
 	}
 	if _, err := store.DB.Exec(`insert into sessions(session_key,source_name,source_session_id,machine_id) values('pi:m:s','pi','s','m')`); err == nil || !strings.Contains(err.Error(), "session key must be sk1") {
@@ -78,10 +78,10 @@ func TestArtifactFTSTriggerFallsBackFromEmptyBodyToPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values('b','` + strings.Repeat("b", 64) + `','m','2026','2026','{}')`); err != nil {
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values('` + strings.Repeat("b", 64) + `','m','2026','2026','{}')`); err != nil {
 		t.Fatal(err)
 	}
-	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,raw_path,relative_path,text_preview,text_body) values(?,'pi','m','b','artifact','raw','rel','preview text','')`, strings.Repeat("a", 64))
+	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path,text_preview,text_body) values(?,'pi','m','` + strings.Repeat("b", 64) + `','artifact','raw','rel','preview text','')`, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,7 @@ func BenchmarkPathologicalReconcileFTSRebuild(b *testing.B) {
 	}
 }
 
-func BenchmarkPathologicalStatusAndBundleSHAs(b *testing.B) {
+func BenchmarkPathologicalStatusAndSnapshotSHAs(b *testing.B) {
 	messages := pathologicalScale("AHA_PATHOLOGICAL_STATUS_MESSAGES", 5000)
 	store := seedPathologicalCorpus(b, messages, messages/10)
 	defer store.Close()
@@ -96,7 +96,7 @@ func BenchmarkPathologicalStatusAndBundleSHAs(b *testing.B) {
 	b.Run("bundle-shas", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := corpus.BundleSHAs(store.DB); err != nil {
+			if _, err := corpus.SnapshotManifestSHAs(store.DB); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -120,7 +120,7 @@ func seedPathologicalCorpus(tb testing.TB, messages, artifacts int) *corpus.Stor
 		store.Close()
 		tb.Fatal(err)
 	}
-	if _, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values('pathological-bundle','` + pathologicalHex(1) + `','bench-machine','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z','{}')`); err != nil {
+	if _, err := tx.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values('` + pathologicalHex(1) + `','bench-machine','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z','{}')`); err != nil {
 		fail(err)
 	}
 	sessionStmt, err := tx.Prepare(`insert into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,started_at) values(?,?,?,?,?,?)`)
@@ -168,7 +168,7 @@ func seedPathologicalCorpus(tb testing.TB, messages, artifacts int) *corpus.Stor
 			}
 		}
 	}
-	artifactStmt, err := tx.Prepare(`insert into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?)`)
+	artifactStmt, err := tx.Prepare(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		fail(err)
 	}
@@ -192,7 +192,7 @@ func seedExtraBundles(tb testing.TB, store *corpus.Store, bundles int) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	stmt, err := tx.Prepare(`insert or ignore into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`)
+	stmt, err := tx.Prepare(`insert or ignore into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		tb.Fatal(err)

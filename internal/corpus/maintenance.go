@@ -9,14 +9,13 @@ import (
 )
 
 type SizeReport struct {
-	Root            string `json:"root"`
-	TotalBytes      int64  `json:"total_bytes"`
-	DatabaseBytes   int64  `json:"database_bytes"`
-	BundleBlobBytes int64  `json:"bundle_blob_bytes"`
-	FileBlobBytes   int64  `json:"file_blob_bytes"`
-	ImageBlobBytes  int64  `json:"image_blob_bytes"`
-	OtherBytes      int64  `json:"other_bytes"`
-	Files           int    `json:"files"`
+	Root           string `json:"root"`
+	TotalBytes     int64  `json:"total_bytes"`
+	DatabaseBytes  int64  `json:"database_bytes"`
+	FileBlobBytes  int64  `json:"file_blob_bytes"`
+	ImageBlobBytes int64  `json:"image_blob_bytes"`
+	OtherBytes     int64  `json:"other_bytes"`
+	Files          int    `json:"files"`
 }
 
 type OrphanBlob struct {
@@ -55,8 +54,6 @@ func Size(store *Store) (SizeReport, error) {
 		switch {
 		case rel == "corpus.db" || strings.HasPrefix(rel, "corpus.db-"):
 			report.DatabaseBytes += size
-		case strings.HasPrefix(rel, "blobs/bundles/"):
-			report.BundleBlobBytes += size
 		case strings.HasPrefix(rel, "blobs/files/"):
 			report.FileBlobBytes += size
 		case strings.HasPrefix(rel, "blobs/images/"):
@@ -81,7 +78,6 @@ func PruneOrphanBlobs(store *Store, force bool) (PruneOrphansReport, error) {
 	}
 	report := PruneOrphansReport{Root: filepath.Clean(store.Root), DryRun: !force}
 	for _, base := range []struct{ rel, kind string }{
-		{filepath.ToSlash(filepath.Join("blobs", "bundles")), "bundle"},
 		{filepath.ToSlash(filepath.Join("blobs", "files")), "file"},
 		{filepath.ToSlash(filepath.Join("blobs", "images")), "image"},
 	} {
@@ -128,24 +124,6 @@ func PruneOrphanBlobs(store *Store, force bool) (PruneOrphansReport, error) {
 
 func referencedBlobPaths(db *sql.DB) (map[string]bool, error) {
 	refs := map[string]bool{}
-	rows, err := db.Query(`select bundle_sha256 from bundles where bundle_sha256 is not null and bundle_sha256<>''`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		refs[filepath.ToSlash(filepath.Join("blobs", "bundles", sha+".tar.zst"))] = true
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	for _, query := range []string{
 		`select compressed_blob_path from files where compressed_blob_path is not null and compressed_blob_path<>''`,
 		`select blob_path from images where blob_path is not null and blob_path<>''`,

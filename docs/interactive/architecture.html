@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">16,786</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">16,865</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">20</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -2494,14 +2494,14 @@ footer a:hover { color: var(--ink-2); }
   </p>
   <div class="schema-er" id="schema-er">
     <div class="er-family">
-      <div class="er-family-h">bundle metadata <span class="cli-note">immutable; identity for everything below</span></div>
+      <div class="er-family-h">snapshot metadata <span class="cli-note">immutable; identity for everything below</span></div>
       <div class="er-tables">
-        <div class="er-table" data-cols="bundle_id PK, bundle_sha256 UNIQUE, machine_id, captured_at, ingested_at, manifest_json">
-          <div class="er-name">bundles</div>
-          <div class="er-pk">PK <code>bundle_id</code></div>
-          <div class="er-uk">UQ <code>bundle_sha256</code></div>
+        <div class="er-table" data-cols="manifest_sha256 PK, machine_id, captured_at, ingested_at, manifest_json">
+          <div class="er-name">snapshots</div>
+          <div class="er-pk">PK <code>manifest_sha256</code></div>
+          <div class="er-note">snapshot identity is the canonical manifest hash (depot v2)</div>
         </div>
-        <div class="er-table" data-cols="attempt_id, bundle_id, bundle_sha256, ingested_at, duplicate">
+        <div class="er-table" data-cols="attempt_id, manifest_sha256, ingested_at, duplicate">
           <div class="er-name">ingest_attempts</div>
           <div class="er-note">audit log of every ingest call</div>
         </div>
@@ -2512,7 +2512,7 @@ footer a:hover { color: var(--ink-2); }
         <div class="er-table" data-cols="source_id, source_name UNIQUE, adapter_version, capabilities_json">
           <div class="er-name">sources</div>
         </div>
-        <div class="er-table" data-cols="file_sha256 PK, kind, bytes, compressed_blob_path, first_seen_bundle_id">
+        <div class="er-table" data-cols="file_sha256 PK, kind, bytes, compressed_blob_path, first_seen_manifest_sha256">
           <div class="er-name">files</div>
           <div class="er-pk">PK <code>file_sha256</code></div>
           <div class="er-note">content-addressed blob index</div>
@@ -2528,9 +2528,9 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-pk">PK <code>session_key</code> (<code>sk1_</code> + sha256)</div>
           <div class="er-fk">→ sessions (self, parent)</div>
         </div>
-        <div class="er-table" data-cols="session_key+file_sha256+bundle_id UNIQUE, relative_path, raw_path, observed_at, copy_state">
+        <div class="er-table" data-cols="session_key+file_sha256+manifest_sha256 UNIQUE, relative_path, raw_path, observed_at, copy_state">
           <div class="er-name">session_versions</div>
-          <div class="er-fk">→ sessions, files, bundles</div>
+          <div class="er-fk">→ sessions, files, snapshots</div>
         </div>
         <div class="er-table primary" data-cols="(session_key, entry_id) PK, parent_id, line_no, entry_type, timestamp, role, entry_sha256, raw_json">
           <div class="er-name">entries</div>
@@ -2553,9 +2553,9 @@ footer a:hover { color: var(--ink-2); }
           <div class="er-fk">→ entries</div>
           <div class="er-note">single-session failure→fix arcs projected from tool_invocations; recomputed per session on ingest; powers outcome-weighted incidents</div>
         </div>
-        <div class="er-table" data-cols="artifact_id PK, artifact_sha256, source_name, machine_id, bundle_id, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body">
+        <div class="er-table" data-cols="artifact_id PK, artifact_sha256, source_name, machine_id, manifest_sha256, kind, parent_session_key, parent_entry_id, raw_path, relative_path, text_preview, text_body">
           <div class="er-name">artifacts</div>
-          <div class="er-fk">→ bundles</div>
+          <div class="er-fk">→ snapshots</div>
           <div class="er-note">append-only; insert trigger mirrors text into fts_artifacts</div>
         </div>
         <div class="er-table" data-cols="image_sha256 PK, source_name, mime_type, bytes, width, height, ext, blob_path">
