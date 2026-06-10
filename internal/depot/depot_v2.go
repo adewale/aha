@@ -168,6 +168,10 @@ type MachineDepot struct {
 type ParentSnapshot struct {
 	manifest model.SnapshotManifest
 	sha      model.ManifestSHA256
+	// blobs indexes the manifest's content addresses so CarriedBlob is
+	// O(1) per lookup — a per-file linear scan would make a push O(n²)
+	// in manifest size, the exact Shlemiel shape v2 exists to remove.
+	blobs map[string]bool
 }
 
 func (p *ParentSnapshot) Manifest() model.SnapshotManifest { return p.manifest }
@@ -202,7 +206,11 @@ func (m *MachineDepot) Parent(ctx context.Context) (*ParentSnapshot, bool, error
 	if err != nil {
 		return nil, false, err
 	}
-	return &ParentSnapshot{manifest: manifest, sha: sha}, true, nil
+	blobs := make(map[string]bool, len(manifest.Files))
+	for _, f := range manifest.Files {
+		blobs[f.SHA256] = true
+	}
+	return &ParentSnapshot{manifest: manifest, sha: sha, blobs: blobs}, true, nil
 }
 
 // EnsureBlob stages the file at srcPath as a compressed blob — verifying
@@ -231,15 +239,10 @@ func (m *MachineDepot) EnsureBlob(ctx context.Context, key model.BlobKey, srcPat
 // fetched parent snapshot already lists this content: the parent's own
 // publish proved the blob exists, and the depot never deletes (I5).
 func (m *MachineDepot) CarriedBlob(parent *ParentSnapshot, key model.BlobKey) (BlobReceipt, bool) {
-	if parent == nil {
+	if parent == nil || !parent.blobs[key.String()] {
 		return BlobReceipt{}, false
 	}
-	for _, f := range parent.manifest.Files {
-		if f.SHA256 == key.String() {
-			return BlobReceipt{key: key}, true
-		}
-	}
-	return BlobReceipt{}, false
+	return BlobReceipt{key: key}, true
 }
 
 // PublishSnapshot canonically encodes the manifest and writes it to the
@@ -296,8 +299,11 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 		case err != nil:
 			return err
 		default:
-			current, err := DecodeLatestPointer(b)
-			if err == nil && current == pub.sha {
+			// A corrupt pointer deliberately falls through: the etag
+			// came from reading that very object, so the conditional
+			// PUT below replaces it with a valid pointer (self-heal).
+			current, decodeErr := DecodeLatestPointer(b)
+			if decodeErr == nil && current == pub.sha {
 				return nil
 			}
 		}

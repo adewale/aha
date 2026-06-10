@@ -98,17 +98,20 @@ func pullFromDepotV2(stdout io.Writer, ing corpus.Ingestor, v2 *depot.V2, jsonOu
 	if err != nil {
 		return nil, err
 	}
-	ingested, err := corpus.SnapshotManifestSHAs(ing.Store.DB)
-	if err != nil {
-		return nil, err
-	}
 	var reports []map[string]any
 	for _, machine := range machines {
 		sha, ok, err := v2.Latest(ctx, machine)
 		if err != nil {
 			return nil, err
 		}
-		if !ok || ingested[sha.String()] {
+		if !ok {
+			continue
+		}
+		known, err := corpus.HasSnapshot(ing.Store.DB, sha.String())
+		if err != nil {
+			return nil, err
+		}
+		if known {
 			continue
 		}
 		manifest, err := v2.Manifest(ctx, machine, sha)
@@ -153,17 +156,20 @@ func depotBehindV2FromDepot(store *corpus.Store, v2 *depot.V2) (depotBehindV2Rep
 	if err != nil {
 		return depotBehindV2Report{}, err
 	}
-	ingested, err := corpus.SnapshotManifestSHAs(store.DB)
-	if err != nil {
-		return depotBehindV2Report{}, err
-	}
 	report := depotBehindV2Report{Machines: len(machines)}
 	for _, machine := range machines {
 		sha, ok, err := v2.Latest(ctx, machine)
 		if err != nil {
 			return report, err
 		}
-		if ok && !ingested[sha.String()] {
+		if !ok {
+			continue
+		}
+		known, err := corpus.HasSnapshot(store.DB, sha.String())
+		if err != nil {
+			return report, err
+		}
+		if !known {
 			report.Behind++
 		}
 	}

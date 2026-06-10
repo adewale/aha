@@ -89,6 +89,17 @@ type Conflict struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// HasSnapshot reports whether one snapshot identity is in the corpus —
+// a point lookup, so depot comparisons stay O(machines) regardless of how
+// many snapshots the corpus has ingested over its lifetime.
+func HasSnapshot(db *sql.DB, manifestSHA string) (bool, error) {
+	var n int
+	if err := db.QueryRow(`select count(*) from snapshots where manifest_sha256=?`, manifestSHA).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // SnapshotManifestSHAs returns the manifest identities of every ingested
 // snapshot — the corpus side of the depot anti-entropy comparison.
 func SnapshotManifestSHAs(db *sql.DB) (map[string]bool, error) {

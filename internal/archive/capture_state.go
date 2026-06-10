@@ -117,6 +117,18 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 			return nil, err
 		}
 	}
+	if opts.Cache != nil && len(opts.SessionFilters) == 0 && opts.MaxSessions == 0 {
+		// Unscoped capture: it saw every live file, so entries for paths
+		// it did not see belong to deleted files — prune them.
+		keep := make(map[string]bool, len(sessions)+len(artifacts))
+		for _, sf := range sessions {
+			keep[sf.Path] = true
+		}
+		for _, af := range artifacts {
+			keep[af.Path] = true
+		}
+		opts.Cache.Retain(keep)
+	}
 	sort.Slice(files, func(i, j int) bool { return files[i].RelativePath < files[j].RelativePath })
 	var mad []model.ManifestAdapt
 	names := make([]string, 0, len(registry))

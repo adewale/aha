@@ -77,8 +77,11 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 // depot, so the legacy schema is rejected at open instead of being
 // silently mixed with the snapshot-keyed schema.
 func rejectLegacyBundleCorpus(db *sql.DB, root string) error {
+	// Two independent signals so a manually-pruned legacy corpus cannot
+	// slip through and become a hybrid schema: the bundles table itself,
+	// and any surviving table still keyed by bundle_id.
 	var n int
-	if err := db.QueryRow(`select count(*) from sqlite_master where type='table' and name='bundles'`).Scan(&n); err != nil {
+	if err := db.QueryRow(`select count(*) from sqlite_master where type='table' and (name='bundles' or (sql like '%bundle_id%' and name<>'bundles'))`).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {

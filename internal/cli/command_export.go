@@ -87,7 +87,7 @@ func cmdExport(args []string, stdout, stderr io.Writer) error {
 func bundleFromSnapshot(ctx context.Context, v2 *depot.V2, manifest model.SnapshotManifest, sha model.ManifestSHA256, tmpDir string) (archive.Bundle, error) {
 	var files []model.CapturedFile
 	var total int64
-	sessionFiles, artifactFiles, imageFiles := 0, 0, 0
+	sessionFiles, artifactFiles := 0, 0
 	for i, mf := range manifest.Files {
 		key, err := model.NewBlobKey(mf.SHA256)
 		if err != nil {
@@ -116,13 +116,11 @@ func bundleFromSnapshot(ctx context.Context, v2 *depot.V2, manifest model.Snapsh
 		}
 		files = append(files, model.CapturedFile{Manifest: mf, Path: path})
 		total += mf.Bytes
-		switch mf.Kind {
-		case "session":
+		// Manifest validation admits only these two kinds.
+		if mf.Kind == "session" {
 			sessionFiles++
-		case "artifact":
+		} else {
 			artifactFiles++
-		default:
-			imageFiles++
 		}
 	}
 	v1 := model.Manifest{
@@ -135,7 +133,7 @@ func bundleFromSnapshot(ctx context.Context, v2 *depot.V2, manifest model.Snapsh
 		Implementation: model.Implementation{Language: "go", Archive: "tar.zst"},
 		Source:         model.ManifestSource{HostOS: runtime.GOOS},
 		Policy:         manifest.Policy,
-		Counts:         model.ManifestCounts{SessionFiles: sessionFiles, ArtifactFiles: artifactFiles, ImageFiles: imageFiles, BytesUncompressed: total},
+		Counts:         model.ManifestCounts{SessionFiles: sessionFiles, ArtifactFiles: artifactFiles, BytesUncompressed: total},
 		Adapters:       manifest.Adapters,
 		Files:          manifest.Files,
 	}

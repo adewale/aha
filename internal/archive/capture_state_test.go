@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,5 +267,84 @@ func TestCaptureStateBlobPathProvidesBytesOnDemand(t *testing.T) {
 	}
 	if _, err := sc2.BlobPath(unknown); err == nil {
 		t.Fatal("BlobPath served a key the capture does not contain")
+	}
+}
+
+type settableClock struct{ at time.Time }
+
+func (c *settableClock) Now() time.Time { return c.at }
+
+// TestCaptureCacheRacyAnchorIsLoadTimeNotSaveTime pins the racy-mtime
+// anchor to when the cache was OPENED, not when it was saved: a file
+// whose mtime falls inside the capture window must never be trusted on
+// the next run, even though Save happened much later. Anchoring at save
+// time would leave a coarse-mtime-granularity window in which a
+// modification during capture is silently masked.
+func TestCaptureCacheRacyAnchorIsLoadTimeNotSaveTime(t *testing.T) {
+	dir := t.TempDir()
+	loadTime := time.Now().Add(-time.Hour)
+	clk := &settableClock{at: loadTime}
+	cachePath := filepath.Join(dir, "cache.json")
+	c := archive.LoadCaptureCache(cachePath, clk)
+
+	// File hashed mid-capture: its mtime is after the cache was opened.
+	p := writeSession(t, dir, "s.jsonl", "captured mid-run\n")
+	mid := loadTime.Add(30 * time.Minute)
+	if err := os.Chtimes(p, mid, mid); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Record(p, st, hash.SHA256Bytes([]byte("captured mid-run\n")))
+	clk.at = loadTime.Add(time.Hour) // Save happens long after the record
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := archive.LoadCaptureCache(cachePath, &settableClock{at: time.Now()})
+	if _, ok := reloaded.Lookup(p, st); ok {
+		t.Fatal("entry recorded inside the capture window was trusted; the racy anchor must be the cache open time")
+	}
+}
+
+// TestCaptureCachePrunesDeletedFiles pins that the cache does not grow
+// without bound as session files are deleted: entries for paths the
+// capture no longer sees are dropped on save.
+func TestCaptureCachePrunesDeletedFiles(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	cfg := config.Default()
+	cfg.MachineID = "m1"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fx.PiRoot, Enabled: true}}
+	cachePath := filepath.Join(root, "capture-cache.json")
+	cold := archive.LoadCaptureCache(cachePath, ahaclock.RealClock{})
+	sc, err := archive.CaptureState(context.Background(), cfg, adapters.Builtins(), archive.StateOptions{CapturedAt: "2026-06-09T00:00:00Z", Cache: cold})
+	if err != nil {
+		t.Fatal(err)
+	}
+	victim := sc.Manifest.Files[0].RawPath
+	sc.Close()
+	if err := cold.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(victim); err != nil {
+		t.Fatal(err)
+	}
+	warm := archive.LoadCaptureCache(cachePath, ahaclock.RealClock{})
+	sc2, err := archive.CaptureState(context.Background(), cfg, adapters.Builtins(), archive.StateOptions{CapturedAt: "2026-06-09T01:00:00Z", Cache: warm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc2.Close()
+	if err := warm.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), victim) {
+		t.Fatalf("cache still holds the deleted file %s", victim)
 	}
 }

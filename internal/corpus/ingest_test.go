@@ -71,7 +71,7 @@ func TestSchemaMigratesOldArtifactTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`create table artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,bundle_id text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`)
+	_, err = db.Exec(`create table artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,manifest_sha256 text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,manifest_sha256,relative_path,parent_session_key))`)
 	if err != nil {
 		t.Fatal(err)
 	}

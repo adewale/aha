@@ -21,10 +21,18 @@ import (
 // modification in the same instant the cache was written can never be
 // masked.
 type CaptureCache struct {
-	path      string
-	clk       ahaclock.Clock
+	path string
+	clk  ahaclock.Clock
+	// writtenAt is the racy-mtime anchor loaded from the file: entries
+	// are only trusted when the file's mtime is strictly older.
 	writtenAt int64
-	entries   map[string]captureCacheEntry
+	// openedAt is when THIS cache was opened, stamped into the file on
+	// Save. Anchoring at open time (not save time) means a file whose
+	// mtime falls anywhere inside the capture window is never trusted on
+	// the next run — saving later would mask a coarse-mtime-granularity
+	// modification made mid-capture.
+	openedAt int64
+	entries  map[string]captureCacheEntry
 }
 
 const captureCacheSchema = "aha-capture-cache/v1"
@@ -45,7 +53,7 @@ type captureCacheFile struct {
 // LoadCaptureCache reads the cache at path. A missing, corrupt, or
 // wrong-schema file yields an empty cache (self-healing), never an error.
 func LoadCaptureCache(path string, clk ahaclock.Clock) *CaptureCache {
-	c := &CaptureCache{path: path, clk: clk, entries: map[string]captureCacheEntry{}}
+	c := &CaptureCache{path: path, clk: clk, openedAt: clk.Now().UnixNano(), entries: map[string]captureCacheEntry{}}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return c
@@ -86,10 +94,21 @@ func (c *CaptureCache) Record(path string, st os.FileInfo, sha string) {
 	c.entries[path] = captureCacheEntry{Size: st.Size(), MtimeNS: st.ModTime().UnixNano(), Inode: statInode(st), SHA256: sha}
 }
 
-// Save atomically writes the cache, stamping the write time the racy
-// rule compares against.
+// Retain drops entries for paths not in keep — called by an unscoped
+// capture with the set of paths it discovered, so the cache cannot grow
+// without bound as session files are deleted.
+func (c *CaptureCache) Retain(keep map[string]bool) {
+	for path := range c.entries {
+		if !keep[path] {
+			delete(c.entries, path)
+		}
+	}
+}
+
+// Save atomically writes the cache, stamped with the open time so the
+// racy rule covers the whole capture window.
 func (c *CaptureCache) Save() error {
-	f := captureCacheFile{Schema: captureCacheSchema, WrittenAtNS: c.clk.Now().UnixNano(), Entries: c.entries}
+	f := captureCacheFile{Schema: captureCacheSchema, WrittenAtNS: c.openedAt, Entries: c.entries}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err

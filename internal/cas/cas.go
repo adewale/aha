@@ -123,11 +123,18 @@ func VerifyReader(rc io.ReadCloser, key model.BlobKey) (io.ReadCloser, error) {
 	return &verifyingReader{key: key, f: rc, zr: zr, h: sha256.New()}, nil
 }
 
+// maxDecompressedBlobBytes caps how far a stored blob may decompress,
+// mirroring the v1 archive-entry budget: a zstd bomb surfaces as a read
+// error instead of filling memory or disk. (Variable, not const, so the
+// white-box guard test can exercise the cap without a 4 GiB fixture.)
+var maxDecompressedBlobBytes int64 = 4 << 30
+
 type verifyingReader struct {
 	key      model.BlobKey
 	f        io.Closer
 	zr       *zstd.Decoder
 	h        stdhash.Hash
+	n        int64
 	verified bool
 }
 
@@ -135,6 +142,10 @@ func (r *verifyingReader) Read(p []byte) (int, error) {
 	n, err := r.zr.Read(p)
 	if n > 0 {
 		_, _ = r.h.Write(p[:n])
+		r.n += int64(n)
+		if r.n > maxDecompressedBlobBytes {
+			return n, fmt.Errorf("cas: blob %s decompresses past the %d byte budget", r.key, maxDecompressedBlobBytes)
+		}
 	}
 	if err == io.EOF {
 		if got := hex.EncodeToString(r.h.Sum(nil)); got != r.key.String() {
