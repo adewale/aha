@@ -161,7 +161,7 @@ JSONL
   "accept_secrets_warning":true
 }
 JSONC
-  run /tmp/aha refresh --config "$tmpdir/config.jsonc" --captured-at 2026-01-01T00:00:00Z --bundle-id conformance >/dev/null
+  run /tmp/aha refresh --config "$tmpdir/config.jsonc" --captured-at 2026-01-01T00:00:00Z >/dev/null
 
   # ---- Server-under-test legs (drive aha mcp from a real SDK Client) ----
 
