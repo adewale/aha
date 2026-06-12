@@ -5,6 +5,8 @@ Branch: `claude/correctness-by-construction-cgcFx`
 Before commit: `9584b34`
 Machine: Apple M2 Ultra, darwin/arm64
 
+*Historical capture: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The depot local/R2 and catalog-merge code measured here is v1 machinery that was replaced by content-addressed snapshots in June 2026.*
+
 Scope: duplication-refactor candidates from `docs/audits/code-duplication-audit.md`: depot local/R2 shared helpers, R2 marker helpers, snapshot/refresh flag registration, search predicate construction, corpus FTS predicates, and atomic file-write helpers.
 
 Metrics are directional. The stable table uses repeated package benchmarks without pprof. The profile table uses one-shot benchmark runs with `-cpuprofile`/`-memprofile` to identify hotspots, not to gate wall-clock time.

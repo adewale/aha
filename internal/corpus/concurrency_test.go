@@ -39,7 +39,7 @@ func TestConcurrentDuplicateIngestIsSerializedAndIdempotent(t *testing.T) {
 			t.Fatalf("ingest %d failed: %v", i, err)
 		}
 	}
-	if got := queryCount(t, storeA, `select count(*) from bundles`); got != 1 {
+	if got := queryCount(t, storeA, `select count(*) from snapshots`); got != 1 {
 		t.Fatalf("bundles=%d want 1", got)
 	}
 	if got := queryCount(t, storeA, `select count(*) from ingest_attempts`); got != 2 {

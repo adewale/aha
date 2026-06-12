@@ -71,7 +71,7 @@ func TestSchemaMigratesOldArtifactTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`create table artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,bundle_id text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,bundle_id,relative_path,parent_session_key))`)
+	_, err = db.Exec(`create table artifacts(artifact_id integer primary key,artifact_sha256 text,source_name text,machine_id text,manifest_sha256 text,kind text,parent_session_key text,parent_entry_id text,raw_path text,relative_path text,text_preview text,unique(artifact_sha256,manifest_sha256,relative_path,parent_session_key))`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestIngestIdempotentSearchReadAndImages(t *testing.T) {
 	if !rep.Duplicate {
 		t.Fatalf("second ingest should be duplicate: %+v", rep)
 	}
-	assertCount(t, store.DB, "bundles", 1)
+	assertCount(t, store.DB, "snapshots", 1)
 	assertCount(t, store.DB, "sessions", 3)
 	assertCount(t, store.DB, "messages", 7)
 	assertCount(t, store.DB, "images", 2)
@@ -647,7 +647,7 @@ func TestOpenExistingDoesNotCreateCorpus(t *testing.T) {
 	_ = store.Close()
 }
 
-func TestDuplicateBundleIDDifferentSHAErrors(t *testing.T) {
+func TestSameBundleIDDifferentContentAreDistinctSnapshots(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)
 	bundle1 := writeBundleFromRoots(t, root, fx, "test-machine", "same-id")
@@ -672,9 +672,16 @@ func TestDuplicateBundleIDDifferentSHAErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle2 := writeBundleFromRoots(t, root, fx, "test-machine", "same-id")
-	if _, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2); err == nil {
-		t.Fatalf("expected duplicate bundle_id with different sha to error")
+	// Snapshot identity is the manifest's content hash, not the human
+	// bundle_id: same id with different content is simply two snapshots.
+	rep, err := corpus.IngestBundle(store, adapters.Builtins(), bundle2)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if rep.Duplicate {
+		t.Fatalf("different content reported as duplicate: %+v", rep)
+	}
+	assertCount(t, store.DB, "snapshots", 2)
 }
 
 func TestCrossMachineConflict(t *testing.T) {

@@ -26,9 +26,6 @@ func TestWriteWithInfoMatchesIndependentHashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.StateSHA256 != archive.ManifestStateSHA256(manifest) {
-		t.Fatalf("state sha=%s want %s", info.StateSHA256, archive.ManifestStateSHA256(manifest))
-	}
 	mb, err := archive.CanonicalManifest(manifest)
 	if err != nil {
 		t.Fatal(err)

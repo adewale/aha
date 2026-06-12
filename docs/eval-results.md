@@ -3,6 +3,8 @@
 Date: 2026-05-20
 Scope: local working tree after audit/refactor/Codex changes.
 
+*Historical: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). Bundle-based depot mechanics referenced below were replaced by content-addressed snapshots in June 2026.*
+
 ## Summary
 
 | Area | Score | Notes |

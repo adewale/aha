@@ -10,3 +10,4 @@ coverage.out
 
 # Harness-managed agent worktrees (transient scratch, not project source)
 /.claude/
+internal/corpus/testdata/rapid/

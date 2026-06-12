@@ -2,26 +2,19 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
-	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
-	"github.com/adewale/aha/internal/depot"
-	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
 )
@@ -60,18 +53,19 @@ type errorPayload struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--corpus", "--depot", "--machine", "--max-sessions", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{bundle,sha256,report}", Docs: "snapshot configured source state or reuse unchanged depot state, then ingest pending/new depot bundles", Run: cmdRefresh},
-		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--json]", Flags: []string{"--accept-secrets", "--bundle-id", "--captured-at", "--config", "--depot", "--machine", "--max-sessions", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:./bundles"}, JSONSchema: "object{bundle,sha256,bundle_id,captured_at}", Docs: "create an immutable local history bundle and store it in a depot", Run: cmdSnapshot},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{bundle,sha256?,bytes?,fetched?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "merge one or more bundles into a corpus", Run: cmdIngest},
+		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--corpus", "--depot", "--force", "--machine", "--max-sessions", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_carried},report,reports}", Docs: "push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus", Run: cmdRefresh},
+		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--depot", "--force", "--machine", "--max-sessions", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:~/.aha/depot"}, JSONSchema: "object{manifest_sha256,reused,files,blobs_uploaded,blobs_carried}", Docs: "push this machine's state to the depot: upload only new file versions, publish a snapshot manifest, move the pointer (no corpus needed; never downloads other machines' data)", Run: cmdSnapshot},
+		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{machine?,manifest_sha256?,bundle?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "pull every machine's latest depot snapshot into the corpus (fetching only unknown content), or import explicit v1 bundle files", Run: cmdIngest},
 		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
 		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <ref_text> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
-		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,bundles,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_bundles?,depot_catalog_refs_listed?,depot_unique_refs_listed?,depot_fetches?,next}", Docs: "summarize corpus health", Run: cmdStatus},
+		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,snapshots,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_snapshots?,depot_machines_listed?,depot_fetches?,next}", Docs: "summarize corpus health", Run: cmdStatus},
 		"verify":    {Name: "verify", Usage: "aha verify [--repo DIR] [--repair-fts] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repair-fts", "--repo"}, Examples: []string{"aha verify --json", "aha verify --repair-fts"}, JSONSchema: "object{root,stats,problems,repaired_fts,fts_repair?}", Docs: "verify corpus invariants and optionally repair derived FTS rows", Run: cmdVerify},
 		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
 		"incidents": {Name: "incidents", Usage: "aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]", Flags: []string{"--config", "--corpus", "--json", "--limit", "--machine", "--project", "--repo", "--source", "--state", "--tool"}, Examples: []string{"aha incidents --json", "aha incidents --state unresolved", "aha incidents --state resolved --project myrepo"}, JSONSchema: "array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref,sample_ordinal}>,sample_ref,score}>", Docs: "rank recurring tool-call failures with their resolution status (unresolved/partial/resolved) and the fix paths that worked", Run: cmdIncidents},
-		"corpus":    {Name: "corpus", Usage: "aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]", Flags: []string{"--config", "--corpus", "--force", "--json", "--repo"}, Examples: []string{"aha corpus size --json", "aha corpus vacuum", "aha corpus prune-orphans --json"}, JSONSchema: "object{root,total_bytes,database_bytes,bundle_blob_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}", Docs: "inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs", Run: cmdCorpus},
+		"corpus":    {Name: "corpus", Usage: "aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]", Flags: []string{"--config", "--corpus", "--force", "--json", "--repo"}, Examples: []string{"aha corpus size --json", "aha corpus vacuum", "aha corpus prune-orphans --json"}, JSONSchema: "object{root,total_bytes,database_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}", Docs: "inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs", Run: cmdCorpus},
+		"export":    {Name: "export", Usage: "aha export [--machine ID] [--depot DEPOT] [--out FILE] [--json]", Flags: []string{"--config", "--depot", "--json", "--machine", "--out"}, Examples: []string{"aha export", "aha export --machine work-mac --out work.tar.zst"}, JSONSchema: "object{bundle,sha256,manifest_sha256,machine,files,bytes}", Docs: "materialize a machine's latest depot snapshot as a portable v1 bundle.tar.zst (the single-file hand-off format; re-import with aha ingest)", Run: cmdExport},
 		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,sources,corpus,depot,next}", Docs: "show diagnostics and next actions", Run: cmdDoctor},
-		"depot":     {Name: "depot", Usage: "aha depot <init|use|ls|verify|compact> [DEPOT] [--json] [--repair] [--deep]", Flags: []string{"--config", "--deep", "--json", "--repair"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot init r2:aha-depot", "aha depot use r2:aha-depot", "aha depot ls --json", "aha depot verify --deep", "aha depot verify --repair", "aha depot compact --json"}, JSONSchema: "object|array", Docs: "initialize a depot, switch the default depot, list, verify, or compact a bundle depot", Run: cmdDepot},
+		"depot":     {Name: "depot", Usage: "aha depot <init|use|ls|verify> [DEPOT] [--json] [--deep]", Flags: []string{"--config", "--deep", "--json"}, Examples: []string{"aha depot init local:~/.aha/depot", "aha depot init r2:aha-depot", "aha depot use r2:aha-depot", "aha depot ls --json", "aha depot verify --deep"}, JSONSchema: "object|array", Docs: "initialize a depot, switch the default depot, list machine snapshots, or verify pointers, manifests, and blobs", Run: cmdDepot},
 		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
 		"mcp":       {Name: "mcp", Usage: "aha mcp [--config PATH] [--repo DIR] [--dry-run]", Flags: []string{"--config", "--corpus", "--dry-run", "--repo"}, Examples: []string{"aha mcp", "aha mcp --dry-run"}, JSONSchema: "jsonrpc:tools/list|tools/call (stdio MCP)", Docs: "run a read-only stdio MCP server over the corpus", Run: cmdMcp},
 		"serve":     {Name: "serve", Usage: "aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]", Flags: []string{"--addr", "--allow-remote", "--allowed-hosts", "--config", "--corpus", "--repo", "--timeout", "--token"}, Examples: []string{"aha serve", "aha serve --addr 127.0.0.1:18428", "aha serve --allow-remote --token $(openssl rand -hex 32)"}, JSONSchema: "http://HOST:PORT/api/{search,read,incidents,incident_trajectory,overview,status,verify,conflicts,corpus_size,doctor}", Docs: "run a read-only local dashboard over the corpus on loopback", Run: cmdServe},
@@ -263,61 +257,6 @@ func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) 
 		return corpus.Open(cfg.CorpusDir)
 	}
 	return corpus.OpenExisting(cfg.CorpusDir)
-}
-
-func writeSnapshot(req snapshotRequest) (string, string, error) {
-	drv, err := depotDriverForConfig(req.Config, req.DepotOverride)
-	if err != nil {
-		return "", "", err
-	}
-	if err := ensureDepot(context.Background(), drv); err != nil {
-		return "", "", err
-	}
-	tmpDir, err := os.MkdirTemp("", "aha-snapshot-*")
-	if err != nil {
-		return "", "", err
-	}
-	defer os.RemoveAll(tmpDir)
-	opts := archive.Options{CapturedAt: req.CapturedAt, BundleID: req.BundleID, SessionFilters: req.SessionFilters, MaxSessions: req.MaxSessions}
-	if opts.CapturedAt == "" {
-		opts.CapturedAt = ahaclock.RealClock{}.Now().Format(time.RFC3339)
-	}
-	if opts.BundleID == "" {
-		opts.BundleID = hash.RandomID()
-	}
-	opts.Clock = ahaclock.RealClock{}
-	bundle, err := archive.Capture(context.Background(), req.Config, adapters.Builtins(), opts)
-	if err != nil {
-		return "", "", err
-	}
-	if req.SkipIfUnchanged {
-		ref, ok, err := findDepotBundleWithSameState(context.Background(), drv, bundle.Manifest, tmpDir)
-		if err != nil {
-			return "", "", err
-		}
-		if ok {
-			path := localDepotBundlePath(drv, ref)
-			if path == "" {
-				path = ref.Key
-			}
-			return path, ref.BundleSHA256, nil
-		}
-	}
-	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("aha-sessions-%s-%s-%s.tar.zst", safeName(req.Config.MachineID), safeTime(opts.CapturedAt), safeName(opts.BundleID)))
-	info, err := archive.WriteWithInfo(tmpPath, bundle)
-	if err != nil {
-		return "", "", err
-	}
-	ref := depot.BundleRefFromWriteInfo(bundle.Manifest, info, filepath.Base(tmpPath))
-	ref, _, err = depot.PutBundleKnown(context.Background(), drv, tmpPath, ref)
-	if err != nil {
-		return "", "", err
-	}
-	path := localDepotBundlePath(drv, ref)
-	if path == "" {
-		path = ref.Key
-	}
-	return path, info.BundleSHA256, nil
 }
 
 func reorderSearchArgs(args []string) []string {

@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/cas"
 	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/fileutil"
 	"github.com/adewale/aha/internal/hash"
@@ -41,41 +41,27 @@ type IngestReport struct {
 	Duplicate bool `json:"duplicate"`
 }
 
-func recordBundleAttempt(tx *sql.Tx, manifest model.Manifest, bundleSHA, ingestedAt string) (duplicate bool, skip bool, err error) {
-	var shaForID string
-	err = tx.QueryRow(`select bundle_sha256 from bundles where bundle_id=?`, manifest.BundleID).Scan(&shaForID)
-	if err == nil {
-		if shaForID != bundleSHA {
-			return false, false, fmt.Errorf("bundle_id %s already exists with different sha", manifest.BundleID)
-		}
-		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
-			return false, false, err
-		}
-		return true, true, nil
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+// recordIngestAttempt logs the attempt and reports whether this snapshot
+// identity is already in the corpus. Identity is the manifest's canonical
+// SHA-256 for both v2 snapshots and imported v1 bundles, so "the same
+// state twice" is one row by construction.
+func recordIngestAttempt(tx *sql.Tx, manifestSHA, ingestedAt string) (duplicate bool, skip bool, err error) {
+	var existing int
+	if err := tx.QueryRow(`select count(*) from snapshots where manifest_sha256=?`, manifestSHA).Scan(&existing); err != nil {
 		return false, false, err
 	}
-	var idForSHA string
-	err = tx.QueryRow(`select bundle_id from bundles where bundle_sha256=?`, bundleSHA).Scan(&idForSHA)
-	if err == nil {
-		if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,1)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
-			return false, false, err
-		}
-		return true, true, nil
+	dup := 0
+	if existing > 0 {
+		dup = 1
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if _, err := tx.Exec(`insert into ingest_attempts(manifest_sha256,ingested_at,duplicate) values(?,?,?)`, manifestSHA, ingestedAt, dup); err != nil {
 		return false, false, err
 	}
-	if _, err := tx.Exec(`insert into ingest_attempts(bundle_id,bundle_sha256,ingested_at,duplicate) values(?,?,?,0)`, manifest.BundleID, bundleSHA, ingestedAt); err != nil {
-		return false, false, err
-	}
-	return false, false, nil
+	return existing > 0, existing > 0, nil
 }
 
 type ingestHooks struct {
-	afterManifestFiles             func() error
-	afterBundlePromoteBeforeCommit func() error
+	afterManifestFiles func() error
 }
 
 type Ingestor struct {
@@ -99,24 +85,29 @@ type Ingestor struct {
 }
 
 type ingestPlan struct {
-	stagingPath string
-	bundleSHA   string
-	bundleBlob  string
-	manifest    model.Manifest
-	expectedSHA string
+	stagingPath  string
+	bundleSHA    string
+	manifest     model.Manifest
+	manifestSHA  string
+	manifestJSON string
+	expectedSHA  string
 }
 
 type bundlePlanner struct {
 	Store *Store
 }
 
-type blobPublisher struct{}
-
 type corpusWriter struct {
-	Store          *Store
-	Registry       map[string]adapters.SourceAdapter
-	tx             *sql.Tx
-	manifest       model.Manifest
+	Store    *Store
+	Registry map[string]adapters.SourceAdapter
+	tx       *sql.Tx
+	// manifest carries the source context (machine, policy, adapters);
+	// for v2 snapshots it is a view assembled from the SnapshotManifest.
+	manifest model.Manifest
+	// manifestSHA is the canonical manifest identity of the snapshot
+	// being ingested; it keys all provenance rows (session_versions,
+	// artifacts, files.first_seen_manifest_sha256).
+	manifestSHA    string
 	stmts          writerStatements
 	redactor       *redact.Redactor
 	redactionLevel string
@@ -149,14 +140,14 @@ func (w *corpusWriter) PrepareStatements() error {
 	}{
 		{&w.stmts.insertMachine, `insert into machines(machine_id,first_seen_at,last_seen_at,labels_json) values(?,?,?,?) on conflict(machine_id) do update set last_seen_at=excluded.last_seen_at`},
 		{&w.stmts.upsertSource, `insert or replace into sources(source_name,adapter_version,capabilities_json) values(?,?,?)`},
-		{&w.stmts.insertFile, `insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_bundle_id) values(?,?,?,?,?)`},
+		{&w.stmts.insertFile, `insert or ignore into files(file_sha256,kind,bytes,compressed_blob_path,first_seen_manifest_sha256) values(?,?,?,?,?)`},
 		{&w.stmts.insertSession, `insert or ignore into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json,is_subagent,parent_session_key) values(?,?,?,?,?,?,?,?,?,?)`},
-		{&w.stmts.insertSessionVersion, `insert or ignore into session_versions(session_key,file_sha256,bundle_id,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`},
+		{&w.stmts.insertSessionVersion, `insert or ignore into session_versions(session_key,file_sha256,manifest_sha256,relative_path,raw_path,observed_at,copy_state) values(?,?,?,?,?,?,?)`},
 		{&w.stmts.insertSessionPathToken, `insert or ignore into session_path_tokens(session_key,token) values(?,?)`},
 		{&w.stmts.insertEntry, `insert or ignore into entries(session_key,entry_id,parent_id,line_no,entry_type,timestamp,role,entry_sha256,raw_json,source_metadata_json) values(?,?,?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertMessage, `insert or ignore into messages(session_key,entry_id,role,text,tool_name,command,files_json,model,provider,tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost,compaction_first_kept_entry_id,compaction_tokens_before,participates_in_context,thinking_level,label,label_target_entry_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertConflict, `insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,?,?,?)`},
-		{&w.stmts.insertArtifact, `insert or ignore into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`},
+		{&w.stmts.insertArtifact, `insert or ignore into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,parent_session_key,parent_entry_id,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertArtifactPathToken, `insert or ignore into artifact_path_tokens(artifact_id,token) values(?,?)`},
 		{&w.stmts.insertImage, `insert or ignore into images(image_sha256,source_name,mime_type,bytes,width,height,ext,blob_path) values(?,?,?,?,?,?,?,?)`},
 		{&w.stmts.insertEntryAsset, `insert or ignore into entry_assets(session_key,entry_id,asset_sha256,asset_kind,content_index,prompt_order,raw_ref,mime_type,metadata_json) values(?,?,?,?,?,?,?,?,?)`},
@@ -222,7 +213,7 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 		return IngestReport{}, err
 	}
 	defer os.Remove(plan.stagingPath)
-	if err := validateIngestAdapters(plan.manifest, ing.Registry); err != nil {
+	if err := validateIngestAdapters(plan.manifest.Files, ing.Registry); err != nil {
 		return IngestReport{}, err
 	}
 	tx, err := store.DB.Begin()
@@ -231,7 +222,7 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 	}
 	defer tx.Rollback()
 	ingestedAt := ing.clock().Now().Format(time.RFC3339)
-	dup, skip, err := recordBundleAttempt(tx, plan.manifest, plan.bundleSHA, ingestedAt)
+	dup, skip, err := recordIngestAttempt(tx, plan.manifestSHA, ingestedAt)
 	if err != nil {
 		return IngestReport{}, err
 	}
@@ -241,7 +232,7 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 		}
 		return IngestReport{Duplicate: dup}, nil
 	}
-	if err := insertBundleMetadata(tx, plan, ingestedAt); err != nil {
+	if err := insertSnapshotMetadata(tx, plan.manifestSHA, plan.manifest.MachineID, plan.manifest.CapturedAt, ingestedAt, plan.manifestJSON); err != nil {
 		return IngestReport{}, err
 	}
 	manifest := plan.manifest
@@ -249,7 +240,7 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 	if level == "" {
 		level = "none-v1"
 	}
-	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest, redactor: ing.Redactor, redactionLevel: level}
+	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest, manifestSHA: plan.manifestSHA, redactor: ing.Redactor, redactionLevel: level}
 	if err := writer.PrepareStatements(); err != nil {
 		return IngestReport{}, err
 	}
@@ -278,31 +269,15 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 			return IngestReport{}, err
 		}
 	}
-	promoted, err := (blobPublisher{}).PromoteBundle(plan)
-	if err != nil {
-		return IngestReport{}, err
-	}
-	committed := false
-	defer func() {
-		if promoted && !committed {
-			_ = os.Remove(plan.bundleBlob)
-		}
-	}()
-	if ing.hooks.afterBundlePromoteBeforeCommit != nil {
-		if err := ing.hooks.afterBundlePromoteBeforeCommit(); err != nil {
-			return IngestReport{}, err
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return IngestReport{}, err
 	}
-	committed = true
 	return rep, nil
 }
 
-func validateIngestAdapters(manifest model.Manifest, registry map[string]adapters.SourceAdapter) error {
+func validateIngestAdapters(files []model.ManifestFile, registry map[string]adapters.SourceAdapter) error {
 	seen := map[string]bool{}
-	for _, mf := range manifest.Files {
+	for _, mf := range files {
 		if seen[mf.Source] {
 			continue
 		}
@@ -344,11 +319,7 @@ func isSQLiteBusy(err error) bool {
 }
 
 func (p bundlePlanner) Prepare(sourcePath, expectedSHA string) (ingestPlan, error) {
-	stagingDir := filepath.Join(p.Store.Root, "blobs", "bundles")
-	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
-		return ingestPlan{}, err
-	}
-	staging, err := os.CreateTemp(stagingDir, ".ingest-*.tar.zst")
+	staging, err := os.CreateTemp("", ".aha-ingest-*.tar.zst")
 	if err != nil {
 		return ingestPlan{}, err
 	}
@@ -375,28 +346,17 @@ func (p bundlePlanner) Prepare(sourcePath, expectedSHA string) (ingestPlan, erro
 		_ = os.Remove(stagingPath)
 		return ingestPlan{}, err
 	}
-	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, bundleBlob: filepath.Join(p.Store.Root, "blobs", "bundles", bundleSHA+".tar.zst"), manifest: manifest, expectedSHA: expectedSHA}, nil
+	mb, err := archive.CanonicalManifest(manifest)
+	if err != nil {
+		_ = os.Remove(stagingPath)
+		return ingestPlan{}, err
+	}
+	return ingestPlan{stagingPath: stagingPath, bundleSHA: bundleSHA, manifest: manifest, manifestSHA: hash.SHA256Bytes(mb), manifestJSON: string(mb), expectedSHA: expectedSHA}, nil
 }
 
-func insertBundleMetadata(tx *sql.Tx, plan ingestPlan, ingestedAt string) error {
-	manifestJSON, _ := json.Marshal(plan.manifest)
-	_, err := tx.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, plan.manifest.BundleID, plan.bundleSHA, plan.manifest.MachineID, plan.manifest.CapturedAt, ingestedAt, string(manifestJSON))
+func insertSnapshotMetadata(tx *sql.Tx, manifestSHA, machineID, capturedAt, ingestedAt, manifestJSON string) error {
+	_, err := tx.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`, manifestSHA, machineID, capturedAt, ingestedAt, manifestJSON)
 	return err
-}
-
-func (blobPublisher) PromoteBundle(plan ingestPlan) (bool, error) {
-	if err := os.MkdirAll(filepath.Dir(plan.bundleBlob), 0o755); err != nil {
-		return false, err
-	}
-	if _, err := os.Stat(plan.bundleBlob); os.IsNotExist(err) {
-		if err := os.Rename(plan.stagingPath, plan.bundleBlob); err != nil {
-			return false, err
-		}
-		return true, nil
-	} else if err != nil {
-		return false, err
-	}
-	return false, nil
 }
 
 func (w corpusWriter) InsertMachineAndSources() error {
@@ -457,7 +417,7 @@ func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (In
 			return IngestReport{}, err
 		}
 	}
-	if _, err := w.stmts.insertFile.Exec(mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), manifest.BundleID); err != nil {
+	if _, err := w.stmts.insertFile.Exec(mf.SHA256, mf.Kind, mf.Bytes, filepath.ToSlash(filepath.Join("blobs", "files", mf.SHA256+".zst")), w.manifestSHA); err != nil {
 		return IngestReport{}, err
 	}
 	if mf.Kind != "session" {
@@ -471,6 +431,29 @@ func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (In
 		return IngestReport{}, nil
 	}
 	return w.IngestSessionFile(mf, tmpPath)
+}
+
+// knownSessionVersionKey returns the session key of an already-ingested
+// version of this exact session file, or "" if none exists. A
+// session_versions row commits in the same transaction as the entries
+// it describes, so an existing row for the same machine, source, path,
+// and content hash proves the parse outcome is already in the corpus
+// and the parse can be skipped — this is what keeps ingest O(new files)
+// instead of O(bundle files). The key deliberately includes the paths:
+// byte-identical files under a different path or session ID are parsed,
+// never skipped (TestIdenticalBytesDifferentSessionStillParsed pins the
+// residual risk).
+func (w corpusWriter) knownSessionVersionKey(mf model.ManifestFile) (string, error) {
+	var key string
+	err := w.tx.QueryRow(`select sv.session_key from session_versions sv join sessions s on s.session_key=sv.session_key where sv.file_sha256=? and sv.relative_path=? and sv.raw_path=? and s.machine_id=? and s.source_name=? limit 1`,
+		mf.SHA256, mf.RelativePath, mf.RawPath, w.manifest.MachineID, mf.Source).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 func (w corpusWriter) fileBlobKnown(sha string) (bool, error) {
@@ -500,6 +483,14 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	ad := w.Registry[mf.Source]
 	if ad == nil {
 		return IngestReport{}, fmt.Errorf("unknown source adapter %q", mf.Source)
+	}
+	if knownKey, err := w.knownSessionVersionKey(mf); err != nil {
+		return IngestReport{}, err
+	} else if knownKey != "" {
+		if _, err := w.stmts.insertSessionVersion.Exec(knownKey, mf.SHA256, w.manifestSHA, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+			return IngestReport{}, err
+		}
+		return IngestReport{Sessions: 1}, nil
 	}
 	fh, err := os.Open(tmpPath)
 	if err != nil {
@@ -545,7 +536,7 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	if err := w.insertSessionPathTokens(sessionKey, rawCWD); err != nil {
 		return IngestReport{}, err
 	}
-	if _, err := w.stmts.insertSessionVersion.Exec(sessionKey, mf.SHA256, manifest.BundleID, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
+	if _, err := w.stmts.insertSessionVersion.Exec(sessionKey, mf.SHA256, w.manifestSHA, mf.RelativePath, mf.RawPath, manifest.CapturedAt, mf.CopyState); err != nil {
 		return IngestReport{}, err
 	}
 	existingEntries, err := existingEntryHashes(tx, sessionKey)
@@ -696,12 +687,12 @@ func crossMachineEntryHashes(tx *sql.Tx, manifest model.Manifest, source, source
 func (w corpusWriter) ingestEntry(source, sourceSessionID, sessionKey string, pe model.ParsedEntry, existing map[string]string, cross map[string][]crossEntryHash) (entryReport, error) {
 	eh := hash.SHA256Bytes([]byte(pe.RawJSON))
 	if oldHash, ok := existing[pe.EntryID]; ok && oldHash != eh {
-		_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"bundle_id": w.manifest.BundleID}))
+		_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, oldHash, eh, mustJSON(map[string]any{"manifest_sha256": w.manifestSHA}))
 		return entryReport{}, err
 	}
 	for _, other := range cross[pe.EntryID] {
 		if other.hash != eh {
-			_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, other.hash, eh, mustJSON(map[string]any{"bundle_id": w.manifest.BundleID, "other_session_key": other.sessionKey, "kind": "cross-machine"}))
+			_, err := w.stmts.insertConflict.Exec(sessionKey, pe.EntryID, other.hash, eh, mustJSON(map[string]any{"manifest_sha256": w.manifestSHA, "other_session_key": other.sessionKey, "kind": "cross-machine"}))
 			return entryReport{}, err
 		}
 	}
@@ -917,7 +908,7 @@ func (w corpusWriter) ingestArtifact(mf model.ManifestFile, path string) (bool, 
 	// per-entry redactions table.
 	redactedPreview, previewHits := w.applyRedaction(preview)
 	redactedFullText, bodyHits := w.applyRedaction(fullText)
-	res, err := w.stmts.insertArtifact.Exec(mf.SHA256, mf.Source, manifest.MachineID, manifest.BundleID, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, redactedPreview, redactedFullText)
+	res, err := w.stmts.insertArtifact.Exec(mf.SHA256, mf.Source, manifest.MachineID, w.manifestSHA, mf.Kind, parent, nil, mf.RawPath, mf.RelativePath, redactedPreview, redactedFullText)
 	if err != nil {
 		return false, err
 	}
@@ -1029,27 +1020,16 @@ func spoolEntry(root string, r io.Reader) (string, string, int64, error) {
 }
 
 func storeFileBlobFromPath(root, sha, path string) error {
-	finalPath := filepath.Join(root, "blobs", "files", sha+".zst")
-	return fileutil.AtomicWrite(finalPath, fileutil.AtomicOptions{TempPattern: sha + "-*.tmp", ExistingOK: true}, func(out *os.File) error {
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		enc, err := pooledZstdWriter(out)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(enc, in)
-		closeEncErr := enc.Close()
-		if closeEncErr == nil {
-			putZstdWriter(enc)
-		}
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeEncErr
-	})
+	key, err := model.NewBlobKey(sha)
+	if err != nil {
+		return err
+	}
+	store, err := cas.Open(filepath.Join(root, "blobs", "files"))
+	if err != nil {
+		return err
+	}
+	_, err = store.PutFile(key, path)
+	return err
 }
 
 func pooledZstdWriter(w io.Writer) (*zstd.Encoder, error) {

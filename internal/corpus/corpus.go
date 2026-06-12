@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -57,6 +58,10 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	if err := rejectLegacyBundleCorpus(db, root); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if opts.Migrate {
 		if err := Init(db); err != nil {
 			db.Close()
@@ -64,6 +69,25 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 		}
 	}
 	return &Store{DB: db, Root: root}, nil
+}
+
+// rejectLegacyBundleCorpus refuses corpora created before depot v2 (the
+// bundle-keyed schema). There is no migration by decision
+// (docs/depot-v2-spec.md): a corpus is a rebuildable index over the
+// depot, so the legacy schema is rejected at open instead of being
+// silently mixed with the snapshot-keyed schema.
+func rejectLegacyBundleCorpus(db *sql.DB, root string) error {
+	// Two independent signals so a manually-pruned legacy corpus cannot
+	// slip through and become a hybrid schema: the bundles table itself,
+	// and any surviving table still keyed by bundle_id.
+	var n int
+	if err := db.QueryRow(`select count(*) from sqlite_master where type='table' and (name='bundles' or (sql like '%bundle_id%' and name<>'bundles'))`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("corpus at %s uses the pre-v2 bundle schema; rebuild it by re-ingesting from the depot (move the old corpus directory aside first)", root)
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.DB.Close() }

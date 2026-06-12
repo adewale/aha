@@ -2,7 +2,9 @@
 
 Date: 2026-05-25
 
-This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic bundles, content-addressed identity, append-only ingest, or repairability. Latest captured benchmark results live in `docs/performance-results.md`.
+This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic content-addressed snapshots, append-only ingest, or repairability. Latest captured benchmark results live in `docs/performance-results.md`.
+
+*Scope note (June 2026): the depot rows in this plan predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The v1 bundle/catalog store — monolithic `tar.zst` bundles, catalog shards, `state_sha256` refs, `depot compact` — was replaced by content-addressed snapshots (write-once blobs + per-machine manifests), which remove the bundle-growth axes by construction: push uploads only new file versions, pull fetches only unknown blobs, and steady-state paths never LIST. v1-era measurements and design records are retained below and marked as such; the corpus/search/verify guidance remains current.*
 
 ## Revised testing strategy
 
@@ -11,7 +13,7 @@ Pathological performance testing now has two layers:
 1. **Synthetic benchmarks for byte/row-heavy cases**: large message counts, broad FTS terms, many tiny archive files, and deep depot verification. These expose constant factors and give pprof data.
 2. **Property-based performance invariants for metadata-heavy cases**: many trivial bundles, duplicates, many machines, and many catalog shapes. These avoid storing huge datasets and assert complexity by operation/cardinality rather than wall-clock time.
 
-The second layer is especially important for depot/status/refresh behavior because the failure mode is often not a 100MiB object; it is years of tiny no-op snapshots and duplicate catalog refs.
+The second layer is especially important for depot/status/refresh behavior because the failure mode is often not a 100MiB object; it is years of tiny no-op snapshots (and, in the v1 depot, duplicate catalog refs — depot v2's operation-count properties play the same role for pointer/manifest GETs and blob fetches).
 
 ## Layer-selection rules
 
@@ -28,7 +30,7 @@ Wall-clock assertions should almost never be unit tests. Prefer deterministic co
 
 ## Phase 0: abstraction-readiness characterization
 
-Before changing an abstraction for performance, add a characterization gate that freezes the externally important behavior and the performance invariant the new abstraction is supposed to improve. This is the minimum test net needed to reconsider internals freely.
+Before changing an abstraction for performance, add a characterization gate that freezes the externally important behavior and the performance invariant the new abstraction is supposed to improve. This is the minimum test net needed to reconsider internals freely. (The depot rows in the table below are v1-era records; depot v2 deleted those abstractions — catalog `state_sha256` refs, `WriteWithInfo` bundle handoff, expected-SHA bundle ingest, and catalog compaction — outright.)
 
 | Proposed abstraction change | Correctness characterization | Performance/scalability characterization | Metric that should improve |
 |---|---|---|---|
@@ -44,6 +46,8 @@ Before changing an abstraction for performance, add a characterization gate that
 If a row lacks a characterization gate, the abstraction is not ready to change yet. This is the direct application of the testing-best-practices rule: make illegal states unrepresentable when possible, then keep only invariant-proof and model-gap tests at the boundary where the type/schema stops helping.
 
 ## Cheapest-layer audit results
+
+*v1-era audit record: the depot rows below (trivial bundles, `status --depot` metadata, `state_sha256` no-fetch, expected-SHA ingest, `PutBundleKnown`) describe v1 machinery that depot v2 deleted; their named tests/helpers no longer exist. The corpus/search/profiling rows remain current.*
 
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
 |---|---|---|---|
@@ -65,8 +69,9 @@ New benchmarks deliberately stress worst-case shapes rather than average fixture
 go test ./internal/archive -run=^$ -bench=BenchmarkPathological -benchmem
 go test ./internal/corpus  -run=^$ -bench=BenchmarkPathological -benchmem
 go test ./internal/search  -run=^$ -bench=BenchmarkPathological -benchmem
-go test ./internal/depot   -run=^$ -bench=BenchmarkPathological -benchmem
 ```
+
+(The v1 depot benchmarks — catalog merge, large-catalog list/verify — were deleted with the v1 bundle store; depot v2 paths are guarded by operation-count tests rather than benchmarks.)
 
 Scale knobs:
 
@@ -74,9 +79,8 @@ Scale knobs:
 - `AHA_PATHOLOGICAL_VERIFY_MESSAGES` default `5000`;
 - `AHA_PATHOLOGICAL_RECONCILE_MESSAGES` default `5000`;
 - `AHA_PATHOLOGICAL_STATUS_MESSAGES` default `5000`;
-- `AHA_PATHOLOGICAL_STATUS_BUNDLES` default `5000`;
-- `AHA_PATHOLOGICAL_SEARCH_MESSAGES` default `10000`;
-- `AHA_PATHOLOGICAL_DEPOT_REFS` default `250`.
+- `AHA_PATHOLOGICAL_STATUS_BUNDLES` default `5000` (seeds extra snapshots for status scaling);
+- `AHA_PATHOLOGICAL_SEARCH_MESSAGES` default `10000`.
 
 Useful profile commands:
 
@@ -90,7 +94,7 @@ go tool pprof -top -alloc_space /tmp/aha-ingest.mem
 
 ## What the first pathological run showed (historical baseline)
 
-Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are directional, not release targets. This section is preserved as the pre-plan baseline; current results are in the next section and in `docs/performance-results.md`.
+Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are directional, not release targets. This section is preserved as the pre-plan baseline; later results are in the next section and in `docs/performance-results.md`. The depot/catalog rows measured the v1 bundle store.
 
 | Area | Pathological case | Observation | Interpretation |
 |---|---:|---:|---|
@@ -107,7 +111,7 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 
 ## Latest post-plan benchmark snapshot
 
-Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. These are not CI thresholds; they are before/after signals for the abstractions added by this plan.
+Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. These are not CI thresholds; they are before/after signals for the abstractions added by this plan. (v1-era capture: the depot merge and status/`BundleSHAs` rows measured v1 catalog machinery that depot v2 has since deleted.)
 
 | Area | Case | Latest observation | Change vs first pathological run |
 |---|---:|---:|---|
@@ -122,7 +126,7 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. The
 
 ## Metrics and measurable improvement targets
 
-The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood.
+The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood. The depot rows below are v1-era targets, retained as the record of what this plan achieved; depot v2 then removed the underlying mechanisms entirely (no catalog refs, no `state_sha256`, no pending-bundle fetches, no `depot compact` — a steady-state v2 refresh is a handful of pointer/manifest GETs with zero PUTs/fetches/parses, and `status --depot` reports `depot_behind_snapshots`/`depot_machines_listed`).
 
 | Scenario / user journey | Current pain signal | Primary metric | Expected measurable improvement |
 |---|---|---|---|
@@ -146,25 +150,24 @@ Instrumentation to add as optimizations land:
 
 ## Property-based performance invariants
 
-For many-trivial-bundle scenarios, tests should generate compact catalog/corpus models and assert invariants such as:
+For many-snapshot scenarios, tests should generate compact depot/corpus models and assert invariants such as:
 
-- **cardinality invariants**: pending/behind work is based on unique bundle SHA, not duplicate catalog refs;
-- **operation-count invariants**: status/list/state checks may list metadata but must not fetch bundle bytes unless a deep operation is explicitly requested;
-- **byte-read invariants**: unchanged refresh should compare catalog `state_sha256` and read `0` old bundle bytes when state metadata exists;
-- **bounded-output invariants**: query/status JSON should be bounded by requested limit or unique ref count, not raw duplicate count;
-- **idempotence invariants**: repeated trivial bundles do not increase pending ingest work after the first successful ingest;
-- **shape invariants**: many machines/shards and many duplicate refs produce the same answer as a set model.
+- **cardinality invariants**: behind/pending work is based on unknown snapshot manifests and unknown file versions, never on re-counting known ones;
+- **operation-count invariants**: push/pull/status may GET pointers and manifests but must never LIST objects or fetch known blobs; deep work is explicit (`depot verify --deep`);
+- **byte-read invariants**: an unchanged push diffs against the parent manifest and performs zero writes; an in-sync pull fetches zero blobs;
+- **bounded-output invariants**: query/status JSON should be bounded by requested limit or unique-version count, not raw history size;
+- **idempotence invariants**: re-pushing unchanged state and re-pulling a known snapshot are no-ops;
+- **shape invariants**: many machines/manifests produce the same answer as a set model.
 
-Current examples:
+Current examples (v2 operation-count/property tests replaced the deleted v1 catalog tests):
 
-- `TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty`: `status --depot` behind counts are computed as `unique(catalog_sha) - ingested_sha`, so duplicate refs from many trivial bundles do not inflate output/work units.
-- `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles`: `status --depot` performs one metadata list and zero bundle fetches.
-- `TestMergeBundleRefsSetSemanticsAndMetadataProperty`: map-backed catalog merge preserves first non-empty metadata while deduplicating by bundle SHA.
-- `TestDuplicateBundleSkipsSessionParsing`: duplicate bundle ingest does not parse session files again.
+- `TestPushV2UnchangedStateIsReusedWithoutWritesOrReads` / `TestV2R2SecondUnchangedPushWritesNothing`: an unchanged push performs zero PUTs and zero blob reads.
+- `TestPushV2DeltaReadsAndUploadsOnlyNewContent` / `TestV2R2DeltaPushUploadsOnlyTheDelta`: one new file means exactly that blob plus one manifest and one pointer write.
+- `TestV2R2PushOperationInvariants`: push performs zero foreign-prefix GETs and zero LISTs.
+- `TestUnchangedSessionFileSkipsReparseAcrossBundles`: a session-file version already proven present is never re-parsed.
 - `TestKnownFileBlobSkipsRecompression`: known file blobs are not recompressed/re-written.
-- `BenchmarkPathologicalCatalogMergeManyTrivialRefs`: measures catalog merge/sort for many trivial refs entirely in memory, avoiding generated bundle files.
 
-This changes the roadmap: every optimization below should get both a benchmark and a small-model property/operation test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT/counter tests answer “what must not grow with duplicates, stale refs, old trivial bundles, or remote object bytes?”
+This changes the roadmap: every optimization below should get both a benchmark and a small-model property/operation test when the risk is algorithmic. Benchmarks answer “how expensive is this implementation?”; PBT/counter tests answer “what must not grow with duplicates, stale snapshots, old history, or remote object bytes?”
 
 ## Profiling lessons
 
@@ -181,11 +184,11 @@ This changes the roadmap: every optimization below should get both a benchmark a
 | More messages | Ingest remains roughly linear in new entries; rowid-backed FTS verification removed the first superlinear verify cliff. | Future schema/FTS changes could reintroduce unindexed verifier work, so query-plan guards must stay green. |
 | More broad terms | FTS keeps search usable, but broad/common terms and high `--limit` increase SQL work and output allocations. | Search latency and JSON size grow; agent loops become slower and noisier. |
 | More paths/projects | `--path` uses contains matching over cwd/path columns. | Path filters stay non-indexable and degrade when combined with common terms. |
-| More bundles | `BundleSHAs`, depot `List`, catalog JSON parse/sort, and status set-difference scan raw catalog/bundle rows; PBT guards that output/work units are deduped by SHA, and map-backed merge/compact are in place. | `status --depot` and depot ingest startup can still grow with raw catalog metadata if real depots become much larger. |
-| More unchanged refreshes | New catalog refs carry `state_sha256`, so matching state metadata avoids fetching old bundles; refs missing state metadata still fall back to reads. | Unchanged daily refresh should stay metadata-only for new refs; fallback/repair paths remain explicit costs. |
-| More depot objects | Deep verify hashes/downloads every object. | Correct integrity audits become expensive and network-costly. |
-| More tiny files | Manifest/tar/header overhead scales with file count, not just bytes. | Many subagent artifacts or small sessions create high allocation/metadata overhead. |
-| More years of history | Corpus and bundle blobs are append-only by design. | Disk usage grows monotonically unless users get compaction/export/retention tools. |
+| More snapshots/machines | Push/pull/status read one pointer + one manifest per machine and never LIST; the corpus diffs each manifest against known `(machine, path, sha)` versions. | Work grows with machine count and day's delta, not with history; very large fleets would grow the per-refresh GET count linearly in machines. |
+| More unchanged refreshes | Push diffs against the parent manifest; an unchanged machine performs zero writes, and an in-sync pull fetches zero blobs. | A steady-state refresh stays a handful of small GETs; the advisory capture cache keeps the local scan O(changed files), and a wiped cache costs one full re-hash, never re-uploads. |
+| More depot objects | `depot verify --deep` fetches and hashes every referenced blob (many small GETs). | Correct integrity audits stay byte-linear and get slower as unique history grows; they remain explicit, never part of daily paths. |
+| More tiny files | Per-file blob and manifest-entry overhead scales with file count, not just bytes (tar/header overhead now applies only to `export`). | Many subagent artifacts or small sessions create many small objects and manifest entries; R2's cheap op classes make this affordable, but manifests grow with file count. |
+| More years of history | Corpus and depot blobs are append-only by design; the depot stores each unique file version once and never deletes (no GC, by policy). | Disk usage grows with unique bytes — the theoretical floor; growing JSONL files still store one whole blob per observed version until an append-segment refinement lands. |
 
 ## Historical implementation plan by hotspot
 

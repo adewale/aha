@@ -1,6 +1,6 @@
 # Architecture
 
-`aha` is a local-first agent-history archive. It reads supported coding-agent history roots, snapshots them into deterministic `tar.zst` bundles, stores those bundles in a depot, ingests pending bundles into a local SQLite + FTS5 corpus, and exposes stable search/read refs for humans and agents.
+`aha` is a local-first agent-history archive. It reads supported coding-agent history roots, pushes their file versions as content-addressed blobs plus a per-machine snapshot manifest into a depot, pulls unknown blobs into a local SQLite + FTS5 corpus, and exposes stable search/read refs for humans and agents.
 
 ## System overview
 
@@ -26,16 +26,16 @@
               ▼                                ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              internal/archive                               │
-│ Capture → manifest.json + copied raw files → deterministic tar.zst bundle    │
+│ Capture → stat/hash sources → diff vs parent manifest → new blobs + manifest │
 └──────────────────────────────────────┬───────────────────────────────────────┘
-                                       │ PutBundle / Fetch / List / Verify
+                                       │ put blobs/manifest/pointer · get pointers/manifests
                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                               internal/depot                                │
 │ local: filesystem depot          r2: S3-compatible Cloudflare R2 depot       │
-│ bundles/v1/<sha>.tar.zst         catalog/v1/<machine>.json                  │
+│ blobs/v2/<sha>.zst  machines/<id>/manifests/<sha>.json  machines/<id>/latest │
 └──────────────────────────────────────┬───────────────────────────────────────┘
-                                       │ ingest pending bundle refs
+                                       │ pull: fetch only unknown blobs
                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              internal/corpus                                │
@@ -54,10 +54,12 @@
 | Noun | Meaning | Durable? |
 |---|---|---|
 | Source root | A local history directory/DB for Pi, Claude Code, Codex, or OpenCode. | External input; `aha` treats it read-only. |
-| Bundle | Immutable deterministic `tar.zst` snapshot containing `manifest.json` and copied raw files. | Yes. Bundle bytes are durable truth. |
-| Depot | Bundle store addressed as `local:PATH` or `r2:BUCKET`. | Yes. Stores content-addressed bundle objects. |
-| Catalog shard | Repairable JSON listing of bundle refs for one machine. | No. It is rebuilt from bundle objects. |
-| Corpus | Local SQLite + FTS5 database and blob store derived from ingested bundles. | Rebuildable. It is the query engine, not truth. |
+| Blob | One compressed file version, stored write-once at `blobs/v2/<sha256>.zst` and addressed by the SHA-256 of its contents. | Yes. Blob bytes are durable truth. |
+| Manifest | A small JSON object listing one machine's complete state — every file entry with its `blob_sha256`. Its canonical-encoding SHA-256 is the snapshot identity. | Yes. Write-once under `machines/<id>/manifests/<sha256>.json`. |
+| Latest pointer | `machines/<id>/latest`, a tiny `{manifest_sha256}` pointer updated by conditional PUT. | Repointable; every manifest it ever pointed at remains. |
+| Depot | Blob/manifest store addressed as `local:PATH` or `r2:BUCKET`. Append-only: it never deletes. | Yes. |
+| Bundle | The v1 portable `tar.zst` file format. Survives only in `aha export` (write) and `aha ingest <bundle.tar.zst>` (import). | A bundle file is a portable copy, not a depot object. |
+| Corpus | Local SQLite + FTS5 database and blob store derived from pulled snapshots. | Rebuildable. It is the query engine, not truth. |
 | Ref | Stable canonical search/read identifier: `msg:v1:<b64-session>:<b64-entry>`, `session:v1:<b64-session>`, or `artifact:v1:<sha256>`. | API contract for retrieval. |
 
 ## On-disk / object layouts
@@ -68,22 +70,18 @@ Local depot default: `~/.aha/depot`.
 
 ```text
 <depot>/
-  depot.json
-  bundles/v1/<bundle_sha256>.tar.zst
-  catalog/v1/<safe-machine-id>.json
+  aha-depot.json                                 # marker (schema aha-depot/v2)
+  blobs/v2/<sha256>.zst                          # one compressed file version, write-once
+  machines/index.json                            # machine-namespace registry, conditional PUT
+  machines/<machine_id>/manifests/<sha256>.json  # one snapshot manifest, write-once
+  machines/<machine_id>/latest                   # pointer {manifest_sha256}, conditional PUT
 ```
 
-R2 uses the same key layout inside the bucket:
+R2 uses the same key layout inside the bucket.
 
-```text
-depot.json
-bundles/v1/<bundle_sha256>.tar.zst
-catalog/v1/<safe-machine-id>.json
-```
+The machines index exists so pull can discover machine namespaces with a single GET instead of a LIST; it is appended to (conditional PUT with retry) only on a machine's first-ever push. v1 depots (`depot.json` + `bundles/v1/` + `catalog/v1/`) are refused at `init` — there is no migration; a v1 depot is recovered by feeding its bundle files through `aha ingest <bundle.tar.zst>` and pushing fresh.
 
-The catalog filename uses a sanitized machine ID for path safety; the JSON body preserves the real `machine_id`. The catalog is an acceleration/provenance layer. `aha depot verify --repair` can rebuild it by listing `bundles/v1/*`, reading each embedded manifest, and writing fresh shards.
-
-See [`depot-lifecycle.md`](depot-lifecycle.md) for the states a depot moves through and the commands that move it (`init`, `use`, `snapshot`/`refresh`, `verify`, `compact`).
+See [`depot-lifecycle.md`](depot-lifecycle.md) for the states a depot moves through and the commands that move it (`init`, `use`, `snapshot`/`refresh`, `verify`).
 
 ### Corpus
 
@@ -96,55 +94,66 @@ Default corpus: `~/.aha`.
   images/...
 ```
 
-SQLite tables store machines, sources, bundles, files, sessions, entries, messages, artifacts, images, and conflicts. FTS5 virtual tables index message text and text artifacts. Blob files preserve raw bundle content needed for reads.
+SQLite tables store machines, sources, snapshots (keyed by `manifest_sha256`), files, sessions, entries, messages, artifacts, images, and conflicts. FTS5 virtual tables index message text and text artifacts. Blob files preserve raw file content needed for reads. Pre-v2 corpora are rejected at open with an instruction to rebuild (delete and re-pull); the corpus is always rebuildable from the depot.
 
 ## Command flows and walkthrough
 
 The shortest mental model is:
 
 ```text
-local agent histories → snapshot bundle → depot → local corpus → search/read
+local agent histories → push (new blobs + manifest) → depot → pull into local corpus → search/read
 ```
 
-### `aha snapshot`
+### `aha snapshot` (push)
 
 ```text
 config + flags
   → adapters discover local sessions/artifacts read-only
-  → archive.Capture copies stable raw bytes into temp storage
-  → archive.Write creates deterministic tar.zst
-  → depot.PutBundle stores bundles/v1/<sha>.tar.zst
-  → catalog shard is merged/updated
+  → GET own latest pointer + parent manifest (a few KB)
+  → stat/hash local sources (advisory capture cache skips re-reading unchanged files; --force bypasses it)
+  → diff against the parent manifest
+  → PUT only blobs the parent doesn't list
+  → PUT the new manifest, then conditional PUT the pointer
 ```
 
-Snapshot creates durable evidence and writes to the depot; it does not touch the corpus. If OpenCode is enabled, discovery may also refresh the private OpenCode JSONL export cache before archive capture.
+Snapshot is push-only: it creates durable evidence in the depot and does not touch the corpus. Unchanged state means zero writes — not even a new manifest. If OpenCode is enabled, discovery may also refresh the private OpenCode JSONL export cache before capture.
 
-### `aha ingest`
+### `aha ingest` (pull / import)
 
-With explicit paths, ingest reads those bundles. With no paths, ingest reads pending refs from the configured depot.
+With an explicit `bundle.tar.zst` path, ingest imports a portable v1-format bundle file (the compatibility hedge for pre-v2 depots and for journeys that hand someone one file). With no paths, ingest is anti-entropy pull from the configured depot:
 
 ```text
-depot.List or explicit paths
-  → skip bundle SHA already present in corpus
-  → depot.Fetch when needed
-  → verify catalog SHA/key == actual bundle SHA
-  → archive validation and manifest/file SHA checks
+GET machines/index.json
+  → GET every machine's latest pointer + manifest
+  → diff each manifest against corpus-known (machine, path, sha) file versions
+  → fetch only unknown blobs (read-side hash verification)
+  → parse each fetched file version once
   → corpus planner/blob publisher/writer transaction
   → SQLite rows + FTS + blobs
 ```
 
-Ingest builds the query corpus. It never rereads mutable source roots to decide identity; identity comes from bundled bytes.
+Ingest builds the query corpus. It never rereads mutable source roots to decide identity; identity comes from manifest-listed content hashes.
 
 ### `aha refresh`
 
-`refresh` is the daily path:
+`refresh` is the daily path: push then pull.
 
 ```text
-snapshot current local sources into depot, or reuse matching state metadata
-then ingest pending/new depot bundles into local corpus
+push new file versions + manifest for this machine
+then pull unknown snapshots/blobs from every machine into the local corpus
 ```
 
-If source state is unchanged and no deterministic metadata override was supplied, refresh reuses the equivalent existing depot bundle instead of creating a new one.
+A steady-state refresh with no changes is a handful of small GETs and zero PUTs, zero blob fetches, zero parses.
+
+### `aha export`
+
+```text
+resolve a machine's latest pointer → manifest
+  → fetch the manifest's blobs
+  → materialize one portable v1-format bundle.tar.zst
+```
+
+`export` and `ingest <bundle.tar.zst>` are the only places the v1 tar format survives; together they preserve the "hand someone one file" journey.
 
 ### `aha search` and `aha read`
 
@@ -163,67 +172,65 @@ optionally rebuild FTS rows from messages/artifacts
 report machine-readable problems for agents and scripts
 ```
 
-The corpus verifier checks rebuildable local state. It does not contact the depot; use `depot verify` for depot object/catalog integrity. `depot verify` is quick by default and checks metadata/object existence; use `depot verify --deep` for byte/manifest validation.
+The corpus verifier checks rebuildable local state. It does not contact the depot; use `depot verify` for depot object integrity.
 
-### `aha depot verify --repair`
+### `aha depot verify`
 
 ```text
-validate depot.json schema/layout
-list bundle objects
-rehash/read embedded manifests
-compare object set with catalog refs
-optionally rebuild catalog shards from objects
+validate aha-depot.json schema/layout
+resolve every machine pointer to a well-formed manifest
+--deep: fetch every referenced blob and verify its hash
 ```
 
-Bundle objects are durable truth; catalog shards are repairable.
+Quick verify is pointer/manifest resolution; `--deep` is the byte-level audit (many small GETs — slower than streaming one tar, accepted as the explicit audit path; it is the only path allowed to LIST). Blobs and manifests are write-once durable truth, so there is no `--repair` mode: there is no derived catalog to rebuild.
 
 ## Multiple snapshots, aggregation, deduplication, and efficiency
 
-A user can capture many snapshots from one or many machines and publish them to the same depot. Today publishing happens through `aha snapshot --depot ...` or `aha refresh --depot ...`; explicit path ingestion (`aha ingest bundle.tar.zst`) imports into the corpus and does not publish that existing bundle into the depot.
+A user can push from one or many machines into the same depot. Publishing happens through `aha snapshot --depot ...` or `aha refresh --depot ...`; explicit path ingestion (`aha ingest bundle.tar.zst`) imports into the corpus and does not publish into the depot.
 
 ```text
-machine A snapshot A1 ─┐
-machine A snapshot A2 ─┼─→ depot bundle pool → local corpus on each machine
-machine B snapshot B1 ─┘
+machine A push A1 ─┐
+machine A push A2 ─┼─→ shared depot blob pool + per-machine manifests → local corpus on each machine
+machine B push B1 ─┘
 ```
 
-Aggregation is a union over depot catalog shards:
+Aggregation is a union over per-machine namespaces:
 
 ```text
-bundles/v1/<sha-a1>.tar.zst
-bundles/v1/<sha-a2>.tar.zst
-bundles/v1/<sha-b1>.tar.zst
-catalog/v1/machine-a.json  # refs A1, A2
-catalog/v1/machine-b.json  # refs B1
+blobs/v2/<sha…>.zst                          # shared, deduplicated file versions
+machines/machine-a/manifests/<sha-a1>.json
+machines/machine-a/manifests/<sha-a2>.json
+machines/machine-b/manifests/<sha-b1>.json
+machines/machine-a/latest                    # → A2
+machines/machine-b/latest                    # → B1
+machines/index.json                          # machine-a, machine-b
 ```
 
-`aha depot ls`, no-argument `aha ingest`, and `status --depot` read catalog shards and treat their bundle refs as the depot's current known set. Each machine has its own shard so normal publishing does not require every machine to write the same catalog object.
-
-The catalog is not absolute truth. If shards are stale or corrupt, `aha depot verify --repair` scans `bundles/v1/*`, reads each embedded manifest, and rewrites catalog shards from the object set.
+`aha depot ls`, no-argument `aha ingest`, and `status --depot` read the machines index plus each machine's latest pointer and manifest — steady-state paths never LIST objects. `status --depot` reports `depot_behind_snapshots` and `depot_machines_listed`. Each machine writes only its own namespace, so normal publishing has no cross-machine write contention; the only shared objects (`machines/index.json` and each pointer) use conditional PUT with retry.
 
 ### How deduplication works
 
 | Layer | Key | Effect |
 |---|---|---|
-| Depot object store | `bundle_sha256` in `bundles/v1/<sha>.tar.zst` | Identical bundle bytes are stored once. |
-| Depot catalog merge | `bundle_sha256` | Re-adding the same bundle ref updates/keeps one ref instead of appending duplicates. |
-| Refresh source-state check | catalog `state_sha256` / manifest state signature ignoring `bundle_id`/`captured_at` | Unchanged sources reuse an equivalent existing same-machine bundle without fetching old bundle bytes when state metadata is present. |
-| Ingest pending set | `catalog bundle_sha256 - corpus bundle_sha256` | No-argument ingest fetches/imports only bundles not already in the corpus. |
-| Corpus bundle table | unique `bundle_sha256` and `bundle_id` | Re-ingesting the same bundle is a duplicate no-op/audit attempt. |
-| Corpus file/blob table | file SHA-256 | Raw file/blob payloads are content-addressed and reused across ingested bundles. |
+| Depot blob store | file content SHA-256 in `blobs/v2/<sha>.zst` | Each unique file version is stored once, ever, fleet-wide — identical content is one object by construction. |
+| Push diff baseline | parent manifest's file list | Push uploads only file versions the parent manifest doesn't list; unchanged state means zero writes. |
+| Capture cache | `(path, size, mtime_ns, inode) → sha256` | Push skips re-reading/re-hashing unchanged files. Advisory only — never a correctness input; `--force` bypasses it. |
+| Pull pending set | manifest entries − corpus-known `(machine, path, sha)` versions | Pull fetches only unknown blobs and parses each file version once. |
+| Corpus snapshots table | unique `manifest_sha256` | Re-pulling a known snapshot is a no-op. |
+| Corpus file/blob table | file SHA-256 | Raw file/blob payloads are content-addressed and reused across snapshots. |
 
-If two machines somehow produce byte-identical bundles, the depot object key is identical and only one object is needed. If two snapshots contain many of the same raw files but differ as bundles, the corpus still deduplicates individual file blobs by file SHA.
+If two machines observe the same file version, the blob key is identical and only one object is stored. Snapshot identity is the manifest's own SHA-256 — there is no `bundle_id` to name, police, or collide.
 
 ### How efficiency is preserved
 
-- **Content-addressed writes:** local depot checks whether the target object exists; R2 checks object existence and uses conditional writes.
-- **Per-machine catalog shards:** publishing one machine's bundle only updates that machine's shard, reducing write contention.
-- **Delta ingest:** no-arg `ingest` computes `catalog - corpus` and skips already-ingested bundle SHAs.
-- **Idempotent refresh:** unchanged sources avoid creating another bundle unless deterministic metadata overrides are supplied; catalog `state_sha256` makes the common case metadata-only.
+- **Content-addressed writes:** a blob key *is* the SHA-256 of its contents; the local driver and R2 both treat an existing key as already-done (`ExistingOK`), and the pointer/index use conditional writes.
+- **Per-machine namespaces:** a machine writes only its own manifests and pointer; there is no shared catalog to merge or repair.
+- **Delta push:** the parent manifest is the diff baseline, so push is O(day's delta), not O(history). The advisory capture cache makes the scan itself O(changed files).
+- **Delta pull:** anti-entropy — fetch only blobs the corpus doesn't know, parse each file version once.
+- **No LIST on steady-state paths:** push/pull/refresh/status learn remote state from pointer + manifest GETs; only `depot verify` may LIST.
 - **Local query engine:** search/read never scan depot objects and never query R2; all analysis uses SQLite + FTS5 locally.
-- **Repair/deep verification is explicit:** expensive full object listing/rehashing is done by `depot verify --deep` or `depot verify --repair`, not on every search or refresh.
-
-Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so unchanged-source checks compare metadata first and fetch old bundles only as a repair/fallback path for refs missing state metadata.
+- **Deep verification is explicit:** fetching/rehashing every referenced blob is `depot verify --deep`, not part of any daily path.
+- **No GC:** the depot never deletes. At R2's storage price and O(unique-bytes) growth, keeping every file version ever is rational and removes the hardest operational problem.
 
 ## Trust boundaries
 
@@ -232,8 +239,8 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 - R2 is explicit opt-in through `--depot r2...` or config.
 - Network imports are confined to `internal/depot` (outbound R2/S3), `internal/server` (the inbound loopback dashboard), and the `internal/cli/command_serve.go` wrapper that constructs it; a static test enforces this allowlist. Search, read, and ingest remain network-free.
 - The dashboard (`aha serve`) binds to loopback by default, validates the `Host` header against a loopback allowlist on every request, requires `application/json` on POST routes, and is read-only; non-loopback binds require explicit `--allow-remote`.
-- R2 credentials are not stored in bundles, catalogs, config output, command JSON, or logs.
-- default `none-v1` does not redact; `redaction:"v1"` redacts corpus projections, while bundles remain raw/private.
+- R2 credentials are not stored in blobs, manifests, config output, command JSON, or logs.
+- default `none-v1` does not redact; `redaction:"v1"` redacts corpus projections, while depot blobs remain raw/private.
 
 ## Package map
 
@@ -244,9 +251,9 @@ Current note: new catalog refs include `state_sha256` and `manifest_sha256`, so 
 | `internal/cli` | Command parsing, JSON errors, renderers, registry/docs generation, command orchestration. |
 | `internal/config` | JSONC defaults/load/write. |
 | `internal/adapters` | Source discovery/parsing for Pi, Claude Code, Codex, and OpenCode. |
-| `internal/archive` | Snapshot capture, deterministic archive writing, bundle validation, state signature. |
+| `internal/archive` | Snapshot capture (discover/stat/hash), parent-manifest diff, advisory capture cache, deterministic manifest encoding; the v1 `tar.zst` reader/writer survives only behind `export`/`import`. |
 | `internal/opencodeexport` | Private OpenCode SQLite-to-JSONL export cache: serialized DB/WAL/SHM copy, deterministic JSONL writes, stale-export pruning. |
-| `internal/depot` | Local/R2 depot drivers, catalog merge/list/fetch/verify/repair. |
+| `internal/depot` | Local/R2 depot v2 drivers: write-once blob/manifest puts, conditional pointer/index updates, machine-scoped write namespaces, verify. |
 | `internal/corpus` | SQLite schema, ingest transaction, read/status/conflict APIs. |
 | `internal/search` | FTS5 query construction and result mapping. |
 | `internal/mcp` | Read-only MCP server. Wire format, lifecycle, tool registration, schema derivation, strict `additionalProperties:false` input validation, and result envelopes are owned by [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) v1.6+. This package holds the typed input structs, the pure `do<Tool>` business functions, the `CallTool` dispatch the HTTP server reuses (with a `decodeInput` strict-decode that mirrors the SDK's unknown-key rejection on the non-SDK path), and `codegen/` for the TypeScript surface. |
@@ -264,9 +271,11 @@ result types into `clients/typescript/aha-mcp.ts` for code-mode agent runtimes.
 
 ## Design invariants
 
-- Preserve raw bundles; optionally redact derived corpus projections with `redaction:"v1"`.
-- Bundles are immutable and content-addressed by SHA-256.
-- The corpus is derived and rebuildable from depot bundles.
+- Preserve raw depot blobs; optionally redact derived corpus projections with `redaction:"v1"`.
+- Blobs and manifests are immutable, write-once, and content-addressed by SHA-256; the manifest SHA *is* the snapshot identity.
+- The depot is append-only: nothing is ever deleted (no GC).
+- Steady-state paths never LIST; they navigate pointer → manifest → blobs.
+- The corpus is derived and rebuildable from depot snapshots.
 - SQLite + FTS5 is the search engine; no custom search index.
 - Search snippets are leads; agents should `read` refs before answering.
 - Public JSON/refs/docs are tested contracts.

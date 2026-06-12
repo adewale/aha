@@ -4,6 +4,100 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Depot v2 — content-addressed snapshots (June 2026)
+
+The bundle/catalog depot first described below was replaced wholesale before
+any release ([docs/depot-v2-spec.md](docs/depot-v2-spec.md)); there is no
+migration, by decision. Later sections of this Unreleased entry that mention
+`bundles/v1`, `catalog/v1`, `depot compact`, `depot verify --repair`,
+`state_sha256`, or behind-bundle counters describe that superseded v1 depot.
+
+#### Added
+
+- Content-addressed depot v2: write-once file blobs (`blobs/v2/<sha256>.zst`,
+  stored once ever), per-machine snapshot manifests
+  (`machines/<id>/manifests/<sha256>.json`) whose canonical-encoding SHA-256
+  is the snapshot identity, a conditional-PUT `machines/<id>/latest` pointer,
+  a `machines/index.json` registry (pull discovers machines with one GET —
+  steady-state paths never LIST), and an `aha-depot.json` marker. The depot
+  never deletes; steady-state primitives expose no delete and no list.
+- Typestate publish flow: blob receipts (upload-verified or carried from the
+  identity-verified parent snapshot) → manifest → pointer → index, making
+  dangling references unrepresentable and ordering crash-safe (pinned by a
+  fault-injection sweep that fails every primitive operation once).
+- Capture-as-diff push: `snapshot`/`refresh` upload only file versions the
+  parent snapshot does not carry; unchanged state is recognized from the
+  pointer alone (zero writes, zero content reads, across differing capture
+  timestamps via a capture-time-invariant state digest). An advisory scan
+  cache (size/mtime/inode, git-style racy-mtime rule anchored at cache-open
+  time, self-healing, pruned of deleted files) skips re-reading unchanged
+  files; `--force` bypasses it. Capture no longer parses sessions.
+- Anti-entropy pull: `refresh`/no-arg `ingest` fetch each machine's latest
+  manifest and only blobs the corpus cannot prove present; known snapshot
+  identities are zero work; known session-file versions record provenance
+  without fetching or parsing. Corpus re-keyed to
+  `snapshots(manifest_sha256)`; pre-v2 corpora are rejected at open with a
+  rebuild instruction.
+- `aha export`: materialize a machine's latest snapshot as one portable v1
+  `bundle.tar.zst` — with `aha ingest <file>`, the only surviving use of the
+  v1 bundle format (and the recovery path for old v1 depots, which `depot
+  init` refuses).
+- `internal/cas`: shared content-addressed blob store (corpus + depot),
+  write-once atomic puts verified against the key, verified reads with a
+  decompression budget (zstd-bomb guard).
+- Ingest parse-once: a session-file version already proven present (its
+  provenance row commits in the same transaction as its entries) is never
+  re-parsed — grown snapshots and bundles cost only their delta.
+- Live-bucket smoke test (`go test -tags integration ./internal/depot/ -run
+  TestR2IntegrationV2`): asserts the acceptance properties (delta uploads
+  exactly the delta; unchanged push reuses the parent; verified round trips;
+  clean quick/deep verify) against real R2, with raw-SDK cleanup under a
+  unique namespace.
+- Confidence suite per adewale/testing-best-practices: fault-injection sweep
+  (found and fixed a real index-before-pointer crash bug), local↔R2
+  differential test, metamorphic history-equivalence test, exhaustive
+  hostile-machine-ID namespace-safety proof, rapid state machine with a
+  write-once shadow tree, concurrent first-push index contention test, and
+  fuzz targets for the manifest/pointer/index codecs and blob verification.
+
+#### Changed
+
+- `snapshot` is push-only (no corpus needed; never reads another machine's
+  namespace), `refresh` is push + pull, no-arg `ingest` is pull.
+- `depot ls` lists each machine's latest snapshot; `depot verify` checks
+  marker, index, pointers, manifest identities, and blob presence, with
+  `--deep` verifying blob content and historical manifests (the only path
+  allowed to LIST).
+- `status --depot` reports `depot_behind_snapshots` / `depot_machines_listed`
+  via per-machine point lookups.
+- `corpus size` no longer reports `bundle_blob_bytes`; the corpus stores no
+  bundle objects.
+
+#### Removed
+
+- The v1 depot: `bundles/v1` + `catalog/v1` layout, catalog shards and their
+  merge/repair/compaction (`depot compact`, `depot verify --repair`),
+  `bundle_id` identity and the `--bundle-id` flag, `state_sha256` signatures,
+  corpus bundle-blob promotion, and the 2 GiB bundle budget cliff. The
+  codebase is net smaller after the conversion.
+
+#### Fixed
+
+- Refresh previously re-read, re-parsed, and re-uploaded the machine's entire
+  history on every run (and re-parsed its own just-pushed bundle); per-refresh
+  cost is now O(changed files) end to end, depot storage O(unique bytes).
+- Audit findings: O(n²) carried-blob lookup made O(1); blob reads regained a
+  decompression budget; the capture-cache racy window is anchored at cache
+  open; the parse-skip lookup seeks a covering index (query-plan guarded);
+  machine-index registration ordered after the pointer write.
+
+#### Docs
+
+- `docs/depot-v2-spec.md` (design, invariants I1–I7, phase plan, acceptance
+  properties; status: implemented). All diagrams, prose docs, and the
+  interactive explorer updated to v2; historical records banner-marked;
+  `docs/lessons-learned.md` records the conversion as cycle 11.
+
 ### Fixed
 
 - Codex adapter now parses the current (enveloped) rollout format. Modern Codex CLI wraps every line as `{timestamp, type, payload}` — the conversation lives inside `response_item` payloads (`payload.type:"message"`, `payload.role`, `payload.content[]` of `input_text`/`output_text`), `session_meta` carries the session id/cwd, and `turn_context` carries the model. The generic JSONL parser looked for top-level `role`/`message.content`, so it ingested every line as an entry but recognized **zero messages** and indexed nothing for search (confirmed on a real install: 8,693 entries, 0 messages). The adapter now detects the enveloped format and unwraps `payload` — mapping user/assistant messages, tool calls (`function_call` name/arguments/command), tool output, and reasoning — while delegating older flat rollouts to the generic parser unchanged. Verified by new conformance + committed-fixture coverage and by re-running the smoketest against a modern rollout (messages and FTS rows now populate and search/read succeed).

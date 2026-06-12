@@ -2,102 +2,78 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
-	"testing/quick"
 
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
+	"github.com/adewale/aha/internal/hash"
+	"github.com/adewale/aha/internal/model"
 )
 
-func TestDepotBehindFromRefsCountsUniqueCatalogMinusCorpusProperty(t *testing.T) {
-	prop := func(catalogInputs, duplicateInputs, ingestedInputs []string) bool {
-		var refs []depot.BundleRef
-		catalogSet := map[string]bool{}
-		for _, input := range append(append([]string{}, catalogInputs...), duplicateInputs...) {
-			sha := statusPropSHA(input)
-			catalogSet[sha] = true
-			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha)})
-		}
-		// Add duplicates deliberately: many trivial bundle refs should affect metadata cardinality, not work units.
-		for _, input := range duplicateInputs {
-			sha := statusPropSHA(input)
-			refs = append(refs, depot.BundleRef{BundleSHA256: sha, Key: depot.BundleKey(sha)})
-		}
-		ingested := map[string]bool{}
-		for _, input := range ingestedInputs {
-			ingested[statusPropSHA(input)] = true
-		}
-		want := 0
-		for sha := range catalogSet {
-			if !ingested[sha] {
-				want++
-			}
-		}
-		return depotBehindFromRefs(refs, ingested) == want
-	}
-	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+// TestDepotBehindV2CountsMachinesWithUningestedSnapshots pins the
+// status --depot comparison: a machine whose latest snapshot identity is
+// in the corpus is current; one whose identity is unknown counts as
+// behind. The comparison is metadata-only (index + pointers).
+func TestDepotBehindV2CountsMachinesWithUningestedSnapshots(t *testing.T) {
+	ctx := context.Background()
+	v2, err := depot.NewLocalV2(filepath.Join(t.TempDir(), "depot"))
+	if err != nil {
 		t.Fatal(err)
 	}
-}
+	if err := v2.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	push := func(machine, content string) model.ManifestSHA256 {
+		t.Helper()
+		dir := t.TempDir()
+		src := filepath.Join(dir, "s.jsonl")
+		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifest := model.SnapshotManifest{
+			Schema:     model.SnapshotManifestSchema,
+			MachineID:  machine,
+			CapturedAt: "2026-06-09T00:00:00Z",
+			Policy:     model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+			Files:      []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/s.jsonl", RawPath: src, SHA256: hash.SHA256Bytes([]byte(content)), Bytes: int64(len(content)), SessionID: "s", CopyState: "stable"}},
+		}
+		res, err := depot.PushV2(ctx, v2, manifest, pathBlobSource{path: src, sha: hash.SHA256Bytes([]byte(content))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.ManifestSHA256()
+	}
+	shaA := push("mach-a", "content a")
+	push("mach-b", "content b")
 
-func TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles(t *testing.T) {
 	store, err := corpus.Open(filepath.Join(t.TempDir(), "corpus"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	ingestedSHA := statusPropSHA("ingested")
-	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, "ingested", ingestedSHA, "machine", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "{}"); err != nil {
+	// Mark mach-a's snapshot as ingested.
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`, shaA.String(), "mach-a", "2026", "2026", "{}"); err != nil {
 		t.Fatal(err)
 	}
-	pendingSHA := statusPropSHA("pending")
-	drv := &countingStatusDepot{refs: []depot.BundleRef{
-		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA)},
-		{BundleSHA256: pendingSHA, Key: depot.BundleKey(pendingSHA)},
-		{BundleSHA256: ingestedSHA, Key: depot.BundleKey(ingestedSHA)},
-	}}
-	behind, err := depotBehindCountFromDriver(store, drv)
+	report, err := depotBehindV2FromDepot(store, v2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if behind != 1 {
-		t.Fatalf("behind=%d, want 1", behind)
-	}
-	if drv.listCalls != 1 || drv.fetchCalls != 0 {
-		t.Fatalf("status depot operations list=%d fetch=%d, want list=1 fetch=0", drv.listCalls, drv.fetchCalls)
+	if report.Machines != 2 || report.Behind != 1 {
+		t.Fatalf("behind report=%+v, want machines=2 behind=1", report)
 	}
 }
 
-type countingStatusDepot struct {
-	refs       []depot.BundleRef
-	listCalls  int
-	fetchCalls int
+type pathBlobSource struct {
+	path string
+	sha  string
 }
 
-func (d *countingStatusDepot) Address() depot.Address {
-	return depot.Address{Type: "fake", Location: "status"}
-}
-func (d *countingStatusDepot) Init(context.Context) error { return nil }
-func (d *countingStatusDepot) PutBundle(context.Context, string) (depot.BundleRef, bool, error) {
-	return depot.BundleRef{}, false, fmt.Errorf("unexpected PutBundle")
-}
-func (d *countingStatusDepot) List(context.Context) ([]depot.BundleRef, error) {
-	d.listCalls++
-	return append([]depot.BundleRef(nil), d.refs...), nil
-}
-func (d *countingStatusDepot) Fetch(context.Context, depot.BundleRef, string) error {
-	d.fetchCalls++
-	return fmt.Errorf("status must not fetch bundle bytes")
-}
-func (d *countingStatusDepot) Verify(context.Context, bool) (depot.VerifyReport, error) {
-	return depot.VerifyReport{}, fmt.Errorf("unexpected Verify")
-}
-
-func statusPropSHA(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
+func (s pathBlobSource) BlobPath(key model.BlobKey) (string, error) {
+	if key.String() != s.sha {
+		return "", os.ErrNotExist
+	}
+	return s.path, nil
 }

@@ -90,13 +90,13 @@ func TestArtifactPathTokenFilterFindsIndexedPathSegments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.Exec(`insert into bundles(bundle_id,bundle_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?,?)`, "bundle", sha, "machine", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", `{}`); err != nil {
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,?,?,?,?)`, sha, "machine", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", `{}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.Exec(`insert into sessions(session_key,source_name,source_session_id,machine_id,raw_cwd,project_key,started_at,source_metadata_json) values(?,?,?,?,?,?,?,?)`, sessionKey.String(), "pi", "artifact-parent", "machine", "/repo/project", "project", "2026-01-01T00:00:00Z", `{}`); err != nil {
 		t.Fatal(err)
 	}
-	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,bundle_id,kind,parent_session_key,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?)`, sha, "pi", "machine", "bundle", "artifact", sessionKey.String(), "/repo/project/artifact-target/file.txt", "artifact-target/file.txt", "artifactneedle", "artifactneedle")
+	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,parent_session_key,raw_path,relative_path,text_preview,text_body) values(?,?,?,?,?,?,?,?,?,?)`, sha, "pi", "machine", sha, "artifact", sessionKey.String(), "/repo/project/artifact-target/file.txt", "artifact-target/file.txt", "artifactneedle", "artifactneedle")
 	if err != nil {
 		t.Fatal(err)
 	}

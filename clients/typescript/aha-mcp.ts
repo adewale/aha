@@ -103,7 +103,7 @@ export interface VerifyStats {
   artifacts: number;
   fts_messages: number;
   fts_artifacts: number;
-  bundles: number;
+  snapshots: number;
   redactions: number;
   redaction_events: number;
   tool_invocations: number;
@@ -129,7 +129,6 @@ export interface SizeReport {
   root: string;
   total_bytes: number;
   database_bytes: number;
-  bundle_blob_bytes: number;
   file_blob_bytes: number;
   image_blob_bytes: number;
   other_bytes: number;

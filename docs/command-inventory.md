@@ -18,19 +18,20 @@ This is the human command inventory for `aha`: what each command is for and when
 | Command | Use when | Notes |
 |---|---|---|
 | `aha init` | Write starter JSONC config. | `--accept-secrets` persists the v1 privacy acknowledgement. |
-| `aha snapshot` | Capture immutable bundle evidence without ingesting it. | Useful for backup, copy, deterministic tests, and scoped session bundles. |
-| `aha ingest` | Merge bundles into a corpus. | Accepts explicit bundle paths or ingests pending bundles from the configured depot. |
+| `aha snapshot` | Push this machine's state to the depot without touching a corpus. | Uploads only new file versions and publishes a snapshot manifest; never downloads other machines' data (contribute-only machines). |
+| `aha export` | Materialize a machine's latest depot snapshot as one portable `bundle.tar.zst`. | The single-file hand-off format; re-import anywhere with `aha ingest <file>`. |
+| `aha ingest` | Pull depot snapshots into a corpus, or import v1 bundle files. | Depot pulls fetch only content the corpus does not already have. |
 
 ## Health, trust, and maintenance
 
 | Command | Use when | Notes |
 |---|---|---|
-| `aha status` | Inspect corpus counts and health. | Check sessions, messages, bundles, sources, redaction levels, and index size. |
+| `aha status` | Inspect corpus counts and health. | Check sessions, messages, snapshots, sources, redaction levels, and index size. |
 | `aha verify` | Check corpus invariants. | Read-only by default; `--repair-fts` repairs derived FTS projections. |
 | `aha conflicts` | Inspect quarantined merge conflicts. | Keeps conflict/trust issues out of normal search/read paths. |
 | `aha doctor` | Diagnose config, source discovery, corpus, depot, and next actions. | May create/update the private OpenCode JSONL export cache while counting OpenCode sessions. |
 | `aha corpus` | Inspect or maintain corpus storage. | Subcommands: `size`, `vacuum`, `prune-orphans`; destructive prune requires `--force`. |
-| `aha depot` | Initialize, switch, list, verify, or compact the durable bundle store. | `depot verify` is quick by default; `--deep` reads bundle bytes/manifests; `--repair` rebuilds catalogs. |
+| `aha depot` | Initialize, switch, list machine snapshots, or verify the durable store. | `depot verify` is quick by default; `--deep` verifies blob contents and historical manifests. |
 
 ## Typical workflows
 

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,23 +95,6 @@ func TestCaptureDepotR2ConfigLocalNoop(t *testing.T) {
 	}
 }
 
-func TestDepotUseVerificationIsQuick(t *testing.T) {
-	d := &selectionVerifyDriver{report: depot.VerifyReport{Problems: []string{"missing depot marker"}}}
-	report, err := verifyDepotQuick(context.Background(), d)
-	if err != nil {
-		t.Fatalf("verifyDepotQuick: %v", err)
-	}
-	if report.Deep {
-		t.Fatalf("depot selection must use quick verification, got deep report: %+v", report)
-	}
-	if d.deepCalls != 0 {
-		t.Fatalf("depot selection called deep Verify %d times", d.deepCalls)
-	}
-	if d.quickCalls != 1 {
-		t.Fatalf("depot selection quick calls = %d, want 1", d.quickCalls)
-	}
-}
-
 func TestDepotUninitializedSignal(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -120,8 +102,8 @@ func TestDepotUninitializedSignal(t *testing.T) {
 		want   bool
 	}{
 		{"empty missing marker", depot.VerifyReport{Problems: []string{"missing depot marker"}}, true},
-		{"missing marker with catalog refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Catalogs: 1}, false},
-		{"missing marker with bundle refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Bundles: 1}, false},
+		{"missing marker with catalog refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Machines: 1}, false},
+		{"missing marker with bundle refs is degraded", depot.VerifyReport{Problems: []string{"missing depot marker"}, Manifests: 1}, false},
 		{"no problems", depot.VerifyReport{}, false},
 		{"invalid marker", depot.VerifyReport{Problems: []string{"invalid depot marker: bad schema"}}, false},
 		{"marker plus other", depot.VerifyReport{Problems: []string{"missing depot marker", "catalog missing bundle x"}}, false},
@@ -133,37 +115,6 @@ func TestDepotUninitializedSignal(t *testing.T) {
 			}
 		})
 	}
-}
-
-type selectionVerifyDriver struct {
-	report     depot.VerifyReport
-	deepCalls  int
-	quickCalls int
-}
-
-func (d *selectionVerifyDriver) Address() depot.Address {
-	return depot.Address{Type: "test", Location: "depot"}
-}
-func (d *selectionVerifyDriver) Init(context.Context) error { return nil }
-func (d *selectionVerifyDriver) PutBundle(context.Context, string) (depot.BundleRef, bool, error) {
-	return depot.BundleRef{}, false, nil
-}
-func (d *selectionVerifyDriver) List(context.Context) ([]depot.BundleRef, error)      { return nil, nil }
-func (d *selectionVerifyDriver) Fetch(context.Context, depot.BundleRef, string) error { return nil }
-func (d *selectionVerifyDriver) Verify(context.Context, bool) (depot.VerifyReport, error) {
-	d.deepCalls++
-	r := d.report
-	r.Deep = true
-	return r, nil
-}
-func (d *selectionVerifyDriver) VerifyWithOptions(_ context.Context, opts depot.VerifyOptions) (depot.VerifyReport, error) {
-	if opts.Deep || opts.Repair {
-		return d.Verify(context.Background(), opts.Repair)
-	}
-	d.quickCalls++
-	r := d.report
-	r.Deep = false
-	return r, nil
 }
 
 func configWriteForTest(t *testing.T, cfg model.Config) (string, error) {

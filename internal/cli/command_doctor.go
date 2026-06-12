@@ -163,7 +163,7 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 		return out
 	}
 	out["ok"] = true
-	for _, key := range []string{"bundles", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "redactions", "redaction_events", "redaction_hits", "redaction_levels", "redactions_by_pattern", "index_size_bytes"} {
+	for _, key := range []string{"snapshots", "sessions", "entries", "messages", "artifacts", "images", "conflicts", "redactions", "redaction_events", "redaction_hits", "redaction_levels", "redactions_by_pattern", "index_size_bytes"} {
 		out[key] = stats[key]
 	}
 	return out
@@ -191,20 +191,20 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 	if len(warnings) > 0 {
 		out["warnings"] = warnings
 	}
-	drv, err := depotDriverForConfig(cfg, override)
+	v2, err := depotV2ForConfig(cfg, override)
 	if err != nil {
 		out["error"] = err.Error()
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
-	report, err := verifyDepotQuick(context.Background(), drv)
+	report, err := v2.Verify(context.Background(), false)
 	if err != nil {
 		out["error"] = err.Error()
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
-	out["bundles"] = report.Bundles
-	out["catalogs"] = report.Catalogs
+	out["manifests"] = report.Manifests
+	out["machines"] = report.Machines
 	if depotUninitialized(report) {
 		// Reachable with valid credentials, just not provisioned yet: guide the
 		// user to initialize it rather than reporting it as broken.
@@ -217,7 +217,7 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 	out["ok"] = len(report.Problems) == 0
 	if len(report.Problems) > 0 {
 		out["problems"] = report.Problems
-		out["next"] = []string{fmt.Sprintf("aha depot verify %s:%s --repair", addr.Type, addr.Location)}
+		out["next"] = []string{fmt.Sprintf("aha depot verify %s:%s --deep", addr.Type, addr.Location)}
 	}
 	return out
 }

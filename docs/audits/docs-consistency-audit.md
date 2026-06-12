@@ -3,6 +3,8 @@
 Date: 2026-05-19
 Updated: 2026-05-25
 
+*Historical: predates depot v2 ([../depot-v2-spec.md](../depot-v2-spec.md)). The bundle/catalog vocabulary and depot mechanics this audit normalized were replaced by content-addressed snapshots (blobs + manifests + pointers) in June 2026.*
+
 Scope: README, changelog, command docs, trust docs, user journeys, architecture, R2 snapshot aggregation spec, correctness specs, performance audit, performance results, lessons learned, and the original aggregator spec.
 
 ## Checks performed

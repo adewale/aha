@@ -7,7 +7,7 @@ import (
 
 func Status(db *sql.DB, root string) (map[string]any, error) {
 	stats := map[string]any{"corpus_dir": root}
-	for _, table := range []string{"machines", "bundles", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
+	for _, table := range []string{"machines", "snapshots", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
 		var n int
 		if err := db.QueryRow("select count(*) from " + table).Scan(&n); err != nil {
 			return nil, fmt.Errorf("status count %s: %w", table, err)
@@ -89,8 +89,21 @@ type Conflict struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-func BundleSHAs(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`select bundle_sha256 from bundles`)
+// HasSnapshot reports whether one snapshot identity is in the corpus —
+// a point lookup, so depot comparisons stay O(machines) regardless of how
+// many snapshots the corpus has ingested over its lifetime.
+func HasSnapshot(db *sql.DB, manifestSHA string) (bool, error) {
+	var n int
+	if err := db.QueryRow(`select count(*) from snapshots where manifest_sha256=?`, manifestSHA).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// SnapshotManifestSHAs returns the manifest identities of every ingested
+// snapshot — the corpus side of the depot anti-entropy comparison.
+func SnapshotManifestSHAs(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`select manifest_sha256 from snapshots`)
 	if err != nil {
 		return nil, err
 	}

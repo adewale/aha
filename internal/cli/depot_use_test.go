@@ -93,7 +93,7 @@ func TestDepotUseSwitchesDefaultDepot(t *testing.T) {
 	if !strings.Contains(err.Error(), wantInit) {
 		t.Fatalf("error should point at exact init command %q: %v", wantInit, err)
 	}
-	if _, statErr := os.Stat(filepath.Join(empty, "depot.json")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(empty, "aha-depot.json")); !os.IsNotExist(statErr) {
 		t.Fatalf("failed depot use should not initialize target marker, stat err=%v", statErr)
 	}
 	if _, statErr := os.Stat(filepath.Join(empty, "catalog")); !os.IsNotExist(statErr) {
@@ -163,10 +163,10 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-01T00:00:00Z", "--bundle-id", "doctor-degraded"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-01T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatalf("seed refresh: %v", err)
 	}
-	if err := os.Remove(filepath.Join(depotDir, "depot.json")); err != nil {
+	if err := os.Remove(filepath.Join(depotDir, "aha-depot.json")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,8 +178,8 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 		Depot struct {
 			OK          bool     `json:"ok"`
 			Initialized bool     `json:"initialized"`
-			Bundles     int      `json:"bundles"`
-			Catalogs    int      `json:"catalogs"`
+			Manifests   int      `json:"manifests"`
+			Machines    int      `json:"machines"`
 			Problems    []string `json:"problems"`
 			Next        []string `json:"next"`
 		} `json:"depot"`
@@ -190,13 +190,13 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 	if doc.Depot.OK || !doc.Depot.Initialized || len(doc.Depot.Problems) == 0 {
 		t.Fatalf("populated depot missing marker should be degraded, got %+v", doc.Depot)
 	}
-	if doc.Depot.Bundles == 0 || doc.Depot.Catalogs == 0 {
+	if doc.Depot.Manifests == 0 || doc.Depot.Machines == 0 {
 		t.Fatalf("test did not create a populated depot: %+v", doc.Depot)
 	}
-	wantRepair := "aha depot verify local:" + depotDir + " --repair"
+	wantVerify := "aha depot verify local:" + depotDir + " --deep"
 	joinedNext := strings.Join(doc.Depot.Next, "\n")
-	if !strings.Contains(joinedNext, wantRepair) || strings.Contains(joinedNext, "depot init") {
-		t.Fatalf("degraded populated depot should point at repair %q, got %+v", wantRepair, doc.Depot)
+	if !strings.Contains(joinedNext, wantVerify) || strings.Contains(joinedNext, "depot init") {
+		t.Fatalf("degraded populated depot should point at verify %q, got %+v", wantVerify, doc.Depot)
 	}
 
 	out.Reset()
@@ -204,8 +204,8 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 		t.Fatalf("doctor human: %v", err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "depot problem: missing depot marker") || !strings.Contains(text, "next: "+wantRepair) {
-		t.Fatalf("human doctor should show degraded problem and repair next action, got:\n%s", text)
+	if !strings.Contains(text, "depot problem: missing depot marker") || !strings.Contains(text, "next: "+wantVerify) {
+		t.Fatalf("human doctor should show degraded problem and verify next action, got:\n%s", text)
 	}
 }
 
@@ -234,15 +234,14 @@ func TestDepotUseRejectsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 	if err := cli.Run([]string{"depot", "use", "--config", configPath, "local:" + depotA}, &out, io.Discard); err != nil {
 		t.Fatalf("switch back to A: %v", err)
 	}
-	sha := strings.Repeat("a", 64)
-	bundlePath := filepath.Join(depotB, "bundles", "v1", sha+".tar.zst")
-	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o755); err != nil {
+	indexPath := filepath.Join(depotB, "machines", "index.json")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(bundlePath, []byte("not a real bundle; quick verify must not read it"), 0o644); err != nil {
+	if err := os.WriteFile(indexPath, []byte(`{"schema":"aha-depot-machines/v2","machines":["ghost"]}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(depotB, "depot.json")); err != nil {
+	if err := os.Remove(filepath.Join(depotB, "aha-depot.json")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,9 +249,9 @@ func TestDepotUseRejectsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 	if err == nil {
 		t.Fatal("depot use accepted a degraded populated depot")
 	}
-	wantRepair := "aha depot verify local:" + depotB + " --repair"
-	if !strings.Contains(err.Error(), wantRepair) || strings.Contains(err.Error(), "depot init") {
-		t.Fatalf("degraded depot use should point at repair %q, got: %v", wantRepair, err)
+	wantVerify := "aha depot verify local:" + depotB + " --deep"
+	if !strings.Contains(err.Error(), wantVerify) || strings.Contains(err.Error(), "depot init") {
+		t.Fatalf("degraded depot use should point at verify %q, got: %v", wantVerify, err)
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -281,27 +280,28 @@ func TestDepotFlagsMayFollowDepotAddress(t *testing.T) {
 	if err := cli.Run([]string{"depot", "init", "--config", configPath, "local:" + depotDir}, &out, io.Discard); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if err := os.Remove(filepath.Join(depotDir, "depot.json")); err != nil {
+	if err := os.Remove(filepath.Join(depotDir, "aha-depot.json")); err != nil {
 		t.Fatal(err)
 	}
 
 	out.Reset()
-	if err := cli.Run([]string{"depot", "verify", "--config", configPath, "local:" + depotDir, "--repair", "--json"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"depot", "verify", "--config", configPath, "local:" + depotDir, "--deep", "--json"}, &out, io.Discard); err != nil {
 		t.Fatalf("verify with flags after depot address: %v", err)
 	}
 	if !json.Valid(out.Bytes()) {
 		t.Fatalf("--json after depot address was ignored; output was:\n%s", out.String())
 	}
 	var report struct {
-		Repaired bool `json:"repaired"`
+		Deep     bool     `json:"deep"`
+		Problems []string `json:"problems"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatalf("decode verify report: %v\n%s", err, out.String())
 	}
-	if !report.Repaired {
-		t.Fatalf("--repair after depot address was ignored: %s", out.String())
+	if !report.Deep {
+		t.Fatalf("--deep after depot address was ignored: %s", out.String())
 	}
-	if _, err := os.Stat(filepath.Join(depotDir, "depot.json")); err != nil {
-		t.Fatalf("repair did not recreate marker: %v", err)
+	if len(report.Problems) == 0 {
+		t.Fatalf("verify missed the removed marker: %s", out.String())
 	}
 }

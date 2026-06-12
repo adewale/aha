@@ -298,16 +298,20 @@ future `verify --deep` mode.
 
 ### 8. Depot correctness
 
-Depot invariants are part of correctness by construction, not an add-on:
+Depot invariants are part of correctness by construction, not an add-on
+(depot v2; see docs/depot-v2-spec.md I1-I7):
 
-- bundle key is exactly `bundles/v1/<sha>.tar.zst`;
-- key SHA matches object bytes;
-- catalog shards are provenance/repair indexes, not truth;
-- list is deterministic union of shard refs;
-- merge is idempotent, commutative, and stable-sorted;
+- blob key is exactly `blobs/v2/<sha>.zst` and the SHA matches the
+  uncompressed content (verified on write and on read);
+- snapshot identity is the SHA-256 of the canonical manifest encoding;
+  only canonical bytes decode, so one manifest has exactly one identity;
+- publish ordering is typestate: blobs before manifest before pointer,
+  receipts unforgeable outside the package;
+- writers are bound to one machine namespace; foreign keys inexpressible;
+- steady-state paths have no delete and no list primitives;
 - local and R2 drivers satisfy the same contract;
-- R2 conditional writes are retryable and do not corrupt shards;
-- credentials never appear in config/manifests/catalogs/logs/JSON.
+- R2 conditional writes are retryable (pointer and machines index);
+- credentials never appear in config/manifests/logs/JSON.
 
 Keep fake-S3 contract tests and add state-machine sequences that interleave
 `Put`, duplicate `Put`, stale catalog refs, `Verify`, and `Repair`.

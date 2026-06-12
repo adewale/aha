@@ -44,7 +44,7 @@ func cmdCorpus(args []string, stdout, stderr io.Writer) error {
 		if *jsonOut {
 			return writeJSON(stdout, report)
 		}
-		return renderMap(stdout, map[string]any{"root": report.Root, "total_bytes": report.TotalBytes, "database_bytes": report.DatabaseBytes, "bundle_blob_bytes": report.BundleBlobBytes, "file_blob_bytes": report.FileBlobBytes, "image_blob_bytes": report.ImageBlobBytes, "other_bytes": report.OtherBytes, "files": report.Files})
+		return renderMap(stdout, map[string]any{"root": report.Root, "total_bytes": report.TotalBytes, "database_bytes": report.DatabaseBytes, "file_blob_bytes": report.FileBlobBytes, "image_blob_bytes": report.ImageBlobBytes, "other_bytes": report.OtherBytes, "files": report.Files})
 	case "vacuum":
 		store, err := openCorpusForCommand(cfg, false)
 		if err != nil {

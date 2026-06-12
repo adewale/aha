@@ -202,10 +202,10 @@ func TestSnapshotJSONIncludesGeneratedMetadata(t *testing.T) {
 	if err := cli.Run([]string{"snapshot", "--json", "--accept-secrets", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), `"bundle_id": ""`) || strings.Contains(out.String(), `"captured_at": ""`) {
-		t.Fatalf("snapshot JSON omitted generated metadata: %s", out.String())
+	if strings.Contains(out.String(), `"manifest_sha256": ""`) {
+		t.Fatalf("snapshot JSON omitted manifest identity: %s", out.String())
 	}
-	if !strings.Contains(out.String(), `"bundle_id"`) || !strings.Contains(out.String(), `"captured_at"`) {
+	if !strings.Contains(out.String(), `"manifest_sha256"`) || !strings.Contains(out.String(), `"reused"`) {
 		t.Fatalf("snapshot JSON missing metadata fields: %s", out.String())
 	}
 }
@@ -220,12 +220,12 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}
-	if !strings.Contains(stderr.String(), "Bundles are raw provenance") {
+	if !strings.Contains(stderr.String(), "Snapshots are raw provenance") {
 		t.Fatalf("missing privacy warning: %s", stderr.String())
 	}
-	matches, _ := filepath.Glob(filepath.Join(outDir, "bundles", "v1", "*.tar.zst"))
+	matches, _ := filepath.Glob(filepath.Join(outDir, "blobs", "v2", "*"))
 	if len(matches) != 0 {
-		t.Fatalf("snapshot wrote bundles despite rejected privacy acknowledgement: %v", matches)
+		t.Fatalf("snapshot wrote blobs despite rejected privacy acknowledgement: %v", matches)
 	}
 }
 
@@ -318,10 +318,10 @@ func TestCLIRefreshCreatesAggregationCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "refresh"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "sha256:") || !strings.Contains(out.String(), "sessions=3") {
+	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "sessions=3") {
 		t.Fatalf("bad refresh output: %s", out.String())
 	}
 	out.Reset()
@@ -364,7 +364,7 @@ func TestCLIRefreshHonorsRedactionConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "refresh-redaction"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	store, err := corpus.OpenExisting(corpusDir)
@@ -397,12 +397,11 @@ func TestCLIRepoAliasAndSessionScopedJourneys(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--machine", "scoped", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--session", "pi-session", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "pi-only"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--machine", "scoped", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--session", "pi-session", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	bundle := snapshotPathFromOutput(t, out.String())
 	out.Reset()
-	if err := cli.Run([]string{"ingest", "--repo", repoDir, bundle}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"ingest", "--repo", repoDir, "--depot", "local:" + outDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "sessions=1") {
@@ -423,7 +422,7 @@ func TestCLIRefreshCanLimitLocalSessions(t *testing.T) {
 	outDir := filepath.Join(root, "bundles")
 	repoDir := filepath.Join(root, "repo")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"refresh", "--machine", "limited", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--max-sessions", "1", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "one"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"refresh", "--machine", "limited", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--repo", repoDir, "--accept-secrets", "--max-sessions", "1", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "sessions=1") {
@@ -457,18 +456,18 @@ func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
 	depotDir := filepath.Join(root, "depot")
 	corpusDir := filepath.Join(root, "corpus")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "depot-cli"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), filepath.Join("bundles", "v1")) || !strings.Contains(out.String(), "sha256:") {
-		t.Fatalf("snapshot did not write content-addressed depot bundle: %s", out.String())
+	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "uploaded=") {
+		t.Fatalf("snapshot did not report the pushed manifest: %s", out.String())
 	}
-	receipts, err := filepath.Glob(filepath.Join(depotDir, "bundles", "v1", "*.receipt.json"))
+	manifests, err := filepath.Glob(filepath.Join(depotDir, "machines", "*", "manifests", "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(receipts) != 0 {
-		t.Fatalf("snapshot wrote removed receipt sidecars: %v", receipts)
+	if len(manifests) != 1 {
+		t.Fatalf("snapshot did not publish exactly one manifest: %v", manifests)
 	}
 	out.Reset()
 	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, "--depot", "local:" + depotDir}, &out, io.Discard); err != nil {
@@ -481,7 +480,7 @@ func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
 	if err := cli.Run([]string{"status", "--corpus", corpusDir, "--depot", "local:" + depotDir, "--json"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"depot_behind_bundles": 0`) {
+	if !strings.Contains(out.String(), `"depot_behind_snapshots": 0`) {
 		t.Fatalf("status did not compare depot/corpus: %s", out.String())
 	}
 }
@@ -500,12 +499,12 @@ func TestCLIRefreshIsIdempotentWhenSourcesUnchanged(t *testing.T) {
 	if err := cli.Run(args, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	matches, err := filepath.Glob(filepath.Join(depotDir, "bundles", "v1", "*.tar.zst"))
+	matches, err := filepath.Glob(filepath.Join(depotDir, "machines", "*", "manifests", "*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(matches) != 1 {
-		t.Fatalf("refresh should not create a second unchanged bundle, got %d: %v", len(matches), matches)
+		t.Fatalf("refresh should not publish a second unchanged snapshot, got %d: %v", len(matches), matches)
 	}
 	if strings.Contains(out.String(), "sessions=") {
 		t.Fatalf("second refresh should not re-ingest already-current corpus: %s", out.String())
@@ -537,7 +536,7 @@ func TestCLIDefaultSnapshotAndIngestJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "journey"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
@@ -562,13 +561,12 @@ func TestCLISnapshotIngestSearchReadStatus(t *testing.T) {
 	outDir := filepath.Join(root, "out")
 	corpusDir := filepath.Join(root, "corpus")
 	var out bytes.Buffer
-	args := []string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "fixed"}
+	args := []string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--source", "claude-code=" + fx.ClaudeRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}
 	if err := cli.Run(args, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	bundle := snapshotPathFromOutput(t, out.String())
 	out.Reset()
-	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, bundle}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, "--depot", "local:" + outDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "sessions=3") {
@@ -690,12 +688,11 @@ func TestCLIMcpDryRunSmokeChecksRegistration(t *testing.T) {
 	outDir := filepath.Join(root, "out")
 	corpusDir := filepath.Join(root, "corpus")
 	var out bytes.Buffer
-	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z", "--bundle-id", "mcp-dry"}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + outDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	bundle := snapshotPathFromOutput(t, out.String())
 	out.Reset()
-	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, bundle}, &out, io.Discard); err != nil {
+	if err := cli.Run([]string{"ingest", "--corpus", corpusDir, "--depot", "local:" + outDir}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 

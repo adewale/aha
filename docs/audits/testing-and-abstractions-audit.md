@@ -2,6 +2,8 @@
 
 Date: 2026-05-21
 
+*Historical: predates depot v2 ([../depot-v2-spec.md](../depot-v2-spec.md)). Bundle/catalog depot mechanics referenced below were replaced by content-addressed snapshots in June 2026.*
+
 Inputs:
 
 - `github.com/adewale/testing-best-practices` installed locally as a Pi skill and reviewed.

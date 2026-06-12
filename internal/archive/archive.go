@@ -11,7 +11,6 @@ import (
 	stdhash "hash"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -25,7 +24,6 @@ import (
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/media"
 	"github.com/adewale/aha/internal/model"
-	"github.com/adewale/aha/internal/paths"
 	"github.com/adewale/aha/internal/safety"
 	"github.com/klauspost/compress/zstd"
 )
@@ -58,7 +56,6 @@ type WriteInfo struct {
 	BundleSHA256   string
 	SizeBytes      int64
 	ManifestSHA256 string
-	StateSHA256    string
 }
 
 func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters.SourceAdapter, opts Options) (Bundle, error) {
@@ -72,56 +69,10 @@ func Capture(ctx context.Context, cfg model.Config, registry map[string]adapters
 	if opts.BundleID == "" {
 		opts.BundleID = hash.RandomID()
 	}
-	var sessions []model.SessionFile
-	var artifacts []model.ArtifactFile
-	artifactByPath := map[string]int{}
-	for _, sc := range cfg.Sources {
-		if !sc.Enabled {
-			continue
-		}
-		ad, ok := registry[sc.Type]
-		if !ok {
-			return Bundle{}, fmt.Errorf("unknown source adapter %q", sc.Type)
-		}
-		root, err := paths.Expand(sc.Root)
-		if err != nil {
-			return Bundle{}, err
-		}
-		sc.Root = root
-		found, err := ad.Discover(ctx, sc)
-		if err != nil {
-			return Bundle{}, err
-		}
-		for _, sf := range found {
-			if sf.IsSubagent && !cfg.IncludeSubagents {
-				continue
-			}
-			sessions = append(sessions, sf)
-		}
+	sessions, artifacts, err := discoverSourceFiles(ctx, cfg, registry, opts.SessionFilters, opts.MaxSessions)
+	if err != nil {
+		return Bundle{}, err
 	}
-	sessions = filterSessions(sessions, opts)
-	for _, sf := range sessions {
-		ad := registry[sf.Source]
-		if ad == nil {
-			continue
-		}
-		as, err := ad.DiscoverArtifacts(ctx, sf)
-		if err != nil {
-			return Bundle{}, err
-		}
-		for _, artifact := range as {
-			if idx, ok := artifactByPath[artifact.Path]; ok {
-				if artifacts[idx].ParentHint == "" && artifact.ParentHint != "" {
-					artifacts[idx].ParentHint = artifact.ParentHint
-				}
-				continue
-			}
-			artifactByPath[artifact.Path] = len(artifacts)
-			artifacts = append(artifacts, artifact)
-		}
-	}
-	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Path < sessions[j].Path })
-	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	tmpDir, err := os.MkdirTemp("", "aha-capture-*")
 	if err != nil {
 		return Bundle{}, err
@@ -269,29 +220,6 @@ func openRegularNoFollow(path string) (*os.File, os.FileInfo, error) {
 		return nil, nil, fmt.Errorf("refusing to copy non-regular file: %s", path)
 	}
 	return f, st, nil
-}
-
-func ManifestStateSHA256(m model.Manifest) string {
-	state := struct {
-		Schema       string
-		MachineID    string
-		MachineLabel string
-		Source       model.ManifestSource
-		Policy       model.ManifestPolicy
-		Adapters     []model.ManifestAdapt
-		Files        []model.ManifestFile
-	}{
-		Schema:       m.Schema,
-		MachineID:    m.MachineID,
-		MachineLabel: m.MachineLabel,
-		Source:       m.Source,
-		Policy:       m.Policy,
-		Adapters:     m.Adapters,
-		Files:        m.Files,
-	}
-	b, _ := json.Marshal(state)
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }
 
 func StableCopy(path, dir string) (string, string, int64, string, error) {
@@ -494,7 +422,7 @@ func WriteWithInfo(path string, b Bundle) (WriteInfo, error) {
 	if err := os.Rename(tmp, path); err != nil {
 		return WriteInfo{}, err
 	}
-	return WriteInfo{Path: path, BundleSHA256: hex.EncodeToString(compressed.h.Sum(nil)), SizeBytes: compressed.n, ManifestSHA256: hash.SHA256Bytes(mb), StateSHA256: ManifestStateSHA256(b.Manifest)}, nil
+	return WriteInfo{Path: path, BundleSHA256: hex.EncodeToString(compressed.h.Sum(nil)), SizeBytes: compressed.n, ManifestSHA256: hash.SHA256Bytes(mb)}, nil
 }
 
 type hashingWriter struct {
@@ -567,13 +495,7 @@ func ValidateManifestSemantics(m model.Manifest) error {
 }
 
 func validateArchiveDataPath(name string) error {
-	if name == "" || name == "." || name == ".." || path.IsAbs(name) || path.Clean(name) != name || strings.Contains(name, "\\") || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || strings.HasPrefix(name, "./") || strings.Contains(name, "/./") {
-		return fmt.Errorf("unsafe archive path: %s", name)
-	}
-	if name == "manifest.json" || name == "checksums/sha256sums.txt" || strings.HasPrefix(name, "checksums/") {
-		return fmt.Errorf("unsafe archive path: %s", name)
-	}
-	return nil
+	return model.ValidateSourceDataPath(name)
 }
 
 func CanonicalManifest(m model.Manifest) ([]byte, error) {

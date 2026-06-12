@@ -32,11 +32,11 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 	}
 	var reports []map[string]any
 	if len(bundles) == 0 {
-		drv, err := depotDriverForConfig(cfg, *depotAddr)
+		v2, err := depotV2ForConfig(cfg, *depotAddr)
 		if err != nil {
 			return err
 		}
-		reports, err = ingestFromDepotWith(stdout, ing, drv, *jsonOut)
+		reports, err = pullFromDepotV2(stdout, ing, v2, *jsonOut)
 		if err != nil {
 			return err
 		}
