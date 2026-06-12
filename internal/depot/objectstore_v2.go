@@ -270,10 +270,21 @@ func (s *r2StoreV2) listKeys(ctx context.Context, prefix string) ([]string, erro
 }
 
 func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
-	if _, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)}); err != nil {
-		if _, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); createErr != nil {
-			return createErr
-		}
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
+	if err == nil {
+		return nil
+	}
+	if !isS3NotFound(err) {
+		// Credential/endpoint failures must surface as themselves; falling
+		// through to CreateBucket would mask them behind a creation denial.
+		return err
+	}
+	if _, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); createErr != nil {
+		// Named step: the CLI hint layer keys on "create r2 bucket" to advise
+		// pre-creating the bucket instead of re-checking object permissions,
+		// because the recommended Object Read & Write token cannot create
+		// buckets — only Admin Read & Write can.
+		return fmt.Errorf("create r2 bucket %q: %w", s.bucket, createErr)
 	}
 	return nil
 }

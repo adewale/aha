@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,68 @@ func TestDepotUninitializedSignal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := depotUninitialized(tc.report); got != tc.want {
 				t.Fatalf("depotUninitialized(%+v) = %v, want %v", tc.report, got, tc.want)
+			}
+		})
+	}
+}
+
+// depotErrorHints turns raw S3/R2 errors into next actions. The
+// bucket-creation case matters most: the recommended Object Read & Write
+// token cannot create buckets (that needs Admin), so when CreateBucket is
+// denied the hint must say "pre-create the bucket" — repeating the generic
+// "check Object Read & Write permissions" advice would tell the user to
+// re-verify a token that is already correct.
+func TestDepotErrorHints(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     string
+		want    string
+		wantNot string
+	}{
+		{
+			name: "create bucket denied points at pre-creation not token scope",
+			err:  `create r2 bucket "aha-depot": operation error S3: CreateBucket, https response error StatusCode: 403, api error AccessDenied: Access Denied`,
+			want: "wrangler r2 bucket create", wantNot: "Object Read & Write",
+		},
+		{
+			name: "plain access denied keeps the token-scope hint",
+			err:  `operation error S3: PutObject, https response error StatusCode: 403, api error AccessDenied: Access Denied`,
+			want: "Object Read & Write",
+		},
+		{
+			name: "missing account id",
+			err:  "R2 account id required (AHA_R2_ACCOUNT_ID or R2_ACCOUNT_ID)",
+			want: "AHA_R2_ACCOUNT_ID",
+		},
+		{
+			name: "missing credentials",
+			err:  "R2 credentials required (AHA_R2_ACCESS_KEY_ID/R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY/R2_SECRET_ACCESS_KEY)",
+			want: "AHA_R2_ACCESS_KEY_ID",
+		},
+		{
+			name: "not found checks bucket and account",
+			err:  "operation error S3: HeadObject, https response error StatusCode: 404, api error NotFound: Not Found",
+			want: "bucket name",
+		},
+		{
+			name: "signature mismatch checks key set coherence",
+			err:  "api error SignatureDoesNotMatch: The request signature we calculated does not match",
+			want: "belong together",
+		},
+		{
+			name: "unknown host checks endpoint spelling",
+			err:  "dial tcp: lookup acct.r2.cloudflarestorage.com: no such host",
+			want: "r2.cloudflarestorage.com",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			joined := strings.Join(depotErrorHints(errors.New(tc.err)), " ")
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("hints %q missing %q", joined, tc.want)
+			}
+			if tc.wantNot != "" && strings.Contains(joined, tc.wantNot) {
+				t.Fatalf("hints %q contain misleading %q", joined, tc.wantNot)
 			}
 		})
 	}

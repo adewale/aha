@@ -183,55 +183,65 @@ you can switch back to local at any time.
 > For the full set of depot states and transitions — init, use, snapshot,
 > verify — see [`depot-lifecycle.md`](depot-lifecycle.md).
 
-R2 requires two separate things:
+R2 setup is three steps, in this order:
 
-1. A private R2 bucket. `aha depot init` creates it for you if it doesn't exist
-   (or you can pre-create one — see below).
-2. R2 **S3-compatible** credentials: Access Key ID + Secret Access Key.
+1. Create a private R2 bucket.
+2. Create an R2 API token scoped to that bucket. The token gives you the two
+   S3 credentials `aha` reads: Access Key ID and Secret Access Key.
+3. Run `aha depot init r2:<bucket>` to write the depot marker and set R2 as
+   your default depot.
 
-A Wrangler OAuth login can list/create buckets, but `aha` does not use Wrangler OAuth. `aha` talks to the R2 S3-compatible API.
+The bucket comes first because the recommended token is scoped to one bucket:
+the dashboard can only scope a token to a bucket that already exists, and a
+bucket-scoped token cannot create buckets (bucket creation is an Admin-token
+permission in Cloudflare's model).
 
-### Find or create a bucket
+A Wrangler OAuth login can list and create buckets, but `aha` does not use
+Wrangler OAuth. `aha` talks to the R2 S3-compatible API using the token from
+step 2.
+
+### Step 1: create the bucket
 
 If Wrangler is logged in:
 
 ```bash
-npx wrangler r2 bucket list
 npx wrangler r2 bucket create aha-depot
 ```
 
-Use one private bucket per depot. Do not enable public `r2.dev` or a public custom domain for an `aha` depot.
+Or in the Cloudflare dashboard: **R2 Object Storage → Create bucket**. Either
+way: keep the bucket private (no public `r2.dev` access, no public custom
+domain), use one bucket per depot, and leave the location on Automatic unless
+you have a reason documented in
+[`r2-bucket-settings.md`](r2-bucket-settings.md).
 
-### Find account ID
+While you are in the dashboard, note your account ID — step 3 needs it. It is
+the `<ACCOUNT_ID>` in the dashboard URL `https://dash.cloudflare.com/<ACCOUNT_ID>/...`,
+or:
 
 ```bash
 npx wrangler whoami
 ```
 
-Or copy it from the Cloudflare dashboard URL:
+### Step 2: create the S3 credentials
 
-```text
-https://dash.cloudflare.com/<ACCOUNT_ID>/...
-```
+In the Cloudflare dashboard: **R2 Object Storage → Manage R2 API tokens /
+API tokens → Create token**, with:
 
-### Create R2 S3 credentials
+- Permission: **Object Read & Write**.
+- Scope: **Apply to specific buckets only**, selecting the bucket from step 1.
+- Token type: prefer an **Account API token** over a User API token for a
+  depot that outlives any one person — User tokens deactivate when that user
+  is removed from the Cloudflare account.
 
-In Cloudflare dashboard:
-
-```text
-R2 Object Storage → Manage R2 API tokens / API tokens → Create token
-```
-
-Copy:
+Copy the two generated values:
 
 - **Access Key ID** → `AHA_R2_ACCESS_KEY_ID`
 - **Secret Access Key** → `AHA_R2_SECRET_ACCESS_KEY`
 
-The secret is shown only once. If you did not save it, create a new token.
+The secret is shown only once. If you did not save it, create a new token and
+revoke the old one.
 
-Recommended token: Object Read & Write, scoped to the depot bucket when bucket scoping is available.
-
-### Configure R2 as the default depot
+### Step 3: configure R2 as the default depot
 
 Export the credentials. The two **secret** keys always stay in the environment,
 never in config. The account ID is only needed in the environment for this
@@ -243,8 +253,8 @@ export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
 export AHA_R2_ACCOUNT_ID="<account-id>"
 ```
 
-Now configure the depot. `aha depot init` creates the bucket (if needed), writes
-the depot marker, **sets R2 as your default depot**, and persists the non-secret
+Now initialize. `aha depot init` writes the depot marker into the bucket,
+**sets R2 as your default depot**, and persists the non-secret
 `depot.r2.account_id` into config:
 
 ```bash
@@ -253,6 +263,11 @@ aha doctor            # default is now r2:aha-depot — reachable and initialize
 aha refresh           # snapshots + ingests against R2, no --depot flag needed
 ```
 
+If the bucket does not exist, `aha depot init` tries to create it. That only
+succeeds with an Admin Read & Write token; with the recommended bucket-scoped
+token, init reports that the token cannot create buckets and points you back
+to step 1.
+
 Because the account ID is now in config, later shells only need the two secret
 keys exported. A direnv `.envrc` is a convenient home for them:
 
@@ -260,6 +275,18 @@ keys exported. A direnv `.envrc` is a convenient home for them:
 # .envrc
 export AHA_R2_ACCESS_KEY_ID="<r2-access-key-id>"
 export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
+```
+
+### Optional: live smoke test
+
+From a repo clone, `scripts/r2-smoketest.sh` runs the depot integration test
+against a real bucket — real conditional writes and read-after-write, the two
+things local fakes cannot vouch for. Point it at a **separate test bucket**,
+not your depot: its verify step reads whatever the bucket contains, and an
+interrupted run can leave uniquely-named smoke objects behind.
+
+```bash
+AHA_R2_TEST_BUCKET=aha-depot-test scripts/r2-smoketest.sh
 ```
 
 ### Switch the default depot
@@ -314,6 +341,12 @@ command -v aha
 ### `doctor` shows a missing Codex/Pi/Claude source
 
 That is okay if you do not use that tool. If you do, check whether the tool stores history somewhere non-default and configure that root.
+
+### `aha depot init` says the token cannot create buckets
+
+The token is fine — bucket creation is simply not an object-token permission.
+Create the bucket first (step 1 above: `npx wrangler r2 bucket create
+aha-depot` or the dashboard), then rerun `aha depot init r2:aha-depot`.
 
 ### R2 works in Wrangler but not in `aha`
 

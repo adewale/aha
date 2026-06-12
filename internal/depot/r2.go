@@ -53,7 +53,11 @@ func NewR2(bucket string, cfg R2Config) *R2 {
 	if bucket == "" {
 		bucket = DefaultR2Bucket
 	}
-	client := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")})
+	// R2 implements x-amz-checksum-* only partially, so follow Cloudflare's
+	// SDK guidance and send/validate checksums only when an operation
+	// requires one. Integrity is owned by the depot layer anyway: every blob
+	// and manifest is content-addressed and re-hashed on read.
+	client := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""), RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired, ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired})
 	return &R2{Bucket: bucket, Client: client, Config: cfg}
 }
 

@@ -296,7 +296,12 @@ func depotErrorHints(err error) []string {
 	if strings.Contains(msg, "credentials required") {
 		hints = append(hints, "Set AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY, or their R2_* aliases.")
 	}
-	if strings.Contains(msg, "accessdenied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "403") {
+	denied := strings.Contains(msg, "accessdenied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "403")
+	if strings.Contains(msg, "create r2 bucket") && denied {
+		// The recommended Object Read & Write token cannot create buckets, so
+		// "check your token permissions" would point at a token that is fine.
+		hints = append(hints, "This token cannot create buckets (only Admin Read & Write tokens can). Pre-create the bucket with `npx wrangler r2 bucket create <bucket>` or in the Cloudflare dashboard, then rerun `aha depot init`.")
+	} else if denied {
 		hints = append(hints, "Check that the R2 token is scoped to this bucket and has Object Read & Write permissions.")
 	}
 	if strings.Contains(msg, "nosuchbucket") || strings.Contains(msg, "notfound") || strings.Contains(msg, "404") {

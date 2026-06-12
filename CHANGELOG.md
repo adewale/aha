@@ -4,6 +4,42 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### R2 onboarding (June 2026)
+
+#### Added
+
+- `scripts/r2-smoketest.sh`: preflights the R2 environment variables with
+  per-variable guidance, then runs the live-bucket integration test
+  (push, delta push, unchanged-state reuse, pull, deep verify) against a
+  real bucket.
+- [docs/r2-bucket-settings.md](docs/r2-bucket-settings.md): concrete bucket
+  lock guidance (lock the `blobs/` prefix, never `machines/` — pushes
+  overwrite the pointer and index), Account-vs-User API token choice,
+  temporary access credentials for CI, and location-hint advice.
+
+#### Changed
+
+- The production R2 client pins AWS SDK request/response checksums to
+  "when required", following Cloudflare's SDK guidance: R2 implements the
+  `x-amz-checksum-*` headers only partially, and depot integrity is already
+  carried by content addressing. The SDK default (checksums on every
+  PutObject) is what broke many S3-compatible stores when AWS enabled it
+  in early 2025.
+- [docs/onboarding.md](docs/onboarding.md) §8 now sets up R2 in dependency
+  order — bucket, then bucket-scoped token, then `aha depot init` — because
+  a token can only be scoped to a bucket that exists, and a bucket-scoped
+  token cannot create buckets.
+
+#### Fixed
+
+- `aha depot init` against a missing bucket with the recommended
+  bucket-scoped token now says the token cannot create buckets and to
+  pre-create it, instead of hinting "check Object Read & Write permissions"
+  at a token whose permissions are already correct.
+- A HeadBucket failure that is not NotFound (bad credentials, wrong account,
+  wrong endpoint) now surfaces as itself; previously `depot init` fell
+  through to CreateBucket and reported the creation failure instead.
+
 ### Depot v2 — content-addressed snapshots (June 2026)
 
 The bundle/catalog depot first described below was replaced wholesale before
