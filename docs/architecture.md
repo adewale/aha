@@ -4,6 +4,63 @@
 
 ## System overview
 
+```mermaid
+flowchart TB
+  subgraph sources["Local agent history roots (read-only)"]
+    pi["Pi&#160;&#183;&#160;~/.pi"]
+    cc["Claude Code&#160;&#183;&#160;~/.claude"]
+    cx["Codex&#160;&#183;&#160;~/.codex"]
+    oc["OpenCode&#160;&#183;&#160;SQLite DB"]
+  end
+
+  subgraph clilayer["aha CLI"]
+    cli["cmd/aha &#8594; internal/cli<br/>refresh · snapshot · ingest · search<br/>read · incidents · serve · mcp · verify · export"]
+    config["internal/config<br/>JSONC defaults"]
+  end
+
+  adapters["internal/adapters<br/>discover + parse (read-only)"]
+  ocexport["internal/opencodeexport<br/>SQLite &#8594; JSONL export cache"]
+  archive["internal/archive<br/>capture · hash · diff vs parent manifest"]
+
+  subgraph depot["internal/depot — append-only, write-once (local · R2)"]
+    blobs["blobs/v2/&lt;sha&gt;.zst<br/>deduplicated file versions"]
+    manifests["machines/&lt;id&gt;/manifests/&lt;sha&gt;.json"]
+    latest["machines/&lt;id&gt;/latest + index.json"]
+  end
+
+  corpus["internal/corpus<br/>SQLite + FTS5 + blobs/images<br/>(derived · rebuildable)"]
+
+  subgraph query["Read surfaces (network-free)"]
+    search["internal/search<br/>SQLite FTS5"]
+    read["corpus read / status / conflicts"]
+    incidents["incidents · resolution paths"]
+  end
+
+  mcp["internal/mcp<br/>read-only MCP server"]
+  server["internal/server<br/>loopback dashboard (aha serve)"]
+  tsclient["clients/typescript<br/>code-mode client"]
+
+  cli --> config
+  cli --> adapters
+  adapters -->|read-only| sources
+  oc -.->|copy DB| ocexport
+  ocexport --> adapters
+  adapters --> archive
+  archive -->|push: new blobs + manifest| depot
+  depot -->|pull: only unknown blobs| corpus
+  corpus --> search
+  corpus --> read
+  corpus --> incidents
+  search --> mcp
+  read --> mcp
+  incidents --> mcp
+  mcp --> server
+  mcp --> tsclient
+```
+
+<details>
+<summary>Text fallback (same overview as ASCII)</summary>
+
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                                   aha CLI                                    │
@@ -48,6 +105,10 @@
              │ SQLite FTS5      │                    │ refs, conflicts      │
              └──────────────────┘                    └──────────────────────┘
 ```
+
+</details>
+
+A rendered copy lives at [`architecture.png`](architecture.png).
 
 ## Core nouns
 
