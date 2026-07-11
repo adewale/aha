@@ -140,6 +140,10 @@ func Normalize(err error, command string) View {
 			fmt.Sprintf("R2 denied both bucket access checks for %q before any depot mutation.", auth.Bucket),
 			command, action("aha", "depot", "setup", "r2:"+auth.Bucket, "--json"), "r2_authorization", false)
 	}
+	var stale *depot.StalePublicationError
+	if errors.As(err, &stale) {
+		return view(CodeConflict, "Another writer published this machine first; recapture against the new latest snapshot and retry.", command, doctorAction(), "stale_publication", true)
+	}
 	var contention *depot.ContentionError
 	if errors.As(err, &contention) {
 		return view(CodeConflict, "The depot stayed busy because other writers repeatedly changed shared state.", command, doctorAction(), "depot_contention", true)

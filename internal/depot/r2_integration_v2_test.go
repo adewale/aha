@@ -3,9 +3,12 @@
 package depot_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,15 +22,84 @@ import (
 	"github.com/adewale/aha/internal/model"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
+
+const (
+	r2SmoketestAttestationKey  = "aha-r2-smoketest-target-v1.json"
+	pinnedR2SmoketestBucket    = "aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd"
+	pinnedR2SmoketestAccountID = "8837d43caf5a2ab3df5143eb3e2f1b96"
+	pinnedR2SmoketestTargetID  = "f7a6d43e8c1b49b0a2d58e7f31c60492"
+)
+
+type r2SmoketestAttestation struct {
+	Schema    string `json:"schema"`
+	TargetID  string `json:"target_id"`
+	Bucket    string `json:"bucket"`
+	AccountID string `json:"account_id"`
+	Endpoint  string `json:"endpoint"`
+}
+
+func decodeR2SmoketestAttestation(body []byte) (r2SmoketestAttestation, error) {
+	var attestation r2SmoketestAttestation
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&attestation); err != nil {
+		return r2SmoketestAttestation{}, fmt.Errorf("invalid R2 smoketest target attestation: %w", err)
+	}
+	if dec.More() || attestation.Schema != "aha.r2-smoketest-target.v1" || strings.TrimSpace(attestation.TargetID) == "" || strings.TrimSpace(attestation.Bucket) == "" {
+		return r2SmoketestAttestation{}, fmt.Errorf("invalid R2 smoketest target attestation")
+	}
+	return attestation, nil
+}
+
+func (a r2SmoketestAttestation) matches(targetID, bucket, accountID, endpoint string) error {
+	if a.TargetID != targetID || a.Bucket != bucket || a.AccountID != accountID || strings.TrimRight(a.Endpoint, "/") != strings.TrimRight(endpoint, "/") {
+		return fmt.Errorf("R2 smoketest target attestation does not match the requested bucket/account/endpoint")
+	}
+	return nil
+}
+
+type attestedR2Target struct{ r2 *depot.R2 }
+
+func attestLiveR2Target(ctx context.Context, r2 *depot.R2, cfg depot.R2Config) (attestedR2Target, error) {
+	targetID := pinnedR2SmoketestTargetID
+	object, err := r2.S3Client().GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r2.Bucket().String()), Key: aws.String(r2SmoketestAttestationKey)})
+	if err != nil {
+		return attestedR2Target{}, fmt.Errorf("read R2 smoketest target attestation before mutation: %w", err)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(object.Body, 8193))
+	closeErr := object.Body.Close()
+	if readErr != nil {
+		return attestedR2Target{}, readErr
+	}
+	if closeErr != nil {
+		return attestedR2Target{}, closeErr
+	}
+	if len(body) > 8192 {
+		return attestedR2Target{}, fmt.Errorf("R2 smoketest target attestation exceeds 8192 bytes")
+	}
+	attestation, err := decodeR2SmoketestAttestation(body)
+	if err != nil {
+		return attestedR2Target{}, err
+	}
+	if err := attestation.matches(targetID, r2.Bucket().String(), cfg.AccountID(), cfg.Endpoint()); err != nil {
+		return attestedR2Target{}, err
+	}
+	return attestedR2Target{r2: r2}, nil
+}
 
 // TestR2IntegrationV2PushPullVerify is the live-bucket smoke test: the
 // full depot v2 contract against a real R2 (or S3-compatible) bucket.
 //
-//	AHA_R2_SMOKETEST_BUCKET=aha-depot-test \
-//	AHA_R2_SMOKETEST_ACCOUNT_ID=... AHA_R2_SMOKETEST_ACCESS_KEY_ID=... \
+//	AHA_R2_SMOKETEST_ACCESS_KEY_ID=... \
 //	AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=... \
 //	go test -tags integration ./internal/depot/ -run TestR2IntegrationV2 -v
+//
+// The bucket, account, endpoint derivation, and target attestation ID are
+// compile-time pinned above; direct test invocation cannot select another
+// remote target.
 //
 // It exercises what the fake cannot vouch for: real conditional writes
 // (If-Match/If-None-Match on pointer and index), real strong-consistency
@@ -39,8 +111,39 @@ import (
 // The production v2 surface cannot delete (invariant I5), so the test
 // namespaces itself under a unique machine ID and cleans up after itself
 // with raw SDK calls — test code, not depot code.
+func TestDecodeR2SmoketestAttestationBindsTargetIdentity(t *testing.T) {
+	const body = `{"schema":"aha.r2-smoketest-target.v1","target_id":"target-1","bucket":"test-bucket","account_id":"0123456789abcdef0123456789abcdef","endpoint":""}`
+	attestation, err := decodeR2SmoketestAttestation([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := attestation.matches("target-1", "test-bucket", "0123456789abcdef0123456789abcdef", ""); err != nil {
+		t.Fatal(err)
+	}
+	for name, targetID := range map[string]string{"wrong-target": "target-2", "wrong-bucket": "target-1"} {
+		t.Run(name, func(t *testing.T) {
+			bucket := "test-bucket"
+			if name == "wrong-bucket" {
+				bucket = "production-bucket"
+			}
+			if err := attestation.matches(targetID, bucket, "0123456789abcdef0123456789abcdef", ""); err == nil {
+				t.Fatal("mismatched target was accepted")
+			}
+		})
+	}
+}
+
+func TestR2CleanupAbsenceRequiresTypedNotFound(t *testing.T) {
+	if !isR2TestNotFound(&smithy.GenericAPIError{Code: "NoSuchKey", Message: "missing"}) {
+		t.Fatal("NoSuchKey was not recognized")
+	}
+	if isR2TestNotFound(&smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}) {
+		t.Fatal("authorization failure was mistaken for absence")
+	}
+}
+
 func TestR2IntegrationV2PushPullVerify(t *testing.T) {
-	bucket := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_BUCKET")
+	bucket := pinnedR2SmoketestBucket
 	cfg := resolveLiveR2Config(t)
 	validatedBucket, err := depot.ParseR2Bucket(bucket)
 	if err != nil {
@@ -50,8 +153,12 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v2 := depot.NewV2FromR2(r2)
 	ctx := t.Context()
+	attested, err := attestLiveR2Target(ctx, r2, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2 := depot.NewV2FromR2(attested.r2)
 
 	if err := v2.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -175,7 +282,7 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 // converges under real R2 conditional-write contention, not only under the
 // in-repo fake. Every writer has a unique namespace and a deadline.
 func TestR2IntegrationV2ConcurrentFirstPushes(t *testing.T) {
-	bucketName := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_BUCKET")
+	bucketName := pinnedR2SmoketestBucket
 	cfg := resolveLiveR2Config(t)
 	bucket, err := depot.ParseR2Bucket(bucketName)
 	if err != nil {
@@ -185,9 +292,13 @@ func TestR2IntegrationV2ConcurrentFirstPushes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v2 := depot.NewV2FromR2(r2)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	attested, err := attestLiveR2Target(ctx, r2, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2 := depot.NewV2FromR2(attested.r2)
 	if err := v2.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -274,11 +385,7 @@ func resolveLiveR2Config(t *testing.T) depot.R2Config {
 	if err != nil {
 		t.Fatalf("invalid smoketest R2 credentials: %v", err)
 	}
-	cfg := model.R2DepotConfig{
-		AccountID: strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")),
-		Endpoint:  strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")),
-		Region:    strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_REGION")),
-	}
+	cfg := model.R2DepotConfig{AccountID: pinnedR2SmoketestAccountID, Region: "auto"}
 	resolved, err := depot.ResolveR2ConfigExplicit(cfg, credentials)
 	if err != nil {
 		t.Fatalf("invalid explicit smoketest R2 configuration: %v", err)
@@ -351,33 +458,28 @@ func (c *r2TestCleaner) trackBlob(content string) {
 	c.keys = append(c.keys, depot.BlobObjectKey(key))
 }
 
-func (c *r2TestCleaner) run() {
-	c.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	keys := append([]string{depot.LatestPointerKey(c.machine)}, c.keys...)
-	for _, key := range keys {
-		if _, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}); err != nil {
-			c.t.Errorf("cleanup delete %s: %v", key, err)
-		}
-	}
-	removed := false
+// discoveryRemovedCleaner is the only type that exposes namespace deletion.
+// A cleanup cannot delete pointers/manifests/blobs until index removal has
+// succeeded, so an interrupted cleanup cannot leave an indexed dead namespace.
+type discoveryRemovedCleaner struct{ cleaner *r2TestCleaner }
+
+func (c *r2TestCleaner) removeDiscovery(ctx context.Context) (discoveryRemovedCleaner, error) {
 	for attempt := 0; attempt < 12; attempt++ {
 		obj, err := c.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(depot.MachinesIndexKey)})
 		if err != nil {
-			c.t.Errorf("cleanup read machines index: %v", err)
-			break
+			return discoveryRemovedCleaner{}, fmt.Errorf("cleanup read machines index: %w", err)
 		}
 		b, readErr := io.ReadAll(obj.Body)
-		_ = obj.Body.Close()
+		closeErr := obj.Body.Close()
 		if readErr != nil {
-			c.t.Errorf("cleanup read machines index body: %v", readErr)
-			break
+			return discoveryRemovedCleaner{}, fmt.Errorf("cleanup read machines index body: %w", readErr)
 		}
-		machines, decodeErr := depot.DecodeMachinesIndex(b)
-		if decodeErr != nil {
-			c.t.Errorf("cleanup decode machines index: %v", decodeErr)
-			break
+		if closeErr != nil {
+			return discoveryRemovedCleaner{}, fmt.Errorf("cleanup close machines index body: %w", closeErr)
+		}
+		machines, err := depot.DecodeMachinesIndex(b)
+		if err != nil {
+			return discoveryRemovedCleaner{}, fmt.Errorf("cleanup decode machines index: %w", err)
 		}
 		kept := make([]string, 0, len(machines))
 		for _, machine := range machines {
@@ -386,34 +488,75 @@ func (c *r2TestCleaner) run() {
 			}
 		}
 		if len(kept) == len(machines) {
-			removed = true
-			break
+			return discoveryRemovedCleaner{cleaner: c}, nil
 		}
-		updated, encodeErr := depot.EncodeMachinesIndex(kept)
-		if encodeErr != nil {
-			c.t.Errorf("cleanup encode machines index: %v", encodeErr)
-			break
+		updated, err := depot.EncodeMachinesIndex(kept)
+		if err != nil {
+			return discoveryRemovedCleaner{}, err
 		}
-		_, putErr := c.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(depot.MachinesIndexKey), Body: strings.NewReader(string(updated)), ContentType: aws.String("application/json"), IfMatch: obj.ETag})
-		if putErr == nil {
-			removed = true
-			break
+		_, err = c.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(depot.MachinesIndexKey), Body: strings.NewReader(string(updated)), ContentType: aws.String("application/json"), IfMatch: obj.ETag})
+		if err == nil {
+			return discoveryRemovedCleaner{cleaner: c}, nil
+		}
+		if attempt+1 == 12 {
+			return discoveryRemovedCleaner{}, fmt.Errorf("cleanup machine-index contention: %w", err)
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			c.t.Errorf("cleanup machines index: %v", ctx.Err())
-			return
+			return discoveryRemovedCleaner{}, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	if !removed {
-		c.t.Errorf("cleanup left machine %s in index", c.machine)
+	panic("unreachable")
+}
+
+func (s discoveryRemovedCleaner) deleteNamespace(ctx context.Context) error {
+	c := s.cleaner
+	if c == nil {
+		return fmt.Errorf("cleanup requires discovery removal proof")
+	}
+	keys := append([]string{depot.LatestPointerKey(c.machine)}, c.keys...)
+	for _, key := range keys {
+		if _, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}); err != nil {
+			return fmt.Errorf("cleanup delete %s: %w", key, err)
+		}
 	}
 	for _, key := range keys {
-		if _, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}); err == nil {
-			c.t.Errorf("cleanup left object %s", key)
+		_, err := c.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)})
+		if err == nil {
+			return fmt.Errorf("cleanup left object %s", key)
 		}
+		if !isR2TestNotFound(err) {
+			return fmt.Errorf("cleanup confirm absence %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func isR2TestNotFound(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch strings.ToLower(apiErr.ErrorCode()) {
+		case "nosuchkey", "notfound", "404":
+			return true
+		}
+	}
+	var responseErr *smithyhttp.ResponseError
+	return errors.As(err, &responseErr) && responseErr.HTTPStatusCode() == 404
+}
+
+func (c *r2TestCleaner) run() {
+	c.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	state, err := c.removeDiscovery(ctx)
+	if err != nil {
+		c.t.Errorf("cleanup preserved namespace because discovery removal failed: %v", err)
+		return
+	}
+	if err := state.deleteNamespace(ctx); err != nil {
+		c.t.Errorf("cleanup namespace: %v", err)
 	}
 }

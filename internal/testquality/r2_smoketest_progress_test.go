@@ -59,15 +59,32 @@ func TestR2IntegrationTestUsesOnlyExplicitSmoketestCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{"AHA_R2_SMOKETEST_BUCKET", "AHA_R2_SMOKETEST_ACCESS_KEY_ID", "AHA_R2_SMOKETEST_SECRET_ACCESS_KEY", "ResolveR2ConfigExplicit", "matchingAmbientProductionCredential"} {
+	for _, required := range []string{"pinnedR2SmoketestBucket", "pinnedR2SmoketestAccountID", "pinnedR2SmoketestTargetID", "AHA_R2_SMOKETEST_ACCESS_KEY_ID", "AHA_R2_SMOKETEST_SECRET_ACCESS_KEY", "ResolveR2ConfigExplicit", "matchingAmbientProductionCredential", "attestLiveR2Target"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("integration test missing explicit capability component %s", required)
 		}
 	}
-	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2DepotConfig{})`} {
+	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2DepotConfig{})`, `os.Getenv("AHA_R2_SMOKETEST_BUCKET")`, `os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")`, `os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")`, `os.Getenv("AHA_R2_SMOKETEST_TARGET_ID")`} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("integration test can consult production credential source %s", forbidden)
 		}
+	}
+}
+
+func TestR2SmoketestProvisionerIsPinnedAndHasNoTargetArguments(t *testing.T) {
+	path := filepath.Join("..", "..", "scripts", "r2-smoketest-provision.sh")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{"aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd", "aha-r2-smoketest-target-v1.json", "r2-smoketest-target.json", "--remote"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("provisioner missing pinned component %q", required)
+		}
+	}
+	if strings.Contains(text, "$1/") || strings.Contains(text, "--bucket") {
+		t.Fatalf("provisioner accepts a target override: %s", text)
 	}
 }
 
@@ -75,12 +92,10 @@ func TestR2SmoketestDefaultsToPinnedTestBucketAndAccount(t *testing.T) {
 	bin := t.TempDir()
 	fakeGo := filepath.Join(bin, "go")
 	fakeGoScript := `#!/usr/bin/env bash
-if [ "$AHA_R2_SMOKETEST_BUCKET" != "aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd" ]; then
-  echo "wrong default bucket"; exit 81
-fi
-if [ "$AHA_R2_SMOKETEST_ACCOUNT_ID" != "8837d43caf5a2ab3df5143eb3e2f1b96" ]; then
-  echo "wrong default account"; exit 82
-fi
+for name in AHA_R2_SMOKETEST_BUCKET AHA_R2_SMOKETEST_ACCOUNT_ID AHA_R2_SMOKETEST_ENDPOINT AHA_R2_SMOKETEST_TARGET_ID; do
+  eval "value=\${$name:-}"
+  if [ -n "$value" ]; then echo "target override leaked through environment: $name"; exit 81; fi
+done
 exit 0
 `
 	if err := os.WriteFile(fakeGo, []byte(fakeGoScript), 0o755); err != nil {
@@ -102,6 +117,33 @@ exit 0
 	}
 }
 
+func TestR2SmoketestRejectsTargetOverridesBeforeRunningGo(t *testing.T) {
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "go-ran")
+	fakeGo := filepath.Join(bin, "go")
+	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "production-bucket", "--account-id", "0123456789abcdef0123456789abcdef", "--target-id", "custom-target")
+	cmd.Env = append(envWithout(r2ProductionEnv),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"AHA_R2_SMOKETEST_ACCESS_KEY_ID=smoke-access",
+		"AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=smoke-secret",
+		"FAKE_GO_MARKER="+marker,
+	)
+	var stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("smoketest accepted a target override")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("go ran despite target override: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "pinned") || strings.Count(stderr.String(), "next:") != 1 {
+		t.Fatalf("stderr=%q want pinned-target rejection and one action", stderr.String())
+	}
+}
+
 func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	bin := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "go-ran")
@@ -109,7 +151,7 @@ func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
 	cmd.Env = append(envWithout(r2ProductionEnv),
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"AHA_R2_ACCESS_KEY_ID=production-access-canary",
@@ -140,7 +182,7 @@ func TestR2SmoketestRejectsCredentialsMatchingAmbientProduction(t *testing.T) {
 	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
 	cmd.Env = append(envWithout(r2ProductionEnv),
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"AHA_R2_ACCESS_KEY_ID=same-access-canary",
@@ -187,7 +229,7 @@ exit "${FAKE_GO_EXIT:-0}"
 		t.Fatal(err)
 	}
 	run := func(exit, forbidden string) (string, string, error) {
-		cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+		cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
 		cmd.Env = append(envWithout(r2ProductionEnv),
 			"PATH="+bin+":"+os.Getenv("PATH"),
 			"AHA_R2_SMOKETEST_ACCESS_KEY_ID=smoke-access",

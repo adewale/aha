@@ -15,6 +15,7 @@ const (
 	PhaseIngest        Phase = "ingest"
 	PhaseVerify        Phase = "verify"
 	PhaseVerifyBlobs   Phase = "verify_blobs"
+	PhaseRebuildLock   Phase = "rebuild_lock"
 	PhaseRebuildBuild  Phase = "rebuild_build"
 	PhaseRebuildVerify Phase = "rebuild_verify"
 	PhaseRebuildSwap   Phase = "rebuild_swap"

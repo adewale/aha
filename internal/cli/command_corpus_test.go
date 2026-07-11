@@ -60,8 +60,12 @@ func TestCorpusRebuildBacksUpLegacyCorpusAndBuildsFromDepot(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatalf("decode rebuild JSON: %v\n%s", err, out.String())
 	}
-	if report.Root != corpusDir || report.Backup == "" || len(report.Next) != 1 {
-		t.Fatalf("rebuild report=%+v", report)
+	canonicalCorpusDir, err := filepath.EvalSymlinks(corpusDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Root != canonicalCorpusDir || report.Backup == "" || len(report.Next) != 1 {
+		t.Fatalf("rebuild report=%+v canonical=%q", report, canonicalCorpusDir)
 	}
 	if got, err := os.ReadFile(filepath.Join(report.Backup, "legacy-marker")); err != nil || string(got) != "old" {
 		t.Fatalf("legacy backup missing: %q err=%v", got, err)

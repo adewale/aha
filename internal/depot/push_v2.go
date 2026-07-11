@@ -21,6 +21,7 @@ type PushResult struct {
 	Reused        bool `json:"reused"`
 	Files         int  `json:"files"`
 	BlobsUploaded int  `json:"blobs_uploaded"`
+	BlobsExisting int  `json:"blobs_existing"`
 	BlobsCarried  int  `json:"blobs_carried"`
 }
 
@@ -67,6 +68,13 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 			return res, err
 		}
 		if parentState == state {
+			// A previous attempt may have published the pointer but failed
+			// while registering this machine in the discovery index. Re-run
+			// the idempotent commit step so unchanged retries heal that crash
+			// window without reading or uploading blob content.
+			if err := md.recommitParent(ctx, parent); err != nil {
+				return res, err
+			}
 			res.manifestSHA = parent.SHA()
 			res.Reused = true
 			return res, nil
@@ -129,7 +137,12 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 			return res, err
 		}
 		receipts = append(receipts, r)
-		res.BlobsUploaded++
+		switch r.kind {
+		case blobReceiptCreated:
+			res.BlobsUploaded++
+		case blobReceiptExisting:
+			res.BlobsExisting++
+		}
 		processedBlobs++
 		opts.Progress.Advance(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
 	}
@@ -137,7 +150,7 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 	uploadComplete = true
 	opts.Progress.Start(ahaprogress.PhasePublish, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
 	publishStarted = true
-	pub, err := md.PublishSnapshot(ctx, manifest, receipts)
+	pub, err := md.PublishSnapshot(ctx, manifest, receipts, parent)
 	if err != nil {
 		return res, err
 	}

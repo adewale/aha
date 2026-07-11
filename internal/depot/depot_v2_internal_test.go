@@ -79,7 +79,7 @@ func TestSetLatestRetriesUntilCASConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := machine.SetLatest(t.Context(), PublishedSnapshot{machine: machineID, sha: sha}); err != nil {
+	if err := machine.SetLatest(t.Context(), PublishedSnapshot{machine: machineID, sha: sha, expected: latestExpectation{kind: expectLatestAbsent}}); err != nil {
 		t.Fatalf("SetLatest: %v", err)
 	}
 	if store.conflicts != forcedConflicts {
@@ -115,11 +115,144 @@ func TestEnsureInMachinesIndexReturnsTypedContentionError(t *testing.T) {
 	}
 }
 
+type cancelOnNthConflictStore struct {
+	objectStore
+	key       string
+	remaining int
+	cancel    context.CancelFunc
+}
+
+func (s *cancelOnNthConflictStore) putBytesConditional(ctx context.Context, key, contentType string, b []byte, etag string) error {
+	if key == s.key && s.remaining > 0 {
+		s.remaining--
+		if s.remaining == 0 {
+			s.cancel()
+		}
+		return fmt.Errorf("%w: forced terminal conflict", errPreconditionFailed)
+	}
+	return s.objectStore.putBytesConditional(ctx, key, contentType, b, etag)
+}
+
+func TestContentionExhaustionDoesNotSleepOrReplaceContentionWithLateCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &cancelOnNthConflictStore{
+		objectStore: &localStoreV2{root: t.TempDir()},
+		key:         MachinesIndexKey,
+		remaining:   conditionalRetryAttempts,
+		cancel:      cancel,
+	}
+	err := (&MachineDepot{v: &V2{store: store}, machine: "blocked-machine"}).ensureInMachinesIndex(ctx)
+	var contention *ContentionError
+	if !errors.As(err, &contention) {
+		t.Fatalf("terminal error=%v want *ContentionError despite cancellation after final write", err)
+	}
+	if contention.Attempts != conditionalRetryAttempts {
+		t.Fatalf("attempts=%d want %d", contention.Attempts, conditionalRetryAttempts)
+	}
+}
+
 func TestWaitForConditionalRetryHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := waitForConditionalRetry(ctx, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForConditionalRetry error=%v want context.Canceled", err)
+	}
+}
+
+type internalBlobSource struct {
+	path  string
+	calls int
+}
+
+func (s *internalBlobSource) BlobPath(model.BlobKey) (string, error) {
+	s.calls++
+	if s.path == "" {
+		return "", errors.New("blob source must not be consulted")
+	}
+	return s.path, nil
+}
+
+func singleFileManifest(machine, content string) (model.SnapshotManifest, model.BlobKey) {
+	key, _ := model.NewBlobKey(hash.SHA256Bytes([]byte(content)))
+	manifest := model.SnapshotManifest{
+		Schema: model.SnapshotManifestSchema, MachineID: machine, CapturedAt: "2026-07-10T00:00:00Z", CreatedBy: "test",
+		Source:   model.ManifestSource{HostOS: "linux"},
+		Policy:   model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+		Adapters: []model.ManifestAdapt{{Name: "pi", Version: "test"}},
+		Files:    []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/one.jsonl", RawPath: "/one.jsonl", SHA256: key.String(), Bytes: int64(len(content)), SessionID: "one", CopyState: "stable"}},
+	}
+	return manifest, key
+}
+
+func writeInternalBlob(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "blob")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T) {
+	base := &localStoreV2{root: t.TempDir()}
+	v2 := &V2{store: base}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := singleFileManifest("heal-machine", "steady bytes")
+	conflicts := &forcedConditionalConflictsStore{objectStore: base, key: MachinesIndexKey, remaining: conditionalRetryAttempts}
+	v2.store = conflicts
+	firstSource := &internalBlobSource{path: writeInternalBlob(t, "steady bytes")}
+	err := func() error {
+		_, err := PushV2(t.Context(), v2, manifest, firstSource)
+		return err
+	}()
+	var contention *ContentionError
+	if !errors.As(err, &contention) {
+		t.Fatalf("first push error=%v want index contention after pointer publication", err)
+	}
+	if _, ok, err := v2.Latest(t.Context(), "heal-machine"); err != nil || !ok {
+		t.Fatalf("latest pointer was not published before index failure: ok=%v err=%v", ok, err)
+	}
+	conflicts.remaining = 0
+	retrySource := &internalBlobSource{}
+	result, err := PushV2(t.Context(), v2, manifest, retrySource)
+	if err != nil {
+		t.Fatalf("unchanged retry: %v", err)
+	}
+	if !result.Reused || retrySource.calls != 0 {
+		t.Fatalf("retry result=%+v blob_calls=%d", result, retrySource.calls)
+	}
+	machines, err := v2.Machines(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(machines) != 1 || machines[0] != "heal-machine" {
+		t.Fatalf("machines=%v want healed registration", machines)
+	}
+}
+
+func TestPushCountsOnlyNewlyCreatedBlobObjectsAsUploaded(t *testing.T) {
+	base := &localStoreV2{root: t.TempDir()}
+	v2 := &V2{store: base}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, key := singleFileManifest("existing-blob-machine", "already present")
+	machine, err := v2.ForMachine("existing-blob-machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeInternalBlob(t, "already present")
+	if _, err := machine.EnsureBlob(t.Context(), key, path); err != nil {
+		t.Fatal(err)
+	}
+	result, err := PushV2(t.Context(), v2, manifest, &internalBlobSource{path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BlobsUploaded != 0 {
+		t.Fatalf("BlobsUploaded=%d want 0 for pre-existing object", result.BlobsUploaded)
 	}
 }
 
@@ -226,7 +359,7 @@ func TestDeepVerifyReturnsCancellationInsteadOfCorruptionReport(t *testing.T) {
 		Adapters: []model.ManifestAdapt{{Name: "pi", Version: "test"}},
 		Files:    []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/one.jsonl", RawPath: "/one.jsonl", SHA256: key.String(), Bytes: int64(len(content)), SessionID: "one", CopyState: "stable"}},
 	}
-	published, err := machine.PublishSnapshot(t.Context(), manifest, []BlobReceipt{receipt})
+	published, err := machine.PublishSnapshot(t.Context(), manifest, []BlobReceipt{receipt}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

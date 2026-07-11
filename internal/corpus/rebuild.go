@@ -51,6 +51,19 @@ func IsLegacyCorpus(root string) (bool, error) {
 type RebuildOptions struct {
 	Context  context.Context
 	Progress *ahaprogress.Tracker
+	// ValidateStaging applies source/corpus overlap policy to the exact derived
+	// sibling path before it is created.
+	ValidateStaging func(string) error
+}
+
+type rebuildOps struct {
+	syncTree func(string) error
+	syncDir  func(string) error
+	swap     func(string, string) error
+}
+
+func productionRebuildOps(swap func(string, string) error) rebuildOps {
+	return rebuildOps{syncTree: syncRebuildTree, syncDir: syncRebuildDirectory, swap: swap}
 }
 
 // RebuildWithBackup constructs and verifies a replacement at the final sibling
@@ -72,6 +85,10 @@ func rebuildWithBackupAtUsingSwap(root string, now time.Time, build func(staging
 }
 
 func rebuildWithBackupAtUsingSwapOptions(root string, now time.Time, build func(staging string) error, swap func(string, string) error, opts RebuildOptions) (RebuildReport, error) {
+	return rebuildWithBackupAtUsingOps(root, now, build, opts, productionRebuildOps(swap))
+}
+
+func rebuildWithBackupAtUsingOps(root string, now time.Time, build func(staging string) error, opts RebuildOptions, ops rebuildOps) (RebuildReport, error) {
 	ctx := opts.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -79,17 +96,29 @@ func rebuildWithBackupAtUsingSwapOptions(root string, now time.Time, build func(
 	if err := ctx.Err(); err != nil {
 		return RebuildReport{}, err
 	}
-	if !rebuildLifecycleSupported() {
+	if !rebuildLifecycleSupported() || !atomicSwapSupported() {
 		return RebuildReport{}, ErrRebuildUnsupported
 	}
 	expanded, err := paths.Expand(root)
 	if err != nil {
 		return RebuildReport{}, err
 	}
-	lock, err := acquireLifecycleLock(expanded, true)
+	expanded, err = canonicalCorpusIdentity(expanded)
 	if err != nil {
 		return RebuildReport{}, err
 	}
+	lockTotal := ahaprogress.KnownTotal(1)
+	opts.Progress.Start(ahaprogress.PhaseRebuildLock, lockTotal, ahaprogress.UnitSteps)
+	lock, err := acquireLifecycleLock(ctx, expanded, true)
+	if err != nil {
+		if ctx.Err() != nil {
+			opts.Progress.Cancel(ahaprogress.PhaseRebuildLock, 0, lockTotal, ahaprogress.UnitSteps)
+		} else {
+			opts.Progress.Fail(ahaprogress.PhaseRebuildLock, 0, lockTotal, ahaprogress.UnitSteps)
+		}
+		return RebuildReport{}, err
+	}
+	opts.Progress.Complete(ahaprogress.PhaseRebuildLock, 1, lockTotal, ahaprogress.UnitSteps)
 	defer lock.release()
 	legacy, err := IsLegacyCorpus(expanded)
 	if err != nil {
@@ -101,6 +130,11 @@ func rebuildWithBackupAtUsingSwapOptions(root string, now time.Time, build func(
 	backup, err := unusedBackupPath(expanded, now)
 	if err != nil {
 		return RebuildReport{}, err
+	}
+	if opts.ValidateStaging != nil {
+		if err := opts.ValidateStaging(backup); err != nil {
+			return RebuildReport{}, err
+		}
 	}
 	if err := os.Mkdir(backup, 0o700); err != nil {
 		return RebuildReport{}, err
@@ -155,13 +189,24 @@ func rebuildWithBackupAtUsingSwapOptions(root string, now time.Time, build func(
 	if err := ctx.Err(); err != nil {
 		return RebuildReport{}, err
 	}
-	if err := swap(staging, expanded); err != nil {
-		return RebuildReport{}, fmt.Errorf("%w: atomic promotion: %v", ErrRebuildFailed, err)
+	if err := ops.syncTree(staging); err != nil {
+		return RebuildReport{}, fmt.Errorf("%w: sync replacement tree: %w", ErrRebuildFailed, err)
+	}
+	parent := filepath.Dir(expanded)
+	if err := ops.syncDir(parent); err != nil {
+		return RebuildReport{}, fmt.Errorf("%w: sync replacement parent before promotion: %w", ErrRebuildFailed, err)
+	}
+	if err := ops.swap(staging, expanded); err != nil {
+		return RebuildReport{}, fmt.Errorf("%w: atomic promotion: %w", ErrRebuildFailed, err)
 	}
 	promoted = true
+	report := RebuildReport{Root: expanded, Backup: backup}
+	if err := ops.syncDir(parent); err != nil {
+		return report, fmt.Errorf("%w: sync replacement parent after promotion: %w", ErrRebuildFailed, err)
+	}
 	opts.Progress.Complete(activePhase, 1, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
 	progressComplete = true
-	return RebuildReport{Root: expanded, Backup: backup}, nil
+	return report, nil
 }
 
 func unusedBackupPath(root string, now time.Time) (string, error) {

@@ -124,11 +124,11 @@ func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Wri
 }
 
 func pushResultJSON(res depot.PushResult) map[string]any {
-	return map[string]any{"manifest_sha256": res.ManifestSHA256().String(), "reused": res.Reused, "files": res.Files, "blobs_uploaded": res.BlobsUploaded, "blobs_carried": res.BlobsCarried}
+	return map[string]any{"manifest_sha256": res.ManifestSHA256().String(), "reused": res.Reused, "files": res.Files, "blobs_uploaded": res.BlobsUploaded, "blobs_existing": res.BlobsExisting, "blobs_carried": res.BlobsCarried}
 }
 
 func printPushResult(stdout io.Writer, res depot.PushResult) {
-	fmt.Fprintf(stdout, "snapshot %s files=%d uploaded=%d carried=%d reused=%v\n", res.ManifestSHA256(), res.Files, res.BlobsUploaded, res.BlobsCarried, res.Reused)
+	fmt.Fprintf(stdout, "snapshot %s files=%d uploaded=%d existing=%d carried=%d reused=%v\n", res.ManifestSHA256(), res.Files, res.BlobsUploaded, res.BlobsExisting, res.BlobsCarried, res.Reused)
 }
 
 func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapshotRequest, error) {

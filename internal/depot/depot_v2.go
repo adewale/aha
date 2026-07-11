@@ -243,19 +243,54 @@ func (p *ParentSnapshot) SHA() model.ManifestSHA256        { return p.sha }
 // (CarriedBlob). Receipts cannot be constructed outside this package, so
 // publishing a manifest that references an unavailable blob is
 // unrepresentable (I2).
+type blobReceiptKind uint8
+
+const (
+	blobReceiptCreated blobReceiptKind = iota + 1
+	blobReceiptExisting
+	blobReceiptCarried
+)
+
 type BlobReceipt struct {
-	key model.BlobKey
+	key  model.BlobKey
+	kind blobReceiptKind
 }
 
 // PublishedSnapshot is proof that a manifest object exists in the depot.
 // Only PublishSnapshot produces a valid value; SetLatest accepts nothing
 // else, so the pointer can never reference an unpublished manifest (I2).
+type latestExpectationKind uint8
+
+const (
+	expectLatestAbsent latestExpectationKind = iota + 1
+	expectLatestSHA
+)
+
+type latestExpectation struct {
+	kind latestExpectationKind
+	sha  model.ManifestSHA256
+}
+
+func (e latestExpectation) valid() bool {
+	return e.kind == expectLatestAbsent || (e.kind == expectLatestSHA && e.sha.Valid())
+}
+
 type PublishedSnapshot struct {
-	machine string
-	sha     model.ManifestSHA256
+	machine  string
+	sha      model.ManifestSHA256
+	expected latestExpectation
 }
 
 func (p PublishedSnapshot) ManifestSHA256() model.ManifestSHA256 { return p.sha }
+
+// StalePublicationError means another publication changed the machine's
+// latest pointer after this publication captured its opaque expected parent.
+// The stale publication remains immutable history but cannot move latest.
+type StalePublicationError struct{ Machine string }
+
+func (e *StalePublicationError) Error() string {
+	return fmt.Sprintf("stale publication for machine %s: latest changed since publication began", e.Machine)
+}
 
 // Parent fetches the machine's own latest snapshot, if any.
 func (m *MachineDepot) Parent(ctx context.Context) (*ParentSnapshot, bool, error) {
@@ -290,32 +325,48 @@ func (m *MachineDepot) EnsureBlob(ctx context.Context, key model.BlobKey, srcPat
 	if _, err := staging.PutFile(key, srcPath); err != nil {
 		return BlobReceipt{}, err
 	}
-	if _, err := m.v.store.putFileIfAbsent(ctx, BlobObjectKey(key), "application/zstd", staging.Path(key)); err != nil {
+	created, err := m.v.store.putFileIfAbsent(ctx, BlobObjectKey(key), "application/zstd", staging.Path(key))
+	if err != nil {
 		return BlobReceipt{}, err
 	}
-	return BlobReceipt{key: key}, nil
+	kind := blobReceiptExisting
+	if created {
+		kind = blobReceiptCreated
+	}
+	return BlobReceipt{key: key, kind: kind}, nil
 }
 
 // CarriedBlob grants a receipt without any depot operation when the
 // fetched parent snapshot already lists this content: the parent's own
 // publish proved the blob exists, and the depot never deletes (I5).
+func (m *MachineDepot) recommitParent(ctx context.Context, parent *ParentSnapshot) error {
+	if parent == nil || machinePrefix(parent.manifest.MachineID) != machinePrefix(m.machine) || !parent.sha.Valid() {
+		return fmt.Errorf("recommit requires this machine's verified parent")
+	}
+	return m.SetLatest(ctx, PublishedSnapshot{
+		machine:  m.machine,
+		sha:      parent.sha,
+		expected: latestExpectation{kind: expectLatestSHA, sha: parent.sha},
+	})
+}
+
 func (m *MachineDepot) CarriedBlob(parent *ParentSnapshot, key model.BlobKey) (BlobReceipt, bool) {
 	if parent == nil || !parent.blobs[key.String()] {
 		return BlobReceipt{}, false
 	}
-	return BlobReceipt{key: key}, true
+	return BlobReceipt{key: key, kind: blobReceiptCarried}, true
 }
 
 // PublishSnapshot canonically encodes the manifest and writes it to the
 // machine's namespace. Every file in the manifest must be covered by a
 // receipt, and the manifest must claim this machine's identity.
-func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.SnapshotManifest, receipts []BlobReceipt) (PublishedSnapshot, error) {
+func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.SnapshotManifest, receipts []BlobReceipt, parent *ParentSnapshot) (PublishedSnapshot, error) {
 	if manifest.MachineID != m.machine {
 		return PublishedSnapshot{}, fmt.Errorf("manifest claims machine %q; this handle publishes only for %q", manifest.MachineID, m.machine)
 	}
 	covered := make(map[string]bool, len(receipts))
 	for _, r := range receipts {
-		if !r.key.Valid() {
+		if !r.key.Valid() || (r.kind != blobReceiptCreated && r.kind != blobReceiptExisting && r.kind != blobReceiptCarried) {
 			return PublishedSnapshot{}, fmt.Errorf("invalid blob receipt")
 		}
 		covered[r.key.String()] = true
@@ -332,7 +383,14 @@ func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.Snaps
 	if _, err := m.v.store.putBytesIfAbsent(ctx, ManifestObjectKey(m.machine, sha), "application/json", b); err != nil {
 		return PublishedSnapshot{}, err
 	}
-	return PublishedSnapshot{machine: m.machine, sha: sha}, nil
+	expected := latestExpectation{kind: expectLatestAbsent}
+	if parent != nil {
+		if machinePrefix(parent.manifest.MachineID) != machinePrefix(m.machine) || !parent.sha.Valid() {
+			return PublishedSnapshot{}, fmt.Errorf("publication parent does not belong to this machine")
+		}
+		expected = latestExpectation{kind: expectLatestSHA, sha: parent.sha}
+	}
+	return PublishedSnapshot{machine: m.machine, sha: sha, expected: expected}, nil
 }
 
 // SetLatest moves the machine's pointer to a published snapshot and then
@@ -344,15 +402,14 @@ func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.Snaps
 // by the fault-injection sweep). An already-current pointer is left
 // untouched (steady-state pushes write nothing).
 func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) error {
-	if pub.machine != m.machine || !pub.sha.Valid() {
-		return fmt.Errorf("SetLatest requires a snapshot published by this machine's handle")
+	if pub.machine != m.machine || !pub.sha.Valid() || !pub.expected.valid() {
+		return fmt.Errorf("SetLatest requires a snapshot published with this machine's expected parent")
 	}
 	key := LatestPointerKey(m.machine)
 	pointer, err := EncodeLatestPointer(pub.sha)
 	if err != nil {
 		return err
 	}
-	wrote := false
 	for attempt := 0; attempt < conditionalRetryAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -360,33 +417,37 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 		b, etag, err := m.v.store.get(ctx, key)
 		switch {
 		case errors.Is(err, errObjectNotExist):
+			if pub.expected.kind != expectLatestAbsent {
+				return &StalePublicationError{Machine: m.machine}
+			}
 			etag = ""
 		case err != nil:
 			return err
 		default:
-			// A corrupt pointer deliberately falls through: the etag
-			// came from reading that very object, so the conditional
-			// PUT below replaces it with a valid pointer (self-heal).
 			current, decodeErr := DecodeLatestPointer(b)
-			if decodeErr == nil && current == pub.sha {
-				wrote = true
-			}
-		}
-		if !wrote {
-			err = m.v.store.putBytesConditional(ctx, key, "application/json", pointer, etag)
-			if err == nil {
-				wrote = true
-			} else if errors.Is(err, errPreconditionFailed) {
-				if err := waitForConditionalRetry(ctx, attempt); err != nil {
-					return err
+			if decodeErr == nil {
+				if current == pub.sha {
+					return m.ensureInMachinesIndex(ctx)
 				}
-				continue
-			} else {
-				return err
+				if pub.expected.kind != expectLatestSHA || current != pub.expected.sha {
+					return &StalePublicationError{Machine: m.machine}
+				}
 			}
+			// A corrupt pointer is conditionally replaced using the ETag
+			// read above. No valid concurrent generation is overwritten.
 		}
-		if wrote {
+		err = m.v.store.putBytesConditional(ctx, key, "application/json", pointer, etag)
+		if err == nil {
 			return m.ensureInMachinesIndex(ctx)
+		}
+		if !errors.Is(err, errPreconditionFailed) {
+			return err
+		}
+		if attempt+1 == conditionalRetryAttempts {
+			break
+		}
+		if err := waitForConditionalRetry(ctx, attempt); err != nil {
+			return err
 		}
 	}
 	return &ContentionError{Key: key, Attempts: conditionalRetryAttempts}
@@ -425,6 +486,9 @@ func (m *MachineDepot) ensureInMachinesIndex(ctx context.Context) error {
 		}
 		if !errors.Is(err, errPreconditionFailed) {
 			return err
+		}
+		if attempt+1 == conditionalRetryAttempts {
+			break
 		}
 		if err := waitForConditionalRetry(ctx, attempt); err != nil {
 			return err

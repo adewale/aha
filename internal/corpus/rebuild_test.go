@@ -60,7 +60,7 @@ func TestRebuildProgressOrdersBuildVerifyAndAtomicSwap(t *testing.T) {
 			completed = append(completed, event.Phase)
 		}
 	}
-	want := []ahaprogress.Phase{ahaprogress.PhaseRebuildBuild, ahaprogress.PhaseRebuildVerify, ahaprogress.PhaseRebuildSwap}
+	want := []ahaprogress.Phase{ahaprogress.PhaseRebuildLock, ahaprogress.PhaseRebuildBuild, ahaprogress.PhaseRebuildVerify, ahaprogress.PhaseRebuildSwap}
 	if !reflect.DeepEqual(completed, want) {
 		t.Fatalf("completed phases=%v want %v; events=%+v", completed, want, events)
 	}
@@ -82,8 +82,12 @@ func TestRebuildWithBackupPromotesVerifiedStagingAndPreservesLegacyDirectory(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Root != root || report.Backup == "" {
-		t.Fatalf("report=%+v", report)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Root != canonicalRoot || report.Backup == "" {
+		t.Fatalf("report=%+v canonicalRoot=%q", report, canonicalRoot)
 	}
 	if got, err := os.ReadFile(filepath.Join(report.Backup, "legacy-marker")); err != nil || string(got) != "preserve me" {
 		t.Fatalf("backup did not preserve legacy corpus: %q err=%v", got, err)

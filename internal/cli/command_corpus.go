@@ -81,7 +81,13 @@ func runCorpusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 			ing.Context = ctx
 			_, pullErr := pullFromDepotV2(ctx, io.Discard, ing, v2, true, progress.Tracker)
 			return errors.Join(pullErr, store.Close())
-		}, corpus.RebuildOptions{Context: ctx, Progress: progress.Tracker})
+		}, corpus.RebuildOptions{
+			Context:  ctx,
+			Progress: progress.Tracker,
+			ValidateStaging: func(path string) error {
+				return safety.ValidateWriteOutsideSources(cfg, path, "corpus rebuild staging")
+			},
+		})
 		if err != nil {
 			return err
 		}

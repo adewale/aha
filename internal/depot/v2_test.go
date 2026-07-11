@@ -2,6 +2,7 @@ package depot_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -85,7 +86,7 @@ func pushState(t *testing.T, ctx context.Context, v2 *depot.V2, machine string, 
 		}
 		receipts = append(receipts, r)
 	}
-	pub, err := md.PublishSnapshot(ctx, snapshotManifestFor(machine, files...), receipts)
+	pub, err := md.PublishSnapshot(ctx, snapshotManifestFor(machine, files...), receipts, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestV2PublishRequiresReceiptForEveryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	mf := sessionFile("content without a receipt", "a.jsonl")
-	if _, err := md.PublishSnapshot(ctx, snapshotManifestFor("mach-a", mf), nil); err == nil {
+	if _, err := md.PublishSnapshot(ctx, snapshotManifestFor("mach-a", mf), nil, nil); err == nil {
 		t.Fatal("PublishSnapshot accepted a file with no blob receipt")
 	}
 	if _, ok, err := v2.Latest(ctx, "mach-a"); err != nil || ok {
@@ -208,7 +209,7 @@ func TestV2PublishRejectsForeignMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	mf := sessionFile("bytes", "a.jsonl")
-	if _, err := md.PublishSnapshot(ctx, snapshotManifestFor("mach-b", mf), []depot.BlobReceipt{r}); err == nil {
+	if _, err := md.PublishSnapshot(ctx, snapshotManifestFor("mach-b", mf), []depot.BlobReceipt{r}, nil); err == nil {
 		t.Fatal("mach-a's MachineDepot published a manifest for mach-b")
 	}
 }
@@ -539,6 +540,48 @@ func TestV2DeepVerifyProgressReportsMachinesAndActualBytes(t *testing.T) {
 	}
 	if !metadataDone || !blobsDone || report.BytesDownloaded == 0 {
 		t.Fatalf("report=%+v events=%+v", report, events)
+	}
+}
+
+func TestSameMachineConcurrentFirstPublicationsRejectStaleWriter(t *testing.T) {
+	ctx := t.Context()
+	v2 := newLocalV2(t)
+	machine, err := v2.ForMachine("same-machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	makePublication := func(name, content string) depot.PublishedSnapshot {
+		t.Helper()
+		mf := sessionFile(content, name)
+		key, err := model.NewBlobKey(mf.SHA256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path, _ := writeBlobSrc(t, dir, name, content)
+		receipt, err := machine.EnsureBlob(ctx, key, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		published, err := machine.PublishSnapshot(ctx, snapshotManifestFor("same-machine", mf), []depot.BlobReceipt{receipt}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return published
+	}
+	stale := makePublication("stale.jsonl", "stale state")
+	winner := makePublication("winner.jsonl", "winner state")
+	if err := machine.SetLatest(ctx, winner); err != nil {
+		t.Fatal(err)
+	}
+	err = machine.SetLatest(ctx, stale)
+	var staleErr *depot.StalePublicationError
+	if !errors.As(err, &staleErr) {
+		t.Fatalf("stale SetLatest error=%v want *StalePublicationError", err)
+	}
+	latest, ok, err := v2.Latest(ctx, "same-machine")
+	if err != nil || !ok || latest != winner.ManifestSHA256() {
+		t.Fatalf("latest=%s ok=%v err=%v want winner %s", latest, ok, err, winner.ManifestSHA256())
 	}
 }
 

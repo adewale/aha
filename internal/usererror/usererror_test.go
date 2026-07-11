@@ -37,6 +37,17 @@ func TestNormalizeHidesFilesystemPaths(t *testing.T) {
 	}
 }
 
+func TestNormalizeStalePublicationAsRetryableConflict(t *testing.T) {
+	view := usererror.Normalize(&depot.StalePublicationError{Machine: "machine"}, "snapshot")
+	if view.Code() != usererror.CodeConflict {
+		t.Fatalf("view=%+v want conflict", view)
+	}
+	diagnostics := usererror.Diagnostics(view)
+	if len(diagnostics) != 1 || !diagnostics[0].Retryable {
+		t.Fatalf("diagnostics=%+v want retryable", diagnostics)
+	}
+}
+
 func TestNormalizeCancellationAndR2Authorization(t *testing.T) {
 	cancelled := usererror.Normalize(context.Canceled, "refresh")
 	if cancelled.Code() != usererror.CodeCancelled {

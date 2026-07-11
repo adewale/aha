@@ -6,9 +6,6 @@
 # Usage (the project test bucket/account are pinned defaults):
 #   scripts/r2-smoketest.sh
 #
-# Override only for another dedicated test target:
-#   scripts/r2-smoketest.sh --bucket NAME --account-id ACCOUNT_ID
-#
 # Missing credentials are prompted for securely on an interactive terminal.
 # They are intentionally not accepted as command-line flags because argv and
 # shell history are not secret stores.
@@ -31,11 +28,12 @@ cd "$(dirname "$0")/.." || exit 2
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/r2-smoketest.sh [--bucket NAME] [--account-id ID | --endpoint URL] [--region auto] [--verbose]
+usage: scripts/r2-smoketest.sh [--verbose]
 
 Default target:
-  bucket:  aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd
-  account: 8837d43caf5a2ab3df5143eb3e2f1b96
+  bucket:    aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd
+  account:   8837d43caf5a2ab3df5143eb3e2f1b96
+  target-id: f7a6d43e8c1b49b0a2d58e7f31c60492
 
 Credentials must use the dedicated variables below or be entered at the TTY:
   AHA_R2_SMOKETEST_ACCESS_KEY_ID
@@ -47,33 +45,23 @@ EOF
 
 DEFAULT_SMOKE_BUCKET="aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd"
 DEFAULT_SMOKE_ACCOUNT_ID="8837d43caf5a2ab3df5143eb3e2f1b96"
-SMOKE_BUCKET="${AHA_R2_SMOKETEST_BUCKET:-$DEFAULT_SMOKE_BUCKET}"
-SMOKE_ACCOUNT_ID="${AHA_R2_SMOKETEST_ACCOUNT_ID:-$DEFAULT_SMOKE_ACCOUNT_ID}"
-SMOKE_ENDPOINT="${AHA_R2_SMOKETEST_ENDPOINT:-}"
-SMOKE_REGION="${AHA_R2_SMOKETEST_REGION:-auto}"
+DEFAULT_SMOKE_TARGET_ID="f7a6d43e8c1b49b0a2d58e7f31c60492"
+SMOKE_BUCKET="$DEFAULT_SMOKE_BUCKET"
+SMOKE_ACCOUNT_ID="$DEFAULT_SMOKE_ACCOUNT_ID"
+SMOKE_ENDPOINT=""
+SMOKE_REGION="auto"
+SMOKE_TARGET_ID="$DEFAULT_SMOKE_TARGET_ID"
 SMOKE_ACCESS_KEY_ID="${AHA_R2_SMOKETEST_ACCESS_KEY_ID:-}"
 SMOKE_SECRET_ACCESS_KEY="${AHA_R2_SMOKETEST_SECRET_ACCESS_KEY:-}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --bucket)
-      [ "$#" -ge 2 ] || { echo "error: --bucket requires a value" >&2; usage; echo "next: rerun with an explicit dedicated test bucket" >&2; exit 2; }
-      SMOKE_BUCKET="$2"; shift 2 ;;
-    --account-id)
-      [ "$#" -ge 2 ] || { echo "error: --account-id requires a value" >&2; usage; echo "next: rerun with the account that owns the dedicated test bucket" >&2; exit 2; }
-      SMOKE_ACCOUNT_ID="$2"; shift 2 ;;
-    --endpoint)
-      [ "$#" -ge 2 ] || { echo "error: --endpoint requires a value" >&2; usage; echo "next: rerun with the dedicated test service endpoint" >&2; exit 2; }
-      SMOKE_ENDPOINT="$2"; shift 2 ;;
-    --region)
-      [ "$#" -ge 2 ] || { echo "error: --region requires a value" >&2; usage; echo "next: rerun with --region auto for Cloudflare R2" >&2; exit 2; }
-      SMOKE_REGION="$2"; shift 2 ;;
     --verbose)
       export AHA_R2_SMOKETEST_VERBOSE=1; shift ;;
     -h|--help)
       usage; exit 0 ;;
     *)
-      echo "error: unknown smoketest option: $1" >&2
+      echo "error: smoketest target is pinned; unsupported option: $1" >&2
       usage
       echo "next: rerun using only the documented test-target options" >&2
       exit 2 ;;
@@ -91,8 +79,6 @@ if [ -z "$SMOKE_SECRET_ACCESS_KEY" ] && [ -t 0 ]; then
 fi
 
 missing=0
-[ -n "$SMOKE_BUCKET" ] || { echo "  missing: --bucket (or AHA_R2_SMOKETEST_BUCKET)" >&2; missing=1; }
-[ -n "$SMOKE_ACCOUNT_ID$SMOKE_ENDPOINT" ] || { echo "  missing: --account-id or --endpoint" >&2; missing=1; }
 [ -n "$SMOKE_ACCESS_KEY_ID" ] || { echo "  missing: AHA_R2_SMOKETEST_ACCESS_KEY_ID (or interactive input)" >&2; missing=1; }
 [ -n "$SMOKE_SECRET_ACCESS_KEY" ] || { echo "  missing: AHA_R2_SMOKETEST_SECRET_ACCESS_KEY (or interactive input)" >&2; missing=1; }
 if [ "$missing" -ne 0 ]; then
@@ -120,10 +106,6 @@ for production_name in AHA_R2_SECRET_ACCESS_KEY R2_SECRET_ACCESS_KEY AWS_SECRET_
   fi
 done
 
-export AHA_R2_SMOKETEST_BUCKET="$SMOKE_BUCKET"
-export AHA_R2_SMOKETEST_ACCOUNT_ID="$SMOKE_ACCOUNT_ID"
-export AHA_R2_SMOKETEST_ENDPOINT="$SMOKE_ENDPOINT"
-export AHA_R2_SMOKETEST_REGION="$SMOKE_REGION"
 export AHA_R2_SMOKETEST_ACCESS_KEY_ID="$SMOKE_ACCESS_KEY_ID"
 export AHA_R2_SMOKETEST_SECRET_ACCESS_KEY="$SMOKE_SECRET_ACCESS_KEY"
 
@@ -145,7 +127,7 @@ fi
 
 echo "progress phase=preflight state=completed" >&2
 echo "R2 smoketest: bucket=$SMOKE_BUCKET" >&2
-echo "using an explicit test-only credential capability; production credential names are absent from the child" >&2
+echo "using an attested test-only target and credential capability; production credential names are absent from the child" >&2
 echo "objects are namespaced per run and deleted afterwards; see header for details" >&2
 echo "the suite includes concurrent first pushes and can take longer than the single-writer check" >&2
 echo >&2

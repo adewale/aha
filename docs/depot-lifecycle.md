@@ -165,8 +165,13 @@ aha refresh --max-sessions 1  # bounded first push/pull
 ```
 
 If doctor identifies a pre-v2 local corpus, `aha corpus rebuild --backup`
-builds and verifies a sibling replacement from the selected depot before
-atomically preserving the old directory and promoting the new one.
+resolves the corpus to one canonical (symlink-free) identity, acquires a
+context-cancellable exclusive lifecycle lock, validates the exact sibling
+staging path against every source root, then builds and verifies the
+replacement. Replacement files/directories and common-parent metadata are
+synced before atomic exchange, and the parent is synced again afterward, so
+the configured root is never absent and the old directory remains at the
+reported backup path.
 
 ### Add another machine
 

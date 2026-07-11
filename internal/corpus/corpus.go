@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -40,7 +41,11 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 			return nil, err
 		}
 	}
-	lock, err := acquireLifecycleLock(root, false)
+	root, err = canonicalCorpusIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := acquireLifecycleLock(context.Background(), root, false)
 	if err != nil {
 		return nil, err
 	}
