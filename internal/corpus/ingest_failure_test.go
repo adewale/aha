@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -18,6 +19,25 @@ import (
 // The corpus never stores bundle blobs under depot v2; the no-bundle-blob
 // assertions below pin that an interrupted bundle import leaves neither
 // database rows nor any bundle-shaped artifact behind.
+func TestCancellationBeforeCommitRollsBackIngest(t *testing.T) {
+	bundlePath := writeFailureBundle(t, t.TempDir(), "cancel-before-commit")
+	store := openFailureStore(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	ing := Ingestor{
+		Context:  ctx,
+		Store:    store,
+		Registry: adapters.Builtins(),
+		hooks: ingestHooks{afterManifestFiles: func() error {
+			cancel()
+			return nil
+		}},
+	}
+	if _, err := ing.IngestBundle(bundlePath); !errors.Is(err, context.Canceled) {
+		t.Fatalf("IngestBundle err=%v want context.Canceled", err)
+	}
+	assertIngestDatabaseRolledBack(t, store)
+}
+
 func TestIngestFailureAfterFileBlobsRollsBackDatabaseAndLeavesNoBundleBlob(t *testing.T) {
 	bundlePath := writeFailureBundle(t, t.TempDir(), "failure-after-files")
 	store := openFailureStore(t)

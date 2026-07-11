@@ -11,6 +11,7 @@ import (
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 func writeBlobSrc(t *testing.T, dir, name, content string) (string, model.BlobKey) {
@@ -517,6 +518,30 @@ func TestV2R2RoundTrip(t *testing.T) {
 
 // TestV2VerifyReportsMissingBlob pins the audit path: a manifest
 // referencing an absent blob is a reported problem.
+func TestV2DeepVerifyProgressReportsMachinesAndActualBytes(t *testing.T) {
+	ctx := context.Background()
+	v2 := newLocalV2(t)
+	pushState(t, ctx, v2, "mach-a", map[string]string{"a.jsonl": "alpha", "b.jsonl": "beta"})
+	var events []ahaprogress.Event
+	tracker := ahaprogress.NewTracker(ahaprogress.ObserverFunc(func(event ahaprogress.Event) { events = append(events, event) }), fixedProgressClock{})
+	report, err := v2.VerifyWithOptions(ctx, true, depot.VerifyOptions{Progress: tracker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadataDone, blobsDone bool
+	for _, event := range events {
+		if event.Phase == ahaprogress.PhaseVerify && event.Kind == ahaprogress.Completed {
+			metadataDone = event.Current == 1 && event.Total.Known && event.Total.Value == 1
+		}
+		if event.Phase == ahaprogress.PhaseVerifyBlobs && event.Kind == ahaprogress.Completed {
+			blobsDone = event.Current == uint64(report.BytesDownloaded) && !event.Total.Known
+		}
+	}
+	if !metadataDone || !blobsDone || report.BytesDownloaded == 0 {
+		t.Fatalf("report=%+v events=%+v", report, events)
+	}
+}
+
 func TestV2VerifyReportsMissingBlob(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "depot")

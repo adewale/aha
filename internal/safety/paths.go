@@ -88,6 +88,9 @@ func ValidateWriteOutsideSources(cfg model.Config, target, label string) error {
 		if Contains(rootAbs, targetAbs) || Contains(rootResolved, targetResolved) {
 			return fmt.Errorf("%s path %s must not be inside source root %s", label, targetAbs, rootAbs)
 		}
+		if Contains(targetAbs, rootAbs) || Contains(targetResolved, rootResolved) {
+			return fmt.Errorf("%s path %s must not overlap source root %s", label, targetAbs, rootAbs)
+		}
 	}
 	return nil
 }

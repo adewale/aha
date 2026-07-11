@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/adewale/aha/internal/cas"
 	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 // V2 is a depot in the v2 content-addressed layout
@@ -23,6 +25,65 @@ import (
 type V2 struct {
 	addr  Address
 	store objectStore
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.r.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return n, ctxErr
+	}
+	return n, err
+}
+
+const (
+	conditionalRetryAttempts  = 12
+	conditionalRetryBaseDelay = 5 * time.Millisecond
+	conditionalRetryMaxDelay  = 250 * time.Millisecond
+)
+
+// ContentionError means a conditional object update kept losing races after
+// the bounded retry policy. It is typed so callers can distinguish contention
+// from corruption, credentials, and transport failures.
+type ContentionError struct {
+	Key      string
+	Attempts int
+}
+
+func (e *ContentionError) Error() string {
+	return fmt.Sprintf("conditional update contention for %s after %d attempts", e.Key, e.Attempts)
+}
+
+// waitForConditionalRetry backs off after a lost conditional write. The
+// bounded, jittered delay prevents a herd of writers from immediately
+// repeating the same GET/PUT race; context cancellation remains the bound on
+// how long a caller is willing to wait for finite contention to converge.
+func waitForConditionalRetry(ctx context.Context, attempt int) error {
+	shift := attempt
+	if shift > 6 { // 5ms << 6 exceeds the 250ms cap.
+		shift = 6
+	}
+	upper := conditionalRetryBaseDelay << shift
+	if upper > conditionalRetryMaxDelay {
+		upper = conditionalRetryMaxDelay
+	}
+	lower := upper / 2
+	delay := lower + time.Duration(rand.Int64N(int64(upper-lower)+1))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // NewLocalV2 opens a local-filesystem depot v2 rooted at root.
@@ -36,7 +97,7 @@ func NewLocalV2(root string) (*V2, error) {
 
 // NewV2FromR2 opens a depot v2 over an existing R2 driver's bucket+client.
 func NewV2FromR2(r *R2) *V2 {
-	return &V2{addr: r.Address(), store: &r2StoreV2{bucket: r.Bucket, client: r.Client}}
+	return &V2{addr: r.Address(), store: &r2StoreV2{bucket: r.Bucket().String(), client: r.S3Client()}}
 }
 
 func (v *V2) Address() Address { return v.addr }
@@ -274,8 +335,6 @@ func (m *MachineDepot) PublishSnapshot(ctx context.Context, manifest model.Snaps
 	return PublishedSnapshot{machine: m.machine, sha: sha}, nil
 }
 
-const conditionalPutAttempts = 5
-
 // SetLatest moves the machine's pointer to a published snapshot and then
 // registers the machine in the index (first push only). The pointer is
 // written BEFORE the index entry: the index is the discovery layer, so it
@@ -294,7 +353,10 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 		return err
 	}
 	wrote := false
-	for attempt := 0; attempt < conditionalPutAttempts; attempt++ {
+	for attempt := 0; attempt < conditionalRetryAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, etag, err := m.v.store.get(ctx, key)
 		switch {
 		case errors.Is(err, errObjectNotExist):
@@ -314,7 +376,12 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 			err = m.v.store.putBytesConditional(ctx, key, "application/json", pointer, etag)
 			if err == nil {
 				wrote = true
-			} else if !errors.Is(err, errPreconditionFailed) {
+			} else if errors.Is(err, errPreconditionFailed) {
+				if err := waitForConditionalRetry(ctx, attempt); err != nil {
+					return err
+				}
+				continue
+			} else {
 				return err
 			}
 		}
@@ -322,11 +389,14 @@ func (m *MachineDepot) SetLatest(ctx context.Context, pub PublishedSnapshot) err
 			return m.ensureInMachinesIndex(ctx)
 		}
 	}
-	return fmt.Errorf("latest pointer update conflict for %s", key)
+	return &ContentionError{Key: key, Attempts: conditionalRetryAttempts}
 }
 
 func (m *MachineDepot) ensureInMachinesIndex(ctx context.Context) error {
-	for attempt := 0; attempt < conditionalPutAttempts; attempt++ {
+	for attempt := 0; attempt < conditionalRetryAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, etag, err := m.v.store.get(ctx, MachinesIndexKey)
 		var machines []string
 		switch {
@@ -356,15 +426,25 @@ func (m *MachineDepot) ensureInMachinesIndex(ctx context.Context) error {
 		if !errors.Is(err, errPreconditionFailed) {
 			return err
 		}
+		if err := waitForConditionalRetry(ctx, attempt); err != nil {
+			return err
+		}
 	}
-	return fmt.Errorf("machines index update conflict")
+	return &ContentionError{Key: MachinesIndexKey, Attempts: conditionalRetryAttempts}
 }
 
-// Verify audits the depot: marker, index, every machine's pointer and
-// latest manifest identity, and referenced blob presence; deep mode also
-// verifies blob content and audits historical manifests. Verify is the
-// only v2 path allowed to LIST (I6) and uses it only in deep mode.
+type VerifyOptions struct {
+	Progress *ahaprogress.Tracker
+}
+
+// Verify audits the depot without progress reporting.
 func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
+	return v.VerifyWithOptions(ctx, deep, VerifyOptions{})
+}
+
+// VerifyWithOptions audits marker, index, pointers, manifests, and blobs.
+// Deep mode additionally reads and hashes blob bytes and historical manifests.
+func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOptions) (VerifyReport, error) {
 	report := VerifyReport{Deep: deep}
 	if b, _, err := v.store.get(ctx, MarkerObjectKey); err == nil {
 		if err := validateMarkerV2Bytes(b); err != nil {
@@ -380,10 +460,37 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 		return report, err
 	}
 	report.Machines = len(machines)
+	machineTotal := ahaprogress.KnownTotal(uint64(len(machines)))
+	processedMachines := uint64(0)
+	verifyComplete := false
+	blobsComplete := false
+	defer func() {
+		if !verifyComplete {
+			if ctx.Err() != nil {
+				opts.Progress.Cancel(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
+			} else {
+				opts.Progress.Fail(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
+			}
+		}
+		if deep && !blobsComplete {
+			if ctx.Err() != nil {
+				opts.Progress.Cancel(ahaprogress.PhaseVerifyBlobs, uint64(report.BytesDownloaded), ahaprogress.UnknownTotal(), ahaprogress.UnitBytes)
+			} else {
+				opts.Progress.Fail(ahaprogress.PhaseVerifyBlobs, uint64(report.BytesDownloaded), ahaprogress.UnknownTotal(), ahaprogress.UnitBytes)
+			}
+		}
+	}()
+	opts.Progress.Start(ahaprogress.PhaseVerify, machineTotal, ahaprogress.UnitMachines)
+	if deep {
+		opts.Progress.Start(ahaprogress.PhaseVerifyBlobs, ahaprogress.UnknownTotal(), ahaprogress.UnitBytes)
+	}
 	checkedBlobs := map[string]bool{}
 	checkManifest := func(machine string, sha model.ManifestSHA256) error {
 		manifest, err := v.Manifest(ctx, machine, sha)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest %s: %v", machine, sha, err))
 			return nil
 		}
@@ -402,19 +509,26 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 				rc, err := v.OpenBlob(ctx, key)
 				if err == nil {
 					var n int64
-					n, err = io.Copy(io.Discard, rc)
+					n, err = io.Copy(io.Discard, contextReader{ctx: ctx, r: rc})
 					if cerr := rc.Close(); err == nil {
 						err = cerr
 					}
 					report.BytesDownloaded += n
+					opts.Progress.Advance(ahaprogress.PhaseVerifyBlobs, uint64(report.BytesDownloaded), ahaprogress.UnknownTotal(), ahaprogress.UnitBytes)
 				}
 				if err != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
 					report.Problems = append(report.Problems, fmt.Sprintf("blob %s: %v", key, err))
 				}
 				continue
 			}
 			ok, err := v.HasBlob(ctx, key)
 			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return err
 			}
 			if !ok {
@@ -427,11 +541,18 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 	for _, machine := range machines {
 		sha, ok, err := v.Latest(ctx, machine)
 		if err != nil {
+			if ctx.Err() != nil {
+				return report, ctx.Err()
+			}
 			report.Problems = append(report.Problems, fmt.Sprintf("machine %s pointer: %v", machine, err))
+			processedMachines++
+			opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
 			continue
 		}
 		if !ok {
 			report.Problems = append(report.Problems, fmt.Sprintf("machine %s is indexed but has no latest pointer", machine))
+			processedMachines++
+			opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
 			continue
 		}
 		seenManifests[ManifestObjectKey(machine, sha)] = true
@@ -439,10 +560,14 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 			return report, err
 		}
 		if !deep {
+			processedMachines++
+			opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
 			continue
 		}
 		lister, ok := v.store.(objectLister)
 		if !ok {
+			processedMachines++
+			opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
 			continue
 		}
 		keys, err := lister.listKeys(ctx, machinePrefix(machine)+"manifests/")
@@ -464,6 +589,17 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 				return report, err
 			}
 		}
+		processedMachines++
+		opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
+	}
+	if err := ctx.Err(); err != nil {
+		return report, err
+	}
+	opts.Progress.Complete(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
+	verifyComplete = true
+	if deep {
+		opts.Progress.Complete(ahaprogress.PhaseVerifyBlobs, uint64(report.BytesDownloaded), ahaprogress.UnknownTotal(), ahaprogress.UnitBytes)
+		blobsComplete = true
 	}
 	return report, nil
 }

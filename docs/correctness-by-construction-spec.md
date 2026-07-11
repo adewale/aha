@@ -104,7 +104,9 @@ behavior.
 | Invariant | Current enforcement | Target construction | Verification |
 |---|---|---|---|
 | Local-only by default | docs + static no-network test | network imports only in `internal/depot`; R2 only via explicit depot address/config | static import guard + CLI JSON contract tests |
-| Credentials never persist | R2 config omits secrets; tests check non-leakage | secret-bearing type never serializes; config writer cannot accept secret fields | config round-trip + redaction/non-leak tests |
+| R2 identifiers are valid before networking | opaque `R2Bucket`/`R2AccountID`; `ParseAddress` and resolved config reject malformed and placeholder values | invalid bucket/account/credential/endpoint values cannot construct an R2 client | constructor tables + instrumented zero-request CLI test + live contract test |
+| Credentials never persist | resolved secret-bearing R2 config has private fields and no JSON representation; persisted config accepts only non-secret account/endpoint/region fields | secret-bearing type never serializes; config writer cannot accept secret fields | config round-trip + redaction/non-leak tests |
+| Legacy corpus rebuild always preserves recoverability | exclusive corpus lifecycle capability; verified sibling staging at the final backup path; one atomic directory exchange; no no-backup CLI variant | callers cannot request destructive rebuild, promotion cannot occur before replacement verification, and the configured root is never absent | build/verification/swap-failure, overlap, lock-exclusion, collision, backup-preservation, and CLI journey tests |
 | Source reads are read-only | adapter convention + static grep | adapter/source capability exposes read/discover/open only; no write authority | compile-time interface + static mutation guard |
 | Source path safety | path containment checks | `SafePath`/`SourceRoot` constructed once; write destinations require corpus/depot roots | PBT path containment + Type B unsafe path tests |
 | Parser never drops raw source bytes | source file blob stored before parse | raw file always stored; optional malformed-line diagnostics table for per-line raw | fuzz postconditions + fixture conformance |
@@ -132,7 +134,9 @@ behavior.
 | Orphan blobs are benign/repairable | some cleanup on bundle promote failure | explicit orphan policy: allowed staging or repairable orphan, never missing committed blob | state-machine + repair tests |
 | Status counts exact | integration tests | status reads from constrained schema/views | property/state-machine count agreement |
 | JSON CLI contracts stable | generated docs + tests | registry metadata and renderers are source of truth | docs sync + golden + JSON envelope tests |
-| Time is explicit | multiple `time.Now`, one `time.Sleep` retry | `Clock` and `Sleeper/Backoff` capabilities at production seams | static debt guard then forbidigo/static ban |
+| Time is explicit | multiple `time.Now`; bounded conditional-write retry uses a context-cancellable timer with capped jitter | `Clock` and `Sleeper/Backoff` capabilities at production seams | cancellation + bounded-contention tests; static debt guard then forbidigo/static ban |
+| Onboarding sequence is valid | doctor/setup derive one action from depot/corpus/config state; structured argv preserves config overrides | invalid transitions are absent from the closed action mapping | state-table tests + exact-one-next JSON contract |
+| Progress cannot corrupt output or leak identity | closed phase/kind/unit enums and aggregate-only events; renderers receive no paths, IDs, endpoints, keys, errors, or credentials | core operations cannot put sensitive strings into progress events; stdout is never a progress sink | renderer concurrency/privacy tests + final-JSON/NDJSON contracts + race detector |
 | No new correctness debt | code review convention | debt inventory tests fail if raw identity/time/FTS patterns spread | `internal/testquality` static inventory |
 
 ## Construction design

@@ -16,7 +16,8 @@ import (
 // R2 default survives a new shell) while never writing the access/secret keys
 // and never freezing the account-derived endpoint or the default region.
 func TestCaptureDepotR2ConfigPersistsAccountNotSecrets(t *testing.T) {
-	t.Setenv("AHA_R2_ACCOUNT_ID", "acct-123")
+	const accountID = "0123456789abcdef0123456789abcdef"
+	t.Setenv("AHA_R2_ACCOUNT_ID", accountID)
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "AKIDEXAMPLE")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secretvalue")
 	// Neutralize any endpoint/region the host environment may carry.
@@ -29,7 +30,7 @@ func TestCaptureDepotR2ConfigPersistsAccountNotSecrets(t *testing.T) {
 	if err := captureDepotR2Config(&cfg); err != nil {
 		t.Fatalf("captureDepotR2Config: %v", err)
 	}
-	if cfg.Depot.R2.AccountID != "acct-123" {
+	if cfg.Depot.R2.AccountID != accountID {
 		t.Fatalf("account id not persisted: %q", cfg.Depot.R2.AccountID)
 	}
 	if cfg.Depot.R2.Endpoint != "" {
@@ -53,7 +54,7 @@ func TestCaptureDepotR2ConfigPersistsAccountNotSecrets(t *testing.T) {
 }
 
 func TestCaptureDepotR2ConfigClearsStaleAutoRegion(t *testing.T) {
-	t.Setenv("AHA_R2_ACCOUNT_ID", "acct-123")
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "AKIDEXAMPLE")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secretvalue")
 	t.Setenv("AHA_R2_REGION", "auto")
@@ -70,7 +71,7 @@ func TestCaptureDepotR2ConfigClearsStaleAutoRegion(t *testing.T) {
 
 // An explicitly provided endpoint (jurisdiction or fake-S3) is persisted as-is.
 func TestCaptureDepotR2ConfigKeepsExplicitEndpoint(t *testing.T) {
-	t.Setenv("AHA_R2_ACCOUNT_ID", "acct-123")
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "AKIDEXAMPLE")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secretvalue")
 	t.Setenv("AHA_R2_ENDPOINT", "https://eu.example.r2.cloudflarestorage.com")

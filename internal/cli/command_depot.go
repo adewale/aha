@@ -12,15 +12,20 @@ import (
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
+	"github.com/adewale/aha/internal/paths"
 	"github.com/adewale/aha/internal/safety"
 )
 
 func cmdDepot(args []string, stdout, stderr io.Writer) error {
+	return runDepotContext(context.Background(), args, stdout, stderr)
+}
+
+func runDepotContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("depot requires subcommand: init, use, ls, verify")
+		return errors.New("depot requires subcommand: setup, init, use, ls, verify")
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <init|use|ls|verify> [DEPOT] [--json] [--deep]")
+		fmt.Fprintln(stdout, "Usage of aha depot: aha depot <setup|init|use|ls|verify> [DEPOT] [--progress MODE] [--json] [--deep]")
 		return nil
 	}
 	sub := args[0]
@@ -29,25 +34,64 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 	configPath := fs.String("config", "", "config path")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	deep := fs.Bool("deep", false, "deep verify blob contents and historical manifests")
+	progressSetting := fs.String("progress", "auto", "progress mode: auto, off, plain, tty, or json (stderr only)")
 	if err := fs.Parse(interspersedDepotFlagArgs(args[1:])); err != nil {
 		return err
 	}
-	cfg, err := config.Load(*configPath)
+	progress, err := newProgressSession(stderr, *progressSetting, *jsonOut)
 	if err != nil {
 		return err
+	}
+	defer progress.Close()
+	cfg, cfgErr := config.Load(*configPath)
+	if cfgErr != nil && sub != "setup" {
+		return cfgErr
 	}
 	addr := ""
 	if fs.NArg() > 0 {
 		addr = fs.Arg(0)
 	}
-	if sub == "use" && addr == "" {
-		return errors.New("depot use requires a depot address, e.g. `aha depot use r2:aha-depot` or `aha depot use local:~/.aha/depot`")
+	if (sub == "use" || sub == "setup") && addr == "" {
+		return fmt.Errorf("depot %s requires a depot address, e.g. `aha depot %s r2:aha-depot`", sub, sub)
+	}
+	if sub == "setup" {
+		parsed, err := depot.ParseAddress(addr)
+		if err != nil {
+			return err
+		}
+		if parsed.Type != "r2" {
+			return errors.New("depot setup currently supports R2 addresses only, e.g. r2:aha-depot")
+		}
+		effectiveConfig := *configPath
+		if effectiveConfig == "" {
+			effectiveConfig = config.DefaultPath()
+		}
+		effectiveConfig, err = paths.Expand(effectiveConfig)
+		if err != nil {
+			return err
+		}
+		diag := doctorDepot(cfg, addr, cfgErr)
+		selected := false
+		if configured, cfgAddrErr := depot.AddressFromConfig(cfg.Depot); cfgAddrErr == nil {
+			selected = configured == parsed
+		}
+		state, action := depotSetupAction(addr, effectiveConfig, selected, diag)
+		next, structured := actionOutput(action)
+		if *jsonOut {
+			return writeJSON(stdout, map[string]any{"state": state, "depot": diag, "next": next, "next_action": structured})
+		}
+		fmt.Fprintf(stdout, "state: %s\nnext: %s\n", state, action.String())
+		if hints, ok := diag["hints"].([]string); ok {
+			for _, hint := range hints {
+				fmt.Fprintf(stdout, "hint: %s\n", hint)
+			}
+		}
+		return nil
 	}
 	v2, err := depotV2ForConfig(cfg, addr)
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
 	switch sub {
 	case "init":
 		if v2.Address().Type == "local" {
@@ -92,7 +136,7 @@ func cmdDepot(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	case "verify":
-		report, err := v2.Verify(ctx, *deep)
+		report, err := v2.VerifyWithOptions(ctx, *deep, depot.VerifyOptions{Progress: progress.Tracker})
 		if err != nil {
 			return err
 		}
@@ -173,7 +217,7 @@ func interspersedDepotFlagArgs(args []string) []string {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
-			if (arg == "--config" || arg == "-config") && i+1 < len(args) {
+			if (arg == "--config" || arg == "-config" || arg == "--progress" || arg == "-progress") && i+1 < len(args) {
 				i++
 				flags = append(flags, args[i])
 			}
@@ -192,16 +236,16 @@ func captureDepotR2Config(cfg *model.Config) error {
 	if err != nil {
 		return err
 	}
-	cfg.Depot.R2.AccountID = rc.AccountID
+	cfg.Depot.R2.AccountID = rc.AccountID()
 	// Persist an endpoint only when explicitly provided (jurisdiction or fake-S3);
 	// the account-derived endpoint stays implicit so it can't drift.
 	if endpoint := firstNonEmpty(os.Getenv("AHA_R2_ENDPOINT"), os.Getenv("R2_ENDPOINT"), cfg.Depot.R2.Endpoint); endpoint != "" {
 		cfg.Depot.R2.Endpoint = endpoint
 	}
-	if rc.Region == "" || rc.Region == "auto" {
+	if rc.Region() == "" || rc.Region() == "auto" {
 		cfg.Depot.R2.Region = ""
 	} else {
-		cfg.Depot.R2.Region = rc.Region
+		cfg.Depot.R2.Region = rc.Region()
 	}
 	return nil
 }

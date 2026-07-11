@@ -129,6 +129,31 @@ aha read "$REF" --json
 
 Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.
 
+## Long-running command progress
+
+`refresh`, `snapshot`, `ingest`, `verify`, `depot verify`, and `corpus rebuild`
+emit typed phase progress on **stderr**. Final command output remains on stdout:
+
+- terminal use: one updating line with phase, honest counters/percentages when a
+  total is known, and elapsed time;
+- redirected non-JSON use: stable phase-start/completion lines;
+- `--json` in a terminal: progress remains visible on stderr while stdout stays
+  one valid final JSON document;
+- redirected `--json`: progress defaults off so scripts remain quiet;
+- `--progress=json`: NDJSON progress events on stderr for automation;
+- `--progress=off|plain|tty|json|auto` overrides selection explicitly.
+
+No ETA is shown: totals are reported only when known before completion. Example:
+
+```bash
+aha depot verify --deep --json --progress=json \
+  >verify-result.json 2>verify-progress.ndjson
+```
+
+Ctrl-C propagates cancellation through capture, depot upload/pull, deep blob
+verification, and rebuild phase boundaries. Operations remain idempotent; a
+rebuild swaps directories only after its replacement verifies cleanly.
+
 ## Search functionality
 
 `aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artifacts while preserving raw source files for later reads.

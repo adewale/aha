@@ -12,6 +12,7 @@
 #   * real conditional writes (If-Match / If-None-Match on the latest pointer
 #     and machines index) against the live service;
 #   * real strong-consistency read-after-write;
+#   * shared-index convergence under simultaneous first pushes;
 #   * that the AWS SDK's request/response checksum configuration is accepted
 #     by R2's partial x-amz-checksum-* implementation.
 #
@@ -78,21 +79,26 @@ if ! command -v go >/dev/null 2>&1; then
   exit 2
 fi
 
-echo "R2 smoketest: bucket=$AHA_R2_TEST_BUCKET"
-echo "objects are namespaced per run and deleted afterwards; see header for details"
-echo
+echo "progress phase=preflight state=completed" >&2
+echo "R2 smoketest: bucket=$AHA_R2_TEST_BUCKET" >&2
+echo "objects are namespaced per run and deleted afterwards; see header for details" >&2
+echo "the suite includes concurrent first pushes and can take longer than the single-writer check" >&2
+echo >&2
 
 # ---- run ---------------------------------------------------------------------
 
 # -count=1 forces a real run: a cached "pass" would vouch for nothing about
 # the live service. The test itself skips (exit 0 with skip notice) only if
 # credentials resolve but are empty — the preflight above makes that loud.
+echo "progress phase=integration_test state=started" >&2
 if go test -tags integration -count=1 -run 'TestR2IntegrationV2' ./internal/depot/ -v; then
-  echo
-  echo "R2 smoketest PASSED against bucket '$AHA_R2_TEST_BUCKET'"
+  echo >&2
+  echo "progress phase=integration_test state=completed" >&2
+  echo "R2 smoketest PASSED against bucket '$AHA_R2_TEST_BUCKET'" >&2
 else
   status=$?
-  echo
+  echo >&2
+  echo "progress phase=integration_test state=failed" >&2
   echo "R2 smoketest FAILED (exit $status)" >&2
   echo "diagnose credentials/endpoint problems with: aha doctor --depot r2:$AHA_R2_TEST_BUCKET --json" >&2
   exit "$status"

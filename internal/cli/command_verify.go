@@ -1,19 +1,26 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 
 	"github.com/adewale/aha/internal/corpus"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
+	return runVerifyContext(context.Background(), args, stdout, stderr)
+}
+
+func runVerifyContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	repairFTS := fs.Bool("repair-fts", false, "rebuild FTS tables from corpus rows before reporting")
+	progressSetting := fs.String("progress", "auto", "progress mode: auto, off, plain, tty, or json (stderr only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -21,23 +28,60 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	progress, err := newProgressSession(stderr, *progressSetting, *jsonOut)
+	if err != nil {
+		return err
+	}
+	defer progress.Close()
+	totalSteps := uint64(1)
+	if *repairFTS {
+		totalSteps = 2
+	}
+	verifyTotal := ahaprogress.KnownTotal(totalSteps)
+	progress.Tracker.Start(ahaprogress.PhaseVerify, verifyTotal, ahaprogress.UnitSteps)
 	store, err := openCorpusForCommand(cfg, false)
 	if err != nil {
+		if ctx.Err() != nil {
+			progress.Tracker.Cancel(ahaprogress.PhaseVerify, 0, verifyTotal, ahaprogress.UnitSteps)
+		} else {
+			progress.Tracker.Fail(ahaprogress.PhaseVerify, 0, verifyTotal, ahaprogress.UnitSteps)
+		}
 		return err
 	}
 	defer store.Close()
 	var repairReport corpus.FTSRepairReport
 	if *repairFTS {
-		var err error
-		repairReport, err = corpus.ReconcileFTSWithReport(store)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
+			progress.Tracker.Cancel(ahaprogress.PhaseVerify, 0, verifyTotal, ahaprogress.UnitSteps)
 			return err
 		}
+		var err error
+		repairReport, err = corpus.ReconcileFTSWithReportContext(ctx, store)
+		if err != nil {
+			if ctx.Err() != nil {
+				progress.Tracker.Cancel(ahaprogress.PhaseVerify, 0, verifyTotal, ahaprogress.UnitSteps)
+			} else {
+				progress.Tracker.Fail(ahaprogress.PhaseVerify, 0, verifyTotal, ahaprogress.UnitSteps)
+			}
+			return err
+		}
+		progress.Tracker.Advance(ahaprogress.PhaseVerify, 1, verifyTotal, ahaprogress.UnitSteps)
 	}
-	report, err := corpus.Verify(store)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
+		progress.Tracker.Cancel(ahaprogress.PhaseVerify, totalSteps-1, verifyTotal, ahaprogress.UnitSteps)
 		return err
 	}
+	report, err := corpus.VerifyContext(ctx, store)
+	if err != nil {
+		completedSteps := totalSteps - 1
+		if ctx.Err() != nil {
+			progress.Tracker.Cancel(ahaprogress.PhaseVerify, completedSteps, verifyTotal, ahaprogress.UnitSteps)
+		} else {
+			progress.Tracker.Fail(ahaprogress.PhaseVerify, completedSteps, verifyTotal, ahaprogress.UnitSteps)
+		}
+		return err
+	}
+	progress.Tracker.Complete(ahaprogress.PhaseVerify, totalSteps, verifyTotal, ahaprogress.UnitSteps)
 	if *jsonOut {
 		var repair *corpus.FTSRepairReport
 		if *repairFTS {

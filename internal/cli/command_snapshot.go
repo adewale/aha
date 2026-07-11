@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 	"github.com/adewale/aha/internal/safety"
 )
 
@@ -20,21 +22,35 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 type snapshotRequest struct {
-	Config         model.Config
-	DepotOverride  string
-	CapturedAt     string
-	SessionFilters []string
-	MaxSessions    int
-	JSON           bool
+	Context         context.Context
+	Config          model.Config
+	DepotOverride   string
+	CapturedAt      string
+	SessionFilters  []string
+	MaxSessions     int
+	JSON            bool
+	Progress        *ahaprogress.Tracker
+	ProgressSetting string
 	// Force bypasses the advisory capture cache (full re-read).
 	Force bool
 }
 
 func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
+	return runSnapshotContext(context.Background(), args, stdout, stderr)
+}
+
+func runSnapshotContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	req, err := parseSnapshotRequest("snapshot", args, stderr)
 	if err != nil {
 		return err
 	}
+	progress, err := newProgressSession(stderr, req.ProgressSetting, req.JSON)
+	if err != nil {
+		return err
+	}
+	defer progress.Close()
+	req.Context = ctx
+	req.Progress = progress.Tracker
 	res, err := pushSnapshotV2(req)
 	if err != nil {
 		return err
@@ -47,6 +63,10 @@ func cmdSnapshot(args []string, stdout, stderr io.Writer) error {
 }
 
 func cmdRefresh(args []string, stdout, stderr io.Writer) error {
+	return runRefreshContext(context.Background(), args, stdout, stderr)
+}
+
+func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	snapshotFlags := registerSnapshotFlags(fs)
@@ -59,6 +79,13 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	progress, err := newProgressSession(stderr, req.ProgressSetting, req.JSON)
+	if err != nil {
+		return err
+	}
+	defer progress.Close()
+	req.Context = ctx
+	req.Progress = progress.Tracker
 	applyCorpusOverride(&req.Config, *repoDir, *corpusDir)
 	if err := safety.ValidateWriteOutsideSources(req.Config, req.Config.CorpusDir, "corpus"); err != nil {
 		return err
@@ -83,7 +110,8 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reports, err := pullFromDepotV2(stdout, ing, v2, *snapshotFlags.jsonOut)
+	ing.Context = ctx
+	reports, err := pullFromDepotV2(ctx, stdout, ing, v2, *snapshotFlags.jsonOut, req.Progress)
 	if err != nil {
 		return err
 	}
@@ -120,6 +148,7 @@ type snapshotFlagSet struct {
 	maxSessions   *int
 	force         *bool
 	jsonOut       *bool
+	progress      *string
 	sourceFlags   multiFlag
 	sessionFlags  multiFlag
 }
@@ -134,6 +163,7 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 	flags.maxSessions = fs.Int("max-sessions", 0, "maximum number of discovered local sessions to snapshot (0 means all)")
 	flags.force = fs.Bool("force", false, "bypass the capture cache and re-read every source file")
 	flags.jsonOut = fs.Bool("json", false, "JSON output")
+	flags.progress = fs.String("progress", "auto", "progress mode: auto, off, plain, tty, or json (stderr only)")
 	fs.Var(&flags.sourceFlags, "source", "source spec type=path (repeatable)")
 	fs.Var(&flags.sessionFlags, "session", "session id/path match to snapshot (repeatable)")
 	return flags
@@ -145,6 +175,7 @@ func (f *snapshotFlagSet) buildRequest(stderr io.Writer) (snapshotRequest, error
 		return snapshotRequest{}, err
 	}
 	req.JSON = *f.jsonOut
+	req.ProgressSetting = *f.progress
 	req.Force = *f.force
 	return req, nil
 }
@@ -180,7 +211,10 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 	if maxSessions < 0 {
 		return snapshotRequest{}, errors.New("--max-sessions must be >= 0")
 	}
-	depotAddress := depot.AddressFromConfig(cfg.Depot)
+	depotAddress, err := depot.AddressFromConfig(cfg.Depot)
+	if err != nil {
+		return snapshotRequest{}, err
+	}
 	if depotAddr != "" {
 		parsed, err := depot.ParseAddress(depotAddr)
 		if err != nil {

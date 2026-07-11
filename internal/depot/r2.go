@@ -3,7 +3,9 @@ package depot
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/adewale/aha/internal/model"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -12,56 +14,157 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-type R2Config struct {
-	AccountID       string
-	Endpoint        string
-	Region          string
-	AccessKeyID     string
-	SecretAccessKey string
+// R2Bucket is a Cloudflare R2 bucket name that has passed syntax and
+// placeholder validation. Its representation is opaque so networking code
+// cannot be constructed with an unchecked bucket string.
+type R2Bucket struct{ value string }
+
+func ParseR2Bucket(value string) (R2Bucket, error) {
+	value = strings.TrimSpace(value)
+	if looksLikePlaceholder(value) {
+		return R2Bucket{}, fmt.Errorf("R2 bucket contains a documentation placeholder; replace it with the real bucket name")
+	}
+	if len(value) < 3 || len(value) > 63 || strings.HasPrefix(value, "-") || strings.HasSuffix(value, "-") {
+		return R2Bucket{}, fmt.Errorf("invalid R2 bucket %q: use 3-63 lowercase letters, numbers, and hyphens", value)
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return R2Bucket{}, fmt.Errorf("invalid R2 bucket %q: use 3-63 lowercase letters, numbers, and hyphens", value)
+		}
+	}
+	return R2Bucket{value: value}, nil
 }
 
-type R2 struct {
-	Bucket string
-	Client *s3.Client
-	Config R2Config
+func (b R2Bucket) String() string { return b.value }
+func (b R2Bucket) Valid() bool    { return b.value != "" }
+
+// R2AccountID is a validated Cloudflare account identifier. Cloudflare
+// account IDs are 32 lowercase hexadecimal characters.
+type R2AccountID struct{ value string }
+
+func ParseR2AccountID(value string) (R2AccountID, error) {
+	value = strings.TrimSpace(value)
+	if looksLikePlaceholder(value) {
+		return R2AccountID{}, fmt.Errorf("R2 account ID contains a documentation placeholder; replace it with the real Cloudflare account ID")
+	}
+	if len(value) != 32 {
+		return R2AccountID{}, fmt.Errorf("invalid R2 account ID: expected 32 lowercase hexadecimal characters")
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'f') || (r >= '0' && r <= '9')) {
+			return R2AccountID{}, fmt.Errorf("invalid R2 account ID: expected 32 lowercase hexadecimal characters")
+		}
+	}
+	return R2AccountID{value: value}, nil
+}
+
+func (id R2AccountID) String() string { return id.value }
+
+func looksLikePlaceholder(value string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	return trimmed == "" || trimmed == "..." || strings.Contains(trimmed, "<") || strings.Contains(trimmed, ">") || strings.HasPrefix(trimmed, "your-")
+}
+
+// R2Config is a resolved, validated R2 client configuration. Secret-bearing
+// fields are private and the type has no JSON representation, so config writers
+// cannot accidentally persist credentials.
+type R2Config struct {
+	accountID       R2AccountID
+	endpoint        string
+	region          string
+	accessKeyID     string
+	secretAccessKey string
+}
+
+func (c R2Config) AccountID() string { return c.accountID.String() }
+func (c R2Config) Endpoint() string  { return c.endpoint }
+func (c R2Config) Region() string    { return c.region }
+func (c R2Config) Valid() bool {
+	return c.endpoint != "" && c.region == "auto" && c.accessKeyID != "" && c.secretAccessKey != ""
 }
 
 func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
-	out := R2Config{
-		AccountID:       firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID),
-		Endpoint:        firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint),
-		Region:          firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region),
-		AccessKeyID:     firstEnv("AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", ""),
-		SecretAccessKey: firstEnv("AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", ""),
+	accountValue := firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID)
+	endpoint := firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint)
+	region := firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region)
+	accessKeyID := firstEnv("AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", "")
+	secretAccessKey := firstEnv("AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", "")
+	if region == "" {
+		region = "auto"
 	}
-	if out.Region == "" {
-		out.Region = "auto"
+	if region != "auto" {
+		return R2Config{}, fmt.Errorf("invalid R2 region %q: Cloudflare R2 uses auto", region)
 	}
-	if out.Endpoint == "" {
-		if out.AccountID == "" {
-			return out, fmt.Errorf("R2 account id required (AHA_R2_ACCOUNT_ID or R2_ACCOUNT_ID)")
+	if looksLikePlaceholder(accessKeyID) || looksLikePlaceholder(secretAccessKey) {
+		return R2Config{}, fmt.Errorf("R2 credentials required: values are missing or contain documentation placeholders; set real AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY values")
+	}
+	var accountID R2AccountID
+	if endpoint == "" {
+		if accountValue == "" {
+			return R2Config{}, fmt.Errorf("R2 account id required (AHA_R2_ACCOUNT_ID or R2_ACCOUNT_ID)")
 		}
-		out.Endpoint = fmt.Sprintf("https://%s.r2.cloudflarestorage.com", out.AccountID)
+		var err error
+		accountID, err = ParseR2AccountID(accountValue)
+		if err != nil {
+			return R2Config{}, err
+		}
+		endpoint = fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID.String())
+	} else {
+		if looksLikePlaceholder(endpoint) {
+			return R2Config{}, fmt.Errorf("R2 endpoint contains a documentation placeholder; replace it with a real endpoint")
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return R2Config{}, fmt.Errorf("invalid R2 endpoint: expected an absolute URL")
+		}
+		if parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return R2Config{}, fmt.Errorf("invalid R2 endpoint: user info, paths, queries, and fragments are not allowed")
+		}
+		host := strings.ToLower(parsed.Hostname())
+		local := host == "localhost" || host == "127.0.0.1" || host == "::1"
+		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && local) {
+			return R2Config{}, fmt.Errorf("invalid R2 endpoint: HTTPS is required except for localhost test endpoints")
+		}
+		if accountValue != "" {
+			accountID, err = ParseR2AccountID(accountValue)
+			if err != nil {
+				return R2Config{}, err
+			}
+		}
 	}
-	if out.AccessKeyID == "" || out.SecretAccessKey == "" {
-		return out, fmt.Errorf("R2 credentials required (AHA_R2_ACCESS_KEY_ID/R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY/R2_SECRET_ACCESS_KEY)")
-	}
-	return out, nil
+	return R2Config{accountID: accountID, endpoint: endpoint, region: region, accessKeyID: accessKeyID, secretAccessKey: secretAccessKey}, nil
 }
 
-func NewR2(bucket string, cfg R2Config) *R2 {
-	if bucket == "" {
-		bucket = DefaultR2Bucket
+type R2 struct {
+	bucket R2Bucket
+	client *s3.Client
+	config R2Config
+}
+
+func NewR2(bucket R2Bucket, cfg R2Config) (*R2, error) {
+	if !bucket.Valid() || !cfg.Valid() {
+		return nil, fmt.Errorf("NewR2 requires a validated bucket and resolved configuration")
 	}
 	// R2 implements x-amz-checksum-* only partially, so follow Cloudflare's
 	// SDK guidance and send/validate checksums only when an operation
 	// requires one. Integrity is owned by the depot layer anyway: every blob
 	// and manifest is content-addressed and re-hashed on read.
-	client := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""), RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired, ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired})
-	return &R2{Bucket: bucket, Client: client, Config: cfg}
+	client := s3.New(s3.Options{Region: cfg.region, BaseEndpoint: aws.String(cfg.endpoint), Credentials: credentials.NewStaticCredentialsProvider(cfg.accessKeyID, cfg.secretAccessKey, ""), RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired, ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired})
+	return &R2{bucket: bucket, client: client, config: cfg}, nil
 }
 
-func (d *R2) Address() Address { return Address{Type: "r2", Location: d.Bucket} }
+// NewR2WithClient binds a validated bucket to an existing S3 client. It is
+// primarily the protocol-test seam; production configuration uses NewR2.
+func NewR2WithClient(bucket R2Bucket, client *s3.Client) (*R2, error) {
+	if !bucket.Valid() || client == nil {
+		return nil, fmt.Errorf("NewR2WithClient requires a validated bucket and non-nil client")
+	}
+	return &R2{bucket: bucket, client: client}, nil
+}
+
+func (d *R2) Address() Address     { return Address{Type: "r2", Location: d.bucket.String()} }
+func (d *R2) Bucket() R2Bucket     { return d.bucket }
+func (d *R2) S3Client() *s3.Client { return d.client }
 
 func isS3NotFound(err error) bool {
 	var apiErr smithy.APIError

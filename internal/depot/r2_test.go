@@ -17,8 +17,22 @@ import (
 // WhenRequired — the fake-S3 suite accepts any header and can never catch
 // a drift here.
 func TestNewR2FollowsCloudflareChecksumGuidance(t *testing.T) {
-	r2 := depot.NewR2("bucket", depot.R2Config{Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto", AccessKeyID: "key", SecretAccessKey: "secret"})
-	opts := r2.Client.Options()
+	t.Setenv("AHA_R2_ENDPOINT", "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
+	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket, err := depot.ParseR2Bucket("bucket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := depot.NewR2(bucket, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := r2.S3Client().Options()
 	if opts.RequestChecksumCalculation != aws.RequestChecksumCalculationWhenRequired {
 		t.Fatalf("request checksum calculation = %v, want WhenRequired", opts.RequestChecksumCalculation)
 	}
@@ -28,15 +42,16 @@ func TestNewR2FollowsCloudflareChecksumGuidance(t *testing.T) {
 }
 
 func TestResolveR2ConfigUsesCloudflareEndpointAndAutoRegion(t *testing.T) {
-	t.Setenv("AHA_R2_ACCOUNT_ID", "acct123")
+	const accountID = "0123456789abcdef0123456789abcdef"
+	t.Setenv("AHA_R2_ACCOUNT_ID", accountID)
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
 	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Endpoint != "https://acct123.r2.cloudflarestorage.com" || cfg.Region != "auto" {
-		t.Fatalf("bad R2 endpoint/region: %+v", cfg)
+	if cfg.Endpoint() != "https://"+accountID+".r2.cloudflarestorage.com" || cfg.Region() != "auto" {
+		t.Fatalf("bad R2 endpoint/region: endpoint=%s region=%s", cfg.Endpoint(), cfg.Region())
 	}
 }
 
@@ -48,8 +63,8 @@ func TestResolveR2ConfigAllowsEndpointOverrideWithoutAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Endpoint != "http://127.0.0.1:9000" {
-		t.Fatalf("endpoint override ignored: %+v", cfg)
+	if cfg.Endpoint() != "http://127.0.0.1:9000" {
+		t.Fatalf("endpoint override ignored: %s", cfg.Endpoint())
 	}
 }
 
@@ -72,8 +87,77 @@ func TestResolveR2ConfigRequiresCredentials(t *testing.T) {
 	t.Setenv("R2_SECRET_ACCESS_KEY", "")
 	t.Setenv("AHA_R2_ENDPOINT", "")
 	t.Setenv("R2_ENDPOINT", "")
-	_, err := depot.ResolveR2Config(model.R2DepotConfig{AccountID: "acct"})
+	_, err := depot.ResolveR2Config(model.R2DepotConfig{AccountID: "0123456789abcdef0123456789abcdef"})
 	if err == nil {
 		t.Fatal("expected missing credential error")
+	}
+}
+
+func TestNewR2RejectsZeroValueValidatedInputs(t *testing.T) {
+	if _, err := depot.NewR2(depot.R2Bucket{}, depot.R2Config{}); err == nil {
+		t.Fatal("NewR2 accepted zero-value validated inputs")
+	}
+}
+
+func TestParseR2BucketRejectsInvalidAndPlaceholderValues(t *testing.T) {
+	for _, value := range []string{"", "<your-production-bucket>", "<bucket>", "...", "UPPER", "https://example.com/bucket", "a/b", "-leading", "trailing-"} {
+		t.Run(value, func(t *testing.T) {
+			if _, err := depot.ParseR2Bucket(value); err == nil {
+				t.Fatalf("ParseR2Bucket(%q) succeeded", value)
+			}
+		})
+	}
+	bucket, err := depot.ParseR2Bucket("aha-depot-123")
+	if err != nil || bucket.String() != "aha-depot-123" {
+		t.Fatalf("valid bucket rejected: bucket=%q err=%v", bucket.String(), err)
+	}
+}
+
+func TestParseAddressRejectsInvalidR2BucketBeforeNetworking(t *testing.T) {
+	if _, err := depot.ParseAddress("r2:<your-production-bucket>"); err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("ParseAddress placeholder error=%v", err)
+	}
+}
+
+func TestResolveR2ConfigRejectsPlaceholderAndMalformedAccountIDs(t *testing.T) {
+	for _, accountID := range []string{"<your-account-id>", "...", "acct123", strings.Repeat("g", 32)} {
+		t.Run(accountID, func(t *testing.T) {
+			t.Setenv("AHA_R2_ACCOUNT_ID", accountID)
+			t.Setenv("AHA_R2_ENDPOINT", "")
+			t.Setenv("R2_ENDPOINT", "")
+			t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
+			t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
+			if _, err := depot.ResolveR2Config(model.R2DepotConfig{}); err == nil {
+				t.Fatalf("ResolveR2Config accepted account ID %q", accountID)
+			}
+		})
+	}
+}
+
+func TestResolveR2ConfigRejectsUnsafeEndpointsBeforeNetworking(t *testing.T) {
+	for _, endpoint := range []string{"http://example.com", "https://user:pass@example.com", "https://example.com/path", "<endpoint>"} {
+		t.Run(endpoint, func(t *testing.T) {
+			t.Setenv("AHA_R2_ENDPOINT", endpoint)
+			t.Setenv("AHA_R2_ACCOUNT_ID", "")
+			t.Setenv("R2_ACCOUNT_ID", "")
+			t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
+			t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
+			if _, err := depot.ResolveR2Config(model.R2DepotConfig{}); err == nil {
+				t.Fatalf("ResolveR2Config accepted unsafe endpoint %q", endpoint)
+			}
+		})
+	}
+}
+
+func TestResolveR2ConfigRejectsPlaceholderCredentialsWithoutLeakingThem(t *testing.T) {
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "<r2-access-key-id>")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "<r2-secret-access-key>")
+	_, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	if err == nil {
+		t.Fatal("ResolveR2Config accepted placeholder credentials")
+	}
+	if strings.Contains(err.Error(), "r2-secret-access-key") {
+		t.Fatalf("error leaked secret placeholder: %v", err)
 	}
 }

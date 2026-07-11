@@ -24,6 +24,9 @@ type BlobOpen func(key model.BlobKey) (io.ReadCloser, error)
 func (ing Ingestor) IngestSnapshot(manifest model.SnapshotManifest, open BlobOpen) (IngestReport, error) {
 	const maxBusyRetries = 20
 	for attempt := 0; ; attempt++ {
+		if err := ing.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		rep, err := ing.ingestSnapshotOnce(manifest, open)
 		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
 			return rep, err
@@ -33,6 +36,9 @@ func (ing Ingestor) IngestSnapshot(manifest model.SnapshotManifest, open BlobOpe
 }
 
 func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open BlobOpen) (IngestReport, error) {
+	if err := ing.context().Err(); err != nil {
+		return IngestReport{}, err
+	}
 	canonical, sha, err := model.EncodeSnapshotManifest(manifest)
 	if err != nil {
 		return IngestReport{}, err
@@ -51,6 +57,9 @@ func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open Blo
 		return IngestReport{}, err
 	}
 	if skip {
+		if err := ing.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return IngestReport{}, err
 		}
@@ -63,7 +72,7 @@ func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open Blo
 	if level == "" {
 		level = "none-v1"
 	}
-	writer := corpusWriter{Store: ing.Store, Registry: ing.Registry, tx: tx, manifest: bundleViewOf(manifest), manifestSHA: sha.String(), redactor: ing.Redactor, redactionLevel: level}
+	writer := corpusWriter{Context: ing.context(), Store: ing.Store, Registry: ing.Registry, tx: tx, manifest: bundleViewOf(manifest), manifestSHA: sha.String(), redactor: ing.Redactor, redactionLevel: level}
 	if err := writer.PrepareStatements(); err != nil {
 		return IngestReport{}, err
 	}
@@ -73,6 +82,9 @@ func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open Blo
 	}
 	rep := IngestReport{Duplicate: dup}
 	for _, mf := range manifest.Files {
+		if err := ing.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		if mf.Kind == "session" {
 			knownKey, err := writer.knownSessionVersionKey(mf)
 			if err != nil {
@@ -106,6 +118,9 @@ func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open Blo
 		rep.Messages += fileRep.Messages
 		rep.Images += fileRep.Images
 		rep.Artifacts += fileRep.Artifacts
+	}
+	if err := ing.context().Err(); err != nil {
+		return IngestReport{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return IngestReport{}, err

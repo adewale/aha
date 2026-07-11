@@ -54,26 +54,28 @@ Recommended token shape:
   do not control.
 - Store secrets in environment variables or an OS/secret-manager mechanism, not in repo files or `aha` config.
 
-`aha` reads these variables:
+`aha` reads these variables. For interactive zsh/bash setup, avoid literal
+placeholders and keep the secret out of shell history:
 
 ```bash
-export AHA_R2_ACCOUNT_ID=...
-export AHA_R2_ACCESS_KEY_ID=...
-export AHA_R2_SECRET_ACCESS_KEY=...
-# Optional, for jurisdiction-specific or fake-S3 endpoints:
-export AHA_R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-export AHA_R2_REGION=auto
+printf 'Cloudflare Account ID: '; read -r AHA_R2_ACCOUNT_ID; export AHA_R2_ACCOUNT_ID
+printf 'R2 Access Key ID: '; read -r AHA_R2_ACCESS_KEY_ID; export AHA_R2_ACCESS_KEY_ID
+printf 'R2 Secret Access Key: '; read -rs AHA_R2_SECRET_ACCESS_KEY; printf '\n'; export AHA_R2_SECRET_ACCESS_KEY
+# Optional only for jurisdiction-specific or non-Cloudflare S3 endpoints:
+# export AHA_R2_ENDPOINT=https://real-account-id.eu.r2.cloudflarestorage.com
 ```
+
+`aha` rejects documentation placeholders before creating an SDK client.
+Cloudflare account IDs must be 32 lowercase hexadecimal characters; bucket
+names must be 3–63 lowercase letters, numbers, or hyphens.
 
 `R2_*` aliases also work. `aha` intentionally ignores generic `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` so it does not accidentally use unrelated AWS credentials.
 
-Example setup:
+After loading real values, preflight and follow its single next action:
 
 ```bash
-export AHA_R2_ACCOUNT_ID=<account-id>
-export AHA_R2_ACCESS_KEY_ID=<r2-access-key-id>
-export AHA_R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
-aha doctor --depot r2:aha-depot --json
+aha depot setup r2:aha-depot --json
+aha depot init r2:aha-depot
 aha snapshot --depot r2:aha-depot --accept-secrets --json
 aha depot verify r2:aha-depot --json
 ```
@@ -167,9 +169,10 @@ Recommended bucket controls:
 ## End-to-end validation
 
 From a repo clone, `scripts/r2-smoketest.sh` runs the live-bucket integration
-test: push, delta push, unchanged-state reuse, pull, and deep verify against
-the real service, exercising the conditional writes and read-after-write
-consistency that local fakes cannot vouch for. Run it against a dedicated
+tests: push, delta push, unchanged-state reuse, pull, deep verify, and
+simultaneous first pushes from multiple machine IDs against the real service,
+exercising conditional-write contention and read-after-write consistency that
+local fakes cannot vouch for. Run it against a dedicated
 test bucket (its verify step reads everything in the bucket, and an
 interrupted run can leave uniquely-named smoke objects behind):
 

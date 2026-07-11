@@ -2,7 +2,9 @@ package corpus_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -51,6 +53,47 @@ func (o *countingBlobOpener) Open(key model.BlobKey) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("no blob %s", key)
 	}
 	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (r cancelOnClose) Close() error {
+	err := r.ReadCloser.Close()
+	r.cancel()
+	return err
+}
+
+func TestIngestSnapshotCancellationBeforeCommitRollsBack(t *testing.T) {
+	store, err := corpus.Open(filepath.Join(t.TempDir(), "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	manifest, opener := snapshotFixture(map[string][]byte{"alpha": []byte("session alpha bytes")})
+	registry, _ := countingRegistry()
+	ctx, cancel := context.WithCancel(t.Context())
+	ing := corpus.NewIngestor(store, registry)
+	ing.Context = ctx
+	_, err = ing.IngestSnapshot(manifest, func(key model.BlobKey) (io.ReadCloser, error) {
+		rc, err := opener.Open(key)
+		if err != nil {
+			return nil, err
+		}
+		return cancelOnClose{ReadCloser: rc, cancel: cancel}, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("IngestSnapshot error=%v want context.Canceled", err)
+	}
+	var snapshots int
+	if err := store.DB.QueryRow(`select count(*) from snapshots`).Scan(&snapshots); err != nil {
+		t.Fatal(err)
+	}
+	if snapshots != 0 {
+		t.Fatalf("snapshots=%d want 0 after cancelled ingest", snapshots)
+	}
 }
 
 func countingRegistry() (map[string]adapters.SourceAdapter, *atomic.Int64) {

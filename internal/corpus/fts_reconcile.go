@@ -1,6 +1,9 @@
 package corpus
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 type FTSRepairReport struct {
 	DeletedMessageRows   int `json:"deleted_message_rows"`
@@ -22,24 +25,41 @@ func ReconcileFTS(store *Store) error {
 }
 
 func ReconcileFTSWithReport(store *Store) (FTSRepairReport, error) {
+	return ReconcileFTSWithReportContext(context.Background(), store)
+}
+
+func ReconcileFTSWithReportContext(ctx context.Context, store *Store) (FTSRepairReport, error) {
 	report := FTSRepairReport{}
-	var err error
-	if report.DeletedMessageRows, err = verifyCount(store.DB, `select count(*) from fts_messages`); err != nil {
+	tx, err := store.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return report, err
 	}
-	if report.DeletedArtifactRows, err = verifyCount(store.DB, `select count(*) from fts_artifacts`); err != nil {
+	defer tx.Rollback()
+	if report.DeletedMessageRows, err = verifyCountContext(ctx, tx, `select count(*) from fts_messages`); err != nil {
 		return report, err
 	}
-	if report.InsertedMessageRows, err = verifyCount(store.DB, countIndexableMessages); err != nil {
+	if report.DeletedArtifactRows, err = verifyCountContext(ctx, tx, `select count(*) from fts_artifacts`); err != nil {
 		return report, err
 	}
-	if report.InsertedArtifactRows, err = verifyCount(store.DB, countIndexableArtifacts); err != nil {
+	if report.InsertedMessageRows, err = verifyCountContext(ctx, tx, countIndexableMessages); err != nil {
 		return report, err
 	}
-	if err := rebuildFTSMessages(store.DB); err != nil {
+	if report.InsertedArtifactRows, err = verifyCountContext(ctx, tx, countIndexableArtifacts); err != nil {
 		return report, err
 	}
-	if err := rebuildFTSArtifacts(store.DB); err != nil {
+	if _, err := tx.ExecContext(ctx, deleteFTSMessagesSQL); err != nil {
+		return report, err
+	}
+	if _, err := tx.ExecContext(ctx, reinsertFTSMessagesSQL); err != nil {
+		return report, err
+	}
+	if _, err := tx.ExecContext(ctx, deleteFTSArtifactsSQL); err != nil {
+		return report, err
+	}
+	if _, err := tx.ExecContext(ctx, reinsertFTSArtifactsSQL); err != nil {
+		return report, err
+	}
+	if err := tx.Commit(); err != nil {
 		return report, err
 	}
 	return report, nil

@@ -2,6 +2,7 @@ package archive_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 	"github.com/adewale/aha/internal/testutil"
 )
 
@@ -135,6 +137,54 @@ func TestCaptureCacheCorruptFileSelfHeals(t *testing.T) {
 	}
 	if _, ok := c.Lookup(p, st); ok {
 		t.Fatal("corrupt cache produced a hit")
+	}
+}
+
+func TestCaptureStateTempDirectoryFailureTerminatesProgress(t *testing.T) {
+	badTemp := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(badTemp, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", badTemp)
+	var events []ahaprogress.Event
+	tracker := ahaprogress.NewTracker(ahaprogress.ObserverFunc(func(event ahaprogress.Event) {
+		events = append(events, event)
+	}), fixedClock{at: time.Unix(0, 0)})
+	cfg := model.Config{MachineID: "machine"}
+	_, err := archive.CaptureState(t.Context(), cfg, map[string]adapters.SourceAdapter{}, archive.StateOptions{CapturedAt: "2026-07-10T00:00:00Z", Progress: tracker})
+	if err == nil {
+		t.Fatal("CaptureState unexpectedly succeeded")
+	}
+	if len(events) < 2 || events[0].Kind != ahaprogress.Started || events[len(events)-1].Kind != ahaprogress.Failed {
+		t.Fatalf("events=%+v want started then failed", events)
+	}
+}
+
+func TestCaptureStateProgressCountsDiscoveredFilesWithoutPaths(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	cfg := config.Default()
+	cfg.MachineID = "m1"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fx.PiRoot, Enabled: true}}
+	var events []ahaprogress.Event
+	tracker := ahaprogress.NewTracker(ahaprogress.ObserverFunc(func(event ahaprogress.Event) { events = append(events, event) }), fixedClock{at: time.Unix(0, 0)})
+	sc, err := archive.CaptureState(context.Background(), cfg, adapters.Builtins(), archive.StateOptions{CapturedAt: "2026-06-09T00:00:00Z", Progress: tracker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sc.Close()
+	var completed *ahaprogress.Event
+	for i := range events {
+		if events[i].Phase == ahaprogress.PhaseCapture && events[i].Kind == ahaprogress.Completed {
+			completed = &events[i]
+		}
+	}
+	if completed == nil || completed.Current != uint64(len(sc.Manifest.Files)) || !completed.Total.Known || completed.Total.Value != uint64(len(sc.Manifest.Files)) {
+		t.Fatalf("files=%d events=%+v", len(sc.Manifest.Files), events)
+	}
+	joined := fmt.Sprint(events)
+	if strings.Contains(joined, root) || strings.Contains(joined, cfg.MachineID) {
+		t.Fatalf("progress leaked sensitive identity/path: %s", joined)
 	}
 }
 

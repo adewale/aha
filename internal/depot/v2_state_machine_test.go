@@ -210,39 +210,59 @@ func (s *stateBlobSource) BlobPath(key model.BlobKey) (string, error) {
 // TestV2ConcurrentFirstPushesAllLandInIndex pins the machines-index
 // conditional-write retry under real contention: many machines pushing
 // their first snapshot concurrently must all end up registered, with no
-// lost updates.
+// lost updates. It exercises both drivers because the retry is depot
+// behavior, not a local-filesystem locking accident.
 func TestV2ConcurrentFirstPushesAllLandInIndex(t *testing.T) {
-	ctx := context.Background()
-	v2 := newLocalV2(t)
-	const n = 8
-	var wg sync.WaitGroup
-	errs := make([]error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			machine := fmt.Sprintf("conc-%d", i)
-			_, errs[i] = pushV2State(ctx, v2, machine, map[string]string{"s.jsonl": "content " + machine})
-		}(i)
+	stores := []struct {
+		name string
+		open func(*testing.T) *depot.V2
+	}{
+		{name: "local", open: newLocalV2},
+		{name: "r2", open: func(t *testing.T) *depot.V2 {
+			f := newFakeS3(t)
+			t.Cleanup(f.Close)
+			v2 := depot.NewV2FromR2(f.Depot("bucket"))
+			if err := v2.Init(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			return v2
+		}},
 	}
-	wg.Wait()
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent push %d: %v", i, err)
-		}
-	}
-	machines, err := v2.Machines(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(machines) != n {
-		t.Fatalf("machines index lost updates: %d/%d registered: %v", len(machines), n, machines)
-	}
-	report, err := v2.Verify(ctx, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(report.Problems) != 0 {
-		t.Fatalf("verify after concurrent pushes: %v", report.Problems)
+	for _, store := range stores {
+		t.Run(store.name, func(t *testing.T) {
+			ctx := t.Context()
+			v2 := store.open(t)
+			const n = 8
+			var wg sync.WaitGroup
+			errs := make([]error, n)
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					machine := fmt.Sprintf("conc-%d", i)
+					_, errs[i] = pushV2State(ctx, v2, machine, map[string]string{"s.jsonl": "content " + machine})
+				}(i)
+			}
+			wg.Wait()
+			for i, err := range errs {
+				if err != nil {
+					t.Fatalf("concurrent push %d: %v", i, err)
+				}
+			}
+			machines, err := v2.Machines(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(machines) != n {
+				t.Fatalf("machines index lost updates: %d/%d registered: %v", len(machines), n, machines)
+			}
+			report, err := v2.Verify(ctx, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Problems) != 0 {
+				t.Fatalf("verify after concurrent pushes: %v", report.Problems)
+			}
+		})
 	}
 }

@@ -100,6 +100,7 @@ the default leaves every depot's data untouched.
 
 | Command | Provisioning | Selection | Net (r2) | Effect |
 |---|---|---|---|---|
+| `aha depot setup r2:<bucket>` | read-only preflight | unchanged | yes, after local validation | Rejects malformed/placeholders before networking, reports the depot state, and emits exactly one safe next command. |
 | `aha depot init <addr>` | Uninitialized → Initialized (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `aha-depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
 | `aha depot use <addr>` | requires Initialized | sets default = `<addr>` | yes | Switches the default to an already-initialized `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
 | `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognized from the pointer alone (zero writes). Does not touch the corpus and never reads another machine's namespace. |
@@ -157,10 +158,15 @@ Configuring R2 makes it the default. Only the two **secret** keys ever live in
 the environment; `init` persists the non-secret account id to config:
 
 ```bash
-export AHA_R2_ACCESS_KEY_ID=... AHA_R2_SECRET_ACCESS_KEY=... AHA_R2_ACCOUNT_ID=...
+# Load real values from a secret manager or shell-neutral interactive prompts.
+aha depot setup r2:aha-depot  # read-only; prints one next command
 aha depot init r2:aha-depot   # create/connect, write marker, set as default
-aha refresh                   # now targets R2, no --depot flag
+aha refresh --max-sessions 1  # bounded first push/pull
 ```
+
+If doctor identifies a pre-v2 local corpus, `aha corpus rebuild --backup`
+builds and verifies a sibling replacement from the selected depot before
+atomically preserving the old directory and promoting the new one.
 
 ### Add another machine
 

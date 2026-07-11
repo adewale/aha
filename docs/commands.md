@@ -46,18 +46,20 @@ aha conflicts [--repo DIR] [--json]
 
 ## aha corpus
 
-inspect corpus disk usage, vacuum SQLite, or explicitly prune unreferenced blobs
+inspect corpus disk usage, vacuum SQLite, explicitly prune unreferenced blobs, or atomically rebuild a pre-v2 corpus while preserving a backup
 
 ```txt
-aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
+aha corpus <size|vacuum|prune-orphans|rebuild> [--repo DIR] [--progress MODE] [--json] [--force|--backup]
 ```
 
 **Flags:**
 
+- `--backup`
 - `--config`
 - `--corpus`
 - `--force`
 - `--json`
+- `--progress`
 - `--repo`
 
 **Examples:**
@@ -65,15 +67,16 @@ aha corpus <size|vacuum|prune-orphans> [--repo DIR] [--json] [--force]
 - `aha corpus size --json`
 - `aha corpus vacuum`
 - `aha corpus prune-orphans --json`
+- `aha corpus rebuild --backup --json`
 
-**JSON contract:** `object{root,total_bytes,database_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}`
+**JSON contract:** `object{root,total_bytes,database_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}|object{root,backup,next,next_action}`
 
 ## aha depot
 
-initialize a depot, switch the default depot, list machine snapshots, or verify pointers, manifests, and blobs
+preflight R2 with one safe next action, initialize a depot, switch the default, list snapshots, or verify content
 
 ```txt
-aha depot <init|use|ls|verify> [DEPOT] [--json] [--deep]
+aha depot <setup|init|use|ls|verify> [DEPOT] [--progress MODE] [--json] [--deep]
 ```
 
 **Flags:**
@@ -81,9 +84,11 @@ aha depot <init|use|ls|verify> [DEPOT] [--json] [--deep]
 - `--config`
 - `--deep`
 - `--json`
+- `--progress`
 
 **Examples:**
 
+- `aha depot setup r2:aha-depot --json`
 - `aha depot init local:~/.aha/depot`
 - `aha depot init r2:aha-depot`
 - `aha depot use r2:aha-depot`
@@ -94,7 +99,7 @@ aha depot <init|use|ls|verify> [DEPOT] [--json] [--deep]
 
 ## aha doctor
 
-show diagnostics and next actions
+show diagnostics and exactly one state-aware next action
 
 ```txt
 aha doctor [--depot DEPOT] [--json]
@@ -111,7 +116,7 @@ aha doctor [--depot DEPOT] [--json]
 - `aha doctor`
 - `aha doctor --depot local:~/.aha/depot --json`
 
-**JSON contract:** `object{version,config,adapters,sources,corpus,depot,next}`
+**JSON contract:** `object{version,config,adapters,sources,corpus,depot,next,next_action}`
 
 ## aha export
 
@@ -170,7 +175,7 @@ aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [-
 pull every machine's latest depot snapshot into the corpus (fetching only unknown content), or import explicit v1 bundle files
 
 ```txt
-aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
+aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]
 ```
 
 **Flags:**
@@ -178,6 +183,7 @@ aha ingest [--repo DIR] [--depot DEPOT] [--json] [bundle.tar.zst ...]
 - `--config`
 - `--corpus`
 - `--depot`
+- `--progress`
 - `--repo`
 - `--json`
 
@@ -265,7 +271,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus
 
 ```txt
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--json]
+aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--progress MODE] [--json]
 ```
 
 **Flags:**
@@ -278,6 +284,7 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT
 - `--force`
 - `--machine`
 - `--max-sessions`
+- `--progress`
 - `--repo`
 - `--session`
 - `--source`
@@ -356,7 +363,7 @@ aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout
 push this machine's state to the depot: upload only new file versions, publish a snapshot manifest, move the pointer (no corpus needed; never downloads other machines' data)
 
 ```txt
-aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--json]
+aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--progress MODE] [--json]
 ```
 
 **Flags:**
@@ -368,6 +375,7 @@ aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] 
 - `--force`
 - `--machine`
 - `--max-sessions`
+- `--progress`
 - `--session`
 - `--source`
 - `--json`
@@ -406,7 +414,7 @@ aha status [--repo DIR] [--depot DEPOT] [--json]
 verify corpus invariants and optionally repair derived FTS rows
 
 ```txt
-aha verify [--repo DIR] [--repair-fts] [--json]
+aha verify [--repo DIR] [--repair-fts] [--progress MODE] [--json]
 ```
 
 **Flags:**
@@ -414,6 +422,7 @@ aha verify [--repo DIR] [--repair-fts] [--json]
 - `--config`
 - `--corpus`
 - `--json`
+- `--progress`
 - `--repair-fts`
 - `--repo`
 

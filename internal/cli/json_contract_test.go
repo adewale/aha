@@ -175,6 +175,7 @@ func TestStatusAndDoctorJSONIncludeNextActions(t *testing.T) {
 		t.Fatalf("status JSON missing next actions: %s", out.String())
 	}
 	out.Reset()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
 	if err := cli.Run([]string{"doctor", "--json"}, &out, &out); err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +185,8 @@ func TestStatusAndDoctorJSONIncludeNextActions(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &doctor); err != nil {
 		t.Fatal(err)
 	}
-	if len(doctor.Next) == 0 {
-		t.Fatalf("doctor JSON missing next actions: %s", out.String())
+	if len(doctor.Next) != 1 {
+		t.Fatalf("doctor JSON must contain exactly one next action: %s", out.String())
 	}
 }
 
