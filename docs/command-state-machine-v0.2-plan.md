@@ -1,7 +1,9 @@
 # aha 0.2 command and state-machine redesign
 
-Status: **accepted implementation plan**  
-Compatibility policy: **none** — aha has not launched and has no users, so 0.2 should remove the old command model rather than preserve aliases.  
+Status: **accepted implementation plan**
+
+Compatibility policy: **none** — aha has not launched and has no users, so 0.2 should remove the old command model rather than preserve aliases.
+
 Target product version: **0.2.0**
 
 ## 1. Why redesign now
