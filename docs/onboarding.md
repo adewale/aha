@@ -382,6 +382,17 @@ The token is fine — bucket creation is simply not an object-token permission.
 Create the bucket first (step 1 above: `npx wrangler r2 bucket create
 aha-depot` or the dashboard), then rerun `aha depot init r2:aha-depot`.
 
+### `HeadBucket` returns `403 Forbidden`
+
+No depot mutation occurred. The loaded S3 key pair does not authorize the
+bucket/account endpoint. The usual causes are a token scoped to another bucket,
+an access key and secret copied from different tokens, or stale `AHA_R2_*`
+variables taking precedence over `R2_*` aliases.
+
+Next: export a matching key pair from one **Object Read & Write** R2 S3 token
+scoped to the named bucket, then rerun the failed command. `aha` and the live
+smoke test classify this case without printing credential values.
+
 ### The endpoint contains `%3Cyour-...%3E` or TLS fails on `<your-account-id>`
 
 A documentation placeholder was exported literally. Current `aha` rejects

@@ -20,7 +20,7 @@ func bucketStoreAgainst(t *testing.T, handler http.HandlerFunc) *r2StoreV2 {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client := s3.New(s3.Options{Region: "auto", BaseEndpoint: aws.String(server.URL), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider("key", "secret", ""), Retryer: aws.NopRetryer{}})
+	client := s3.New(s3.Options{Region: "auto", BaseEndpoint: aws.String(server.URL), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider("key-canary", "secret-canary", ""), Retryer: aws.NopRetryer{}})
 	return &r2StoreV2{bucket: "smoke-bucket", client: client}
 }
 
@@ -48,8 +48,14 @@ func TestEnsureBucketSurfacesHeadErrorsWithoutCreating(t *testing.T) {
 	if got := createAttempts.Load(); got != 0 {
 		t.Fatalf("CreateBucket attempted %d times after a non-NotFound HeadBucket error", got)
 	}
-	if !strings.Contains(err.Error(), "403") {
-		t.Fatalf("error lost the original 403: %v", err)
+	message := err.Error()
+	for _, want := range []string{"403", "HeadBucket", "before any depot mutation", "Object Read & Write", "matching access key and secret", "smoke-bucket"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error %q missing actionable detail %q", message, want)
+		}
+	}
+	if strings.Contains(message, "secret-canary") {
+		t.Fatalf("error leaked credentials: %q", message)
 	}
 }
 

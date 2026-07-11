@@ -63,6 +63,9 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - `TestExportRequiresExistingSnapshot` no longer writes a temporary depot into
   the real user config; a static test now rejects mutating CLI tests that omit
   an explicit `--config` path.
+- R2 `HeadBucket` authorization failures now identify the failed operation,
+  guarantee that no depot/smoke mutation occurred, distinguish likely token
+  scope/key-pair/endpoint causes, and provide one credential-safe next action.
 
 ### Depot v2 — content-addressed snapshots (June 2026)
 

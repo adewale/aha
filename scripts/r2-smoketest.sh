@@ -91,7 +91,14 @@ echo >&2
 # the live service. The test itself skips (exit 0 with skip notice) only if
 # credentials resolve but are empty — the preflight above makes that loud.
 echo "progress phase=integration_test state=started" >&2
-if go test -tags integration -count=1 -run 'TestR2IntegrationV2' ./internal/depot/ -v; then
+smoke_log=$(mktemp "${TMPDIR:-/tmp}/aha-r2-smoketest.XXXXXX") || {
+  echo "progress phase=integration_test state=failed" >&2
+  echo "R2 smoketest FAILED: cannot create a private diagnostic log" >&2
+  echo "next: check temporary-directory permissions and rerun scripts/r2-smoketest.sh" >&2
+  exit 2
+}
+trap 'rm -f "$smoke_log"' EXIT HUP INT TERM
+if go test -tags integration -count=1 -run 'TestR2IntegrationV2' ./internal/depot/ -v 2>&1 | tee "$smoke_log"; then
   echo >&2
   echo "progress phase=integration_test state=completed" >&2
   echo "R2 smoketest PASSED against bucket '$AHA_R2_TEST_BUCKET'" >&2
@@ -100,6 +107,12 @@ else
   echo >&2
   echo "progress phase=integration_test state=failed" >&2
   echo "R2 smoketest FAILED (exit $status)" >&2
-  echo "diagnose credentials/endpoint problems with: aha doctor --depot r2:$AHA_R2_TEST_BUCKET --json" >&2
+  if grep -Eiq 'HeadBucket.*(StatusCode: 403|Forbidden)|StatusCode: 403.*HeadBucket' "$smoke_log"; then
+    echo "R2 authorization denied during HeadBucket, before any smoke objects were written." >&2
+    echo "The loaded S3 key pair does not authorize this bucket/account endpoint; common causes are a token scoped to another bucket, keys copied from different tokens, or stale AHA_R2_* variables overriding R2_* aliases." >&2
+    echo "next: export a matching access key and secret from one Object Read & Write R2 S3 token scoped to '$AHA_R2_TEST_BUCKET', then rerun scripts/r2-smoketest.sh" >&2
+  else
+    echo "next: run aha doctor --depot r2:$AHA_R2_TEST_BUCKET --json" >&2
+  fi
   exit "$status"
 fi

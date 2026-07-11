@@ -277,6 +277,9 @@ func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
 	if !isS3NotFound(err) {
 		// Credential/endpoint failures must surface as themselves; falling
 		// through to CreateBucket would mask them behind a creation denial.
+		if isS3Forbidden(err) {
+			return fmt.Errorf("R2 authorization denied during HeadBucket for bucket %q, before any depot mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint: %w", s.bucket, err)
+		}
 		return err
 	}
 	if _, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); createErr != nil {
@@ -287,6 +290,22 @@ func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
 		return fmt.Errorf("create r2 bucket %q: %w", s.bucket, createErr)
 	}
 	return nil
+}
+
+func isS3Forbidden(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch strings.ToLower(apiErr.ErrorCode()) {
+	case "accessdenied", "forbidden", "403":
+		return true
+	default:
+		return false
+	}
 }
 
 func isS3PreconditionFailed(err error) bool {
