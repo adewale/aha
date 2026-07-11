@@ -16,6 +16,7 @@ import (
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
+	"github.com/adewale/aha/internal/safety"
 	"github.com/aws/smithy-go"
 )
 
@@ -133,6 +134,22 @@ func Normalize(err error, command string) View {
 	}
 	if errors.Is(err, flag.ErrHelp) {
 		return view(CodeFlagParse, commandMessage(command, "needs valid command options"), command, helpAction(command), "usage", false)
+	}
+	var explicitAddress *depot.ExplicitAddressError
+	if errors.As(err, &explicitAddress) {
+		return view(CodeInvalidInput, "Specify the depot kind explicitly: use r2:<bucket> for Cloudflare R2 or local:<path> for local storage.", command, helpAction(command), "depot_address_kind", false)
+	}
+	var corpusDestination *safety.CorpusDestinationError
+	if errors.As(err, &corpusDestination) {
+		return view(CodeInvalidInput, "Choose a dedicated empty directory or an existing aha corpus for local history; an unrelated non-empty directory cannot become a corpus.", command, helpAction("ingest"), "corpus_destination", false)
+	}
+	var r2Config *depot.R2ConfigError
+	if errors.As(err, &r2Config) {
+		code := CodeInvalidInput
+		if r2Config.Field() == depot.R2ConfigAccessKeyID || r2Config.Field() == depot.R2ConfigSecretAccessKey {
+			code = CodePermissionDenied
+		}
+		return view(code, r2ConfigMessage(r2Config), command, doctorAction(), "r2_config_"+string(r2Config.Field())+"_"+string(r2Config.Kind()), false)
 	}
 	var auth *depot.R2AuthorizationError
 	if errors.As(err, &auth) {
@@ -264,6 +281,32 @@ func commandMessage(command, suffix string) string {
 		return "The aha command " + suffix + "."
 	}
 	return fmt.Sprintf("The aha %s command %s.", command, suffix)
+}
+
+func r2ConfigMessage(configErr *depot.R2ConfigError) string {
+	type fieldDescription struct {
+		label string
+		envs  string
+	}
+	fields := map[depot.R2ConfigField]fieldDescription{
+		depot.R2ConfigAccountID:       {"account ID", "AHA_R2_ACCOUNT_ID (or R2_ACCOUNT_ID)"},
+		depot.R2ConfigEndpoint:        {"endpoint", "AHA_R2_ENDPOINT (or R2_ENDPOINT)"},
+		depot.R2ConfigRegion:          {"region", "AHA_R2_REGION (or R2_REGION)"},
+		depot.R2ConfigAccessKeyID:     {"access key ID", "AHA_R2_ACCESS_KEY_ID (or R2_ACCESS_KEY_ID)"},
+		depot.R2ConfigSecretAccessKey: {"secret access key", "AHA_R2_SECRET_ACCESS_KEY (or R2_SECRET_ACCESS_KEY)"},
+	}
+	field := fields[configErr.Field()]
+	if field.label == "" {
+		field = fieldDescription{"configuration", "the corresponding AHA_R2_* environment variable"}
+	}
+	switch configErr.Kind() {
+	case depot.R2ConfigMissing:
+		return "R2 " + field.label + " is missing; set " + field.envs + " to the real value from one bucket-scoped R2 S3 token."
+	case depot.R2ConfigPlaceholder:
+		return "R2 " + field.label + " is a documentation placeholder; replace " + field.envs + " with the real value from one bucket-scoped R2 S3 token."
+	default:
+		return "R2 " + field.label + " is invalid; correct " + field.envs + " and retry."
+	}
 }
 
 func safeKind(kind string) string {

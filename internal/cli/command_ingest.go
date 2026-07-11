@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/adewale/aha/internal/depot"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
@@ -18,7 +19,7 @@ func runIngestContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
-	depotAddr := fs.String("depot", "", "depot address")
+	depotAddr := fs.String("depot", "", "explicit depot address: r2:BUCKET or local:PATH")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	progressSetting := fs.String("progress", "auto", "progress mode: auto, off, plain, tty, or json (stderr only)")
 	if err := fs.Parse(args); err != nil {
@@ -34,7 +35,22 @@ func runIngestContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	defer progress.Close()
 	bundles := fs.Args()
-	store, err := openCorpusForCommand(cfg, true)
+	destination, err := prepareWritableCorpus(cfg)
+	if err != nil {
+		return err
+	}
+	var prepared depot.PreparedPull
+	if len(bundles) == 0 {
+		v2, err := depotV2ForConfig(cfg, *depotAddr)
+		if err != nil {
+			return err
+		}
+		prepared, err = v2.PreparePull(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	store, err := openPreparedCorpus(destination)
 	if err != nil {
 		return err
 	}
@@ -46,11 +62,7 @@ func runIngestContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	ing.Context = ctx
 	var reports []map[string]any
 	if len(bundles) == 0 {
-		v2, err := depotV2ForConfig(cfg, *depotAddr)
-		if err != nil {
-			return err
-		}
-		reports, err = pullFromDepotV2(ctx, stdout, ing, v2, *jsonOut, progress.Tracker)
+		reports, err = pullFromDepotV2(ctx, stdout, ing, prepared, *jsonOut, progress.Tracker)
 		if err != nil {
 			return err
 		}

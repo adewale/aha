@@ -417,7 +417,7 @@ file support), never from bundle/corpus data:
 
 ```console
 ade-mbp$ export R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
-ade-mbp$ aha depot init r2                 # opinionated default bucket "aha-depot"
+ade-mbp$ aha depot init r2:aha-depot       # explicit R2 bucket address
 created depot r2:aha-depot  (account ...e91)
 
 work-mac$  aha depot use r2:aha-depot      # bucket exists → select it
@@ -498,7 +498,7 @@ The depot address names the **bucket only**:
 
 | Input | Meaning |
 |---|---|
-| `--depot r2` | bucket `aha-depot` |
+| `--depot r2:aha-depot` | explicit bucket `aha-depot` |
 | `--depot r2:aha-depot` | bucket `aha-depot` |
 | `--depot r2:aha-archive` | bucket `aha-archive` |
 

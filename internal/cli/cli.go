@@ -62,7 +62,7 @@ func Registry() map[string]Command {
 	return map[string]Command{
 		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--progress MODE] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--corpus", "--depot", "--force", "--machine", "--max-sessions", "--progress", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried},report,reports}", Docs: "push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus", Run: cmdRefresh, RunContext: runRefreshContext},
 		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--progress MODE] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--depot", "--force", "--machine", "--max-sessions", "--progress", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:~/.aha/depot"}, JSONSchema: "object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried}", Docs: "push this machine's state to the depot: upload only new file versions, publish a snapshot manifest, move the pointer (no corpus needed; never downloads other machines' data)", Run: cmdSnapshot, RunContext: runSnapshotContext},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--progress", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{machine?,manifest_sha256?,bundle?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "pull every machine's latest depot snapshot into the corpus (fetching only unknown content), or import explicit v1 bundle files", Run: cmdIngest, RunContext: runIngestContext},
+		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--progress", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{machine?,manifest_sha256?,bundle?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "pull every machine's latest depot snapshot into a dedicated corpus after side-effect-free depot/destination preflight (explicit r2:BUCKET or local:PATH), or import explicit v1 bundle files", Run: cmdIngest, RunContext: runIngestContext},
 		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
 		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <ref_text> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
 		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,snapshots,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_snapshots?,depot_machines_listed?,depot_fetches?,next}", Docs: "summarize corpus health", Run: cmdStatus},
@@ -274,12 +274,28 @@ func applyCorpusOverride(cfg *model.Config, repoDir, corpusDir string) {
 	}
 }
 
-func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) {
-	if err := safety.ValidateWriteOutsideSources(cfg, cfg.CorpusDir, "corpus"); err != nil {
+func prepareWritableCorpus(cfg model.Config) (safety.CorpusDestination, error) {
+	return safety.PrepareCorpusDestination(cfg, cfg.CorpusDir)
+}
+
+func openPreparedCorpus(destination safety.CorpusDestination) (*corpus.Store, error) {
+	path, err := destination.Path()
+	if err != nil {
 		return nil, err
 	}
+	return corpus.Open(path)
+}
+
+func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) {
 	if create {
-		return corpus.Open(cfg.CorpusDir)
+		destination, err := prepareWritableCorpus(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return openPreparedCorpus(destination)
+	}
+	if err := safety.ValidateWriteOutsideSources(cfg, cfg.CorpusDir, "corpus"); err != nil {
+		return nil, err
 	}
 	return corpus.OpenExisting(cfg.CorpusDir)
 }

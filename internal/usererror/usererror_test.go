@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/adewale/aha/internal/depot"
+	"github.com/adewale/aha/internal/safety"
 	"github.com/adewale/aha/internal/usererror"
 )
 
@@ -34,6 +35,33 @@ func TestNormalizeHidesFilesystemPaths(t *testing.T) {
 	view := usererror.Normalize(err, "verify")
 	if view.Code() != usererror.CodePermissionDenied || strings.Contains(view.Message(), privatePath) {
 		t.Fatalf("view=%+v", view)
+	}
+}
+
+func TestNormalizeAmbiguousDepotAddressRequiresExplicitKind(t *testing.T) {
+	_, err := depot.ParseExplicitAddress("looks-like-a-bucket")
+	view := usererror.Normalize(err, "ingest")
+	if view.Code() != usererror.CodeInvalidInput || !strings.Contains(view.Message(), "r2:") || !strings.Contains(view.Message(), "local:") {
+		t.Fatalf("view=%+v want explicit depot-kind guidance", view)
+	}
+}
+
+func TestNormalizeUnownedCorpusDestinationIsActionable(t *testing.T) {
+	view := usererror.Normalize(&safety.CorpusDestinationError{}, "ingest")
+	if view.Code() != usererror.CodeInvalidInput || !strings.Contains(view.Message(), "dedicated") {
+		t.Fatalf("view=%+v want dedicated corpus guidance", view)
+	}
+}
+
+func TestNormalizeR2PlaceholderNamesSafeFieldWithoutValue(t *testing.T) {
+	secretCanary := "your-secret-canary"
+	_, err := depot.NewR2Credentials("real-access-id", secretCanary)
+	view := usererror.Normalize(err, "ingest")
+	if !strings.Contains(view.Message(), "secret access key") || !strings.Contains(view.Message(), "placeholder") {
+		t.Fatalf("message=%q want safe actionable field and reason", view.Message())
+	}
+	if strings.Contains(fmt.Sprintf("%+v", view), secretCanary) {
+		t.Fatalf("public view leaked placeholder value: %+v", view)
 	}
 }
 

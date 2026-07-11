@@ -204,7 +204,7 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		return out
 	}
 	if override != "" {
-		parsed, err := depot.ParseAddress(override)
+		parsed, err := depot.ParseExplicitAddress(override)
 		if err != nil {
 			out["error"] = doctorError(err)
 			out["hints"] = []string{"Use depot addresses like local:/path or r2:bucket-name."}
@@ -317,6 +317,21 @@ func doctorError(err error) string {
 }
 
 func depotErrorHints(err error) []string {
+	var configErr *depot.R2ConfigError
+	if errors.As(err, &configErr) {
+		switch configErr.Field() {
+		case depot.R2ConfigAccountID:
+			return []string{"Set AHA_R2_ACCOUNT_ID (or R2_ACCOUNT_ID) to the real 32-character Cloudflare account ID."}
+		case depot.R2ConfigEndpoint:
+			return []string{"Correct AHA_R2_ENDPOINT (or R2_ENDPOINT), or unset it and provide AHA_R2_ACCOUNT_ID so aha derives the endpoint."}
+		case depot.R2ConfigRegion:
+			return []string{"Set AHA_R2_REGION (or R2_REGION) to auto, or unset it."}
+		case depot.R2ConfigAccessKeyID:
+			return []string{"Set AHA_R2_ACCESS_KEY_ID (or R2_ACCESS_KEY_ID) to the Access Key ID from the bucket-scoped R2 S3 token."}
+		case depot.R2ConfigSecretAccessKey:
+			return []string{"Set AHA_R2_SECRET_ACCESS_KEY (or R2_SECRET_ACCESS_KEY) to the Secret Access Key from the same bucket-scoped R2 S3 token."}
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	var hints []string
 	if strings.Contains(msg, "account id required") {

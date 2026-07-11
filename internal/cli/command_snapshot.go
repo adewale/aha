@@ -89,7 +89,8 @@ func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	req.Context = ctx
 	req.Progress = progress.Tracker
 	applyCorpusOverride(&req.Config, *repoDir, *corpusDir)
-	if err := safety.ValidateWriteOutsideSources(req.Config, req.Config.CorpusDir, "corpus"); err != nil {
+	destination, err := prepareWritableCorpus(req.Config)
+	if err != nil {
 		return err
 	}
 	res, err := pushSnapshotV2(req)
@@ -99,21 +100,25 @@ func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	if !*snapshotFlags.jsonOut {
 		printPushResult(stdout, res)
 	}
-	store, err := openCorpusForCommand(req.Config, true)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
 	v2, err := depotV2ForConfig(req.Config, req.DepotOverride)
 	if err != nil {
 		return err
 	}
+	prepared, err := v2.PreparePull(ctx)
+	if err != nil {
+		return err
+	}
+	store, err := openPreparedCorpus(destination)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
 	ing, err := ingestorForConfig(store, req.Config)
 	if err != nil {
 		return err
 	}
 	ing.Context = ctx
-	reports, err := pullFromDepotV2(ctx, stdout, ing, v2, *snapshotFlags.jsonOut, req.Progress)
+	reports, err := pullFromDepotV2(ctx, stdout, ing, prepared, *snapshotFlags.jsonOut, req.Progress)
 	if err != nil {
 		return err
 	}
@@ -217,7 +222,7 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 		return snapshotRequest{}, err
 	}
 	if depotAddr != "" {
-		parsed, err := depot.ParseAddress(depotAddr)
+		parsed, err := depot.ParseExplicitAddress(depotAddr)
 		if err != nil {
 			return snapshotRequest{}, err
 		}

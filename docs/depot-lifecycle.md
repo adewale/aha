@@ -31,7 +31,9 @@ Keeping these two **independent** dimensions separate is the whole model:
 
 A depot can be fully Initialized and Populated *without* being the default.
 *Configuring* a depot moves the pointer — `aha depot init <addr>` (provision and
-select) or `aha depot use <addr>` (switch to an already-initialized depot). A
+select) or `aha depot use <addr>` (switch to an already-initialized depot).
+CLI addresses are always explicit: `r2:BUCKET` or `local:PATH`; bare values are
+rejected rather than guessed. A
 `--depot <addr>` flag is a one-off override: it targets a depot for a single
 command without moving the pointer (and may still auto-initialize that target).
 

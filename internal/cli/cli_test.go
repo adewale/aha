@@ -16,8 +16,137 @@ import (
 	"github.com/adewale/aha/internal/cli"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/testutil"
 )
+
+func clearR2Environment(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"AHA_R2_ACCOUNT_ID", "AHA_R2_ENDPOINT", "AHA_R2_REGION", "AHA_R2_ACCESS_KEY_ID", "AHA_R2_SECRET_ACCESS_KEY", "R2_ACCOUNT_ID", "R2_ENDPOINT", "R2_REGION", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"} {
+		t.Setenv(name, "")
+	}
+}
+
+func assertNoCorpusPreflightArtifacts(t *testing.T, root string) {
+	t.Helper()
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("failed preflight created corpus root: %v", err)
+	}
+	lock := filepath.Join(filepath.Dir(root), "."+filepath.Base(root)+".lifecycle.lock")
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Fatalf("failed preflight created lifecycle lock: %v", err)
+	}
+}
+
+func TestCLIIngestInvalidR2ConfigCannotCreateCorpus(t *testing.T) {
+	clearR2Environment(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "your-r2-access-key-id")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
+	corpusRoot := filepath.Join(t.TempDir(), "must-not-exist")
+
+	err := cli.Run([]string{"ingest", "--depot", "r2:private-bucket", "--corpus", corpusRoot}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("ingest accepted placeholder R2 configuration")
+	}
+	assertNoCorpusPreflightArtifacts(t, corpusRoot)
+}
+
+func TestCLIIngestRemotePreflightFailureCannotCreateCorpus(t *testing.T) {
+	clearR2Environment(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ENDPOINT", server.URL)
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "real-access-id")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "real-secret")
+	corpusRoot := filepath.Join(t.TempDir(), "must-not-exist")
+
+	err := cli.Run([]string{"ingest", "--depot", "r2:private-bucket", "--corpus", corpusRoot}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("ingest unexpectedly passed denied remote preflight")
+	}
+	assertNoCorpusPreflightArtifacts(t, corpusRoot)
+}
+
+func TestCLIIngestBareDepotCannotFallBackToLocalOrCreateCorpus(t *testing.T) {
+	clearR2Environment(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	corpusRoot := filepath.Join(t.TempDir(), "must-not-exist")
+
+	err := cli.Run([]string{"ingest", "--depot", "looks-like-a-bucket", "--corpus", corpusRoot}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "r2:") || !strings.Contains(err.Error(), "local:") {
+		t.Fatalf("ambiguous depot error=%v, want explicit-prefix guidance", err)
+	}
+	assertNoCorpusPreflightArtifacts(t, corpusRoot)
+}
+
+func TestCLIRefreshInvalidCorpusDestinationCannotPublishDepotState(t *testing.T) {
+	clearR2Environment(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module unrelated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	depotRoot := filepath.Join(t.TempDir(), "depot")
+	v2, err := depot.NewLocalV2(depotRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	fx := testutil.WriteAgentFixtures(t, t.TempDir())
+	err = cli.Run([]string{"refresh", "--machine", "must-not-publish", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotRoot, "--corpus", root, "--accept-secrets", "--captured-at", "2026-01-01T00:00:00Z"}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("refresh accepted unrelated corpus destination")
+	}
+	machines, listErr := v2.Machines(t.Context())
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(machines) != 0 {
+		t.Fatalf("failed destination preflight published machines: %v", machines)
+	}
+}
+
+func TestCLIIngestCannotTurnUnrelatedDirectoryIntoCorpus(t *testing.T) {
+	clearR2Environment(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	sentinel := filepath.Join(root, "go.mod")
+	original := []byte("module unrelated\n")
+	if err := os.WriteFile(sentinel, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	depotRoot := filepath.Join(t.TempDir(), "depot")
+	v2, err := depot.NewLocalV2(depotRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	err = cli.Run([]string{"ingest", "--depot", "local:" + depotRoot, "--corpus", root}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "dedicated") {
+		t.Fatalf("unrelated destination error=%v, want dedicated-directory rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "corpus.db")); !os.IsNotExist(statErr) {
+		t.Fatalf("unrelated destination gained corpus.db: %v", statErr)
+	}
+	lock := filepath.Join(filepath.Dir(root), "."+filepath.Base(root)+".lifecycle.lock")
+	if _, statErr := os.Stat(lock); !os.IsNotExist(statErr) {
+		t.Fatalf("unrelated destination created lifecycle lock: %v", statErr)
+	}
+	got, readErr := os.ReadFile(sentinel)
+	if readErr != nil || !bytes.Equal(got, original) {
+		t.Fatalf("sentinel changed: got=%q err=%v", got, readErr)
+	}
+}
 
 func TestCLIDoctorRejectsInvalidR2IdentityBeforeAnyRequest(t *testing.T) {
 	var requests atomic.Int32

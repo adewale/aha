@@ -236,7 +236,7 @@ If two machines observe the same file version, the blob key is identical and onl
 
 - Source histories are read-only. JSONL adapters never write source roots; OpenCode copies its SQLite DB/WAL/SHM into a private export cache before parsing generated JSONL.
 - Default depot and corpus are local.
-- R2 is explicit opt-in through `--depot r2...` or config.
+- R2 is explicit opt-in through `--depot r2:BUCKET` or config; CLI depot overrides require an explicit `r2:` or `local:` kind.
 - Network imports are confined to `internal/depot` (outbound R2/S3), `internal/server` (the inbound loopback dashboard), and the `internal/cli/command_serve.go` wrapper that constructs it; a static test enforces this allowlist. Search, read, and ingest remain network-free.
 - The dashboard (`aha serve`) binds to loopback by default, validates the `Host` header against a loopback allowlist on every request, requires `application/json` on POST routes, and is read-only; non-loopback binds require explicit `--allow-remote`.
 - R2 credentials are not stored in blobs, manifests, config output, command JSON, or logs.

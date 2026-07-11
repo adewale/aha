@@ -140,6 +140,62 @@ func (v *V2) Init(ctx context.Context) error {
 	return nil
 }
 
+// PreparedPull is a read capability for an initialized depot whose marker and
+// machine index were validated before any local corpus mutation. Its fields are
+// private so pull code cannot manufacture the capability from an unchecked V2.
+type PreparedPull struct {
+	depot    *V2
+	machines []string
+}
+
+// PreparePull performs the complete metadata preflight required before a
+// caller creates or opens a writable corpus.
+func (v *V2) PreparePull(ctx context.Context) (PreparedPull, error) {
+	marker, _, err := v.store.get(ctx, MarkerObjectKey)
+	if errors.Is(err, errObjectNotExist) {
+		return PreparedPull{}, errors.New("depot is not initialized")
+	}
+	if err != nil {
+		return PreparedPull{}, err
+	}
+	if err := validateMarkerV2Bytes(marker); err != nil {
+		return PreparedPull{}, err
+	}
+	machines, err := v.Machines(ctx)
+	if err != nil {
+		return PreparedPull{}, err
+	}
+	return PreparedPull{depot: v, machines: append([]string(nil), machines...)}, nil
+}
+
+func (p PreparedPull) Machines() ([]string, error) {
+	if p.depot == nil {
+		return nil, errors.New("invalid prepared pull capability")
+	}
+	return append([]string(nil), p.machines...), nil
+}
+
+func (p PreparedPull) Latest(ctx context.Context, machine string) (model.ManifestSHA256, bool, error) {
+	if p.depot == nil {
+		return model.ManifestSHA256{}, false, errors.New("invalid prepared pull capability")
+	}
+	return p.depot.Latest(ctx, machine)
+}
+
+func (p PreparedPull) Manifest(ctx context.Context, machine string, sha model.ManifestSHA256) (model.SnapshotManifest, error) {
+	if p.depot == nil {
+		return model.SnapshotManifest{}, errors.New("invalid prepared pull capability")
+	}
+	return p.depot.Manifest(ctx, machine, sha)
+}
+
+func (p PreparedPull) OpenBlob(ctx context.Context, key model.BlobKey) (io.ReadCloser, error) {
+	if p.depot == nil {
+		return nil, errors.New("invalid prepared pull capability")
+	}
+	return p.depot.OpenBlob(ctx, key)
+}
+
 // Machines returns the registered machine namespaces (one GET, no LIST).
 func (v *V2) Machines(ctx context.Context) ([]string, error) {
 	b, _, err := v.store.get(ctx, MachinesIndexKey)

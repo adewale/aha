@@ -24,7 +24,7 @@ func depotV2ForConfig(cfg model.Config, override string) (*depot.V2, error) {
 		return nil, err
 	}
 	if override != "" {
-		parsed, err := depot.ParseAddress(override)
+		parsed, err := depot.ParseExplicitAddress(override)
 		if err != nil {
 			return nil, err
 		}
@@ -107,11 +107,11 @@ func pushSnapshotV2(req snapshotRequest) (depot.PushResult, error) {
 // pullFromDepotV2 anti-entropies the corpus against every machine's
 // latest snapshot: pointer + manifest GETs to find what's new, then only
 // unknown blobs are fetched (inside IngestSnapshot).
-func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor, v2 *depot.V2, jsonOut bool, tracker *ahaprogress.Tracker) ([]map[string]any, error) {
+func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor, prepared depot.PreparedPull, jsonOut bool, tracker *ahaprogress.Tracker) ([]map[string]any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	machines, err := v2.Machines(ctx)
+	machines, err := prepared.Machines()
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		sha, ok, err := v2.Latest(ctx, machine)
+		sha, ok, err := prepared.Latest(ctx, machine)
 		if err != nil {
 			return nil, err
 		}
@@ -152,7 +152,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 				return nil, err
 			}
 			if !known {
-				manifest, err := v2.Manifest(ctx, machine, sha)
+				manifest, err := prepared.Manifest(ctx, machine, sha)
 				if err != nil {
 					return nil, err
 				}
@@ -161,7 +161,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 					ingestStarted = true
 				}
 				rep, err := ing.IngestSnapshot(manifest, func(key model.BlobKey) (io.ReadCloser, error) {
-					return v2.OpenBlob(ctx, key)
+					return prepared.OpenBlob(ctx, key)
 				})
 				if err != nil {
 					return nil, err
