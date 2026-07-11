@@ -30,7 +30,7 @@ func runDepotContext(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("depot "+sub, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	configPath := fs.String("config", "", "config path")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	deep := fs.Bool("deep", false, "deep verify blob contents and historical manifests")
@@ -151,9 +151,6 @@ func runDepotContext(ctx context.Context, args []string, stdout, stderr io.Write
 	case "use":
 		report, err := v2.Verify(ctx, false)
 		if err != nil {
-			for _, h := range depotErrorHints(err) {
-				fmt.Fprintln(stderr, "hint:", h)
-			}
 			return err
 		}
 		if depotUninitialized(report) {

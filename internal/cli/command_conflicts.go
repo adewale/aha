@@ -10,7 +10,7 @@ import (
 
 func cmdConflicts(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("conflicts", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	if err := fs.Parse(args); err != nil {

@@ -68,7 +68,7 @@ func cmdRefresh(args []string, stdout, stderr io.Writer) error {
 
 func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	snapshotFlags := registerSnapshotFlags(fs)
 	corpusDir := fs.String("corpus", "", "corpus dir")
 	repoDir := fs.String("repo", "", "repo/corpus dir")
@@ -131,7 +131,7 @@ func printPushResult(stdout io.Writer, res depot.PushResult) {
 
 func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapshotRequest, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	snapshotFlags := registerSnapshotFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return snapshotRequest{}, err

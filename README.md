@@ -154,6 +154,18 @@ Ctrl-C propagates cancellation through capture, depot upload/pull, deep blob
 verification, and rebuild phase boundaries. Operations remain idempotent; a
 rebuild swaps directories only after its replacement verifies cleanly.
 
+## Errors and diagnostics
+
+Every `aha` command, MCP tool, and dashboard API failure crosses the same safe
+error boundary. Default output contains one concise error and exactly one next
+action; raw SDK, SQL, filesystem-path, and dependency strings are retained only
+as internal causes and are never rendered. `--json` uses the versioned
+`aha.error.v1` envelope with a structured `next_action`.
+
+Use global `--verbose-errors` to add allowlisted diagnostics—failure kind,
+operation, and retryability—not raw causal text or credentials. When combined
+with `--progress=json`, stderr is valid NDJSON through the terminal error.
+
 ## Search functionality
 
 `aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artifacts while preserving raw source files for later reads.

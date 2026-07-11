@@ -123,6 +123,33 @@ func TestVerifyJSONProgressStaysOnStderrAndFinalJSONStaysDecodable(t *testing.T)
 	}
 }
 
+func TestStructuredProgressFailureKeepsStderrValidNDJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := RunMain([]string{"verify", "--repo", filepath.Join(t.TempDir(), "missing"), "--json", "--progress=json"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("verify unexpectedly succeeded")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("failure wrote stdout: %s", stdout.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("stderr=%q want progress and terminal error events", stderr.String())
+	}
+	for i, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("stderr line %d is not JSON: %v\n%s", i, err, line)
+		}
+	}
+	var terminal struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &terminal); err != nil || terminal.Schema != "aha.error.v1" {
+		t.Fatalf("terminal line=%q schema=%q err=%v", lines[len(lines)-1], terminal.Schema, err)
+	}
+}
+
 func TestOperationalFailureEmitsTerminalProgress(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := RunContext(t.Context(), []string{"verify", "--repo", filepath.Join(t.TempDir(), "missing"), "--progress=plain"}, &stdout, &stderr)

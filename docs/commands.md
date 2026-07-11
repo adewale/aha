@@ -8,20 +8,27 @@ Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--mempr
 
 Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.
 
-## JSON errors
+## Error contract
 
-When a command is invoked with `--json`, failures are written to stderr as:
+Every failed command prints one concise, credential-safe error and exactly one `next:` action. Raw dependency, SQL, SDK, and filesystem errors are not public output. Add global `--verbose-errors` for allowlisted diagnostics (failure kind, operation, retryability), never raw causes.
+
+When a command is invoked with `--json`, failures are written to stderr using the stable `aha.error.v1` envelope:
 
 ```json
 {
+  "schema": "aha.error.v1",
   "error": {
     "code": "machine_readable_code",
-    "message": "human-readable message",
+    "message": "safe human-readable message",
     "command": "command-name",
-    "next": ["aha doctor"]
+    "next": ["aha doctor --json"],
+    "next_action": {"command": "aha", "args": ["doctor", "--json"]},
+    "diagnostics": []
   }
 }
 ```
+
+With `--progress=json`, stderr remains valid NDJSON: progress events are followed by one terminal `aha.error.v1` object on failure.
 
 ## aha conflicts
 

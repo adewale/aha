@@ -17,11 +17,12 @@ import (
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	configPath := fs.String("config", "", "config path")
 	depotAddr := fs.String("depot", "", "depot address to check")
 	jsonOut := fs.Bool("json", false, "JSON output")
@@ -78,7 +79,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 
 func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 	if cfgErr != nil {
-		return []map[string]any{{"ok": false, "error": cfgErr.Error()}}
+		return []map[string]any{{"ok": false, "error": doctorError(cfgErr)}}
 	}
 	registry := adapters.Builtins()
 	var out []map[string]any
@@ -92,14 +93,14 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 			continue
 		}
 		if !ok {
-			item["error"] = "unknown source adapter"
+			item["error"] = "Unknown source adapter."
 			item["hints"] = []string{"Check the source type; built-ins are claude-code, codex, opencode, and pi."}
 			out = append(out, item)
 			continue
 		}
 		root, err := paths.Expand(sc.Root)
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			out = append(out, item)
 			continue
 		}
@@ -107,7 +108,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		st, err := os.Stat(root)
 		if err != nil {
 			item["exists"] = false
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			item["hints"] = []string{"Create the source history root, disable this source, or update its configured root."}
 			out = append(out, item)
 			continue
@@ -117,7 +118,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		item["is_file"] = st.Mode().IsRegular()
 		found, err := ad.Discover(context.Background(), model.SourceConfig{Type: sc.Type, Root: root, Enabled: true})
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			out = append(out, item)
 			continue
 		}
@@ -131,12 +132,12 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 	out := map[string]any{"ok": false}
 	if cfgErr != nil {
-		out["error"] = cfgErr.Error()
+		out["error"] = doctorError(cfgErr)
 		return out
 	}
 	root, err := paths.Expand(cfg.CorpusDir)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		return out
 	}
 	if root == "" {
@@ -160,7 +161,7 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 	out["db_exists"] = true
 	store, err := corpus.OpenExisting(root)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		if errors.Is(err, corpus.ErrLegacyCorpus) {
 			out["legacy"] = true
 		}
@@ -170,7 +171,7 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 	defer store.Close()
 	stats, err := corpus.Status(store.DB, store.Root)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		return out
 	}
 	out["ok"] = true
@@ -193,19 +194,19 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		out["location"] = cfg.Depot.Location
 	}
 	if cfgErr != nil {
-		out["error"] = cfgErr.Error()
+		out["error"] = doctorError(cfgErr)
 		return out
 	}
 	addr, err := depot.AddressFromConfig(cfg.Depot)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
 	if override != "" {
 		parsed, err := depot.ParseAddress(override)
 		if err != nil {
-			out["error"] = err.Error()
+			out["error"] = doctorError(err)
 			out["hints"] = []string{"Use depot addresses like local:/path or r2:bucket-name."}
 			return out
 		}
@@ -219,13 +220,13 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 	}
 	v2, err := depotV2ForConfig(cfg, override)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
 	report, err := v2.Verify(context.Background(), false)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
@@ -309,6 +310,10 @@ func looksLikeR2BucketName(name string) bool {
 		}
 	}
 	return true
+}
+
+func doctorError(err error) string {
+	return usererror.Normalize(err, "doctor").Message()
 }
 
 func depotErrorHints(err error) []string {

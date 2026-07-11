@@ -14,7 +14,7 @@ import (
 
 func cmdInit(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	configPath := fs.String("config", config.DefaultPath(), "config path")
 	acceptSecrets := fs.Bool("accept-secrets", false, "write config with privacy warning acknowledged")
 	jsonOut := fs.Bool("json", false, "JSON output")

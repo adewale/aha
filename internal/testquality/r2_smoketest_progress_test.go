@@ -2,12 +2,50 @@ package testquality_test
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestR2SmoketestRejectsConflictingAliasesBeforeRunningGo(t *testing.T) {
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "go-ran")
+	fakeGo := filepath.Join(bin, "go")
+	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"AHA_R2_TEST_BUCKET=aha-depot-test",
+		"AHA_R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef",
+		"AHA_R2_ACCESS_KEY_ID=access-canary-a",
+		"R2_ACCESS_KEY_ID=access-canary-b",
+		"AHA_R2_SECRET_ACCESS_KEY=secret-canary-a",
+		"R2_SECRET_ACCESS_KEY=secret-canary-b",
+		"FAKE_GO_MARKER="+marker,
+	)
+	var stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("conflicting aliases unexpectedly succeeded")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("go ran despite preflight conflict: %v", err)
+	}
+	text := stderr.String()
+	if !strings.Contains(text, "conflicting") || strings.Count(text, "next:") != 1 {
+		t.Fatalf("stderr=%q want conflict and one next action", text)
+	}
+	for _, value := range []string{"access-canary-a", "access-canary-b", "secret-canary-a", "secret-canary-b"} {
+		if strings.Contains(text, value) {
+			t.Fatalf("stderr leaked value %q: %s", value, text)
+		}
+	}
+}
 
 func TestR2SmoketestProgressUsesStderrAndPreservesChildExit(t *testing.T) {
 	bin := t.TempDir()
@@ -53,7 +91,7 @@ exit "${FAKE_GO_EXIT:-0}"
 	if err == nil || !strings.Contains(stderr, "state=failed") {
 		t.Fatalf("failure err=%v stderr=%q", err, stderr)
 	}
-	_, stderr, err = run("1", "1")
+	stdout, stderr, err = run("1", "1")
 	if err == nil {
 		t.Fatal("forbidden smoke test unexpectedly succeeded")
 	}
@@ -64,6 +102,9 @@ exit "${FAKE_GO_EXIT:-0}"
 	}
 	if strings.Count(stderr, "next:") != 1 {
 		t.Fatalf("forbidden stderr=%q want exactly one next action", stderr)
+	}
+	if strings.Contains(stdout, "StatusCode") || strings.Contains(stdout, "api error") || strings.Contains(stdout, "HeadBucket") {
+		t.Fatalf("default forbidden stdout leaked raw child diagnostics: %q", stdout)
 	}
 	if strings.Contains(stderr, "secret-canary") {
 		t.Fatalf("forbidden stderr leaked credentials: %q", stderr)

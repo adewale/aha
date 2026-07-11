@@ -269,6 +269,17 @@ func (s *r2StoreV2) listKeys(ctx context.Context, prefix string) ([]string, erro
 	return keys, nil
 }
 
+type R2AuthorizationError struct {
+	Bucket string
+	Cause  error
+}
+
+func (e *R2AuthorizationError) Error() string {
+	return fmt.Sprintf("R2 authorization denied during HeadBucket and ListObjectsV2 for bucket %q, before any depot mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint (403 Forbidden)", e.Bucket)
+}
+
+func (e *R2AuthorizationError) Unwrap() error { return e.Cause }
+
 func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
 	if err == nil {
@@ -278,7 +289,17 @@ func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
 		// Credential/endpoint failures must surface as themselves; falling
 		// through to CreateBucket would mask them behind a creation denial.
 		if isS3Forbidden(err) {
-			return fmt.Errorf("R2 authorization denied during HeadBucket for bucket %q, before any depot mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint: %w", s.bucket, err)
+			_, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), MaxKeys: aws.Int32(1)})
+			if listErr == nil {
+				// Some S3-compatible permission models deny HeadBucket while
+				// allowing the object-list operation their tokens promise. A
+				// successful bounded list proves both existence and access.
+				return nil
+			}
+			if isS3Forbidden(listErr) {
+				return &R2AuthorizationError{Bucket: s.bucket, Cause: listErr}
+			}
+			return fmt.Errorf("probe R2 bucket access with ListObjectsV2 after HeadBucket was denied: %w", listErr)
 		}
 		return err
 	}

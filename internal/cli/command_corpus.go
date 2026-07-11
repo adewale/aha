@@ -27,7 +27,7 @@ func runCorpusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("corpus "+sub, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	force := fs.Bool("force", false, "perform destructive maintenance; default is dry run")

@@ -80,6 +80,30 @@ func TestResolveR2ConfigErrorsDoNotLeakSecrets(t *testing.T) {
 	}
 }
 
+func TestResolveR2ConfigRejectsConflictingAliasesWithoutLeakingValues(t *testing.T) {
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+	t.Setenv("R2_ACCOUNT_ID", "fedcba9876543210fedcba9876543210")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "access-canary-a")
+	t.Setenv("R2_ACCESS_KEY_ID", "access-canary-b")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret-canary-a")
+	t.Setenv("R2_SECRET_ACCESS_KEY", "secret-canary-b")
+	_, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	if err == nil {
+		t.Fatal("conflicting aliases were silently resolved by precedence")
+	}
+	message := err.Error()
+	for _, name := range []string{"AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", "AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", "AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"} {
+		if !strings.Contains(message, name) {
+			t.Fatalf("error=%q missing conflicting variable %s", message, name)
+		}
+	}
+	for _, secret := range []string{"access-canary-a", "access-canary-b", "secret-canary-a", "secret-canary-b"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("error leaked conflicting value %q: %s", secret, message)
+		}
+	}
+}
+
 func TestResolveR2ConfigRequiresCredentials(t *testing.T) {
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "")
 	t.Setenv("R2_ACCESS_KEY_ID", "")

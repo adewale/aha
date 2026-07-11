@@ -80,7 +80,7 @@ type parsedFlags struct {
 
 func parseFlagSpecs(name string, args []string, stderr io.Writer, specs []FlagSpec) (parsedFlags, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	parsed := parsedFlags{fs: fs, strings: map[string]*string{}, bools: map[string]*bool{}, ints: map[string]*int{}}
 	for _, spec := range specs {
 		switch spec.Kind {

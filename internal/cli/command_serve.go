@@ -14,13 +14,14 @@ import (
 
 	"github.com/adewale/aha/internal/mcp"
 	"github.com/adewale/aha/internal/server"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 // cmdServe runs the local dashboard. Read-only by design and bound to
 // loopback unless --allow-remote is set. See docs/mcp-spec.md (phase 3).
 func cmdServe(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	addr := fs.String("addr", "127.0.0.1:18428", "listen address (loopback only unless --allow-remote)")
 	allowRemote := fs.Bool("allow-remote", false, "allow non-loopback bind (off by default)")
@@ -60,7 +61,12 @@ func cmdServe(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "aha dashboard listening on http://%s\n", listener.Addr().String())
 
-	handler := http.TimeoutHandler(srv, *timeout, `{"error":{"code":"timeout","message":"request timed out"}}`)
+	timeoutAction := usererror.HelpAction("serve")
+	timeoutBody := mustJSON(map[string]any{"error": map[string]any{
+		"code": "timeout", "message": "request timed out",
+		"next": []string{timeoutAction.Text()}, "next_action": timeoutAction,
+	}}) + "\n"
+	handler := http.TimeoutHandler(srv, *timeout, timeoutBody)
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,

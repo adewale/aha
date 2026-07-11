@@ -41,6 +41,31 @@ func TestCLIDoctorRejectsInvalidR2IdentityBeforeAnyRequest(t *testing.T) {
 	}
 }
 
+func TestCLIDoctorDoesNotSerializeRawSDKFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Secret-Canary", "secret-canary")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ENDPOINT", server.URL)
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "access-canary")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret-canary")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--depot", "r2:aha-depot", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, forbidden := range []string{"StatusCode", "RequestID", "HostID", "operation error S3", "secret-canary", server.URL} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("doctor leaked raw SDK detail %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, "remote depot rejected") {
+		t.Fatalf("doctor output lacks safe failure summary: %s", body)
+	}
+}
+
 func TestCLIDepotSetupMalformedConfigStillReturnsOneRepairAction(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "malformed.jsonc")
 	if err := os.WriteFile(configPath, []byte(`{"broken":`), 0o600); err != nil {
@@ -109,7 +134,7 @@ func TestCLIDoctorRejectsInvalidR2AddressBeforeNetworking(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := out.String()
-	if !strings.Contains(body, "invalid R2 bucket") {
+	if !strings.Contains(body, "R2 bucket name is invalid") {
 		t.Fatalf("doctor did not reject invalid bucket locally: %s", body)
 	}
 	if strings.Contains(body, "aws-secret") {
@@ -266,8 +291,11 @@ func TestRunMainUsesProfileEnvironment(t *testing.T) {
 func TestRunMainRejectsProfileFlagWithoutPath(t *testing.T) {
 	var out, stderr bytes.Buffer
 	code := cli.RunMain([]string{"--cpuprofile"}, &out, &stderr)
-	if code == 0 || !strings.Contains(stderr.String(), "--cpuprofile requires path") {
+	if code == 0 || !strings.Contains(stderr.String(), "invalid command options") || strings.Count(stderr.String(), "next:") != 1 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "--cpuprofile requires path") {
+		t.Fatalf("default error leaked parser internals: %q", stderr.String())
 	}
 }
 

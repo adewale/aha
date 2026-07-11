@@ -137,6 +137,7 @@ behavior.
 | Time is explicit | multiple `time.Now`; bounded conditional-write retry uses a context-cancellable timer with capped jitter | `Clock` and `Sleeper/Backoff` capabilities at production seams | cancellation + bounded-contention tests; static debt guard then forbidigo/static ban |
 | Onboarding sequence is valid | doctor/setup derive one action from depot/corpus/config state; structured argv preserves config overrides | invalid transitions are absent from the closed action mapping | state-table tests + exact-one-next JSON contract |
 | Progress cannot corrupt output or leak identity | closed phase/kind/unit enums and aggregate-only events; renderers receive no paths, IDs, endpoints, keys, errors, or credentials | core operations cannot put sensitive strings into progress events; stdout is never a progress sink | renderer concurrency/privacy tests + final-JSON/NDJSON contracts + race detector |
+| Causal errors cannot become public output | opaque `usererror.View` and `Action` values are created only by typed normalization; raw causes remain behind `Unwrap` | CLI, MCP, HTTP, and smoke-test boundaries render one safe message and one constructed action; verbose diagnostics are allowlisted fields, never `err.Error()` | every-command JSON contract + boundary static test + secret/path/SQL canaries + `errors.Is` preservation |
 | No new correctness debt | code review convention | debt inventory tests fail if raw identity/time/FTS patterns spread | `internal/testquality` static inventory |
 
 ## Construction design

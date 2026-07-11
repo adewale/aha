@@ -384,14 +384,20 @@ aha-depot` or the dashboard), then rerun `aha depot init r2:aha-depot`.
 
 ### `HeadBucket` returns `403 Forbidden`
 
-No depot mutation occurred. The loaded S3 key pair does not authorize the
-bucket/account endpoint. The usual causes are a token scoped to another bucket,
-an access key and secret copied from different tokens, or stale `AHA_R2_*`
-variables taking precedence over `R2_*` aliases.
+No depot mutation occurred. `aha` automatically tries a bounded
+`ListObjectsV2` read when `HeadBucket` is forbidden. If listing succeeds, it
+accepts the bucket and continues; if both supported read checks return 403, the
+loaded S3 key pair does not authorize the bucket/account endpoint.
+
+The usual causes are a token scoped to another bucket, an access key and secret
+copied from different tokens, or conflicting `AHA_R2_*`/`R2_*` aliases. Alias
+conflicts are rejected before networking without printing either value.
 
 Next: export a matching key pair from one **Object Read & Write** R2 S3 token
 scoped to the named bucket, then rerun the failed command. `aha` and the live
-smoke test classify this case without printing credential values.
+smoke test classify this case without printing credential values. Set
+`AHA_R2_SMOKETEST_VERBOSE=1` only when raw Go test diagnostics are explicitly
+needed; default smoke failures are concise.
 
 ### The endpoint contains `%3Cyour-...%3E` or TLS fails on `<your-account-id>`
 

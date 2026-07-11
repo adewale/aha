@@ -15,11 +15,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/adewale/aha/internal/archive"
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/safety"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 type Command struct {
@@ -45,14 +45,17 @@ func (e *CommandError) Error() string { return e.Err.Error() }
 func (e *CommandError) Unwrap() error { return e.Err }
 
 type errorEnvelope struct {
-	Error errorPayload `json:"error"`
+	Schema string       `json:"schema"`
+	Error  errorPayload `json:"error"`
 }
 
 type errorPayload struct {
-	Code    string   `json:"code"`
-	Message string   `json:"message"`
-	Command string   `json:"command,omitempty"`
-	Next    []string `json:"next,omitempty"`
+	Code        string                 `json:"code"`
+	Message     string                 `json:"message"`
+	Command     string                 `json:"command,omitempty"`
+	Next        []string               `json:"next"`
+	NextAction  usererror.Action       `json:"next_action"`
+	Diagnostics []usererror.Diagnostic `json:"diagnostics"`
 }
 
 func Registry() map[string]Command {
@@ -91,7 +94,7 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	cmd, ok := Registry()[args[0]]
 	if !ok {
-		return &CommandError{Code: "unknown_command", Command: args[0], Err: fmt.Errorf("unknown command %q", args[0]), Next: []string{"aha help", "aha doctor"}}
+		return &CommandError{Code: "unknown_command", Command: args[0], Err: fmt.Errorf("unknown command %q", args[0]), Next: []string{"aha help"}}
 	}
 	run := cmd.Run
 	if cmd.RunContext != nil {
@@ -115,33 +118,35 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 func RunMain(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	cleanArgs, profileOpts, profileErr := profileOptionsFromArgs(args)
+	errorCleanArgs, errorOpts := errorOptionsFromArgs(args)
+	cleanArgs, profileOpts, profileErr := profileOptionsFromArgs(errorCleanArgs)
 	if profileErr != nil {
-		if wantsJSON(args) {
-			_ = writeJSON(stderr, errorEnvelope{Error: machineError(profileErr, cleanArgs)})
+		view := publicErrorView(profileErr, cleanArgs)
+		if wantsJSON(errorCleanArgs) {
+			_ = writePresentedError(stderr, machineError(view, errorOpts.Verbose), structuredProgressRequested(cleanArgs))
 		} else {
-			fmt.Fprintln(stderr, "error:", profileErr)
+			renderHumanError(stderr, view, errorOpts.Verbose)
 		}
 		return 1
 	}
 	if wantsJSON(cleanArgs) {
 		if wantsLiveProgress(cleanArgs, stderr) {
 			if err := runWithProfiling(profileOpts, func() error { return RunContext(ctx, cleanArgs, stdout, stderr) }); err != nil {
-				_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, cleanArgs)})
+				_ = writePresentedError(stderr, machineError(publicErrorView(err, cleanArgs), errorOpts.Verbose), structuredProgressRequested(cleanArgs))
 				return 1
 			}
 			return 0
 		}
 		var commandStderr bytes.Buffer
 		if err := runWithProfiling(profileOpts, func() error { return RunContext(ctx, cleanArgs, stdout, &commandStderr) }); err != nil {
-			_ = writeJSON(stderr, errorEnvelope{Error: machineError(err, cleanArgs)})
+			_ = writePresentedError(stderr, machineError(publicErrorView(err, cleanArgs), errorOpts.Verbose), false)
 			return 1
 		}
 		_, _ = stderr.Write(commandStderr.Bytes())
 		return 0
 	}
 	if err := runWithProfiling(profileOpts, func() error { return RunContext(ctx, cleanArgs, stdout, stderr) }); err != nil {
-		fmt.Fprintln(stderr, "error:", err)
+		renderHumanError(stderr, publicErrorView(err, cleanArgs), errorOpts.Verbose)
 		return 1
 	}
 	return 0
@@ -179,57 +184,28 @@ func wantsJSON(args []string) bool {
 	return false
 }
 
-func machineError(err error, args []string) errorPayload {
-	payload := errorPayload{Code: classifyError(err), Message: err.Error(), Next: []string{"aha doctor", "aha help"}}
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		payload.Command = args[0]
+func machineError(view usererror.View, verbose bool) errorEnvelope {
+	diagnostics := []usererror.Diagnostic{}
+	if verbose {
+		diagnostics = usererror.Diagnostics(view)
 	}
-	var ce *CommandError
-	if errors.As(err, &ce) {
-		payload.Code = ce.Code
-		payload.Command = ce.Command
-		if len(ce.Next) > 0 {
-			payload.Next = ce.Next
-		}
+	return errorEnvelope{
+		Schema: "aha.error.v1",
+		Error: errorPayload{
+			Code: string(view.Code()), Message: view.Message(), Command: view.Command(),
+			Next: []string{view.Next().Text()}, NextAction: view.Next(), Diagnostics: diagnostics,
+		},
 	}
-	return payload
-}
-
-func classifyError(err error) string {
-	var notFound corpus.NotFoundError
-	if errors.As(err, &notFound) {
-		return "not_found"
-	}
-	var ambiguous corpus.AmbiguousError
-	if errors.As(err, &ambiguous) {
-		return "ambiguous"
-	}
-	var unsupportedSchema archive.UnsupportedSchemaError
-	if errors.As(err, &unsupportedSchema) {
-		return "unsupported_schema"
-	}
-	var unsupportedRef model.UnsupportedRefError
-	if errors.As(err, &unsupportedRef) {
-		return "unsupported_ref"
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "flag provided but not defined") || strings.Contains(msg, "invalid value") || strings.Contains(msg, "flag needs an argument") {
-		return "flag_parse_error"
-	}
-	if strings.Contains(msg, "required") || strings.Contains(msg, "not found") || strings.Contains(msg, "ambiguous") {
-		return "validation_error"
-	}
-	return "command_failed"
 }
 
 func Usage(w io.Writer) {
 	fmt.Fprintf(w, "aha %s\n\nUsage:\n", model.Version)
-	fmt.Fprintln(w, "  aha [--cpuprofile FILE] [--memprofile FILE] <command> [args]")
+	fmt.Fprintln(w, "  aha [--cpuprofile FILE] [--memprofile FILE] [--verbose-errors] <command> [args]")
 	names := CommandNames()
 	for _, name := range names {
 		fmt.Fprintf(w, "  %s\n", Registry()[name].Usage)
 	}
-	fmt.Fprintln(w, "\nGlobal profiling flags may also be supplied after the subcommand, or via AHA_CPU_PROFILE/AHA_MEM_PROFILE.")
+	fmt.Fprintln(w, "\nGlobal profiling flags and --verbose-errors may also be supplied after the subcommand.")
 }
 
 func GenerateCommandsMarkdown() string {
@@ -239,9 +215,11 @@ func GenerateCommandsMarkdown() string {
 	b.WriteString("## Global profiling\n\n")
 	b.WriteString("Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.\n\n")
 	b.WriteString("Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.\n\n")
-	b.WriteString("## JSON errors\n\n")
-	b.WriteString("When a command is invoked with `--json`, failures are written to stderr as:\n\n")
-	b.WriteString("```json\n{\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor\"]\n  }\n}\n```\n\n")
+	b.WriteString("## Error contract\n\n")
+	b.WriteString("Every failed command prints one concise, credential-safe error and exactly one `next:` action. Raw dependency, SQL, SDK, and filesystem errors are not public output. Add global `--verbose-errors` for allowlisted diagnostics (failure kind, operation, retryability), never raw causes.\n\n")
+	b.WriteString("When a command is invoked with `--json`, failures are written to stderr using the stable `aha.error.v1` envelope:\n\n")
+	b.WriteString("```json\n{\n  \"schema\": \"aha.error.v1\",\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"safe human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor --json\"],\n    \"next_action\": {\"command\": \"aha\", \"args\": [\"doctor\", \"--json\"]},\n    \"diagnostics\": []\n  }\n}\n```\n\n")
+	b.WriteString("With `--progress=json`, stderr remains valid NDJSON: progress events are followed by one terminal `aha.error.v1` object on failure.\n\n")
 	for _, name := range CommandNames() {
 		cmd := Registry()[name]
 		fmt.Fprintf(&b, "## aha %s\n\n", name)

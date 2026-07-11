@@ -84,6 +84,23 @@ func (c R2Config) Valid() bool {
 }
 
 func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
+	pairs := [][2]string{
+		{"AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID"},
+		{"AHA_R2_ENDPOINT", "R2_ENDPOINT"},
+		{"AHA_R2_REGION", "R2_REGION"},
+		{"AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"},
+		{"AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"},
+	}
+	var conflicts []string
+	for _, pair := range pairs {
+		primary, alias := os.Getenv(pair[0]), os.Getenv(pair[1])
+		if primary != "" && alias != "" && primary != alias {
+			conflicts = append(conflicts, pair[0]+" and "+pair[1])
+		}
+	}
+	if len(conflicts) > 0 {
+		return R2Config{}, fmt.Errorf("conflicting R2 environment aliases are set to different values: %s; unset one variable from each pair", strings.Join(conflicts, ", "))
+	}
 	accountValue := firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID)
 	endpoint := firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint)
 	region := firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region)

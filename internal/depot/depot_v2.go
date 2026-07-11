@@ -448,7 +448,7 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 	report := VerifyReport{Deep: deep}
 	if b, _, err := v.store.get(ctx, MarkerObjectKey); err == nil {
 		if err := validateMarkerV2Bytes(b); err != nil {
-			report.Problems = append(report.Problems, "invalid depot marker: "+err.Error())
+			report.Problems = append(report.Problems, "invalid depot marker")
 		}
 	} else if errors.Is(err, errObjectNotExist) {
 		report.Problems = append(report.Problems, "missing depot marker")
@@ -491,14 +491,14 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest %s: %v", machine, sha, err))
+			report.Problems = append(report.Problems, fmt.Sprintf("machine %s has an unreadable manifest", machine))
 			return nil
 		}
 		report.Manifests++
 		for _, f := range manifest.Files {
 			key, err := model.NewBlobKey(f.SHA256)
 			if err != nil {
-				report.Problems = append(report.Problems, fmt.Sprintf("manifest %s file %s: %v", sha, f.RelativePath, err))
+				report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest contains an invalid blob identity", machine))
 				continue
 			}
 			if checkedBlobs[key.String()] {
@@ -520,7 +520,7 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					report.Problems = append(report.Problems, fmt.Sprintf("blob %s: %v", key, err))
+					report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest references an unreadable blob", machine))
 				}
 				continue
 			}
@@ -532,7 +532,7 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 				return err
 			}
 			if !ok {
-				report.Problems = append(report.Problems, fmt.Sprintf("manifest %s references missing blob %s", sha, key))
+				report.Problems = append(report.Problems, fmt.Sprintf("machine %s manifest references a missing blob", machine))
 			}
 		}
 		return nil
@@ -544,7 +544,7 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 			if ctx.Err() != nil {
 				return report, ctx.Err()
 			}
-			report.Problems = append(report.Problems, fmt.Sprintf("machine %s pointer: %v", machine, err))
+			report.Problems = append(report.Problems, fmt.Sprintf("machine %s has an unreadable latest pointer", machine))
 			processedMachines++
 			opts.Progress.Advance(ahaprogress.PhaseVerify, processedMachines, machineTotal, ahaprogress.UnitMachines)
 			continue
@@ -582,7 +582,7 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 			shaHex := strings.TrimSuffix(key[len(machinePrefix(machine)+"manifests/"):], ".json")
 			historical, err := model.NewManifestSHA256(shaHex)
 			if err != nil {
-				report.Problems = append(report.Problems, fmt.Sprintf("unexpected manifest object key %s", key))
+				report.Problems = append(report.Problems, fmt.Sprintf("machine %s has an unexpected manifest object", machine))
 				continue
 			}
 			if err := checkManifest(machine, historical); err != nil {

@@ -2,6 +2,7 @@ package depot
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,9 +31,13 @@ func bucketStoreAgainst(t *testing.T, handler http.HandlerFunc) *r2StoreV2 {
 // denial or — worse — silently "succeeded" against a permissive endpoint.
 func TestEnsureBucketSurfacesHeadErrorsWithoutCreating(t *testing.T) {
 	var createAttempts atomic.Int32
+	var listAttempts atomic.Int32
 	store := bucketStoreAgainst(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodHead:
+			w.WriteHeader(http.StatusForbidden)
+		case http.MethodGet:
+			listAttempts.Add(1)
 			w.WriteHeader(http.StatusForbidden)
 		case http.MethodPut:
 			createAttempts.Add(1)
@@ -43,19 +48,70 @@ func TestEnsureBucketSurfacesHeadErrorsWithoutCreating(t *testing.T) {
 	})
 	err := store.ensureBucket(context.Background())
 	if err == nil {
-		t.Fatal("HeadBucket 403 must surface, not vanish behind CreateBucket")
+		t.Fatal("HeadBucket/ListObjectsV2 403 must surface, not vanish behind CreateBucket")
 	}
 	if got := createAttempts.Load(); got != 0 {
-		t.Fatalf("CreateBucket attempted %d times after a non-NotFound HeadBucket error", got)
+		t.Fatalf("CreateBucket attempted %d times after denied read probes", got)
+	}
+	if got := listAttempts.Load(); got != 1 {
+		t.Fatalf("ListObjectsV2 attempts=%d want 1 diagnostic probe", got)
 	}
 	message := err.Error()
-	for _, want := range []string{"403", "HeadBucket", "before any depot mutation", "Object Read & Write", "matching access key and secret", "smoke-bucket"} {
+	for _, want := range []string{"403", "HeadBucket", "ListObjectsV2", "before any depot mutation", "Object Read & Write", "matching access key and secret", "smoke-bucket"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("error %q missing actionable detail %q", message, want)
 		}
 	}
 	if strings.Contains(message, "secret-canary") {
 		t.Fatalf("error leaked credentials: %q", message)
+	}
+}
+
+func TestEnsureBucketDoesNotCreateWhenHeadIsForbiddenAndListSaysMissing(t *testing.T) {
+	var createAttempts atomic.Int32
+	store := bucketStoreAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusForbidden)
+		case http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			createAttempts.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	err := store.ensureBucket(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "ListObjectsV2") {
+		t.Fatalf("ensureBucket error=%v want failed read probe", err)
+	}
+	if got := createAttempts.Load(); got != 0 {
+		t.Fatalf("CreateBucket attempted %d times after ambiguous denied/missing probes", got)
+	}
+}
+
+func TestEnsureBucketAcceptsObjectTokenWhenListWorksButHeadIsForbidden(t *testing.T) {
+	var createAttempts atomic.Int32
+	store := bucketStoreAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusForbidden)
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>smoke-bucket</Name><KeyCount>0</KeyCount><MaxKeys>1</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>`)
+		case http.MethodPut:
+			createAttempts.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	if err := store.ensureBucket(context.Background()); err != nil {
+		t.Fatalf("ListObjectsV2 proved bucket access but ensureBucket failed: %v", err)
+	}
+	if got := createAttempts.Load(); got != 0 {
+		t.Fatalf("CreateBucket attempted %d times after ListObjectsV2 proved access", got)
 	}
 }
 

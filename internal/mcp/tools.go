@@ -26,6 +26,7 @@ import (
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/search"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 // Backend is the read surface the MCP tools need from the rest of aha.
@@ -536,9 +537,10 @@ func textResult(v any) *mcp.CallToolResult {
 }
 
 func errorResult(err error) *mcp.CallToolResult {
+	view := usererror.Normalize(err, "mcp")
 	return &mcp.CallToolResult{
 		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		Content: []mcp.Content{&mcp.TextContent{Text: view.Message() + "\nnext: " + view.Next().Text()}},
 	}
 }
 

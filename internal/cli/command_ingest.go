@@ -16,7 +16,7 @@ func cmdIngest(args []string, stdout, stderr io.Writer) error {
 
 func runIngestContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	depotAddr := fs.String("depot", "", "depot address")
 	jsonOut := fs.Bool("json", false, "JSON output")

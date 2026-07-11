@@ -16,7 +16,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 
 func runVerifyContext(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	repairFTS := fs.Bool("repair-fts", false, "rebuild FTS tables from corpus rows before reporting")

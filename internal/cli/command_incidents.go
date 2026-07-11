@@ -11,7 +11,7 @@ import (
 
 func cmdIncidents(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("incidents", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 50, "maximum incidents to return (default 50, max 200)")

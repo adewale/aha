@@ -63,9 +63,16 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 - `TestExportRequiresExistingSnapshot` no longer writes a temporary depot into
   the real user config; a static test now rejects mutating CLI tests that omit
   an explicit `--config` path.
-- R2 `HeadBucket` authorization failures now identify the failed operation,
-  guarantee that no depot/smoke mutation occurred, distinguish likely token
-  scope/key-pair/endpoint causes, and provide one credential-safe next action.
+- R2 access preflight now falls back from a forbidden `HeadBucket` to a bounded
+  `ListObjectsV2` probe. If both fail, the error proves the loaded key pair does
+  not authorize the bucket endpoint before any mutation. Conflicting
+  `AHA_R2_*`/`R2_*` aliases fail locally without exposing either value.
+- All `aha` CLI, MCP, and dashboard error boundaries now use opaque safe views:
+  one concise message, exactly one structured next action, stable
+  `aha.error.v1` JSON, valid NDJSON with structured progress, and optional
+  allowlisted `--verbose-errors` diagnostics instead of raw SDK/SQL/path causes.
+  R2 smoke failures are concise by default; raw child logs require explicit
+  `AHA_R2_SMOKETEST_VERBOSE=1`.
 
 ### Depot v2 — content-addressed snapshots (June 2026)
 

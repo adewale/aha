@@ -13,6 +13,46 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
+func TestRunMainHumanErrorsAreConciseAndHaveOneAction(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cli.RunMain([]string{"status", "--definitely-invalid"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("RunMain unexpectedly succeeded")
+	}
+	text := stderr.String()
+	if strings.Count(text, "error:") != 1 || strings.Count(text, "next:") != 1 {
+		t.Fatalf("stderr=%q want one error and one next action", text)
+	}
+	for _, raw := range []string{"flag provided but not defined", "Usage of", "aha doctor\naha help"} {
+		if strings.Contains(text, raw) {
+			t.Fatalf("stderr leaked raw/duplicate diagnostics %q: %s", raw, text)
+		}
+	}
+}
+
+func TestRunMainDefaultErrorHidesRawPathsAndVerboseUsesSafeDiagnostics(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "secret-canary", "cpu.pprof")
+	if err := os.WriteFile(filepath.Dir(secretPath), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, verbose := range []bool{false, true} {
+		args := []string{"status", "--cpuprofile", secretPath}
+		if verbose {
+			args = append(args, "--verbose-errors")
+		}
+		var stdout, stderr bytes.Buffer
+		if code := cli.RunMain(args, &stdout, &stderr); code == 0 {
+			t.Fatal("profiling unexpectedly succeeded")
+		}
+		if strings.Contains(stderr.String(), secretPath) || strings.Contains(stderr.String(), "secret-canary") {
+			t.Fatalf("verbose=%v leaked path: %s", verbose, stderr.String())
+		}
+		if verbose && !strings.Contains(stderr.String(), "diagnostic:") {
+			t.Fatalf("verbose stderr missing safe diagnostic: %s", stderr.String())
+		}
+	}
+}
+
 func TestRunMainJSONErrorContract(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := cli.RunMain([]string{"nope", "--json"}, &stdout, &stderr)
@@ -23,11 +63,17 @@ func TestRunMainJSONErrorContract(t *testing.T) {
 		t.Fatalf("JSON errors should not write stdout: %s", stdout.String())
 	}
 	var payload struct {
-		Error struct {
-			Code    string   `json:"code"`
-			Message string   `json:"message"`
-			Command string   `json:"command"`
-			Next    []string `json:"next"`
+		Schema string `json:"schema"`
+		Error  struct {
+			Code       string   `json:"code"`
+			Message    string   `json:"message"`
+			Command    string   `json:"command"`
+			Next       []string `json:"next"`
+			NextAction struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"next_action"`
+			Diagnostics []map[string]any `json:"diagnostics"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(stderr.Bytes(), &payload); err != nil {
@@ -36,8 +82,88 @@ func TestRunMainJSONErrorContract(t *testing.T) {
 	if payload.Error.Code != "unknown_command" || payload.Error.Command != "nope" || payload.Error.Message == "" {
 		t.Fatalf("bad JSON error payload: %+v", payload.Error)
 	}
-	if len(payload.Error.Next) == 0 || !strings.Contains(strings.Join(payload.Error.Next, "\n"), "aha help") {
-		t.Fatalf("JSON error missing next hints: %+v", payload.Error)
+	if payload.Schema != "aha.error.v1" || len(payload.Error.Next) != 1 || payload.Error.NextAction.Command != "aha" || len(payload.Error.Diagnostics) != 0 {
+		t.Fatalf("JSON error contract is incomplete: schema=%q error=%+v", payload.Schema, payload.Error)
+	}
+	if !strings.Contains(payload.Error.Next[0], "aha help") {
+		t.Fatalf("JSON error missing sole next action: %+v", payload.Error)
+	}
+}
+
+func TestEveryRegisteredCommandUsesTheSharedHumanErrorContract(t *testing.T) {
+	for name := range cli.Registry() {
+		t.Run(name, func(t *testing.T) {
+			args := []string{name, "--definitely-invalid"}
+			if name == "corpus" || name == "depot" {
+				args = []string{name, "invalid-subcommand"}
+			}
+			var stdout, stderr bytes.Buffer
+			if code := cli.RunMain(args, &stdout, &stderr); code == 0 {
+				t.Fatalf("%s unexpectedly succeeded", name)
+			}
+			text := stderr.String()
+			if strings.Count(text, "error:") != 1 || strings.Count(text, "next:") != 1 {
+				t.Fatalf("%s stderr=%q want one error and one action", name, text)
+			}
+			if strings.Contains(text, "Usage of") || strings.Contains(text, "flag provided") {
+				t.Fatalf("%s stderr leaked parser output: %s", name, text)
+			}
+		})
+	}
+}
+
+func TestEveryRegisteredCommandUsesTheSharedJSONErrorContract(t *testing.T) {
+	for name := range cli.Registry() {
+		t.Run(name, func(t *testing.T) {
+			args := []string{name, "--definitely-invalid", "--json"}
+			if name == "corpus" || name == "depot" {
+				args = []string{name, "invalid-subcommand", "--json"}
+			}
+			var stdout, stderr bytes.Buffer
+			if code := cli.RunMain(args, &stdout, &stderr); code == 0 {
+				t.Fatalf("%s unexpectedly succeeded", name)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("%s failure wrote stdout: %s", name, stdout.String())
+			}
+			var envelope struct {
+				Schema string `json:"schema"`
+				Error  struct {
+					Message    string   `json:"message"`
+					Next       []string `json:"next"`
+					NextAction struct {
+						Command string   `json:"command"`
+						Args    []string `json:"args"`
+					} `json:"next_action"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+				t.Fatalf("%s stderr is not one JSON document: %v\n%s", name, err, stderr.String())
+			}
+			if envelope.Schema != "aha.error.v1" || envelope.Error.Message == "" || len(envelope.Error.Next) != 1 || envelope.Error.NextAction.Command == "" {
+				t.Fatalf("%s error contract=%+v", name, envelope)
+			}
+		})
+	}
+}
+
+func TestRunMainVerboseJSONAddsOnlySafeDiagnostics(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := cli.RunMain([]string{"nope", "--json", "--verbose-errors"}, &stdout, &stderr); code == 0 {
+		t.Fatal("unknown command unexpectedly succeeded")
+	}
+	var envelope struct {
+		Error struct {
+			Diagnostics []struct {
+				Kind string `json:"kind"`
+			} `json:"diagnostics"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr.String())
+	}
+	if len(envelope.Error.Diagnostics) != 1 || envelope.Error.Diagnostics[0].Kind == "" {
+		t.Fatalf("diagnostics=%+v", envelope.Error.Diagnostics)
 	}
 }
 

@@ -507,9 +507,9 @@ func TestHTTPErrorEnvelopeIsPinned(t *testing.T) {
 		want string // expected error code
 	}{
 		{
-			"unknown route → 404 (via NotFound, not our envelope)",
+			"unknown route uses the shared envelope",
 			func() *http.Request { return loopback(httptest.NewRequest(http.MethodGet, "/api/no-such", nil)) },
-			"", // 404 from mux.NotFoundHandler is HTML; skip envelope assert
+			"not_found",
 		},
 		{
 			"wrong method on GET endpoint",
@@ -560,8 +560,13 @@ func assertErrorEnvelope(t *testing.T, body []byte, wantCode string) {
 	t.Helper()
 	var got struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code       string   `json:"code"`
+			Message    string   `json:"message"`
+			Next       []string `json:"next"`
+			NextAction struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"next_action"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
@@ -572,6 +577,9 @@ func assertErrorEnvelope(t *testing.T, body []byte, wantCode string) {
 	}
 	if got.Error.Message == "" {
 		t.Fatalf("error.message empty: %s", body)
+	}
+	if len(got.Error.Next) != 1 || got.Error.NextAction.Command == "" {
+		t.Fatalf("error must contain exactly one structured action: %s", body)
 	}
 }
 

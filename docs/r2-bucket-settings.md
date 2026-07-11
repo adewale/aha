@@ -163,8 +163,12 @@ Recommended bucket controls:
 - using malformed bucket names;
 - relying on generic `AWS_*` credentials, which `aha` ignores;
 - likely wrong account/bucket/endpoint combinations (`404`/not found);
-- likely token scope/permission problems (`403`/access denied);
-- signature/access-key mismatches.
+- likely token scope/permission problems (`403`/access denied); a forbidden
+  `HeadBucket` is checked with a one-key `ListObjectsV2` fallback before being
+  classified, so an object token is not rejected merely for a HEAD-policy quirk;
+- signature/access-key mismatches;
+- conflicting `AHA_R2_*` and `R2_*` aliases (rejected before networking without
+  printing either value).
 
 ## End-to-end validation
 

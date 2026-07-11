@@ -15,7 +15,7 @@ import (
 // docs/mcp-spec.md.
 func cmdMcp(args []string, _, stderr io.Writer) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "open the corpus, register tools, print a one-line summary to stderr, then exit without serving stdio")
 	if err := fs.Parse(args); err != nil {
