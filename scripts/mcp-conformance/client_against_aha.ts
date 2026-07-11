@@ -5,12 +5,12 @@
 // server is interoperable with both Anthropic-maintained SDKs.
 //
 // Run via `scripts/verify.sh mcp` (it spawns a fresh corpus first); or
-// manually:
-//   AHA_BIN=/tmp/aha AHA_CONFIG=/path/to/config.jsonc \
-//     node --experimental-strip-types client_against_aha.ts
+// Direct ambient AHA_BIN/AHA_CONFIG values are rejected; run through the
+// attested private workspace created by scripts/verify.sh mcp.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { assertAttestedConformance } from "./attestation.ts";
 
 const EXPECTED_TOOLS = [
   "search",
@@ -25,13 +25,7 @@ const EXPECTED_TOOLS = [
   "doctor",
 ];
 
-const ahaBin = process.env.AHA_BIN ?? "/tmp/aha";
-const ahaConfig = process.env.AHA_CONFIG;
-
-if (!ahaConfig) {
-  console.error("AHA_CONFIG unset; skipping");
-  process.exit(77);
-}
+const { ahaBin, ahaConfig } = assertAttestedConformance();
 
 const transport = new StdioClientTransport({
   command: ahaBin,

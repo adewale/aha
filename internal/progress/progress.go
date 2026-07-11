@@ -52,12 +52,13 @@ func UnknownTotal() Total           { return Total{} }
 func KnownTotal(value uint64) Total { return Total{Known: true, Value: value} }
 
 type Event struct {
-	Kind    Kind          `json:"kind"`
-	Phase   Phase         `json:"phase"`
-	Current uint64        `json:"current,omitempty"`
-	Total   Total         `json:"total"`
-	Unit    Unit          `json:"unit,omitempty"`
-	Elapsed time.Duration `json:"-"`
+	Sequence uint64        `json:"sequence"`
+	Kind     Kind          `json:"kind"`
+	Phase    Phase         `json:"phase"`
+	Current  uint64        `json:"current,omitempty"`
+	Total    Total         `json:"total"`
+	Unit     Unit          `json:"unit,omitempty"`
+	Elapsed  time.Duration `json:"-"`
 }
 
 type Observer interface {
@@ -73,10 +74,12 @@ type Clock interface {
 }
 
 type Tracker struct {
-	mu       sync.Mutex
-	observer Observer
-	clock    Clock
-	started  map[Phase]time.Time
+	mu        sync.Mutex
+	observeMu sync.Mutex
+	observer  Observer
+	clock     Clock
+	started   map[Phase]time.Time
+	sequence  uint64
 }
 
 func NewTracker(observer Observer, clock Clock) *Tracker {
@@ -110,6 +113,12 @@ func (t *Tracker) emit(kind Kind, phase Phase, current uint64, total Total, unit
 	if total.Known && current > total.Value {
 		current = total.Value
 	}
+	// The observer is part of the public delivery contract. Serialize the
+	// entire assign-and-deliver path so concurrent callers cannot reorder
+	// callbacks after sequence assignment or require observers to be safe for
+	// concurrent use.
+	t.observeMu.Lock()
+	defer t.observeMu.Unlock()
 	now := t.clock.Now()
 	t.mu.Lock()
 	started, ok := t.started[phase]
@@ -117,7 +126,8 @@ func (t *Tracker) emit(kind Kind, phase Phase, current uint64, total Total, unit
 		started = now
 		t.started[phase] = now
 	}
-	event := Event{Kind: kind, Phase: phase, Current: current, Total: total, Unit: unit, Elapsed: now.Sub(started)}
+	t.sequence++
+	event := Event{Sequence: t.sequence, Kind: kind, Phase: phase, Current: current, Total: total, Unit: unit, Elapsed: now.Sub(started)}
 	t.mu.Unlock()
 	t.observer.Observe(event)
 }

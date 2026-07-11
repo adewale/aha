@@ -11,9 +11,9 @@ Modes:
   ci            same as full; intended for GitHub Actions
   fuzz          run all bounded fuzz targets
   race          run race detector
-  build         build cmd/aha into /tmp/aha
+  build         compile cmd/aha in a private temporary workspace
   ts            typecheck + runtime-test the TypeScript client (skips if no toolchain)
-  mcp           bidirectional MCP conformance: aha server vs official Python SDK client, AND aha TS client vs official Python SDK server (skips if python3 mcp not installed)
+  mcp           isolated bidirectional MCP conformance (never installs dependencies or uses ambient aha config)
   mutation-dry  inventory covered mutants with gremlins dry-run
   mutation      run gremlins against invariant-critical packages
 
@@ -31,6 +31,24 @@ fi
 
 FUZZTIME="${FUZZTIME:-2s}"
 GREMLINS="${GREMLINS:-go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0}"
+
+cleanup_dirs=()
+cleanup() {
+  local dir
+  if (( ${#cleanup_dirs[@]} == 0 )); then
+    return
+  fi
+  for dir in "${cleanup_dirs[@]}"; do
+    rm -rf -- "$dir"
+  done
+}
+trap cleanup EXIT HUP INT TERM
+
+new_workspace() {
+  NEW_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/aha-verify.XXXXXX")"
+  chmod 700 "$NEW_WORKSPACE"
+  cleanup_dirs+=("$NEW_WORKSPACE")
+}
 
 run() {
   printf '\n==> %s\n' "$*" >&2
@@ -60,6 +78,23 @@ whitespace_check() {
 quick() {
   run go test ./...
   whitespace_check
+}
+
+build_private() {
+  new_workspace
+  run go build -o "$NEW_WORKSPACE/aha" ./cmd/aha
+}
+
+cross_compile() {
+  new_workspace
+  local root="$NEW_WORKSPACE"
+  run env GOOS=linux GOARCH=amd64 go build -o "$root/aha-linux-amd64" ./cmd/aha
+  run env GOOS=darwin GOARCH=amd64 go build -o "$root/aha-darwin-amd64" ./cmd/aha
+  run env GOOS=windows GOARCH=amd64 go build -o "$root/aha-windows-amd64.exe" ./cmd/aha
+  # Cross-running test binaries is impossible, and compiling all *_test.go
+  # currently reaches platform-specific syscall tests. Building the complete
+  # command graph still gates production portability without broad test-only
+  # platform refactors.
 }
 
 fuzz() {
@@ -114,92 +149,84 @@ ts() {
 # Each leg skips gracefully when its toolchain is missing, so this mode
 # still does *something* useful on a Python-only or Go-only box.
 mcp_conformance() {
-  # The Go-SDK leg needs no external toolchain — it runs under `go test`.
-  # The Python and TS legs need their respective SDKs installed.
-  local have_python=0 have_node=0 have_tsc=0
+  # The Go-SDK leg needs no external toolchain. Python/TS legs run only when
+  # their already-prepared dependencies are present; verification never runs
+  # a package manager or mutates the checkout.
+  local have_python=0 have_node=0 have_tsc=0 have_ts_sdk=0
   command -v python3 >/dev/null 2>&1 && python3 -c "import mcp" 2>/dev/null && have_python=1
   command -v node    >/dev/null 2>&1 && have_node=1
   command -v tsc     >/dev/null 2>&1 && have_tsc=1
-
-  # Build aha + the Go-SDK reference server for this checkout every time.
-  # Reusing /tmp binaries made `verify.sh mcp` capable of testing a stale
-  # executable after source changes.
-  run go build -o /tmp/aha ./cmd/aha
-  run go build -o /tmp/aha-ref-mcp ./cmd/aha-ref-mcp
-
-  # Make sure the TS SDK + zod are installed in scripts/mcp-conformance/ if
-  # node is available. Skip the install if package-lock is fresh enough.
-  if (( have_node )) && [[ ! -d scripts/mcp-conformance/node_modules ]]; then
-    if [[ -f scripts/mcp-conformance/package-lock.json ]]; then
-      run_shell "cd scripts/mcp-conformance && npm ci --silent --ignore-scripts --no-audit --no-fund"
-    else
-      run_shell "cd scripts/mcp-conformance && npm install --silent --ignore-scripts --no-audit --no-fund"
-    fi
+  if (( have_node )) && [[ -d scripts/mcp-conformance/node_modules/@modelcontextprotocol/sdk ]]; then
+    have_ts_sdk=1
   fi
 
-  # Populate a fixture corpus the Python+TS+Go clients can drive against.
-  local tmpdir; tmpdir="$(mktemp -d)"
-  # Bake the path into the trap so it survives the local going out of
-  # scope, and clear the RETURN trap once it fires. A bare
-  # `trap 'rm -rf "$tmpdir"' RETURN` is global: it re-fires when an outer
-  # caller (full() -> mcp_conformance) returns, by which point $tmpdir is
-  # unset and `set -u` aborts the whole run. That is the CI failure this
-  # guards against.
-  trap "rm -rf '$tmpdir'; trap - RETURN" RETURN
-  local pi="$tmpdir/pi/--Users-me-proj--"
+  new_workspace
+  local root="$NEW_WORKSPACE"
+  local aha_bin="$root/bin/aha"
+  local ref_bin="$root/bin/aha-ref-mcp"
+  local cfg="$root/config.jsonc"
+  local token="aha-mcp-$PPID-$RANDOM-$RANDOM"
+  mkdir -p "$root/bin"
+  printf '%s\n' "$token" > "$root/.aha-mcp-conformance"
+  chmod 600 "$root/.aha-mcp-conformance"
+
+  run go build -o "$aha_bin" ./cmd/aha
+  run go build -o "$ref_bin" ./cmd/aha-ref-mcp
+
+  local pi="$root/pi/--Users-me-proj--"
   mkdir -p "$pi"
   cat > "$pi/2026.jsonl" <<'JSONL'
 {"type":"session","version":3,"id":"pi-session","timestamp":"2026-01-01T00:00:00Z","cwd":"/Users/me/proj"}
 {"id":"p1","parentId":"","type":"user","role":"user","timestamp":"2026-01-01T00:00:01Z","message":{"content":"hello"}}
 JSONL
-  cat > "$tmpdir/config.jsonc" <<JSONC
+  cat > "$cfg" <<JSONC
 {
   "machine_id":"mcp-conformance",
   "sources":[{"type":"pi","root":"$pi","enabled":true}],
-  "corpus_dir":"$tmpdir/corpus",
-  "depot":{"type":"local","location":"$tmpdir/depot"},
+  "corpus_dir":"$root/corpus",
+  "depot":{"type":"local","location":"$root/depot"},
   "accept_secrets_warning":true
 }
 JSONC
-  run /tmp/aha refresh --config "$tmpdir/config.jsonc" --captured-at 2026-01-01T00:00:00Z >/dev/null
+  run "$aha_bin" refresh --config "$cfg" --captured-at 2026-01-01T00:00:00Z >/dev/null
 
-  # ---- Server-under-test legs (drive aha mcp from a real SDK Client) ----
+  local -a attested_env=(
+    "AHA_BIN=$aha_bin"
+    "AHA_CONFIG=$cfg"
+    "AHA_MCP_CONFORMANCE_ROOT=$root"
+    "AHA_MCP_CONFORMANCE_TOKEN=$token"
+  )
 
   if (( have_python )); then
-    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
-      run python3 scripts/mcp-conformance/client_against_aha.py
+    run env "${attested_env[@]}" python3 scripts/mcp-conformance/client_against_aha.py
   else
     printf '\n==> mcp leg 1 (python client -> aha): skipped (python3 mcp not available)\n' >&2
   fi
 
-  if (( have_node )); then
-    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
-      run_shell "cd scripts/mcp-conformance && node --experimental-strip-types client_against_aha.ts"
+  if (( have_ts_sdk )); then
+    run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types client_against_aha.ts"
   else
-    printf '\n==> mcp leg 2 (typescript client -> aha): skipped (node not available)\n' >&2
+    printf '\n==> mcp leg 2 (typescript client -> aha): skipped (prepared TS SDK dependencies not available; prepare scripts/mcp-conformance dependencies explicitly)\n' >&2
   fi
 
-  AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
-    run go test -count=1 ./internal/mcp/conformance/...
+  run env "${attested_env[@]}" go test -count=1 ./internal/mcp/conformance/...
 
-  # ---- Code Mode workflow: typed surface drives search -> filter -> read ----
-  if (( have_node )); then
-    AHA_BIN=/tmp/aha AHA_CONFIG="$tmpdir/config.jsonc" \
-      run_shell "cd scripts/mcp-conformance && node --experimental-strip-types codemode_workflow.ts"
+  if (( have_ts_sdk )); then
+    run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types codemode_workflow.ts"
   else
-    printf '\n==> mcp code-mode workflow: skipped (node not available)\n' >&2
+    printf '\n==> mcp code-mode workflow: skipped (prepared TS SDK dependencies not available)\n' >&2
   fi
-
-  # ---- Client-under-test legs (drive our TS Transport against real servers) ----
 
   if (( have_node && have_tsc )); then
-    local ref_env=""
+    local -a ref_env=()
     if (( have_python )); then
-      ref_env+=" AHA_REF_SERVER=\"python3 $PWD/scripts/mcp-conformance/reference_server.py\""
+      ref_env+=("AHA_REF_SERVER=python3 $PWD/scripts/mcp-conformance/reference_server.py")
     fi
-    ref_env+=" AHA_REF_SERVER_TS=\"node --experimental-strip-types $PWD/scripts/mcp-conformance/reference_server.ts\""
-    ref_env+=" AHA_REF_SERVER_GO=\"/tmp/aha-ref-mcp\""
-    run_shell "env $ref_env node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts"
+    if (( have_ts_sdk )); then
+      ref_env+=("AHA_REF_SERVER_TS=node --experimental-strip-types $PWD/scripts/mcp-conformance/reference_server.ts")
+    fi
+    ref_env+=("AHA_REF_SERVER_GO=$ref_bin")
+    run env "${ref_env[@]}" node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts
   else
     printf '\n==> mcp legs 4-6 (aha client -> reference servers): skipped (need node + tsc)\n' >&2
   fi
@@ -211,7 +238,8 @@ full() {
   run go test -race ./...
   fuzz
   ts
-  run go build -o /tmp/aha ./cmd/aha
+  build_private
+  cross_compile
   mcp_conformance
 }
 
@@ -242,7 +270,7 @@ case "$mode" in
   ts) ts ;;
   mcp) mcp_conformance ;;
   race) run go test -race ./... ;;
-  build) run go build -o /tmp/aha ./cmd/aha ;;
+  build) build_private ;;
   mutation-dry) mutation_dry ;;
   mutation) mutation ;;
   *) usage >&2; exit 2 ;;

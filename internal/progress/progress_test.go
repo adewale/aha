@@ -60,10 +60,34 @@ func TestTrackerConcurrentObserveIsRaceFreeAndCapsKnownTotals(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	for _, event := range record.events {
+	record.mu.Lock()
+	events := append([]progress.Event(nil), record.events...)
+	record.mu.Unlock()
+	if len(events) != 21 {
+		t.Fatalf("events=%d want start plus all 20 advances: %+v", len(events), events)
+	}
+	if events[0].Kind != progress.Started {
+		t.Fatalf("first event=%+v want started", events[0])
+	}
+	counts := map[uint64]int{}
+	for i, event := range events {
+		if event.Sequence != uint64(i+1) {
+			t.Fatalf("event[%d] sequence=%d want %d; observer delivery was reordered", i, event.Sequence, i+1)
+		}
 		if event.Total.Known && event.Current > event.Total.Value {
 			t.Fatalf("event exceeded total: %+v", event)
 		}
+		if event.Kind == progress.Advanced {
+			counts[event.Current]++
+		}
+	}
+	for current := uint64(1); current < 10; current++ {
+		if counts[current] != 1 {
+			t.Fatalf("current=%d count=%d want 1; events=%+v", current, counts[current], events)
+		}
+	}
+	if counts[10] != 11 {
+		t.Fatalf("capped current=10 count=%d want 11", counts[10])
 	}
 }
 

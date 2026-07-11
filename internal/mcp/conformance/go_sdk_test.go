@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -42,12 +43,42 @@ var expectedTools = []string{
 // TestGoSDKAgainstAha drives the official Go MCP SDK Client against a
 // spawned `aha mcp` and asserts every conformance check the Python and
 // TypeScript scripts make.
-func TestGoSDKAgainstAha(t *testing.T) {
-	bin := os.Getenv("AHA_BIN")
-	cfg := os.Getenv("AHA_CONFIG")
-	if bin == "" || cfg == "" {
-		t.Skip("AHA_BIN and AHA_CONFIG must both be set; run via scripts/verify.sh mcp")
+func attestedInputs(t *testing.T) (string, string) {
+	t.Helper()
+	rootInput := os.Getenv("AHA_MCP_CONFORMANCE_ROOT")
+	token := os.Getenv("AHA_MCP_CONFORMANCE_TOKEN")
+	binInput := os.Getenv("AHA_BIN")
+	cfgInput := os.Getenv("AHA_CONFIG")
+	if rootInput == "" || token == "" || binInput == "" || cfgInput == "" {
+		t.Skip("isolated MCP conformance attestation must be set; run via scripts/verify.sh mcp")
 	}
+	root, err := filepath.EvalSymlinks(rootInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(filepath.Join(root, ".aha-mcp-conformance"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(marker)) != token {
+		t.Fatal("invalid MCP conformance attestation")
+	}
+	resolveUnder := func(path string) string {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(root, resolved)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("MCP conformance path is outside attested root")
+		}
+		return resolved
+	}
+	return resolveUnder(binInput), resolveUnder(cfgInput)
+}
+
+func TestGoSDKAgainstAha(t *testing.T) {
+	bin, cfg := attestedInputs(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

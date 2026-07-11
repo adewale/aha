@@ -1,6 +1,5 @@
-// aha-gen-ts regenerates clients/typescript/aha-mcp.ts from the MCP tool
-// registry and Go struct shapes. Run after changing any tool or any of the
-// returned types.
+// aha-gen-docs writes generated command reference documentation to an
+// explicitly selected output. It never infers or overwrites a repository path.
 package main
 
 import (
@@ -9,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/adewale/aha/internal/mcp/codegen"
+	"github.com/adewale/aha/internal/cli"
 )
 
 func main() {
@@ -23,12 +22,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(*out, codegen.Generate(), 0o644); err != nil {
+	if err := os.WriteFile(*out, []byte(cli.GenerateCommandsMarkdown()), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-	if w := codegen.Warnings(); w != "" {
-		fmt.Fprint(os.Stderr, w)
 	}
 	fmt.Println("wrote", *out)
 }

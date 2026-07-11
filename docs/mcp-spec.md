@@ -258,7 +258,7 @@ tool would be needed for a literal single MCP round trip.
 
 `internal/mcp/codegen` reflects on the Go return types of each tool and emits
 a typed TypeScript surface at `clients/typescript/aha-mcp.ts`. Regenerate via
-`go run ./cmd/aha-gen-ts` after changing any of the Go shapes; a drift test in
+`make gen-ts` after changing any of the Go shapes; a drift test in
 `internal/mcp/codegen/codegen_test.go` fails CI if the checked-in file is
 stale.
 
