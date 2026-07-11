@@ -4,6 +4,13 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Command/state model 0.2 (July 2026)
+
+#### Changed
+
+- Bumped the product and TypeScript client version to `0.2.0`.
+- Accepted [`docs/command-state-machine-v0.2-plan.md`](docs/command-state-machine-v0.2-plan.md): replace implementation-oriented `snapshot`/`refresh`/`ingest`, `depot`, and `corpus` vocabulary with directional `push`/`pull`/`sync`/`import`, user-facing `store`/`library` nouns, unified status, closed state variants, and explicit partial-sync outcomes. Because aha has not launched and has no users, 0.2 will remove the old commands rather than carry compatibility aliases.
+
 ### R2 onboarding (June–July 2026)
 
 #### Added

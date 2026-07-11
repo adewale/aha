@@ -1,6 +1,6 @@
 package model
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 const BundleSchema = "agent-session-snapshot-bundle/v2"
 
 type Config struct {

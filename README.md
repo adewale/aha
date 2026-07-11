@@ -99,6 +99,8 @@ go test ./...
 
 ## Quick start
 
+> **0.2 design note:** aha is pre-launch. The accepted [`0.2 command/state-machine plan`](docs/command-state-machine-v0.2-plan.md) will replace the current implementation-oriented command names without compatibility aliases. The commands below describe the current implementation until that plan lands.
+
 See `docs/onboarding.md` for the verifiable first-run checklist, including install/PATH checks and optional R2 setup.
 
 Local-first setup:

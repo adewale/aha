@@ -1,6 +1,6 @@
 {
   "name": "aha-mcp-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Typed TypeScript client for the aha read-only MCP tools.",
   "type": "module",
