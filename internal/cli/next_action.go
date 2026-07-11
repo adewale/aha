@@ -46,10 +46,10 @@ func doctorNextAction(configPath string, configExists bool, cfgErr error, depotD
 		return withConfig("init", "--accept-secrets")
 	}
 	if cfgErr != nil {
-		// Never suggest `init`: it would either fail on or encourage replacing
-		// the malformed existing config. Doctor remains the read-only repair
-		// surface and reports the parse error alongside this action.
-		return withConfig("doctor")
+		// Preserve the malformed file. Initialize a sibling repair path that can
+		// actually succeed; pointing back at doctor is a non-transition loop,
+		// while init against the malformed path would refuse to overwrite it.
+		return nextAction{Command: "aha", Args: []string{"init", "--accept-secrets", "--config", configPath + ".repaired"}}
 	}
 	depotType, _ := depotDiag["type"].(string)
 	depotLocation, _ := depotDiag["location"].(string)

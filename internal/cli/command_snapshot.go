@@ -21,6 +21,8 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
+var errPrivacyAcknowledgement = errors.New("privacy acknowledgement required")
+
 type snapshotRequest struct {
 	Context         context.Context
 	Config          model.Config
@@ -75,7 +77,7 @@ func runRefreshContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	req, err := snapshotFlags.buildRequest(stderr)
+	req, err := snapshotFlags.buildRequest()
 	if err != nil {
 		return err
 	}
@@ -136,7 +138,7 @@ func parseSnapshotRequest(name string, args []string, stderr io.Writer) (snapsho
 	if err := fs.Parse(args); err != nil {
 		return snapshotRequest{}, err
 	}
-	return snapshotFlags.buildRequest(stderr)
+	return snapshotFlags.buildRequest()
 }
 
 type snapshotFlagSet struct {
@@ -169,8 +171,8 @@ func registerSnapshotFlags(fs *flag.FlagSet) *snapshotFlagSet {
 	return flags
 }
 
-func (f *snapshotFlagSet) buildRequest(stderr io.Writer) (snapshotRequest, error) {
-	req, err := buildSnapshotRequest(*f.configPath, *f.machine, *f.depotAddr, *f.acceptSecrets, *f.capturedAt, f.sourceFlags, f.sessionFlags, *f.maxSessions, stderr)
+func (f *snapshotFlagSet) buildRequest() (snapshotRequest, error) {
+	req, err := buildSnapshotRequest(*f.configPath, *f.machine, *f.depotAddr, *f.acceptSecrets, *f.capturedAt, f.sourceFlags, f.sessionFlags, *f.maxSessions)
 	if err != nil {
 		return snapshotRequest{}, err
 	}
@@ -180,7 +182,7 @@ func (f *snapshotFlagSet) buildRequest(stderr io.Writer) (snapshotRequest, error
 	return req, nil
 }
 
-func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets bool, capturedAt string, sourceFlags, sessionFlags multiFlag, maxSessions int, stderr io.Writer) (snapshotRequest, error) {
+func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets bool, capturedAt string, sourceFlags, sessionFlags multiFlag, maxSessions int) (snapshotRequest, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return snapshotRequest{}, err
@@ -205,8 +207,7 @@ func buildSnapshotRequest(configPath, machine, depotAddr string, acceptSecrets b
 		cfg.AcceptSecretsWarning = true
 	}
 	if !acceptSecrets && !cfg.AcceptSecretsWarning {
-		fmt.Fprintln(stderr, "Snapshots are raw provenance and may contain prompts, source code, tool output, images, tokens, and private paths. Treat depot contents as private even when corpus redaction is enabled. Pass --accept-secrets to continue.")
-		return snapshotRequest{}, errors.New("secrets warning not acknowledged")
+		return snapshotRequest{}, errPrivacyAcknowledgement
 	}
 	if maxSessions < 0 {
 		return snapshotRequest{}, errors.New("--max-sessions must be >= 0")

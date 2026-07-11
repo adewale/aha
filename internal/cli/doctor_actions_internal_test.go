@@ -71,9 +71,9 @@ func TestDoctorNextActionUsesSetupForDepotConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestDoctorNextActionMalformedConfigDoesNotSuggestOverwritingIt(t *testing.T) {
+func TestDoctorNextActionMalformedConfigInitializesPreservedRepairPath(t *testing.T) {
 	action := doctorNextAction("/tmp/config", true, errors.New("bad JSON"), nil, nil)
-	want := []string{"doctor", "--config", "/tmp/config"}
+	want := []string{"init", "--accept-secrets", "--config", "/tmp/config.repaired"}
 	if !reflect.DeepEqual(action.Args, want) {
 		t.Fatalf("action=%+v want args=%v", action, want)
 	}

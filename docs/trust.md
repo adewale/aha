@@ -66,11 +66,12 @@ How this is enforced:
 
 ## Guarantee 5: user-facing errors cannot render raw causal failures
 
-Every CLI, MCP, and dashboard failure is normalized through an opaque
-`internal/usererror` view before presentation. The safe view contains a stable
-code, concise message, and exactly one structured action. It cannot contain the
-raw causal error, so SDK response text, SQL, absolute paths, object keys, and
-credential-bearing dependency strings do not become public output.
+Every CLI failure, dashboard application failure, and MCP application/tool failures that reach aha's presentation boundary are normalized through an
+opaque `internal/usererror` view. The safe view contains a stable code, concise
+message, and exactly one structured action. It cannot contain the raw causal
+error, so SQL, absolute paths, object keys, and credential-bearing dependency
+strings do not become public output. SDK-owned protocol, framing, schema, and
+transport failures occur outside that application boundary and are not normalized by aha; they retain the official SDK's error contract.
 
 `--verbose-errors` adds only allowlisted failure kind, operation, and
 retryability fields. The underlying cause remains available to Go callers via

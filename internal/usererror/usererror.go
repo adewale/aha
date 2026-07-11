@@ -22,20 +22,21 @@ import (
 type Code string
 
 const (
-	CodeUnknownCommand    Code = "unknown_command"
-	CodeInvalidInput      Code = "validation_error"
-	CodeFlagParse         Code = "flag_parse_error"
-	CodeNotFound          Code = "not_found"
-	CodeAmbiguous         Code = "ambiguous"
-	CodeUnsupported       Code = "unsupported"
-	CodeUnsupportedSchema Code = "unsupported_schema"
-	CodeUnsupportedRef    Code = "unsupported_ref"
-	CodePermissionDenied  Code = "permission_denied"
-	CodeUnavailable       Code = "unavailable"
-	CodeConflict          Code = "conflict"
-	CodeCorruptData       Code = "corrupt_data"
-	CodeCancelled         Code = "cancelled"
-	CodeCommandFailed     Code = "command_failed"
+	CodeUnknownCommand         Code = "unknown_command"
+	CodeInvalidInput           Code = "validation_error"
+	CodeFlagParse              Code = "flag_parse_error"
+	CodeNotFound               Code = "not_found"
+	CodeAmbiguous              Code = "ambiguous"
+	CodeUnsupported            Code = "unsupported"
+	CodeUnsupportedSchema      Code = "unsupported_schema"
+	CodeUnsupportedRef         Code = "unsupported_ref"
+	CodePermissionDenied       Code = "permission_denied"
+	CodePrivacyAcknowledgement Code = "privacy_acknowledgement_required"
+	CodeUnavailable            Code = "unavailable"
+	CodeConflict               Code = "conflict"
+	CodeCorruptData            Code = "corrupt_data"
+	CodeCancelled              Code = "cancelled"
+	CodeCommandFailed          Code = "command_failed"
 )
 
 type Action struct {
@@ -104,6 +105,20 @@ func UnknownCommand(command string, cause error) View {
 
 func InvalidInput(command string, cause error) View {
 	return view(CodeInvalidInput, commandMessage(command, "received invalid input"), command, helpAction(command), "validation", false)
+}
+
+func PrivacyAcknowledgement(command string) View {
+	if command != "snapshot" && command != "refresh" {
+		command = "snapshot"
+	}
+	return view(
+		CodePrivacyAcknowledgement,
+		"Raw snapshot privacy acknowledgement is required before upload.",
+		command,
+		action("aha", command, "--accept-secrets"),
+		"privacy_acknowledgement",
+		false,
+	)
 }
 
 func Normalize(err error, command string) View {

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -63,6 +64,43 @@ func TestCLIDoctorDoesNotSerializeRawSDKFailures(t *testing.T) {
 	}
 	if !strings.Contains(body, "remote depot rejected") {
 		t.Fatalf("doctor output lacks safe failure summary: %s", body)
+	}
+}
+
+func TestCLIDoctorMalformedConfigActionCreatesSiblingWithoutOverwriting(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "malformed.jsonc")
+	original := []byte(`{"broken":`)
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Next       []string `json:"next"`
+		NextAction struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"next_action"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	repaired := configPath + ".repaired"
+	if len(payload.Next) != 1 || payload.NextAction.Command != "aha" || !reflect.DeepEqual(payload.NextAction.Args, []string{"init", "--accept-secrets", "--config", repaired}) {
+		t.Fatalf("payload=%+v output=%s", payload, out.String())
+	}
+	out.Reset()
+	if err := cli.Run(payload.NextAction.Args, &out, io.Discard); err != nil {
+		t.Fatalf("suggested action failed: %v", err)
+	}
+	if _, err := os.Stat(repaired); err != nil {
+		t.Fatalf("suggested action did not create repaired config: %v", err)
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("malformed original changed: got=%q err=%v", got, err)
 	}
 }
 
@@ -376,8 +414,11 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}
-	if !strings.Contains(stderr.String(), "Snapshots are raw provenance") {
-		t.Fatalf("missing privacy warning: %s", stderr.String())
+	if !strings.Contains(err.Error(), "privacy acknowledgement") {
+		t.Fatalf("unexpected typed privacy error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("command layer bypassed public error boundary: %s", stderr.String())
 	}
 	matches, _ := filepath.Glob(filepath.Join(outDir, "blobs", "v2", "*"))
 	if len(matches) != 0 {

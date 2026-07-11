@@ -13,6 +13,54 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
+func TestPrivacyAcknowledgementFailureUsesSingleErrorBoundary(t *testing.T) {
+	root := t.TempDir()
+	fx := testutil.WriteAgentFixtures(t, root)
+	base := []string{"snapshot", "--config", filepath.Join(root, "config.jsonc"), "--machine", "privacy-machine", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + filepath.Join(root, "depot")}
+
+	t.Run("human", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if code := cli.RunMain(base, &stdout, &stderr); code == 0 {
+			t.Fatal("snapshot unexpectedly succeeded")
+		}
+		text := stderr.String()
+		if strings.Count(text, "error:") != 1 || strings.Count(text, "next:") != 1 {
+			t.Fatalf("stderr=%q want one public error and one action", text)
+		}
+		if strings.Contains(text, "Snapshots are raw provenance") {
+			t.Fatalf("stderr contains pre-error remediation output: %s", text)
+		}
+		if !strings.Contains(text, "privacy acknowledgement") || !strings.Contains(text, "--accept-secrets") {
+			t.Fatalf("stderr lacks safe actionable privacy error: %s", text)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := append(append([]string(nil), base...), "--json")
+		if code := cli.RunMain(args, &stdout, &stderr); code == 0 {
+			t.Fatal("snapshot unexpectedly succeeded")
+		}
+		var envelope struct {
+			Schema string `json:"schema"`
+			Error  struct {
+				Code       string   `json:"code"`
+				Next       []string `json:"next"`
+				NextAction struct {
+					Command string   `json:"command"`
+					Args    []string `json:"args"`
+				} `json:"next_action"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+			t.Fatalf("stderr is not one JSON document: %v\n%s", err, stderr.String())
+		}
+		if envelope.Schema != "aha.error.v1" || envelope.Error.Code != "privacy_acknowledgement_required" || len(envelope.Error.Next) != 1 || envelope.Error.NextAction.Command != "aha" || !strings.Contains(strings.Join(envelope.Error.NextAction.Args, " "), "--accept-secrets") {
+			t.Fatalf("envelope=%+v", envelope)
+		}
+	})
+}
+
 func TestRunMainHumanErrorsAreConciseAndHaveOneAction(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := cli.RunMain([]string{"status", "--definitely-invalid"}, &stdout, &stderr)

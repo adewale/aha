@@ -34,6 +34,9 @@ func publicErrorView(err error, args []string) usererror.View {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		command = args[0]
 	}
+	if errors.Is(err, errPrivacyAcknowledgement) {
+		return usererror.PrivacyAcknowledgement(command)
+	}
 	var ce *CommandError
 	if errors.As(err, &ce) && ce.Code == "unknown_command" {
 		return usererror.UnknownCommand(ce.Command, err)
