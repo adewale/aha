@@ -13,6 +13,37 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
+func TestIngestPlaceholderErrorNamesSafeFieldAndLeavesNoCorpus(t *testing.T) {
+	clearR2Environment(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "your-access-canary")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "real-secret")
+	corpusRoot := filepath.Join(t.TempDir(), "must-not-exist")
+	var stdout, stderr bytes.Buffer
+	code := cli.RunMain([]string{"ingest", "--depot", "r2:private-bucket", "--corpus", corpusRoot, "--json"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("ingest unexpectedly accepted placeholder access key")
+	}
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(envelope.Error.Message, "access key ID") || !strings.Contains(envelope.Error.Message, "AHA_R2_ACCESS_KEY_ID") {
+		t.Fatalf("message=%q want safe field-specific correction", envelope.Error.Message)
+	}
+	if strings.Contains(stderr.String(), "your-access-canary") {
+		t.Fatalf("error leaked rejected value: %s", stderr.String())
+	}
+	if _, err := os.Stat(corpusRoot); !os.IsNotExist(err) {
+		t.Fatalf("failed preflight created corpus root: %v", err)
+	}
+}
+
 func TestPrivacyAcknowledgementFailureUsesSingleErrorBoundary(t *testing.T) {
 	root := t.TempDir()
 	fx := testutil.WriteAgentFixtures(t, root)

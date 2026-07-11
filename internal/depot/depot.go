@@ -31,6 +31,25 @@ type VerifyReport struct {
 	Problems        []string `json:"problems,omitempty"`
 }
 
+// ExplicitAddressError means a CLI destination omitted its depot kind. It
+// carries no rejected value, so it is safe for public presentation.
+type ExplicitAddressError struct{}
+
+func (*ExplicitAddressError) Error() string {
+	return "explicit depot address required: prefix the destination with r2: or local:"
+}
+
+// ParseExplicitAddress parses an address supplied at a CLI boundary. Unlike
+// ParseAddress's backward-compatible config/default form, it cannot silently
+// reinterpret a bucket-looking value as a local filesystem path.
+func ParseExplicitAddress(s string) (Address, error) {
+	trimmed := strings.TrimSpace(s)
+	if _, _, ok := strings.Cut(trimmed, ":"); !ok {
+		return Address{}, &ExplicitAddressError{}
+	}
+	return ParseAddress(trimmed)
+}
+
 func ParseAddress(s string) (Address, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

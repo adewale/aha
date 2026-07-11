@@ -179,7 +179,7 @@ aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [-
 
 ## aha ingest
 
-pull every machine's latest depot snapshot into the corpus (fetching only unknown content), or import explicit v1 bundle files
+pull every machine's latest depot snapshot into a dedicated corpus after side-effect-free depot/destination preflight (explicit r2:BUCKET or local:PATH), or import explicit v1 bundle files
 
 ```txt
 aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]

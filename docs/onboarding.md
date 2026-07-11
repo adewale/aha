@@ -366,6 +366,30 @@ aha depot use r2:aha-depot   # switch the default to the shared R2 depot
 aha refresh                  # share history through R2
 ```
 
+### Pull every machine into one local corpus without uploading
+
+Use `ingest` for a pull-only operation. CLI depot destinations are explicit:
+`r2:BUCKET` selects R2 and `local:PATH` selects a local depot; a bare value is
+rejected rather than guessed. Choose a dedicated empty directory (or an
+existing aha corpus), not a source checkout or another unrelated non-empty
+directory:
+
+```bash
+aha ingest \
+  --depot 'r2:aha-depot' \
+  --corpus "$HOME/aha-all-history" \
+  --json \
+  --progress=plain
+```
+
+Before creating `corpus.db` or a lifecycle lock, `ingest` validates the depot
+address and R2 fields, reads the initialized depot marker and machine index,
+and constructs a safe corpus destination. A failed local or remote preflight
+therefore leaves both destinations unchanged. The resulting directory contains
+one searchable SQLite corpus plus content-addressed blobs from each machine's
+latest complete snapshot; it is not a recreation of the original agent source
+directory trees.
+
 ### Deep verification
 
 `aha depot verify` is quick by default (pointers resolve to well-formed

@@ -1,6 +1,7 @@
 package depot_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -16,6 +17,35 @@ import (
 // requires one, so the production client must pin both directions to
 // WhenRequired — the fake-S3 suite accepts any header and can never catch
 // a drift here.
+func TestParseExplicitAddressRejectsAmbiguousBareLocation(t *testing.T) {
+	if _, err := depot.ParseExplicitAddress("looks-like-a-bucket"); err == nil || !strings.Contains(err.Error(), "r2:") || !strings.Contains(err.Error(), "local:") {
+		t.Fatalf("error=%v want explicit-prefix guidance", err)
+	}
+	for _, value := range []string{"r2:bucket", "local:/tmp/depot"} {
+		if _, err := depot.ParseExplicitAddress(value); err != nil {
+			t.Fatalf("ParseExplicitAddress(%q): %v", value, err)
+		}
+	}
+}
+
+func TestR2ConfigurationErrorsIdentifySafeFieldWithoutValue(t *testing.T) {
+	secretCanary := "your-secret-canary"
+	_, err := depot.NewR2Credentials("real-access-id", secretCanary)
+	var configErr *depot.R2ConfigError
+	if !errors.As(err, &configErr) {
+		t.Fatalf("error=%v want *R2ConfigError", err)
+	}
+	if configErr.Field() != depot.R2ConfigSecretAccessKey || configErr.Kind() != depot.R2ConfigPlaceholder {
+		t.Fatalf("field=%q kind=%q", configErr.Field(), configErr.Kind())
+	}
+	if strings.Contains(err.Error(), secretCanary) {
+		t.Fatalf("typed error leaked secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "secret access key") || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("typed error is not actionable: %v", err)
+	}
+}
+
 func TestNewR2FollowsCloudflareChecksumGuidance(t *testing.T) {
 	t.Setenv("AHA_R2_ENDPOINT", "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")

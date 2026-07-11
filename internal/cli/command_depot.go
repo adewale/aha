@@ -55,7 +55,7 @@ func runDepotContext(ctx context.Context, args []string, stdout, stderr io.Write
 		return fmt.Errorf("depot %s requires a depot address, e.g. `aha depot %s r2:aha-depot`", sub, sub)
 	}
 	if sub == "setup" {
-		parsed, err := depot.ParseAddress(addr)
+		parsed, err := depot.ParseExplicitAddress(addr)
 		if err != nil {
 			return err
 		}

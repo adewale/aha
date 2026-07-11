@@ -125,6 +125,18 @@ func TestDepotUninitializedSignal(t *testing.T) {
 // denied the hint must say "pre-create the bucket" — repeating the generic
 // "check Object Read & Write permissions" advice would tell the user to
 // re-verify a token that is already correct.
+func TestDepotErrorHintsForTypedConfigErrorNameOnlySafeField(t *testing.T) {
+	secretCanary := "your-secret-canary"
+	_, err := depot.NewR2Credentials("real-access-id", secretCanary)
+	hints := strings.Join(depotErrorHints(err), " ")
+	if !strings.Contains(hints, "AHA_R2_SECRET_ACCESS_KEY") || !strings.Contains(hints, "same bucket-scoped R2 S3 token") {
+		t.Fatalf("hints=%q want precise secret-key correction", hints)
+	}
+	if strings.Contains(hints, secretCanary) {
+		t.Fatalf("hints leaked secret value: %s", hints)
+	}
+}
+
 func TestDepotErrorHints(t *testing.T) {
 	cases := []struct {
 		name    string

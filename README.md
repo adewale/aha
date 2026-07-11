@@ -129,6 +129,20 @@ aha read "$REF" --json
 
 Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.
 
+Pull every machine's latest complete snapshot from an existing R2 depot into
+one dedicated local corpus, without uploading this machine:
+
+```bash
+aha ingest \
+  --depot 'r2:YOUR-BUCKET' \
+  --corpus "$HOME/aha-all-history" \
+  --json --progress=plain
+```
+
+Explicit CLI depot values must start with `r2:` or `local:`. Pull preflight
+validates the initialized depot and dedicated corpus destination before any
+local corpus file or lifecycle lock is created.
+
 ## Long-running command progress
 
 `refresh`, `snapshot`, `ingest`, `verify`, `depot verify`, and `corpus rebuild`

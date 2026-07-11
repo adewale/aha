@@ -44,15 +44,15 @@ type R2AccountID struct{ value string }
 
 func ParseR2AccountID(value string) (R2AccountID, error) {
 	value = strings.TrimSpace(value)
-	if looksLikePlaceholder(value) {
-		return R2AccountID{}, fmt.Errorf("R2 account ID contains a documentation placeholder; replace it with the real Cloudflare account ID")
+	if err := r2ConfigValueError(R2ConfigAccountID, value); err != nil {
+		return R2AccountID{}, err
 	}
 	if len(value) != 32 {
-		return R2AccountID{}, fmt.Errorf("invalid R2 account ID: expected 32 lowercase hexadecimal characters")
+		return R2AccountID{}, &R2ConfigError{field: R2ConfigAccountID, kind: R2ConfigInvalid}
 	}
 	for _, r := range value {
 		if !((r >= 'a' && r <= 'f') || (r >= '0' && r <= '9')) {
-			return R2AccountID{}, fmt.Errorf("invalid R2 account ID: expected 32 lowercase hexadecimal characters")
+			return R2AccountID{}, &R2ConfigError{field: R2ConfigAccountID, kind: R2ConfigInvalid}
 		}
 	}
 	return R2AccountID{value: value}, nil
@@ -63,6 +63,66 @@ func (id R2AccountID) String() string { return id.value }
 func looksLikePlaceholder(value string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(value))
 	return trimmed == "" || trimmed == "..." || strings.Contains(trimmed, "<") || strings.Contains(trimmed, ">") || strings.HasPrefix(trimmed, "your-")
+}
+
+// R2ConfigField identifies a configuration field without carrying its value.
+// Public error boundaries may safely expose this metadata.
+type R2ConfigField string
+
+const (
+	R2ConfigAccountID       R2ConfigField = "account_id"
+	R2ConfigEndpoint        R2ConfigField = "endpoint"
+	R2ConfigRegion          R2ConfigField = "region"
+	R2ConfigAccessKeyID     R2ConfigField = "access_key_id"
+	R2ConfigSecretAccessKey R2ConfigField = "secret_access_key"
+)
+
+// R2ConfigErrorKind is the finite set of locally correctable configuration
+// failures. It intentionally excludes raw values.
+type R2ConfigErrorKind string
+
+const (
+	R2ConfigMissing     R2ConfigErrorKind = "missing"
+	R2ConfigPlaceholder R2ConfigErrorKind = "placeholder"
+	R2ConfigInvalid     R2ConfigErrorKind = "invalid"
+)
+
+// R2ConfigError reports only safe field/reason metadata. The rejected value is
+// never retained, so downstream presentation cannot accidentally disclose a
+// credential.
+type R2ConfigError struct {
+	field R2ConfigField
+	kind  R2ConfigErrorKind
+}
+
+func (e *R2ConfigError) Field() R2ConfigField    { return e.field }
+func (e *R2ConfigError) Kind() R2ConfigErrorKind { return e.kind }
+func (e *R2ConfigError) Error() string {
+	label := map[R2ConfigField]string{
+		R2ConfigAccountID: "account ID", R2ConfigEndpoint: "endpoint", R2ConfigRegion: "region",
+		R2ConfigAccessKeyID: "access key ID", R2ConfigSecretAccessKey: "secret access key",
+	}[e.field]
+	if label == "" {
+		label = "configuration"
+	}
+	switch e.kind {
+	case R2ConfigMissing:
+		return "R2 " + label + " is required"
+	case R2ConfigPlaceholder:
+		return "R2 " + label + " contains a documentation placeholder"
+	default:
+		return "R2 " + label + " is invalid"
+	}
+}
+
+func r2ConfigValueError(field R2ConfigField, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return &R2ConfigError{field: field, kind: R2ConfigMissing}
+	}
+	if looksLikePlaceholder(value) {
+		return &R2ConfigError{field: field, kind: R2ConfigPlaceholder}
+	}
+	return nil
 }
 
 // R2Config is a resolved, validated R2 client configuration. Secret-bearing
@@ -94,8 +154,11 @@ type R2Credentials struct {
 func NewR2Credentials(accessKeyID, secretAccessKey string) (R2Credentials, error) {
 	accessKeyID = strings.TrimSpace(accessKeyID)
 	secretAccessKey = strings.TrimSpace(secretAccessKey)
-	if looksLikePlaceholder(accessKeyID) || looksLikePlaceholder(secretAccessKey) {
-		return R2Credentials{}, fmt.Errorf("R2 credentials required: access key and secret must be real non-placeholder values from one S3 token")
+	if err := r2ConfigValueError(R2ConfigAccessKeyID, accessKeyID); err != nil {
+		return R2Credentials{}, err
+	}
+	if err := r2ConfigValueError(R2ConfigSecretAccessKey, secretAccessKey); err != nil {
+		return R2Credentials{}, err
 	}
 	return R2Credentials{accessKeyID: accessKeyID, secretAccessKey: secretAccessKey}, nil
 }
@@ -144,7 +207,11 @@ func ResolveR2ConfigExplicit(cfg model.R2DepotConfig, creds R2Credentials) (R2Co
 		region = "auto"
 	}
 	if region != "auto" {
-		return R2Config{}, fmt.Errorf("invalid R2 region %q: Cloudflare R2 uses auto", region)
+		kind := R2ConfigInvalid
+		if looksLikePlaceholder(region) {
+			kind = R2ConfigPlaceholder
+		}
+		return R2Config{}, &R2ConfigError{field: R2ConfigRegion, kind: kind}
 	}
 	if creds.accessKeyID == "" || creds.secretAccessKey == "" {
 		return R2Config{}, fmt.Errorf("explicit R2 configuration requires validated credentials")
@@ -152,7 +219,7 @@ func ResolveR2ConfigExplicit(cfg model.R2DepotConfig, creds R2Credentials) (R2Co
 	var accountID R2AccountID
 	if endpoint == "" {
 		if accountValue == "" {
-			return R2Config{}, fmt.Errorf("R2 account id required")
+			return R2Config{}, &R2ConfigError{field: R2ConfigAccountID, kind: R2ConfigMissing}
 		}
 		var err error
 		accountID, err = ParseR2AccountID(accountValue)
@@ -162,19 +229,19 @@ func ResolveR2ConfigExplicit(cfg model.R2DepotConfig, creds R2Credentials) (R2Co
 		endpoint = fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID.String())
 	} else {
 		if looksLikePlaceholder(endpoint) {
-			return R2Config{}, fmt.Errorf("R2 endpoint contains a documentation placeholder; replace it with a real endpoint")
+			return R2Config{}, &R2ConfigError{field: R2ConfigEndpoint, kind: R2ConfigPlaceholder}
 		}
 		parsed, err := url.Parse(endpoint)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return R2Config{}, fmt.Errorf("invalid R2 endpoint: expected an absolute URL")
+			return R2Config{}, &R2ConfigError{field: R2ConfigEndpoint, kind: R2ConfigInvalid}
 		}
 		if parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return R2Config{}, fmt.Errorf("invalid R2 endpoint: user info, paths, queries, and fragments are not allowed")
+			return R2Config{}, &R2ConfigError{field: R2ConfigEndpoint, kind: R2ConfigInvalid}
 		}
 		host := strings.ToLower(parsed.Hostname())
 		local := host == "localhost" || host == "127.0.0.1" || host == "::1"
 		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && local) {
-			return R2Config{}, fmt.Errorf("invalid R2 endpoint: HTTPS is required except for localhost test endpoints")
+			return R2Config{}, &R2ConfigError{field: R2ConfigEndpoint, kind: R2ConfigInvalid}
 		}
 		if accountValue != "" {
 			accountID, err = ParseR2AccountID(accountValue)

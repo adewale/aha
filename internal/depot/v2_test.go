@@ -585,6 +585,33 @@ func TestSameMachineConcurrentFirstPublicationsRejectStaleWriter(t *testing.T) {
 	}
 }
 
+func TestPreparePullRequiresInitializedValidatedDepot(t *testing.T) {
+	ctx := t.Context()
+	root := filepath.Join(t.TempDir(), "depot")
+	v2, err := depot.NewLocalV2(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v2.PreparePull(ctx); err == nil || !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("uninitialized PreparePull error=%v", err)
+	}
+	if err := v2.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := v2.PreparePull(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machines, err := prepared.Machines()
+	if err != nil || len(machines) != 0 {
+		t.Fatalf("machines=%v err=%v want empty initialized pull plan", machines, err)
+	}
+	var zero depot.PreparedPull
+	if _, err := zero.Machines(); err == nil {
+		t.Fatal("zero-value prepared pull became a readable depot")
+	}
+}
+
 func TestV2VerifyReportsMissingBlob(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "depot")

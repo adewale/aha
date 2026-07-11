@@ -46,6 +46,16 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 #### Fixed
 
+- Explicit CLI depot destinations now require `r2:BUCKET` or `local:PATH`; a
+  bare bucket-looking value can no longer silently become a local path.
+- Pull-only ingest constructs an opaque validated depot read capability and a
+  dedicated corpus-destination capability before opening SQLite or creating a
+  lifecycle lock. Invalid/denied R2 preflight and unrelated non-empty corpus
+  directories therefore produce zero local or remote mutations.
+- Typed R2 configuration failures expose the safe offending field and reason
+  (`missing`, `placeholder`, or `invalid`) without retaining its value, so
+  public errors and doctor hints identify the exact environment variable to
+  correct without disclosing credentials.
 - `aha depot init` against a missing bucket with the recommended
   bucket-scoped token now says the token cannot create buckets and to
   pre-create it, instead of hinting "check Object Read & Write permissions"
@@ -74,9 +84,9 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   R2 child logs are never streamed into operator output; explicit
   `--verbose`/`AHA_R2_SMOKETEST_VERBOSE=1` retains the private 0600 log and
   reports its path for local inspection.
-- Live R2 smoke tests now default to the project's pinned dedicated test
-  bucket/account (with explicit override flags available) and require a
-  distinct bucket-scoped credential pair via secure prompt or test-only
+- Live R2 smoke tests use the project's source-pinned dedicated test
+  bucket/account/attestation nonce with no runtime target overrides and require
+  a distinct bucket-scoped credential pair via secure prompt or test-only
   variables. Production `AHA_R2_*`, `R2_*`, and `AWS_*` credentials are neither
   fallback inputs nor present in the child environment; matching
   production/test keys fail before networking.

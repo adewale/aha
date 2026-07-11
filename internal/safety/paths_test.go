@@ -10,6 +10,36 @@ import (
 	"github.com/adewale/aha/internal/safety"
 )
 
+func TestPrepareCorpusDestinationMakesUnownedDirectoryUnrepresentable(t *testing.T) {
+	root := t.TempDir()
+	unowned := filepath.Join(root, "checkout")
+	if err := os.Mkdir(unowned, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unowned, "go.mod"), []byte("module unrelated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := safety.PrepareCorpusDestination(model.Config{}, unowned); err == nil {
+		t.Fatal("constructed a corpus destination from an unrelated non-empty directory")
+	}
+
+	fresh := filepath.Join(root, "fresh")
+	destination, err := safety.PrepareCorpusDestination(model.Config{}, fresh)
+	if err != nil {
+		t.Fatalf("fresh destination rejected: %v", err)
+	}
+	if path, err := destination.Path(); err != nil || path == "" {
+		t.Fatalf("prepared destination path=%q err=%v", path, err)
+	}
+	var zero safety.CorpusDestination
+	if _, err := zero.Path(); err == nil {
+		t.Fatal("zero-value corpus destination became a writable path")
+	}
+	if _, err := os.Stat(fresh); !os.IsNotExist(err) {
+		t.Fatalf("preparing destination mutated filesystem: %v", err)
+	}
+}
+
 func TestValidateWriteOutsideSourcesRejectsLexicalAndSymlinkContainment(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source")

@@ -67,6 +67,10 @@ func runCorpusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		if len(depotReport.Problems) > 0 {
 			return fmt.Errorf("default depot has problems: %s", strings.Join(depotReport.Problems, "; "))
 		}
+		prepared, err := v2.PreparePull(ctx)
+		if err != nil {
+			return err
+		}
 		report, err := corpus.RebuildWithBackupOptions(cfg.CorpusDir, func(staging string) error {
 			stagingCfg := cfg
 			stagingCfg.CorpusDir = staging
@@ -79,7 +83,7 @@ func runCorpusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 				return errors.Join(err, store.Close())
 			}
 			ing.Context = ctx
-			_, pullErr := pullFromDepotV2(ctx, io.Discard, ing, v2, true, progress.Tracker)
+			_, pullErr := pullFromDepotV2(ctx, io.Discard, ing, prepared, true, progress.Tracker)
 			return errors.Join(pullErr, store.Close())
 		}, corpus.RebuildOptions{
 			Context:  ctx,
