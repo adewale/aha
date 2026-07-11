@@ -65,6 +65,7 @@ type ingestHooks struct {
 }
 
 type Ingestor struct {
+	Context  context.Context
 	Store    *Store
 	Registry map[string]adapters.SourceAdapter
 	Clock    ahaclock.Clock
@@ -98,6 +99,7 @@ type bundlePlanner struct {
 }
 
 type corpusWriter struct {
+	Context  context.Context
 	Store    *Store
 	Registry map[string]adapters.SourceAdapter
 	tx       *sql.Tx
@@ -198,6 +200,9 @@ func (ing Ingestor) IngestBundle(path string) (IngestReport, error) {
 func (ing Ingestor) IngestBundleWithExpectedSHA(path, expectedSHA string) (IngestReport, error) {
 	const maxBusyRetries = 20
 	for attempt := 0; ; attempt++ {
+		if err := ing.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		rep, err := ing.ingestBundleOnce(path, expectedSHA)
 		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
 			return rep, err
@@ -207,6 +212,9 @@ func (ing Ingestor) IngestBundleWithExpectedSHA(path, expectedSHA string) (Inges
 }
 
 func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, error) {
+	if err := ing.context().Err(); err != nil {
+		return IngestReport{}, err
+	}
 	store := ing.Store
 	plan, err := (bundlePlanner{Store: store}).Prepare(path, expectedSHA)
 	if err != nil {
@@ -227,6 +235,9 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 		return IngestReport{}, err
 	}
 	if skip {
+		if err := ing.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return IngestReport{}, err
 		}
@@ -240,7 +251,7 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 	if level == "" {
 		level = "none-v1"
 	}
-	writer := corpusWriter{Store: store, Registry: ing.Registry, tx: tx, manifest: manifest, manifestSHA: plan.manifestSHA, redactor: ing.Redactor, redactionLevel: level}
+	writer := corpusWriter{Context: ing.context(), Store: store, Registry: ing.Registry, tx: tx, manifest: manifest, manifestSHA: plan.manifestSHA, redactor: ing.Redactor, redactionLevel: level}
 	if err := writer.PrepareStatements(); err != nil {
 		return IngestReport{}, err
 	}
@@ -250,6 +261,9 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 	}
 	rep := IngestReport{Duplicate: dup}
 	err = archive.StreamManifestFiles(plan.stagingPath, func(mf model.ManifestFile, r io.Reader) error {
+		if err := ing.context().Err(); err != nil {
+			return err
+		}
 		fileRep, err := writer.IngestManifestFile(mf, r)
 		if err != nil {
 			return err
@@ -269,6 +283,9 @@ func (ing Ingestor) ingestBundleOnce(path, expectedSHA string) (IngestReport, er
 			return IngestReport{}, err
 		}
 	}
+	if err := ing.context().Err(); err != nil {
+		return IngestReport{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return IngestReport{}, err
 	}
@@ -287,6 +304,36 @@ func validateIngestAdapters(files []model.ManifestFile, registry map[string]adap
 		}
 	}
 	return nil
+}
+
+type readerWithContext struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r readerWithContext) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return n, ctxErr
+	}
+	return n, err
+}
+
+func (ing Ingestor) context() context.Context {
+	if ing.Context == nil {
+		return context.Background()
+	}
+	return ing.Context
+}
+
+func (w corpusWriter) context() context.Context {
+	if w.Context == nil {
+		return context.Background()
+	}
+	return w.Context
 }
 
 func (ing Ingestor) clock() ahaclock.Clock {
@@ -373,6 +420,7 @@ func (w corpusWriter) InsertMachineAndSources() error {
 }
 
 func (w corpusWriter) IngestManifestFile(mf model.ManifestFile, r io.Reader) (IngestReport, error) {
+	r = readerWithContext{ctx: w.context(), reader: r}
 	store := w.Store
 	manifest := w.manifest
 	entryReader := io.Reader(r)
@@ -496,7 +544,11 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	if err != nil {
 		return IngestReport{}, err
 	}
-	ps, err := ad.ParseSession(context.Background(), model.SessionFile{Source: mf.Source, Path: mf.RawPath, RelativePath: strings.TrimPrefix(mf.RelativePath, "sources/"+mf.Source+"/sessions/"), SessionID: mf.SessionID, CWD: mf.CWD, StartedAt: mf.StartedAt, IsSubagent: mf.IsSubagent}, fh)
+	ctx := w.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ps, err := ad.ParseSession(ctx, model.SessionFile{Source: mf.Source, Path: mf.RawPath, RelativePath: strings.TrimPrefix(mf.RelativePath, "sources/"+mf.Source+"/sessions/"), SessionID: mf.SessionID, CWD: mf.CWD, StartedAt: mf.StartedAt, IsSubagent: mf.IsSubagent}, fh)
 	_ = fh.Close()
 	if err != nil {
 		return IngestReport{}, err
@@ -549,6 +601,9 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 	}
 	rep := IngestReport{Sessions: 1}
 	for _, pe := range ps.Entries {
+		if err := w.context().Err(); err != nil {
+			return IngestReport{}, err
+		}
 		if _, err := model.NewEntryID(pe.EntryID); err != nil {
 			return IngestReport{}, err
 		}
@@ -577,17 +632,26 @@ func (w corpusWriter) IngestSessionFile(mf model.ManifestFile, tmpPath string) (
 // resolving success has now arrived correctly flips its abandoned episode to
 // resolved rather than keeping a stale row.
 func (w corpusWriter) insertFailureEpisodes(sessionKey string) error {
+	if err := w.context().Err(); err != nil {
+		return err
+	}
 	return rebuildFailureEpisodesForSession(w.tx, sessionKey)
 }
 
 func (w corpusWriter) insertToolInvocations(sessionKey, projectKey, machineID string, entries []model.ParsedEntry, present map[string]string) error {
 	accepted := make([]model.ParsedEntry, 0, len(entries))
 	for _, pe := range entries {
+		if err := w.context().Err(); err != nil {
+			return err
+		}
 		if present[pe.EntryID] == hash.SHA256Bytes([]byte(pe.RawJSON)) {
 			accepted = append(accepted, pe)
 		}
 	}
 	for _, inv := range BuildToolInvocations(accepted, projectKey, machineID) {
+		if err := w.context().Err(); err != nil {
+			return err
+		}
 		if !inv.OutcomeObserved {
 			continue
 		}

@@ -41,7 +41,15 @@ func (f *fakeS3) Close() { f.server.Close() }
 
 func (f *fakeS3) Depot(bucket string) *depot.R2 {
 	client := s3.New(s3.Options{Region: "auto", BaseEndpoint: aws.String(f.server.URL), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider("key", "secret", "")})
-	return &depot.R2{Bucket: bucket, Client: client, Config: depot.R2Config{Endpoint: f.server.URL, Region: "auto", AccessKeyID: "key", SecretAccessKey: "secret"}}
+	validated, err := depot.ParseR2Bucket(bucket)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	r2, err := depot.NewR2WithClient(validated, client)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return r2
 }
 
 func (f *fakeS3) put(key string, b []byte) {

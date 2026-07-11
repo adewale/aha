@@ -14,6 +14,7 @@ import (
 	"github.com/adewale/aha/internal/media"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 	"github.com/adewale/aha/internal/safety"
 )
 
@@ -23,6 +24,7 @@ type StateOptions struct {
 	SessionFilters []string
 	MaxSessions    int
 	Clock          ahaclock.Clock
+	Progress       *ahaprogress.Tracker
 	// Cache is the advisory scan cache; nil means always read (--force).
 	Cache *CaptureCache
 }
@@ -45,6 +47,7 @@ type StateCapture struct {
 // CaptureState discovers the configured sources and builds the snapshot
 // manifest, reading only files the scan cache cannot vouch for.
 func CaptureState(ctx context.Context, cfg model.Config, registry map[string]adapters.SourceAdapter, opts StateOptions) (*StateCapture, error) {
+	opts.Progress.Start(ahaprogress.PhaseCapture, ahaprogress.UnknownTotal(), ahaprogress.UnitFiles)
 	if opts.CapturedAt == "" {
 		clk := opts.Clock
 		if clk == nil {
@@ -54,21 +57,51 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 	}
 	sessions, artifacts, err := discoverSourceFiles(ctx, cfg, registry, opts.SessionFilters, opts.MaxSessions)
 	if err != nil {
+		if ctx.Err() != nil {
+			opts.Progress.Cancel(ahaprogress.PhaseCapture, 0, ahaprogress.UnknownTotal(), ahaprogress.UnitFiles)
+		} else {
+			opts.Progress.Fail(ahaprogress.PhaseCapture, 0, ahaprogress.UnknownTotal(), ahaprogress.UnitFiles)
+		}
 		return nil, err
 	}
+	captureTotal := ahaprogress.UnknownTotal()
+	if opts.Progress != nil {
+		totalFiles := len(sessions)
+		for _, artifact := range artifacts {
+			if cfg.IncludeImages || !media.FileLooksImage(artifact.Path) {
+				totalFiles++
+			}
+		}
+		captureTotal = ahaprogress.KnownTotal(uint64(totalFiles))
+	}
+	opts.Progress.Advance(ahaprogress.PhaseCapture, 0, captureTotal, ahaprogress.UnitFiles)
+	processedFiles := uint64(0)
 	tmpDir, err := os.MkdirTemp("", "aha-capture-*")
 	if err != nil {
+		if ctx.Err() != nil {
+			opts.Progress.Cancel(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
+		} else {
+			opts.Progress.Fail(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
+		}
 		return nil, err
 	}
 	sc := &StateCapture{tempDir: tmpDir, copies: map[string]string{}, raws: map[string]string{}}
 	success := false
 	defer func() {
 		if !success {
+			if ctx.Err() != nil {
+				opts.Progress.Cancel(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
+			} else {
+				opts.Progress.Fail(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
+			}
 			_ = os.RemoveAll(tmpDir)
 		}
 	}()
 	var files []model.ManifestFile
 	addFile := func(root, rawPath, rel string, mf model.ManifestFile) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := safety.EnsureUnderRoot(root, rawPath); err != nil {
 			return err
 		}
@@ -80,6 +113,8 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 					mf.CopyState = "stable"
 					sc.raws[sha] = rawPath
 					files = append(files, mf)
+					processedFiles++
+					opts.Progress.Advance(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
 					return nil
 				}
 			}
@@ -93,6 +128,8 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 		mf.CopyState = state
 		sc.copies[sha] = copyPath
 		files = append(files, mf)
+		processedFiles++
+		opts.Progress.Advance(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
 		if opts.Cache != nil && state == "stable" {
 			if st, err := os.Lstat(rawPath); err == nil && st.Mode().IsRegular() && st.Size() == size {
 				opts.Cache.Record(rawPath, st, sha)
@@ -154,6 +191,7 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 	if _, _, err := model.EncodeSnapshotManifest(sc.Manifest); err != nil {
 		return nil, err
 	}
+	opts.Progress.Complete(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
 	success = true
 	return sc, nil
 }

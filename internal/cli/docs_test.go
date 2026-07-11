@@ -41,6 +41,19 @@ func TestSpecAndLessonsCycleLedgerStayInSync(t *testing.T) {
 	}
 }
 
+func TestTrustDocScopesErrorNormalizationToApplicationBoundaries(t *testing.T) {
+	b, err := os.ReadFile("../../docs/trust.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, want := range []string{"application/tool failures", "SDK-owned protocol", "not normalized by aha"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("trust document does not scope MCP error guarantee with %q", want)
+		}
+	}
+}
+
 func TestRegisteredCommandsHaveAgentMetadata(t *testing.T) {
 	for _, name := range cli.CommandNames() {
 		cmd := cli.Registry()[name]

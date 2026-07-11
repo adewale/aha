@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/adewale/aha/internal/cli"
@@ -15,7 +19,152 @@ import (
 	"github.com/adewale/aha/internal/testutil"
 )
 
-func TestCLIDoctorReportsR2ConfigurationMistakes(t *testing.T) {
+func TestCLIDoctorRejectsInvalidR2IdentityBeforeAnyRequest(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	defer server.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ENDPOINT", server.URL)
+	t.Setenv("AHA_R2_ACCOUNT_ID", "<your-account-id>")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--depot", "r2:aha-depot", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("invalid identity caused %d network requests", requests.Load())
+	}
+	if !strings.Contains(out.String(), "placeholder") {
+		t.Fatalf("doctor output missing local validation error: %s", out.String())
+	}
+}
+
+func TestCLIDoctorDoesNotSerializeRawSDKFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Secret-Canary", "secret-canary")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AHA_R2_ENDPOINT", server.URL)
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "access-canary")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret-canary")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--depot", "r2:aha-depot", "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, forbidden := range []string{"StatusCode", "RequestID", "HostID", "operation error S3", "secret-canary", server.URL} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("doctor leaked raw SDK detail %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, "remote depot rejected") {
+		t.Fatalf("doctor output lacks safe failure summary: %s", body)
+	}
+}
+
+func TestCLIDoctorMalformedConfigActionCreatesSiblingWithoutOverwriting(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "malformed.jsonc")
+	original := []byte(`{"broken":`)
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Next       []string `json:"next"`
+		NextAction struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"next_action"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	repaired := configPath + ".repaired"
+	if len(payload.Next) != 1 || payload.NextAction.Command != "aha" || !reflect.DeepEqual(payload.NextAction.Args, []string{"init", "--accept-secrets", "--config", repaired}) {
+		t.Fatalf("payload=%+v output=%s", payload, out.String())
+	}
+	out.Reset()
+	if err := cli.Run(payload.NextAction.Args, &out, io.Discard); err != nil {
+		t.Fatalf("suggested action failed: %v", err)
+	}
+	if _, err := os.Stat(repaired); err != nil {
+		t.Fatalf("suggested action did not create repaired config: %v", err)
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("malformed original changed: got=%q err=%v", got, err)
+	}
+}
+
+func TestCLIDepotSetupMalformedConfigStillReturnsOneRepairAction(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "malformed.jsonc")
+	if err := os.WriteFile(configPath, []byte(`{"broken":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"depot", "setup", "r2:aha-depot", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatalf("setup should render blocked state, got: %v", err)
+	}
+	var payload struct {
+		State string   `json:"state"`
+		Next  []string `json:"next"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.State != "blocked" || len(payload.Next) != 1 || !strings.Contains(payload.Next[0], configPath) {
+		t.Fatalf("setup payload=%+v output=%s", payload, out.String())
+	}
+}
+
+func TestCLIDepotSetupReportsOneActionWhenCredentialsAreMissing(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.jsonc")
+	if err := os.WriteFile(configPath, []byte(`{"machine_id":"m","sources":[],"corpus_dir":"`+filepath.ToSlash(filepath.Join(root, "corpus"))+`","depot":{"type":"local","location":"`+filepath.ToSlash(filepath.Join(root, "depot"))+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "")
+	t.Setenv("R2_ACCESS_KEY_ID", "")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "")
+	t.Setenv("R2_SECRET_ACCESS_KEY", "")
+	var out bytes.Buffer
+	if err := cli.Run([]string{"depot", "setup", "r2:aha-depot", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		State string   `json:"state"`
+		Next  []string `json:"next"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.State != "blocked" || len(payload.Next) != 1 || !strings.Contains(payload.Next[0], configPath) {
+		t.Fatalf("setup payload=%+v output=%s", payload, out.String())
+	}
+}
+
+func TestCLIDepotSetupRejectsPlaceholderBeforeNetworking(t *testing.T) {
+	t.Setenv("AHA_R2_ACCOUNT_ID", "<your-account-id>")
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "<r2-access-key-id>")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "<r2-secret-access-key>")
+	var out bytes.Buffer
+	err := cli.Run([]string{"depot", "setup", "r2:<your-production-bucket>", "--json"}, &out, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("depot setup error=%v output=%s", err, out.String())
+	}
+}
+
+func TestCLIDoctorRejectsInvalidR2AddressBeforeNetworking(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("AWS_ACCESS_KEY_ID", "aws-key")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
 	var out bytes.Buffer
@@ -23,13 +172,55 @@ func TestCLIDoctorReportsR2ConfigurationMistakes(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{"depot address should be r2:BUCKET", "public r2.dev", "AHA ignores AWS_ACCESS_KEY_ID"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("doctor missing %q in %s", want, body)
-		}
+	if !strings.Contains(body, "R2 bucket name is invalid") {
+		t.Fatalf("doctor did not reject invalid bucket locally: %s", body)
 	}
 	if strings.Contains(body, "aws-secret") {
 		t.Fatalf("doctor leaked AWS secret: %s", body)
+	}
+}
+
+func TestCLIDoctorPreservesConfigOverrideInItsSingleNextAction(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config with spaces.jsonc")
+	depotDir := filepath.Join(root, "depot")
+	corpusDir := filepath.Join(root, "corpus")
+	cfg := `{"machine_id":"doctor-machine","sources":[],"corpus_dir":"` + filepath.ToSlash(corpusDir) + `","depot":{"type":"local","location":"` + filepath.ToSlash(depotDir) + `"},"accept_secrets_warning":true}`
+	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cli.Run([]string{"doctor", "--config", configPath, "--json"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Config     string         `json:"config"`
+		Next       []string       `json:"next"`
+		Depot      map[string]any `json:"depot"`
+		NextAction struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"next_action"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Config != configPath || len(payload.Next) != 1 || payload.NextAction.Command != "aha" {
+		t.Fatalf("doctor payload=%+v output=%s", payload, out.String())
+	}
+	if _, duplicate := payload.Depot["next"]; duplicate {
+		t.Fatalf("depot diagnostic duplicated the sole next action: %+v", payload.Depot)
+	}
+	joined := strings.Join(payload.NextAction.Args, "\x00")
+	if !strings.Contains(joined, configPath) || !strings.Contains(joined, "depot\x00init") {
+		t.Fatalf("next action lost config/depot state: %+v", payload.NextAction)
+	}
+	out.Reset()
+	if err := cli.Run([]string{"doctor", "--config", configPath}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(out.String(), "next:"); count != 1 {
+		t.Fatalf("human doctor rendered %d next actions:\n%s", count, out.String())
 	}
 }
 
@@ -138,8 +329,11 @@ func TestRunMainUsesProfileEnvironment(t *testing.T) {
 func TestRunMainRejectsProfileFlagWithoutPath(t *testing.T) {
 	var out, stderr bytes.Buffer
 	code := cli.RunMain([]string{"--cpuprofile"}, &out, &stderr)
-	if code == 0 || !strings.Contains(stderr.String(), "--cpuprofile requires path") {
+	if code == 0 || !strings.Contains(stderr.String(), "invalid command options") || strings.Count(stderr.String(), "next:") != 1 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "--cpuprofile requires path") {
+		t.Fatalf("default error leaked parser internals: %q", stderr.String())
 	}
 }
 
@@ -220,8 +414,11 @@ func TestSnapshotRequiresPrivacyAcknowledgement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("snapshot succeeded without privacy acknowledgement")
 	}
-	if !strings.Contains(stderr.String(), "Snapshots are raw provenance") {
-		t.Fatalf("missing privacy warning: %s", stderr.String())
+	if !strings.Contains(err.Error(), "privacy acknowledgement") {
+		t.Fatalf("unexpected typed privacy error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("command layer bypassed public error boundary: %s", stderr.String())
 	}
 	matches, _ := filepath.Glob(filepath.Join(outDir, "blobs", "v2", "*"))
 	if len(matches) != 0 {
@@ -459,7 +656,7 @@ func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
 	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "uploaded=") {
+	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "uploaded=") || !strings.Contains(out.String(), "existing=") {
 		t.Fatalf("snapshot did not report the pushed manifest: %s", out.String())
 	}
 	manifests, err := filepath.Glob(filepath.Join(depotDir, "machines", "*", "manifests", "*.json"))

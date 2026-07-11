@@ -69,7 +69,8 @@ func TestExportImportRoundTrip(t *testing.T) {
 func TestExportRequiresExistingSnapshot(t *testing.T) {
 	root := t.TempDir()
 	depotDir := filepath.Join(root, "depot")
-	if err := cli.Run([]string{"depot", "init", "local:" + depotDir}, io.Discard, io.Discard); err != nil {
+	configPath := filepath.Join(root, "config.jsonc")
+	if err := cli.Run([]string{"depot", "init", "--config", configPath, "local:" + depotDir}, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	err := cli.Run([]string{"export", "--machine", "ghost", "--depot", "local:" + depotDir}, io.Discard, io.Discard)

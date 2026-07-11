@@ -4,6 +4,83 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### R2 onboarding (June–July 2026)
+
+#### Added
+
+- `scripts/r2-smoketest.sh`: preflights the R2 environment variables with
+  per-variable guidance, then runs the live-bucket integration tests
+  (push, delta push, unchanged-state reuse, pull, deep verify, and concurrent
+  first pushes contending on the shared machine index) against a real bucket.
+- `aha depot setup r2:BUCKET`: read-only R2 onboarding preflight that reports a
+  closed state and exactly one safe next command.
+- `aha corpus rebuild --backup`: builds and verifies a sibling v2 corpus,
+  atomically preserves the pre-v2 corpus, promotes the replacement, and reports
+  the retained backup path. There is no unsafe no-backup mode.
+- Typed progress events and stderr renderers for long-running capture, upload,
+  publish, pull, ingest, deep verification, and rebuild phases. TTY, stable
+  plain-line, NDJSON, and off modes preserve a single final JSON document on
+  stdout, never invent totals or ETAs, and terminate started phases explicitly
+  as completed, cancelled, or failed.
+- [docs/r2-bucket-settings.md](docs/r2-bucket-settings.md): concrete bucket
+  lock guidance (lock the `blobs/` prefix, never `machines/` — pushes
+  overwrite the pointer and index), Account-vs-User API token choice,
+  temporary access credentials for CI, and location-hint advice.
+
+#### Changed
+
+- The production R2 client pins AWS SDK request/response checksums to
+  "when required", following Cloudflare's SDK guidance: R2 implements the
+  `x-amz-checksum-*` headers only partially, and depot integrity is already
+  carried by content addressing. The SDK default (checksums on every
+  PutObject) is what broke many S3-compatible stores when AWS enabled it
+  in early 2025.
+- [docs/onboarding.md](docs/onboarding.md) §8 now sets up R2 in dependency
+  order — bucket, then bucket-scoped token, read-only preflight, then `aha
+  depot init` — because a token can only be scoped to a bucket that exists,
+  and a bucket-scoped token cannot create buckets. Credential prompts work in
+  both zsh and bash and do not put the secret in shell history.
+- `aha doctor` now reports the effective config path and exactly one
+  state-derived next action, preserving `--config` overrides as structured
+  command arguments.
+
+#### Fixed
+
+- `aha depot init` against a missing bucket with the recommended
+  bucket-scoped token now says the token cannot create buckets and to
+  pre-create it, instead of hinting "check Object Read & Write permissions"
+  at a token whose permissions are already correct.
+- A HeadBucket failure that is not NotFound (bad credentials, wrong account,
+  wrong endpoint) now surfaces as itself; previously `depot init` fell
+  through to CreateBucket and reported the creation failure instead.
+- R2 bucket names, Cloudflare account IDs, endpoints, credential pairs, and
+  documentation placeholders are rejected before constructing a network
+  client. Secret-bearing resolved config is opaque and cannot be serialized.
+- Conditional pointer/index updates use bounded, jittered, context-cancellable
+  retries and return a typed contention error instead of failing after five
+  ordinary races or retrying forever. Deterministic tests force conflicts
+  beyond the old ceiling for both update paths.
+- `TestExportRequiresExistingSnapshot` no longer writes a temporary depot into
+  the real user config; a static test now rejects mutating CLI tests that omit
+  an explicit `--config` path.
+- R2 access preflight now falls back from a forbidden `HeadBucket` to a bounded
+  `ListObjectsV2` probe. If both fail, the error proves the loaded key pair does
+  not authorize the bucket endpoint before any mutation. Conflicting
+  `AHA_R2_*`/`R2_*` aliases fail locally without exposing either value.
+- All `aha` CLI, MCP, and dashboard error boundaries now use opaque safe views:
+  one concise message, exactly one structured next action, stable
+  `aha.error.v1` JSON, valid NDJSON with structured progress, and optional
+  allowlisted `--verbose-errors` diagnostics instead of raw SDK/SQL/path causes.
+  R2 child logs are never streamed into operator output; explicit
+  `--verbose`/`AHA_R2_SMOKETEST_VERBOSE=1` retains the private 0600 log and
+  reports its path for local inspection.
+- Live R2 smoke tests now default to the project's pinned dedicated test
+  bucket/account (with explicit override flags available) and require a
+  distinct bucket-scoped credential pair via secure prompt or test-only
+  variables. Production `AHA_R2_*`, `R2_*`, and `AWS_*` credentials are neither
+  fallback inputs nor present in the child environment; matching
+  production/test keys fail before networking.
+
 ### Depot v2 — content-addressed snapshots (June 2026)
 
 The bundle/catalog depot first described below was replaced wholesale before

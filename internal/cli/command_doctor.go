@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,11 +17,12 @@ import (
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	configPath := fs.String("config", "", "config path")
 	depotAddr := fs.String("depot", "", "depot address to check")
 	jsonOut := fs.Bool("json", false, "JSON output")
@@ -32,45 +34,52 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) error {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	effectiveConfig := *configPath
+	if effectiveConfig == "" {
+		effectiveConfig = config.DefaultPath()
+	}
+	effectiveConfig, pathErr := paths.Expand(effectiveConfig)
+	configExists := false
+	if pathErr == nil {
+		_, statErr := os.Stat(effectiveConfig)
+		configExists = statErr == nil
+	}
 	cfg, cfgErr := config.Load(*configPath)
+	if cfgErr == nil && pathErr != nil {
+		cfgErr = pathErr
+	}
 	depotDiag := doctorDepot(cfg, *depotAddr, cfgErr)
 	sourceDiag := doctorSources(cfg, cfgErr)
 	corpusDiag := doctorCorpus(cfg, cfgErr)
+	action := doctorNextAction(effectiveConfig, configExists, cfgErr, depotDiag, corpusDiag)
+	next, structuredAction := actionOutput(action)
 	if *jsonOut {
 		var ads []map[string]any
 		for _, name := range names {
 			ad := adapters.Builtins()[name]
 			ads = append(ads, map[string]any{"name": name, "version": ad.Version(), "capabilities": ad.Capabilities(), "default_roots": ad.DefaultRoots()})
 		}
-		return writeJSON(stdout, map[string]any{"version": model.Version, "config": config.DefaultPath(), "adapters": ads, "sources": sourceDiag, "corpus": corpusDiag, "depot": depotDiag, "next": []string{"aha init --accept-secrets", "aha refresh", "aha search <query>"}})
+		return writeJSON(stdout, map[string]any{"version": model.Version, "config": effectiveConfig, "adapters": ads, "sources": sourceDiag, "corpus": corpusDiag, "depot": depotDiag, "next": next, "next_action": structuredAction})
 	}
-	fmt.Fprintf(stdout, "aha: %s\nconfig: %s\n", model.Version, config.DefaultPath())
+	fmt.Fprintf(stdout, "aha: %s\nconfig: %s\n", model.Version, effectiveConfig)
 	fmt.Fprintf(stdout, "corpus: %s ok=%v\n", corpusDiag["path"], corpusDiag["ok"])
 	fmt.Fprintf(stdout, "depot: %s:%s ok=%v\n", depotDiag["type"], depotDiag["location"], depotDiag["ok"])
-	if depotDiag["initialized"] == false {
-		fmt.Fprintf(stdout, "  depot not initialized; run `aha depot init %s:%s`\n", depotDiag["type"], depotDiag["location"])
-	} else {
-		if problems, ok := depotDiag["problems"].([]string); ok {
-			for _, p := range problems {
-				fmt.Fprintf(stdout, "  depot problem: %s\n", p)
-			}
-		}
-		if next, ok := depotDiag["next"].([]string); ok {
-			for _, n := range next {
-				fmt.Fprintf(stdout, "  next: %s\n", n)
-			}
+	if problems, ok := depotDiag["problems"].([]string); ok {
+		for _, p := range problems {
+			fmt.Fprintf(stdout, "  depot problem: %s\n", p)
 		}
 	}
 	for _, name := range names {
 		ad := adapters.Builtins()[name]
 		fmt.Fprintf(stdout, "adapter: %s version=%s capabilities=%s\n", name, ad.Version(), mustJSON(ad.Capabilities()))
 	}
+	fmt.Fprintf(stdout, "next: %s\n", action.String())
 	return nil
 }
 
 func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 	if cfgErr != nil {
-		return []map[string]any{{"ok": false, "error": cfgErr.Error()}}
+		return []map[string]any{{"ok": false, "error": doctorError(cfgErr)}}
 	}
 	registry := adapters.Builtins()
 	var out []map[string]any
@@ -84,14 +93,14 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 			continue
 		}
 		if !ok {
-			item["error"] = "unknown source adapter"
+			item["error"] = "Unknown source adapter."
 			item["hints"] = []string{"Check the source type; built-ins are claude-code, codex, opencode, and pi."}
 			out = append(out, item)
 			continue
 		}
 		root, err := paths.Expand(sc.Root)
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			out = append(out, item)
 			continue
 		}
@@ -99,7 +108,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		st, err := os.Stat(root)
 		if err != nil {
 			item["exists"] = false
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			item["hints"] = []string{"Create the source history root, disable this source, or update its configured root."}
 			out = append(out, item)
 			continue
@@ -109,7 +118,7 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 		item["is_file"] = st.Mode().IsRegular()
 		found, err := ad.Discover(context.Background(), model.SourceConfig{Type: sc.Type, Root: root, Enabled: true})
 		if err != nil {
-			item["error"] = err.Error()
+			item["error"] = doctorError(err)
 			out = append(out, item)
 			continue
 		}
@@ -123,12 +132,12 @@ func doctorSources(cfg model.Config, cfgErr error) []map[string]any {
 func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 	out := map[string]any{"ok": false}
 	if cfgErr != nil {
-		out["error"] = cfgErr.Error()
+		out["error"] = doctorError(cfgErr)
 		return out
 	}
 	root, err := paths.Expand(cfg.CorpusDir)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		return out
 	}
 	if root == "" {
@@ -152,14 +161,17 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 	out["db_exists"] = true
 	store, err := corpus.OpenExisting(root)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
+		if errors.Is(err, corpus.ErrLegacyCorpus) {
+			out["legacy"] = true
+		}
 		out["hints"] = []string{"Check corpus path permissions and schema; run `aha status --json` for details."}
 		return out
 	}
 	defer store.Close()
 	stats, err := corpus.Status(store.DB, store.Root)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		return out
 	}
 	out["ok"] = true
@@ -171,15 +183,30 @@ func doctorCorpus(cfg model.Config, cfgErr error) map[string]any {
 
 func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any {
 	out := map[string]any{"ok": false}
+	if override != "" {
+		typ, location, hasType := strings.Cut(override, ":")
+		if hasType {
+			out["type"] = strings.ToLower(strings.TrimSpace(typ))
+			out["location"] = strings.TrimSpace(location)
+		}
+	} else {
+		out["type"] = cfg.Depot.Type
+		out["location"] = cfg.Depot.Location
+	}
 	if cfgErr != nil {
-		out["error"] = cfgErr.Error()
+		out["error"] = doctorError(cfgErr)
 		return out
 	}
-	addr := depot.AddressFromConfig(cfg.Depot)
+	addr, err := depot.AddressFromConfig(cfg.Depot)
+	if err != nil {
+		out["error"] = doctorError(err)
+		out["hints"] = depotErrorHints(err)
+		return out
+	}
 	if override != "" {
 		parsed, err := depot.ParseAddress(override)
 		if err != nil {
-			out["error"] = err.Error()
+			out["error"] = doctorError(err)
 			out["hints"] = []string{"Use depot addresses like local:/path or r2:bucket-name."}
 			return out
 		}
@@ -193,13 +220,13 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 	}
 	v2, err := depotV2ForConfig(cfg, override)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
 	report, err := v2.Verify(context.Background(), false)
 	if err != nil {
-		out["error"] = err.Error()
+		out["error"] = doctorError(err)
 		out["hints"] = depotErrorHints(err)
 		return out
 	}
@@ -210,14 +237,12 @@ func doctorDepot(cfg model.Config, override string, cfgErr error) map[string]any
 		// user to initialize it rather than reporting it as broken.
 		out["ok"] = true
 		out["initialized"] = false
-		out["next"] = []string{fmt.Sprintf("aha depot init %s:%s", addr.Type, addr.Location)}
 		return out
 	}
 	out["initialized"] = true
 	out["ok"] = len(report.Problems) == 0
 	if len(report.Problems) > 0 {
 		out["problems"] = report.Problems
-		out["next"] = []string{fmt.Sprintf("aha depot verify %s:%s --deep", addr.Type, addr.Location)}
 	}
 	return out
 }
@@ -287,6 +312,10 @@ func looksLikeR2BucketName(name string) bool {
 	return true
 }
 
+func doctorError(err error) string {
+	return usererror.Normalize(err, "doctor").Message()
+}
+
 func depotErrorHints(err error) []string {
 	msg := strings.ToLower(err.Error())
 	var hints []string
@@ -296,7 +325,12 @@ func depotErrorHints(err error) []string {
 	if strings.Contains(msg, "credentials required") {
 		hints = append(hints, "Set AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY, or their R2_* aliases.")
 	}
-	if strings.Contains(msg, "accessdenied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "403") {
+	denied := strings.Contains(msg, "accessdenied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "403")
+	if strings.Contains(msg, "create r2 bucket") && denied {
+		// The recommended Object Read & Write token cannot create buckets, so
+		// "check your token permissions" would point at a token that is fine.
+		hints = append(hints, "This token cannot create buckets (only Admin Read & Write tokens can). Pre-create the bucket with `npx wrangler r2 bucket create <bucket>` or in the Cloudflare dashboard, then rerun `aha depot init`.")
+	} else if denied {
 		hints = append(hints, "Check that the R2 token is scoped to this bucket and has Object Read & Write permissions.")
 	}
 	if strings.Contains(msg, "nosuchbucket") || strings.Contains(msg, "notfound") || strings.Contains(msg, "404") {
@@ -309,7 +343,7 @@ func depotErrorHints(err error) []string {
 		hints = append(hints, "Check AHA_R2_ACCOUNT_ID/AHA_R2_ENDPOINT spelling; R2 endpoints look like https://<ACCOUNT_ID>.r2.cloudflarestorage.com.")
 	}
 	if len(hints) == 0 {
-		hints = append(hints, "Run `aha depot verify --repair` for catalog/object mismatches; check R2 bucket privacy, token scope, endpoint, and region=auto.")
+		hints = append(hints, "Check R2 bucket privacy, token scope, account/endpoint coherence, and region=auto.")
 	}
 	return hints
 }

@@ -45,7 +45,15 @@ func (f *fakeS3) depotV2WithTransport(bucket string, ct *crashingTransport) *dep
 	// No SDK retries: the transport models a crashed process, so retrying
 	// only adds backoff sleeps — a dead connection stays dead.
 	client := s3.New(s3.Options{Region: "auto", BaseEndpoint: aws.String(f.server.URL), UsePathStyle: true, Credentials: credentials.NewStaticCredentialsProvider("key", "secret", ""), HTTPClient: &http.Client{Transport: ct}, Retryer: aws.NopRetryer{}})
-	return depot.NewV2FromR2(&depot.R2{Bucket: bucket, Client: client})
+	validated, err := depot.ParseR2Bucket(bucket)
+	if err != nil {
+		panic(err)
+	}
+	r2, err := depot.NewR2WithClient(validated, client)
+	if err != nil {
+		panic(err)
+	}
+	return depot.NewV2FromR2(r2)
 }
 
 // runCrashScenario pushes snapshot A then grown snapshot A+B for one

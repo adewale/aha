@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 )
@@ -38,6 +39,10 @@ func (r VerifyReport) HasProblem(code string) bool {
 }
 
 func Verify(store *Store) (VerifyReport, error) {
+	return VerifyContext(context.Background(), store)
+}
+
+func VerifyContext(ctx context.Context, store *Store) (VerifyReport, error) {
 	report := VerifyReport{Root: filepath.Clean(store.Root)}
 	stats := []struct {
 		dst   *int
@@ -53,7 +58,7 @@ func Verify(store *Store) (VerifyReport, error) {
 		{&report.Stats.ToolInvocations, `select count(*) from tool_invocations`},
 	}
 	for _, stat := range stats {
-		count, err := verifyCount(store.DB, stat.query)
+		count, err := verifyCountContext(ctx, store.DB, stat.query)
 		if err != nil {
 			return report, err
 		}
@@ -77,7 +82,7 @@ func Verify(store *Store) (VerifyReport, error) {
 		{"unknown_redaction_levels", "sessions with unknown redaction_level", `select count(*) from sessions where coalesce(redaction_level,'none-v1') not in ('none-v1','v1')`},
 	}
 	for _, check := range checks {
-		count, err := verifyCount(store.DB, check.query)
+		count, err := verifyCountContext(ctx, store.DB, check.query)
 		if err != nil {
 			return report, err
 		}
@@ -89,8 +94,16 @@ func Verify(store *Store) (VerifyReport, error) {
 }
 
 func verifyCount(db *sql.DB, query string) (int, error) {
+	return verifyCountContext(context.Background(), db, query)
+}
+
+type contextQueryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func verifyCountContext(ctx context.Context, db contextQueryRower, query string) (int, error) {
 	var count int
-	if err := db.QueryRow(query).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

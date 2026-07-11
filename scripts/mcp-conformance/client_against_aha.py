@@ -13,6 +13,7 @@ verify script supplies that path after building a fixture corpus.
 import asyncio
 import json
 import os
+from pathlib import Path
 import sys
 
 from mcp import ClientSession, StdioServerParameters
@@ -34,12 +35,30 @@ EXPECTED_TOOLS = [
 ]
 
 
-async def main() -> int:
-    aha_bin = os.environ.get("AHA_BIN", "/tmp/aha")
+def attested_inputs() -> tuple[str, str] | None:
+    root_value = os.environ.get("AHA_MCP_CONFORMANCE_ROOT")
+    token = os.environ.get("AHA_MCP_CONFORMANCE_TOKEN")
+    aha_bin = os.environ.get("AHA_BIN")
     config = os.environ.get("AHA_CONFIG")
-    if not config:
-        print("AHA_CONFIG unset; skipping", file=sys.stderr)
+    if not all((root_value, token, aha_bin, config)):
+        return None
+    root = Path(root_value).resolve(strict=True)
+    marker = (root / ".aha-mcp-conformance").read_text().strip()
+    if marker != token:
+        raise RuntimeError("invalid MCP conformance attestation")
+    bin_path = Path(aha_bin).resolve(strict=True)
+    config_path = Path(config).resolve(strict=True)
+    if root not in bin_path.parents or root not in config_path.parents:
+        raise RuntimeError("MCP conformance binary/config must be owned by the attested workspace")
+    return str(bin_path), str(config_path)
+
+
+async def main() -> int:
+    inputs = attested_inputs()
+    if inputs is None:
+        print("isolated MCP conformance attestation unset; skipping", file=sys.stderr)
         return 77
+    aha_bin, config = inputs
 
     params = StdioServerParameters(command=aha_bin, args=["mcp", "--config", config])
 

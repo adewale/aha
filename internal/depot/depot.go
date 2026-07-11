@@ -19,6 +19,8 @@ type Address struct {
 	Location string
 }
 
+func (a Address) String() string { return fmt.Sprintf("%s:%s", a.Type, a.Location) }
+
 type VerifyReport struct {
 	Manifests       int      `json:"manifests"`
 	Machines        int      `json:"machines"`
@@ -52,18 +54,40 @@ func ParseAddress(s string) (Address, error) {
 	if typ != "local" && typ != "r2" {
 		return Address{}, fmt.Errorf("unsupported depot type %q", typ)
 	}
+	if typ == "r2" {
+		bucket, err := ParseR2Bucket(loc)
+		if err != nil {
+			return Address{}, err
+		}
+		loc = bucket.String()
+	}
 	return Address{Type: typ, Location: loc}, nil
 }
 
-func AddressFromConfig(cfg model.DepotConfig) Address {
-	if cfg.Type == "" {
-		return Address{Type: "local", Location: "~/.aha/depot"}
+func AddressFromConfig(cfg model.DepotConfig) (Address, error) {
+	typ := strings.ToLower(strings.TrimSpace(cfg.Type))
+	if typ == "" {
+		return Address{Type: "local", Location: "~/.aha/depot"}, nil
 	}
-	loc := cfg.Location
-	if cfg.Type == "r2" && loc == "" {
-		loc = DefaultR2Bucket
+	switch typ {
+	case "local":
+		if strings.TrimSpace(cfg.Location) == "" {
+			return Address{}, fmt.Errorf("local depot path required")
+		}
+		return Address{Type: typ, Location: strings.TrimSpace(cfg.Location)}, nil
+	case "r2":
+		location := strings.TrimSpace(cfg.Location)
+		if location == "" {
+			location = DefaultR2Bucket
+		}
+		bucket, err := ParseR2Bucket(location)
+		if err != nil {
+			return Address{}, err
+		}
+		return Address{Type: typ, Location: bucket.String()}, nil
+	default:
+		return Address{}, fmt.Errorf("unsupported depot type %q", typ)
 	}
-	return Address{Type: cfg.Type, Location: loc}
 }
 
 func ConfigFromAddress(addr Address) model.DepotConfig {

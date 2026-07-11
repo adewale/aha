@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 // BlobSource provides the uncompressed bytes of blobs a push needs to
@@ -20,18 +21,27 @@ type PushResult struct {
 	Reused        bool `json:"reused"`
 	Files         int  `json:"files"`
 	BlobsUploaded int  `json:"blobs_uploaded"`
+	BlobsExisting int  `json:"blobs_existing"`
 	BlobsCarried  int  `json:"blobs_carried"`
 }
 
 // ManifestSHA256 is the identity of the pushed (or reused) snapshot.
 func (r PushResult) ManifestSHA256() model.ManifestSHA256 { return r.manifestSHA }
 
-// PushV2 publishes one machine's state to a depot v2: compute the
-// snapshot identity, recognize an unchanged state from the parent
-// pointer alone (zero writes, zero content reads), upload only blobs the
-// parent does not carry, then publish the manifest and move the pointer
-// through the typestate flow (invariant I2).
+type PushOptions struct {
+	Progress *ahaprogress.Tracker
+}
+
+// PushV2 publishes one machine's state to a depot v2. The compatibility
+// wrapper keeps progress optional and allocation-free for existing callers.
 func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource) (PushResult, error) {
+	return PushV2WithOptions(ctx, v2, manifest, src, PushOptions{})
+}
+
+// PushV2WithOptions computes the snapshot identity, recognizes unchanged
+// state from the parent pointer alone, uploads only blobs the parent does not
+// carry, then publishes the manifest and pointer through the typestate flow.
+func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {
 	_, sha, err := model.EncodeSnapshotManifest(manifest)
 	if err != nil {
 		return PushResult{}, err
@@ -58,11 +68,46 @@ func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src Bl
 			return res, err
 		}
 		if parentState == state {
+			// A previous attempt may have published the pointer but failed
+			// while registering this machine in the discovery index. Re-run
+			// the idempotent commit step so unchanged retries heal that crash
+			// window without reading or uploading blob content.
+			if err := md.recommitParent(ctx, parent); err != nil {
+				return res, err
+			}
 			res.manifestSHA = parent.SHA()
 			res.Reused = true
 			return res, nil
 		}
 	}
+	totalBlobs := ahaprogress.UnknownTotal()
+	if opts.Progress != nil {
+		unique := make(map[string]bool, len(manifest.Files))
+		for _, file := range manifest.Files {
+			unique[file.SHA256] = true
+		}
+		totalBlobs = ahaprogress.KnownTotal(uint64(len(unique)))
+	}
+	opts.Progress.Start(ahaprogress.PhaseUpload, totalBlobs, ahaprogress.UnitBlobs)
+	processedBlobs := uint64(0)
+	uploadComplete := false
+	publishStarted := false
+	publishComplete := false
+	defer func() {
+		if !uploadComplete {
+			if ctx.Err() != nil {
+				opts.Progress.Cancel(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
+			} else {
+				opts.Progress.Fail(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
+			}
+		} else if publishStarted && !publishComplete {
+			if ctx.Err() != nil {
+				opts.Progress.Cancel(ahaprogress.PhasePublish, 0, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
+			} else {
+				opts.Progress.Fail(ahaprogress.PhasePublish, 0, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
+			}
+		}
+	}()
 	receipts := make([]BlobReceipt, 0, len(manifest.Files))
 	seen := make(map[string]bool, len(manifest.Files))
 	for _, f := range manifest.Files {
@@ -78,6 +123,8 @@ func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src Bl
 			if r, ok := md.CarriedBlob(parent, key); ok {
 				receipts = append(receipts, r)
 				res.BlobsCarried++
+				processedBlobs++
+				opts.Progress.Advance(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
 				continue
 			}
 		}
@@ -90,14 +137,27 @@ func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src Bl
 			return res, err
 		}
 		receipts = append(receipts, r)
-		res.BlobsUploaded++
+		switch r.kind {
+		case blobReceiptCreated:
+			res.BlobsUploaded++
+		case blobReceiptExisting:
+			res.BlobsExisting++
+		}
+		processedBlobs++
+		opts.Progress.Advance(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
 	}
-	pub, err := md.PublishSnapshot(ctx, manifest, receipts)
+	opts.Progress.Complete(ahaprogress.PhaseUpload, processedBlobs, totalBlobs, ahaprogress.UnitBlobs)
+	uploadComplete = true
+	opts.Progress.Start(ahaprogress.PhasePublish, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
+	publishStarted = true
+	pub, err := md.PublishSnapshot(ctx, manifest, receipts, parent)
 	if err != nil {
 		return res, err
 	}
 	if err := md.SetLatest(ctx, pub); err != nil {
 		return res, err
 	}
+	opts.Progress.Complete(ahaprogress.PhasePublish, 1, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
+	publishComplete = true
 	return res, nil
 }

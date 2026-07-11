@@ -183,84 +183,162 @@ you can switch back to local at any time.
 > For the full set of depot states and transitions — init, use, snapshot,
 > verify — see [`depot-lifecycle.md`](depot-lifecycle.md).
 
-R2 requires two separate things:
+R2 setup is four steps, in this order:
 
-1. A private R2 bucket. `aha depot init` creates it for you if it doesn't exist
-   (or you can pre-create one — see below).
-2. R2 **S3-compatible** credentials: Access Key ID + Secret Access Key.
+1. Create a private R2 bucket.
+2. Create an R2 API token scoped to that bucket. The token gives you the two
+   S3 credentials `aha` reads: Access Key ID and Secret Access Key.
+3. Run the read-only `aha depot setup r2:<bucket>` preflight and inspect its
+   single next action.
+4. Run `aha depot init r2:<bucket>` to write the depot marker and set R2 as
+   your default depot.
 
-A Wrangler OAuth login can list/create buckets, but `aha` does not use Wrangler OAuth. `aha` talks to the R2 S3-compatible API.
+The bucket comes first because the recommended token is scoped to one bucket:
+the dashboard can only scope a token to a bucket that already exists, and a
+bucket-scoped token cannot create buckets (bucket creation is an Admin-token
+permission in Cloudflare's model).
 
-### Find or create a bucket
+A Wrangler OAuth login can list and create buckets, but `aha` does not use
+Wrangler OAuth. `aha` talks to the R2 S3-compatible API using the token from
+step 2.
+
+### Step 1: create the bucket
 
 If Wrangler is logged in:
 
 ```bash
-npx wrangler r2 bucket list
 npx wrangler r2 bucket create aha-depot
 ```
 
-Use one private bucket per depot. Do not enable public `r2.dev` or a public custom domain for an `aha` depot.
+Or in the Cloudflare dashboard: **R2 Object Storage → Create bucket**. Either
+way: keep the bucket private (no public `r2.dev` access, no public custom
+domain), use one bucket per depot, and leave the location on Automatic unless
+you have a reason documented in
+[`r2-bucket-settings.md`](r2-bucket-settings.md).
 
-### Find account ID
+While you are in the dashboard, note your account ID — step 3 needs it. It is
+the `<ACCOUNT_ID>` in the dashboard URL `https://dash.cloudflare.com/<ACCOUNT_ID>/...`,
+or:
 
 ```bash
 npx wrangler whoami
 ```
 
-Or copy it from the Cloudflare dashboard URL:
+### Step 2: create the S3 credentials
 
-```text
-https://dash.cloudflare.com/<ACCOUNT_ID>/...
-```
+In the Cloudflare dashboard: **R2 Object Storage → Manage R2 API tokens /
+API tokens → Create token**, with:
 
-### Create R2 S3 credentials
+- Permission: **Object Read & Write**.
+- Scope: **Apply to specific buckets only**, selecting the bucket from step 1.
+- Token type: prefer an **Account API token** over a User API token for a
+  depot that outlives any one person — User tokens deactivate when that user
+  is removed from the Cloudflare account.
 
-In Cloudflare dashboard:
-
-```text
-R2 Object Storage → Manage R2 API tokens / API tokens → Create token
-```
-
-Copy:
+Copy the two generated values:
 
 - **Access Key ID** → `AHA_R2_ACCESS_KEY_ID`
 - **Secret Access Key** → `AHA_R2_SECRET_ACCESS_KEY`
 
-The secret is shown only once. If you did not save it, create a new token.
+The secret is shown only once. If you did not save it, create a new token and
+revoke the old one.
 
-Recommended token: Object Read & Write, scoped to the depot bucket when bucket scoping is available.
+### Step 3: configure R2 as the default depot
 
-### Configure R2 as the default depot
-
-Export the credentials. The two **secret** keys always stay in the environment,
-never in config. The account ID is only needed in the environment for this
-first `init` — it gets persisted to config afterward:
+Load the credentials without putting secrets in shell history. This form works
+in both zsh (the macOS default) and bash; do not use `read -p`, whose meaning
+differs between those shells. Enter the real values without `<...>` brackets:
 
 ```bash
-export AHA_R2_ACCESS_KEY_ID="<r2-access-key-id>"
-export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
-export AHA_R2_ACCOUNT_ID="<account-id>"
+printf 'Cloudflare Account ID: '
+read -r AHA_R2_ACCOUNT_ID
+export AHA_R2_ACCOUNT_ID
+
+printf 'R2 Access Key ID: '
+read -r AHA_R2_ACCESS_KEY_ID
+export AHA_R2_ACCESS_KEY_ID
+
+printf 'R2 Secret Access Key: '
+read -rs AHA_R2_SECRET_ACCESS_KEY
+printf '\n'
+export AHA_R2_SECRET_ACCESS_KEY
 ```
 
-Now configure the depot. `aha depot init` creates the bucket (if needed), writes
-the depot marker, **sets R2 as your default depot**, and persists the non-secret
-`depot.r2.account_id` into config:
+The two **secret** keys always stay in the environment, never in config. First
+run the read-only preflight. It validates identifiers locally before any
+network request and returns exactly one next command:
+
+```bash
+aha depot setup r2:aha-depot --json
+```
+
+For a new, reachable bucket its next command is `aha depot init`. Initialization
+writes the marker, **sets R2 as the default depot**, and persists only the
+non-secret account ID:
 
 ```bash
 aha depot init r2:aha-depot
-aha doctor            # default is now r2:aha-depot — reachable and initialized
-aha refresh           # snapshots + ingests against R2, no --depot flag needed
+aha doctor            # exactly one state-aware next command
+aha refresh --max-sessions 1
+aha verify --json
 ```
+
+Run each state-changing command only after the previous command succeeds.
+Long phases update on stderr even when final output uses `--json`; redirected
+JSON remains quiet unless `--progress=json` is requested.
+
+If the bucket does not exist, `aha depot init` tries to create it. That only
+succeeds with an Admin Read & Write token; with the recommended bucket-scoped
+token, init reports that the token cannot create buckets and points you back
+to step 1.
 
 Because the account ID is now in config, later shells only need the two secret
 keys exported. A direnv `.envrc` is a convenient home for them:
 
 ```bash
-# .envrc
-export AHA_R2_ACCESS_KEY_ID="<r2-access-key-id>"
-export AHA_R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
+# .envrc — replace the example words with real values; never commit this file.
+export AHA_R2_ACCESS_KEY_ID="real-access-key-id"
+export AHA_R2_SECRET_ACCESS_KEY="real-secret-access-key"
 ```
+
+### Optional: live smoke test
+
+From a repo clone, `scripts/r2-smoketest.sh` runs the depot integration test
+against a real bucket — real conditional writes and read-after-write, the two
+things local fakes cannot vouch for. Create a **separate test bucket** and a
+distinct **Object Read & Write** S3 token scoped only to that bucket.
+
+The smoke test never reads production `AHA_R2_*`, `R2_*`, or `AWS_*`
+credentials. It defaults to this project's dedicated test target:
+
+- bucket: `aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd`
+- account: `8837d43caf5a2ab3df5143eb3e2f1b96`
+
+Missing test credentials are requested securely from an interactive terminal:
+
+```bash
+scripts/r2-smoketest.sh
+```
+
+The bucket, account-derived endpoint, and identity nonce are source-pinned;
+the script and direct integration test accept no target flags or target
+environment variables. Before any mutation, the test reads the pre-existing
+`aha-r2-smoketest-target-v1.json` object and requires an exact identity match.
+Maintainers can restore that object with the separately pinned
+`scripts/r2-smoketest-provision.sh` command.
+
+For non-interactive CI, provide only
+`AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
+`AHA_R2_SMOKETEST_SECRET_ACCESS_KEY`. The script rejects a test key that
+matches ambient production credentials, removes all production credential
+names from the child process, and never accepts secrets in argv.
+
+The smoke test includes simultaneous first pushes from multiple machine IDs,
+so the real service—not only the local fake—vouches for shared-index
+conditional-write contention. Cleanup removes discovery/index registration
+before deleting each run namespace; the target attestation and depot metadata
+are intentionally persistent. An interrupted run can leave uniquely named
+smoke objects behind.
 
 ### Switch the default depot
 
@@ -314,6 +392,57 @@ command -v aha
 ### `doctor` shows a missing Codex/Pi/Claude source
 
 That is okay if you do not use that tool. If you do, check whether the tool stores history somewhere non-default and configure that root.
+
+### `read: -p: no coprocess`
+
+That is zsh interpreting bash's `read -p` differently. Use the shell-neutral
+`printf` + `read -r` / `read -rs` commands in step 3 above.
+
+### `aha depot init` says the token cannot create buckets
+
+The token is fine — bucket creation is simply not an object-token permission.
+Create the bucket first (step 1 above: `npx wrangler r2 bucket create
+aha-depot` or the dashboard), then rerun `aha depot init r2:aha-depot`.
+
+### `HeadBucket` returns `403 Forbidden`
+
+No depot mutation occurred. `aha` automatically tries a bounded
+`ListObjectsV2` read when `HeadBucket` is forbidden. If listing succeeds, it
+accepts the bucket and continues; if both supported read checks return 403, the
+loaded S3 key pair does not authorize the bucket/account endpoint.
+
+The usual causes are a token scoped to another bucket, an access key and secret
+copied from different tokens, or conflicting `AHA_R2_*`/`R2_*` aliases. Alias
+conflicts are rejected before networking without printing either value.
+
+Next: export a matching key pair from one **Object Read & Write** R2 S3 token
+scoped to the named bucket, then rerun the failed command. `aha` and the live
+smoke test classify this case without printing credential values. Set
+`--verbose`/`AHA_R2_SMOKETEST_VERBOSE=1` retains the private 0600 Go test log
+and reports its path for explicit local inspection. Child logs are never
+streamed into normal output because dependencies could echo credentials.
+
+### The endpoint contains `%3Cyour-...%3E` or TLS fails on `<your-account-id>`
+
+A documentation placeholder was exported literally. Current `aha` rejects
+placeholder-looking account IDs, bucket names, endpoints, and credentials
+before networking. Reload the real values without angle brackets, then run:
+
+```bash
+aha depot setup r2:aha-depot --json
+```
+
+### The corpus uses the pre-v2 bundle schema
+
+Preserve it and rebuild from the selected depot atomically:
+
+```bash
+aha corpus rebuild --backup --json
+```
+
+There is deliberately no no-backup mode. The command builds and verifies a
+sibling replacement before promotion, leaves the timestamped backup in place,
+and reports its path.
 
 ### R2 works in Wrangler but not in `aha`
 

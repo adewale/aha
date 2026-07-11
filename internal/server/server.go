@@ -20,6 +20,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"github.com/adewale/aha/internal/mcp"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/search"
+	"github.com/adewale/aha/internal/usererror"
 )
 
 // Options configures the HTTP server.
@@ -235,12 +237,12 @@ const indexCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-s
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+		writeError(w, http.StatusNotFound, "route not found")
 		return
 	}
 	body, err := indexHTML()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeCause(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -277,7 +279,7 @@ func (s *Server) jsonGet(toolName string) http.HandlerFunc {
 		}
 		out, err := mcp.CallTool(s.backend, toolName, nil)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeCause(w, http.StatusBadRequest, err)
 			return
 		}
 		writeJSON(w, out)
@@ -299,12 +301,12 @@ func (s *Server) handleSearchTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	args, err := readArgs(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeCause(w, http.StatusBadRequest, err)
 		return
 	}
 	out, err := mcp.CallTool(s.backend, "search", args)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeCause(w, http.StatusBadRequest, err)
 		return
 	}
 	hits, ok := out.([]search.Result)
@@ -314,7 +316,7 @@ func (s *Server) handleSearchTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	traces, err := buildSearchTraces(s.backend.DB(), hits)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeCause(w, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(w, traces)
@@ -646,12 +648,12 @@ func (s *Server) handleJSONPost(w http.ResponseWriter, r *http.Request, tool str
 	}
 	args, err := readArgs(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeCause(w, http.StatusBadRequest, err)
 		return
 	}
 	out, err := mcp.CallTool(s.backend, tool, args)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeCause(w, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(w, out)
@@ -669,13 +671,19 @@ func isJSONContentType(ct string) bool {
 
 const maxJSONArgsBytes = 1 << 20
 
+type requestBodyTooLargeError struct{ limit int }
+
+func (e requestBodyTooLargeError) Error() string {
+	return fmt.Sprintf("JSON request body exceeds the %d-byte limit", e.limit)
+}
+
 func readArgs(r io.Reader) (json.RawMessage, error) {
 	body, err := io.ReadAll(io.LimitReader(r, maxJSONArgsBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(body) > maxJSONArgsBytes {
-		return nil, fmt.Errorf("JSON request body exceeds %d bytes", maxJSONArgsBytes)
+		return nil, requestBodyTooLargeError{limit: maxJSONArgsBytes}
 	}
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {
@@ -703,15 +711,32 @@ type errorEnvelope struct {
 }
 
 type errorPayload struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code       string           `json:"code"`
+	Message    string           `json:"message"`
+	Next       []string         `json:"next"`
+	NextAction usererror.Action `json:"next_action"`
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
+	action := usererror.HelpAction("serve")
+	writeErrorPayload(w, status, errorPayload{Code: errorCodeForStatus(status), Message: message, Next: []string{action.Text()}, NextAction: action})
+}
+
+func writeCause(w http.ResponseWriter, status int, err error) {
+	view := usererror.Normalize(err, "serve")
+	message := view.Message()
+	var tooLarge requestBodyTooLargeError
+	if errors.As(err, &tooLarge) {
+		message = tooLarge.Error()
+	}
+	writeErrorPayload(w, status, errorPayload{Code: errorCodeForStatus(status), Message: message, Next: []string{view.Next().Text()}, NextAction: view.Next()})
+}
+
+func writeErrorPayload(w http.ResponseWriter, status int, payload errorPayload) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(errorEnvelope{Error: errorPayload{Code: errorCodeForStatus(status), Message: message}})
+	_ = json.NewEncoder(w).Encode(errorEnvelope{Error: payload})
 }
 
 func errorCodeForStatus(status int) string {
@@ -728,6 +753,8 @@ func errorCodeForStatus(status int) string {
 		return "host_not_permitted"
 	case http.StatusRequestTimeout:
 		return "timeout"
+	case http.StatusNotFound:
+		return "not_found"
 	}
 	return "error"
 }

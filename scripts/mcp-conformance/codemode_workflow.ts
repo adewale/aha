@@ -25,14 +25,9 @@
 import { spawn } from "node:child_process";
 import { aha, type SearchResult, type ReadEntry } from "../../clients/typescript/aha-mcp.ts";
 import { connectStdio } from "../../clients/typescript/transports/stdio.ts";
+import { assertAttestedConformance } from "./attestation.ts";
 
-const ahaBin = process.env.AHA_BIN ?? "/tmp/aha";
-const ahaConfig = process.env.AHA_CONFIG;
-
-if (!ahaConfig) {
-  console.error("AHA_CONFIG unset; skipping");
-  process.exit(77);
-}
+const { ahaBin, ahaConfig } = assertAttestedConformance();
 
 const child = spawn(ahaBin, ["mcp", "--config", ahaConfig], {
   stdio: ["pipe", "pipe", "pipe"],

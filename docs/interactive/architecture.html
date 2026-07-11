@@ -2090,8 +2090,8 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">15,779</span> production lines</dd>
-    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">20</span> in <code>internal/</code></dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">18,300</span> production lines</dd>
+    <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">22</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
     <dt>Commands</dt><dd><span class="num" data-drift="prod-commands">16</span></dd>
@@ -4116,6 +4116,8 @@ const PACKAGES = [
   { name: 'internal/fileutil',lines: '~120',  why: 'Atomic temp create + rename with ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.', read: ['Look for AtomicWriteBytes, AtomicCopyFile'] },
   { name: 'internal/cas',     lines: '~160',  why: 'Shared content-addressed blob store (zstd): write-once atomic puts that verify content hashes to the key; verified reads that detect corruption before bytes are trusted. Foundation of depot v2.', read: ['cas.go (Store: PutFile, Open, Has)'] },
   { name: 'internal/clock',   lines: '~60',   why: 'Clock, Sleeper, Backoff seams so ingest busy-retry is deterministic in tests.', read: ['clock.go'] },
+  { name: 'internal/progress',lines: '~115',  why: 'Typed privacy-safe progress phases, known/unknown totals, elapsed-time tracking, and observer seam shared by CLI, archive, depot, and corpus.', read: ['progress.go'] },
+  { name: 'internal/usererror',lines: '~250', why: 'Opaque credential-safe public error views and exactly-one-action construction. Normalizes causal domain/SDK/filesystem failures without rendering raw causes; shared by CLI, MCP, and HTTP.', read: ['usererror.go (closed codes, normalization, safe diagnostics)'] },
   { name: 'internal/config',  lines: '~250',  why: 'JSONC config load and write, defaults, redaction-free.', read: ['config.go'] },
   { name: 'internal/hash',    lines: '~30',   why: 'SHA-256 helpers (bytes and streaming).', read: ['hash.go'] },
   { name: 'internal/paths',   lines: '~35',   why: 'Tilde expansion and one or two stable helpers.', read: ['paths.go'] },
@@ -4367,6 +4369,7 @@ const PKG_GRAPH = {
   'hash':        { deps: [],                              role: 'SHA-256 helpers (bytes and streaming). Used wherever identity is computed.' },
   'paths':       { deps: [],                              role: 'tilde expansion and a couple of stable path helpers.' },
   'clock':       { deps: [],                              role: 'Clock / Sleeper / Backoff seams so ingest busy-retry is deterministic in tests.' },
+  'progress':    { deps: [],                              role: 'typed privacy-safe progress events with honest known/unknown totals and injected-clock elapsed time.' },
   'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
   'media':       { deps: [],                              role: 'image and text artifact classification.' },
   'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
@@ -4377,25 +4380,27 @@ const PKG_GRAPH = {
   'config':      { deps: ['model','paths','adapters'],    role: 'JSONC config load/write, defaults; reads adapter capabilities to validate.' },
 
   'adapters':    { deps: ['model','hash','opencodeexport','paths'], role: 'source-specific discovery and parsing for Pi, Claude Code, Codex (JSONL) and OpenCode (SQLite, converted to JSONL in Discover). Adapter conformance fixtures. The only place source-specific behaviour lives.' },
-  'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','safety'], role: 'source discovery, capture-as-diff state capture with the advisory scan cache, deterministic tar.zst write/read for export/import, manifest validation.' },
-  'depot':       { deps: ['model','archive','clock','fileutil','paths'], role: 'local + R2 depot v2: content-addressed blobs, snapshot manifests, per-machine namespaces, typestate publish flow, push. The only package that may import network packages.' },
+  'archive':     { deps: ['model','adapters','hash','clock','fileutil','media','paths','progress','safety'], role: 'source discovery, capture-as-diff state capture with the advisory scan cache, deterministic tar.zst write/read for export/import, manifest validation.' },
+  'depot':       { deps: ['model','archive','clock','fileutil','paths','progress'], role: 'local + R2 depot v2: content-addressed blobs, snapshot manifests, per-machine namespaces, typestate publish flow, push. The only package that may import network packages.' },
 
-  'corpus':      { deps: ['model','adapters','archive','cas','clock','fileutil','hash','media','paths','redact'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
+  'corpus':      { deps: ['model','adapters','archive','cas','clock','fileutil','hash','media','paths','progress','redact'], role: 'SQLite schema + triggers, FTS reconcile, ingest planner/writer/publisher, verify/repair, read APIs, conflicts, path tokens.' },
   'search':      { deps: ['model'],                       role: 'FTS5 query construction, indexed --project / --path-token filters, result mapping. Intentionally tiny.' },
 
   'redact':      { deps: ['model'], role: 'v1.1 redaction pipeline: 14 built-in regex patterns plus user extras, idempotent and property-tested. Wired into corpus ingest to scrub messages.text, tool_invocations.*, entries.raw_json, artifacts.text_* before insertion.' },
-  'mcp':         { deps: ['adapters','config','corpus','model','search'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/incidents/incident_trajectory/overview/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
-  'server':      { deps: ['mcp','model'],                 role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON content-type enforcement, request timeout.' },
+  'usererror':   { deps: ['archive','corpus','depot','model'], role: 'opaque safe error views, stable codes, one structured action, and allowlisted diagnostics; raw causal errors remain available only through Unwrap.' },
+  'mcp':         { deps: ['adapters','config','corpus','model','search','usererror'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/incidents/incident_trajectory/overview/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
+  'server':      { deps: ['mcp','model','usererror'],     role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON Content-Type gate, request timeout, and safe error envelopes.' },
 
-  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','redact','safety','search','server'], role: 'command parsing, JSON errors, docs generation, render helpers, depot orchestration. Thin over everything below.' },
+  'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','progress','redact','safety','search','server','usererror'], role: 'command parsing, safe JSON errors, progress rendering, docs generation, render helpers, depot orchestration. Thin over everything below.' },
 };
 const LAYERS = [
-  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','fileutil','media','testquality','opencodeexport'] },
+  { label: 'L1 · leaves',          pkgs: ['model','hash','paths','clock','progress','fileutil','media','testquality','opencodeexport'] },
   { label: 'L2 · helpers',         pkgs: ['safety','config','redact','cas'] },
   { label: 'L3 · I/O',             pkgs: ['adapters','archive','depot'] },
   { label: 'L4 · derived stores',  pkgs: ['corpus','search'] },
-  { label: 'L5 · agent surfaces',  pkgs: ['mcp','server'] },
-  { label: 'L6 · entry point',     pkgs: ['cli'] },
+  { label: 'L5 · presentation',    pkgs: ['usererror'] },
+  { label: 'L6 · agent surfaces',  pkgs: ['mcp','server'] },
+  { label: 'L7 · entry point',     pkgs: ['cli'] },
 ];
 const REVERSE_DEPS = (() => {
   const r = {};

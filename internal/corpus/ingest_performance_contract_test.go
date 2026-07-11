@@ -2,6 +2,7 @@ package corpus_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,21 @@ import (
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
 )
+
+func TestIngestPassesCancellationContextToSessionParser(t *testing.T) {
+	path, _, _ := writeCountingBundle(t, t.TempDir(), "cancellation-contract", []byte("session"))
+	store, err := corpus.Open(filepath.Join(t.TempDir(), "corpus"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	ing := corpus.NewIngestor(store, map[string]adapters.SourceAdapter{"counting": cancellingAdapter{cancel: cancel}})
+	ing.Context = ctx
+	if _, err := ing.IngestBundle(path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("IngestBundle error=%v want context.Canceled", err)
+	}
+}
 
 func TestDuplicateBundleSkipsSessionParsing(t *testing.T) {
 	path, registry, calls := writeCountingBundle(t, t.TempDir(), "duplicate-contract", []byte("session"))
@@ -177,6 +193,26 @@ func writeCountingBundleSessions(t *testing.T, root, bundleID string, sessions m
 		t.Fatal(err)
 	}
 	return path
+}
+
+type cancellingAdapter struct{ cancel context.CancelFunc }
+
+func (a cancellingAdapter) Name() string                      { return "counting" }
+func (a cancellingAdapter) Version() string                   { return "test" }
+func (a cancellingAdapter) DefaultRoots() []model.DefaultRoot { return nil }
+func (a cancellingAdapter) Capabilities() model.AdapterCapabilities {
+	return model.AdapterCapabilities{}
+}
+func (a cancellingAdapter) Discover(context.Context, model.SourceConfig) ([]model.SessionFile, error) {
+	return nil, nil
+}
+func (a cancellingAdapter) DiscoverArtifacts(context.Context, model.SessionFile) ([]model.ArtifactFile, error) {
+	return nil, nil
+}
+func (a cancellingAdapter) ParseSession(ctx context.Context, _ model.SessionFile, _ io.Reader) (*model.ParsedSession, error) {
+	a.cancel()
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 type countingAdapter struct{ calls *atomic.Int64 }

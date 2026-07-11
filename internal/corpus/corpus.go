@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 type Store struct {
 	DB   *sql.DB
 	Root string
+	lock *lifecycleLock
 }
 
 type OpenOptions struct {
@@ -39,36 +41,48 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 			return nil, err
 		}
 	}
+	root, err = canonicalCorpusIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := acquireLifecycleLock(context.Background(), root, false)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*Store, error) {
+		_ = lock.release()
+		return nil, err
+	}
 	if opts.Create {
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	} else {
 		if st, err := os.Stat(root); err != nil {
-			return nil, err
+			return fail(err)
 		} else if !st.IsDir() {
-			return nil, &os.PathError{Op: "open", Path: root, Err: os.ErrInvalid}
+			return fail(&os.PathError{Op: "open", Path: root, Err: os.ErrInvalid})
 		}
 		if _, err := os.Stat(filepath.Join(root, "corpus.db")); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	}
 	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	db.SetMaxOpenConns(1)
 	if err := rejectLegacyBundleCorpus(db, root); err != nil {
-		db.Close()
-		return nil, err
+		_ = db.Close()
+		return fail(err)
 	}
 	if opts.Migrate {
 		if err := Init(db); err != nil {
-			db.Close()
-			return nil, err
+			_ = db.Close()
+			return fail(err)
 		}
 	}
-	return &Store{DB: db, Root: root}, nil
+	return &Store{DB: db, Root: root, lock: lock}, nil
 }
 
 // rejectLegacyBundleCorpus refuses corpora created before depot v2 (the
@@ -85,9 +99,16 @@ func rejectLegacyBundleCorpus(db *sql.DB, root string) error {
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("corpus at %s uses the pre-v2 bundle schema; rebuild it by re-ingesting from the depot (move the old corpus directory aside first)", root)
+		return fmt.Errorf("%w: corpus at %s uses the pre-v2 bundle schema; run `aha corpus rebuild --backup`", ErrLegacyCorpus, root)
 	}
 	return nil
 }
 
-func (s *Store) Close() error { return s.DB.Close() }
+func (s *Store) Close() error {
+	dbErr := s.DB.Close()
+	lockErr := s.lock.release()
+	if dbErr != nil {
+		return dbErr
+	}
+	return lockErr
+}

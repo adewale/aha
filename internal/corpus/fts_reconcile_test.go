@@ -1,10 +1,29 @@
 package corpus_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/adewale/aha/internal/corpus"
 )
+
+func TestReconcileFTSHonorsCancellationWithoutDeletingIndex(t *testing.T) {
+	store, _ := corpusWithOneEntry(t)
+	defer store.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := corpus.ReconcileFTSWithReportContext(ctx, store); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReconcileFTSWithReportContext error=%v want context.Canceled", err)
+	}
+	var rows int
+	if err := store.DB.QueryRow(`select count(*) from fts_messages`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("fts rows=%d want 1 after cancelled repair", rows)
+	}
+}
 
 func TestReconcileFTSRepairsMessageDrift(t *testing.T) {
 	store, ref := corpusWithOneEntry(t)

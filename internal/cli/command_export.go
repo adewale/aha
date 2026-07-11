@@ -21,7 +21,7 @@ import (
 // survives (docs/depot-v2-spec.md).
 func cmdExport(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	configPath := fs.String("config", "", "JSONC config path")
 	machine := fs.String("machine", "", "machine whose latest snapshot to export (default: this machine)")
 	depotAddr := fs.String("depot", "", "depot address")

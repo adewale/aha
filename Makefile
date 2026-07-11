@@ -1,4 +1,4 @@
-.PHONY: help verify verify-quick verify-full verify-ci verify-fuzz verify-ts verify-race verify-build verify-mutation-dry verify-mutation gen-ts
+.PHONY: help verify verify-quick verify-full verify-ci verify-fuzz verify-ts verify-race verify-build verify-mutation-dry verify-mutation gen-ts gen-docs
 
 help:
 	@printf '%s\n' \
@@ -13,7 +13,8 @@ help:
 	  '  verify-build        build cmd/aha' \
 	  '  verify-mutation-dry gremlins dry-run inventory' \
 	  '  verify-mutation     gremlins mutation run on critical packages' \
-	  '  gen-ts              regenerate clients/typescript/aha-mcp.ts'
+	  '  gen-ts              regenerate clients/typescript/aha-mcp.ts' \
+	  '  gen-docs            regenerate docs/commands.md'
 
 verify: verify-full
 
@@ -33,7 +34,10 @@ verify-ts:
 	./scripts/verify.sh ts
 
 gen-ts:
-	go run ./cmd/aha-gen-ts
+	go run ./cmd/aha-gen-ts -out clients/typescript/aha-mcp.ts
+
+gen-docs:
+	go run ./cmd/aha-gen-docs -out docs/commands.md
 
 verify-race:
 	./scripts/verify.sh race

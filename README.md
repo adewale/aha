@@ -129,6 +129,43 @@ aha read "$REF" --json
 
 Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.
 
+## Long-running command progress
+
+`refresh`, `snapshot`, `ingest`, `verify`, `depot verify`, and `corpus rebuild`
+emit typed phase progress on **stderr**. Final command output remains on stdout:
+
+- terminal use: one updating line with phase, honest counters/percentages when a
+  total is known, and elapsed time;
+- redirected non-JSON use: stable phase-start/completion lines;
+- `--json` in a terminal: progress remains visible on stderr while stdout stays
+  one valid final JSON document;
+- redirected `--json`: progress defaults off so scripts remain quiet;
+- `--progress=json`: NDJSON progress events on stderr for automation;
+- `--progress=off|plain|tty|json|auto` overrides selection explicitly.
+
+No ETA is shown: totals are reported only when known before completion. Example:
+
+```bash
+aha depot verify --deep --json --progress=json \
+  >verify-result.json 2>verify-progress.ndjson
+```
+
+Ctrl-C propagates cancellation through capture, depot upload/pull, deep blob
+verification, and rebuild phase boundaries. Operations remain idempotent; a
+rebuild swaps directories only after its replacement verifies cleanly.
+
+## Errors and diagnostics
+
+Every `aha` command, MCP tool, and dashboard API failure crosses the same safe
+error boundary. Default output contains one concise error and exactly one next
+action; raw SDK, SQL, filesystem-path, and dependency strings are retained only
+as internal causes and are never rendered. `--json` uses the versioned
+`aha.error.v1` envelope with a structured `next_action`.
+
+Use global `--verbose-errors` to add allowlisted diagnostics—failure kind,
+operation, and retryability—not raw causal text or credentials. When combined
+with `--progress=json`, stderr is valid NDJSON through the terminal error.
+
 ## Search functionality
 
 `aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artifacts while preserving raw source files for later reads.
@@ -241,6 +278,14 @@ A source is read-only during snapshot. For JSONL sources, raw files are stored a
 scripts/smoketest.sh opencode          # uses the default root
 scripts/smoketest.sh codex ~/.codex/sessions
 ```
+
+The live R2 test is separately isolated: `scripts/r2-smoketest.sh` defaults to
+the project's pinned dedicated test bucket/account, securely prompts for
+missing `AHA_R2_SMOKETEST_*` credentials, and never falls back to production
+`AHA_R2_*`, `R2_*`, or `AWS_*` providers. The target and its pre-existing
+identity attestation are source-pinned and cannot be changed by flags or
+environment variables. Use a distinct Object Read & Write token scoped only to
+that test bucket.
 
 ## Defaults
 

@@ -269,13 +269,64 @@ func (s *r2StoreV2) listKeys(ctx context.Context, prefix string) ([]string, erro
 	return keys, nil
 }
 
+type R2AuthorizationError struct {
+	Bucket string
+	Cause  error
+}
+
+func (e *R2AuthorizationError) Error() string {
+	return fmt.Sprintf("R2 authorization denied during HeadBucket and ListObjectsV2 for bucket %q, before any depot mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint (403 Forbidden)", e.Bucket)
+}
+
+func (e *R2AuthorizationError) Unwrap() error { return e.Cause }
+
 func (s *r2StoreV2) ensureBucket(ctx context.Context) error {
-	if _, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)}); err != nil {
-		if _, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); createErr != nil {
-			return createErr
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
+	if err == nil {
+		return nil
+	}
+	if !isS3NotFound(err) {
+		// Credential/endpoint failures must surface as themselves; falling
+		// through to CreateBucket would mask them behind a creation denial.
+		if isS3Forbidden(err) {
+			_, listErr := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), MaxKeys: aws.Int32(1)})
+			if listErr == nil {
+				// Some S3-compatible permission models deny HeadBucket while
+				// allowing the object-list operation their tokens promise. A
+				// successful bounded list proves both existence and access.
+				return nil
+			}
+			if isS3Forbidden(listErr) {
+				return &R2AuthorizationError{Bucket: s.bucket, Cause: listErr}
+			}
+			return fmt.Errorf("probe R2 bucket access with ListObjectsV2 after HeadBucket was denied: %w", listErr)
 		}
+		return err
+	}
+	if _, createErr := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); createErr != nil {
+		// Named step: the CLI hint layer keys on "create r2 bucket" to advise
+		// pre-creating the bucket instead of re-checking object permissions,
+		// because the recommended Object Read & Write token cannot create
+		// buckets — only Admin Read & Write can.
+		return fmt.Errorf("create r2 bucket %q: %w", s.bucket, createErr)
 	}
 	return nil
+}
+
+func isS3Forbidden(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch strings.ToLower(apiErr.ErrorCode()) {
+	case "accessdenied", "forbidden", "403":
+		return true
+	default:
+		return false
+	}
 }
 
 func isS3PreconditionFailed(err error) bool {

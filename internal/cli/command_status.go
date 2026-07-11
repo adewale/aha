@@ -9,7 +9,7 @@ import (
 
 func cmdStatus(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(flagOutput(args, stderr))
 	cf := registerCorpusFlags(fs)
 	depotAddr := fs.String("depot", "", "compare corpus against depot")
 	jsonOut := fs.Bool("json", false, "JSON output")

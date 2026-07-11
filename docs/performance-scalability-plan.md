@@ -309,7 +309,7 @@ Actions:
    - repair: rebuild catalog from objects when local/deep enough data is available.
 2. For R2, use object metadata/head where possible before downloads.
 3. Store/refuse inconsistent catalog fields (`bundle_sha256`, `key`, `size`, `manifest_sha256`, `state_sha256`).
-4. Add progress output and JSON counters for large depots.
+4. Implemented: typed stderr progress for large depots (`auto|off|plain|tty|json`), with machine/blob/byte counters only when honestly observable; final JSON remains isolated on stdout.
 5. Add fake-R2 operation-budget tests for quick verify, deep verify, and repair.
 6. Replace linear-scan bulk catalog merging with map-backed merge for repair/compaction paths; keep append of one ref simple unless benchmarks show it dominates.
 
@@ -336,7 +336,7 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 3. **Telemetry-free local metrics**: add `--json` timing/counter fields for expensive commands: files scanned, bytes read, bytes written, bundles listed/fetched, SQL rows inserted, FTS rows repaired.
 4. **Disk-growth tools**: add `aha corpus size`, `aha corpus vacuum`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
 5. **Depot catalog compaction**: as refs grow, support compacted per-machine catalog snapshots or sharded-by-time catalogs while keeping bundle objects content-addressed.
-6. **Background/deferred maintenance**: make deep verify, FTS repair, and vacuum explicit maintenance operations with progress and resumability instead of hidden costs in routine commands.
+6. **Background/deferred maintenance**: deep verify, FTS repair, vacuum, and corpus rebuild are explicit maintenance operations; typed progress and context cancellation are implemented. Snapshot/depot/rebuild operations are idempotent, but checkpoint-based mid-operation resume remains future work.
 7. **Scalable defaults**: cap dangerous limits, choose quick checks by default, and require explicit flags for deep/network-heavy work.
 
 ## Priority order

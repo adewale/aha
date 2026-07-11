@@ -64,7 +64,22 @@ How this is enforced:
 - R2 credentials must not appear in manifests, pointers, the machines index, command JSON, config, or logs;
 - downloaded blobs are still verified against their content-address SHA-256, and manifests against their own SHA-256 identity, before ingest.
 
-## Guarantee 5: projection redaction is explicit and observable
+## Guarantee 5: user-facing errors cannot render raw causal failures
+
+Every CLI failure, dashboard application failure, and MCP application/tool failures that reach aha's presentation boundary are normalized through an
+opaque `internal/usererror` view. The safe view contains a stable code, concise
+message, and exactly one structured action. It cannot contain the raw causal
+error, so SQL, absolute paths, object keys, and credential-bearing dependency
+strings do not become public output. SDK-owned protocol, framing, schema, and
+transport failures occur outside that application boundary and are not normalized by aha; they retain the official SDK's error contract.
+
+`--verbose-errors` adds only allowlisted failure kind, operation, and
+retryability fields. The underlying cause remains available to Go callers via
+`errors.Is`/`errors.As`, but is not formatted for users. Static tests reject raw
+`err.Error()` rendering at CLI, MCP, and HTTP boundaries; canary tests cover
+credentials, paths, and SQL.
+
+## Guarantee 6: projection redaction is explicit and observable
 
 By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `tool_invocations`, `entries.raw_json`, artifact text, or FTS. Raw depot blobs remain unredacted provenance.
 
@@ -108,11 +123,13 @@ go test ./internal/adapters -run SourceAdaptersStayReadOnly
 # Corpus invariant/repair tooling
 go test ./internal/corpus -run 'Verify|ReconcileFTS'
 
-# End-to-end private smoke test; use temp dirs and delete them after inspection
-go build -o /tmp/aha ./cmd/aha
-AHA_ACCEPT_SECRETS=1 /tmp/aha snapshot \
+# End-to-end private smoke test; allocate a new destination rather than naming
+# an existing depot. scripts/smoketest.sh does this automatically.
+WORK="$(mktemp -d /tmp/aha-smoketest.XXXXXX)"
+go build -o "$WORK/aha" ./cmd/aha
+AHA_ACCEPT_SECRETS=1 "$WORK/aha" snapshot \
   --machine local-test \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --depot local:/tmp/aha-depot
+  --depot "local:$WORK/depot"
 ```

@@ -3,7 +3,6 @@ package archive
 import (
 	"encoding/json"
 	"os"
-	"syscall"
 
 	ahaclock "github.com/adewale/aha/internal/clock"
 	"github.com/adewale/aha/internal/fileutil"
@@ -114,11 +113,4 @@ func (c *CaptureCache) Save() error {
 		return err
 	}
 	return fileutil.AtomicWriteBytes(c.path, append(b, '\n'), fileutil.AtomicOptions{TempPattern: ".tmp-cache-*.json"})
-}
-
-func statInode(st os.FileInfo) uint64 {
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		return sys.Ino
-	}
-	return 0
 }

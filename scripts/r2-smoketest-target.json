@@ -1,0 +1,7 @@
+{
+  "schema": "aha.r2-smoketest-target.v1",
+  "target_id": "f7a6d43e8c1b49b0a2d58e7f31c60492",
+  "bucket": "aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd",
+  "account_id": "8837d43caf5a2ab3df5143eb3e2f1b96",
+  "endpoint": "https://8837d43caf5a2ab3df5143eb3e2f1b96.r2.cloudflarestorage.com"
+}

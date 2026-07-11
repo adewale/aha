@@ -181,8 +181,8 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 			Manifests   int      `json:"manifests"`
 			Machines    int      `json:"machines"`
 			Problems    []string `json:"problems"`
-			Next        []string `json:"next"`
 		} `json:"depot"`
+		Next []string `json:"next"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatalf("decode doctor: %v\n%s", err, out.String())
@@ -193,10 +193,10 @@ func TestDoctorReportsPopulatedMissingMarkerDepotAsDegraded(t *testing.T) {
 	if doc.Depot.Manifests == 0 || doc.Depot.Machines == 0 {
 		t.Fatalf("test did not create a populated depot: %+v", doc.Depot)
 	}
-	wantVerify := "aha depot verify local:" + depotDir + " --deep"
-	joinedNext := strings.Join(doc.Depot.Next, "\n")
-	if !strings.Contains(joinedNext, wantVerify) || strings.Contains(joinedNext, "depot init") {
-		t.Fatalf("degraded populated depot should point at verify %q, got %+v", wantVerify, doc.Depot)
+	wantVerify := "aha depot verify local:" + depotDir + " --deep --config " + configPath
+	joinedNext := strings.Join(doc.Next, "\n")
+	if len(doc.Next) != 1 || !strings.Contains(joinedNext, wantVerify) || strings.Contains(joinedNext, "depot init") {
+		t.Fatalf("degraded populated depot should have sole verify action %q, got %+v", wantVerify, doc.Next)
 	}
 
 	out.Reset()

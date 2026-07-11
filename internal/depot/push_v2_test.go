@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
 	"github.com/adewale/aha/internal/model"
+	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 // mapBlobSource serves blob bytes from an in-memory state map and records
@@ -47,6 +49,41 @@ func (s *mapBlobSource) BlobPath(key model.BlobKey) (string, error) {
 // property 1 end to end at the push layer: identical state re-pushed is
 // recognized from the parent pointer alone — no blob source reads, no
 // PUTs, no LISTs.
+func TestPushV2ProgressUsesActualUniqueBlobWork(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeS3(t)
+	defer f.Close()
+	v2 := depot.NewV2FromR2(f.Depot("bucket"))
+	if err := v2.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var events []ahaprogress.Event
+	tracker := ahaprogress.NewTracker(ahaprogress.ObserverFunc(func(event ahaprogress.Event) {
+		events = append(events, event)
+	}), fixedProgressClock{})
+	manifest := snapshotManifestFor("m", sessionFile("same", "a.jsonl"), sessionFile("same", "duplicate.jsonl"), sessionFile("different", "b.jsonl"))
+	_, err := depot.PushV2WithOptions(ctx, v2, manifest, newMapBlobSource(t, map[string]string{"a": "same", "b": "different"}), depot.PushOptions{Progress: tracker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploadCompleted, publishCompleted bool
+	for _, event := range events {
+		if event.Phase == ahaprogress.PhaseUpload && event.Kind == ahaprogress.Completed {
+			uploadCompleted = event.Current == 2 && event.Total.Known && event.Total.Value == 2
+		}
+		if event.Phase == ahaprogress.PhasePublish && event.Kind == ahaprogress.Completed {
+			publishCompleted = true
+		}
+	}
+	if !uploadCompleted || !publishCompleted {
+		t.Fatalf("progress events=%+v", events)
+	}
+}
+
+type fixedProgressClock struct{}
+
+func (fixedProgressClock) Now() time.Time { return time.Unix(0, 0) }
+
 func TestPushV2UnchangedStateIsReusedWithoutWritesOrReads(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeS3(t)

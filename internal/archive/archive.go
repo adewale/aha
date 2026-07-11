@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/adewale/aha/internal/adapters"
@@ -202,24 +201,6 @@ func sessionMatches(s model.SessionFile, filter string) bool {
 		}
 	}
 	return false
-}
-
-func openRegularNoFollow(path string) (*os.File, os.FileInfo, error) {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-	f := os.NewFile(uintptr(fd), path)
-	st, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return nil, nil, err
-	}
-	if !st.Mode().IsRegular() {
-		_ = f.Close()
-		return nil, nil, fmt.Errorf("refusing to copy non-regular file: %s", path)
-	}
-	return f, st, nil
 }
 
 func StableCopy(path, dir string) (string, string, int64, string, error) {
