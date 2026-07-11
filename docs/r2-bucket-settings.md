@@ -178,7 +178,9 @@ simultaneous first pushes from multiple machine IDs against the real service.
 Use a dedicated bucket and a distinct Object Read & Write token scoped only to
 that bucket.
 
-The destination must be explicit. Credentials are securely prompted on a TTY
+The script defaults to the project's pinned dedicated target—bucket
+`aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd` in account
+`8837d43caf5a2ab3df5143eb3e2f1b96`. Credentials are securely prompted on a TTY
 or supplied through the dedicated `AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
 `AHA_R2_SMOKETEST_SECRET_ACCESS_KEY` variables. Production `AHA_R2_*`, `R2_*`,
 and `AWS_*` credentials are never fallback inputs and are removed from the
@@ -186,10 +188,11 @@ child environment. A test key matching an ambient production key is rejected
 before networking.
 
 ```bash
-printf 'R2 account ID: '
-IFS= read -r SMOKE_ACCOUNT_ID
-scripts/r2-smoketest.sh --bucket aha-depot-test --account-id "$SMOKE_ACCOUNT_ID"
+scripts/r2-smoketest.sh
 ```
+
+Use `--bucket` plus `--account-id`/`--endpoint` only for another dedicated test
+target.
 
 ## References
 

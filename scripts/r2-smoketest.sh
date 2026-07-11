@@ -3,10 +3,11 @@
 # aha R2 live-bucket smoketest — runs depot v2 integration tests against one
 # explicitly selected, dedicated test bucket.
 #
-# Usage (destination is explicit; credentials are test-only):
-#   AHA_R2_SMOKETEST_ACCESS_KEY_ID=... \
-#   AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=... \
-#   scripts/r2-smoketest.sh --bucket aha-depot-test --account-id ACCOUNT_ID
+# Usage (the project test bucket/account are pinned defaults):
+#   scripts/r2-smoketest.sh
+#
+# Override only for another dedicated test target:
+#   scripts/r2-smoketest.sh --bucket NAME --account-id ACCOUNT_ID
 #
 # Missing credentials are prompted for securely on an interactive terminal.
 # They are intentionally not accepted as command-line flags because argv and
@@ -30,7 +31,11 @@ cd "$(dirname "$0")/.." || exit 2
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/r2-smoketest.sh --bucket NAME (--account-id ID | --endpoint URL) [--region auto] [--verbose]
+usage: scripts/r2-smoketest.sh [--bucket NAME] [--account-id ID | --endpoint URL] [--region auto] [--verbose]
+
+Default target:
+  bucket:  aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd
+  account: 8837d43caf5a2ab3df5143eb3e2f1b96
 
 Credentials must use the dedicated variables below or be entered at the TTY:
   AHA_R2_SMOKETEST_ACCESS_KEY_ID
@@ -40,8 +45,10 @@ Production AHA_R2_*, R2_*, and AWS_* credentials are never fallback inputs.
 EOF
 }
 
-SMOKE_BUCKET="${AHA_R2_SMOKETEST_BUCKET:-}"
-SMOKE_ACCOUNT_ID="${AHA_R2_SMOKETEST_ACCOUNT_ID:-}"
+DEFAULT_SMOKE_BUCKET="aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd"
+DEFAULT_SMOKE_ACCOUNT_ID="8837d43caf5a2ab3df5143eb3e2f1b96"
+SMOKE_BUCKET="${AHA_R2_SMOKETEST_BUCKET:-$DEFAULT_SMOKE_BUCKET}"
+SMOKE_ACCOUNT_ID="${AHA_R2_SMOKETEST_ACCOUNT_ID:-$DEFAULT_SMOKE_ACCOUNT_ID}"
 SMOKE_ENDPOINT="${AHA_R2_SMOKETEST_ENDPOINT:-}"
 SMOKE_REGION="${AHA_R2_SMOKETEST_REGION:-auto}"
 SMOKE_ACCESS_KEY_ID="${AHA_R2_SMOKETEST_ACCESS_KEY_ID:-}"
@@ -90,7 +97,7 @@ missing=0
 [ -n "$SMOKE_SECRET_ACCESS_KEY" ] || { echo "  missing: AHA_R2_SMOKETEST_SECRET_ACCESS_KEY (or interactive input)" >&2; missing=1; }
 if [ "$missing" -ne 0 ]; then
   echo "error: the smoketest requires one complete, explicitly test-scoped target capability; no network request was made" >&2
-  echo "next: create an Object Read & Write S3 token scoped only to a dedicated test bucket, then supply the documented --bucket target and AHA_R2_SMOKETEST_* credentials" >&2
+  echo "next: create an Object Read & Write S3 token scoped only to the pinned test bucket, then rerun and enter its test credentials (or set AHA_R2_SMOKETEST_* in CI)" >&2
   exit 2
 fi
 

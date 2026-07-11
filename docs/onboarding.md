@@ -309,16 +309,19 @@ things local fakes cannot vouch for. Create a **separate test bucket** and a
 distinct **Object Read & Write** S3 token scoped only to that bucket.
 
 The smoke test never reads production `AHA_R2_*`, `R2_*`, or `AWS_*`
-credentials. Its destination is required explicitly, and missing test
-credentials are requested securely from an interactive terminal:
+credentials. It defaults to this project's dedicated test target:
+
+- bucket: `aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd`
+- account: `8837d43caf5a2ab3df5143eb3e2f1b96`
+
+Missing test credentials are requested securely from an interactive terminal:
 
 ```bash
-printf 'R2 account ID: '
-IFS= read -r SMOKE_ACCOUNT_ID
-scripts/r2-smoketest.sh \
-  --bucket aha-depot-test \
-  --account-id "$SMOKE_ACCOUNT_ID"
+scripts/r2-smoketest.sh
 ```
+
+Use `--bucket` with `--account-id` or `--endpoint` only to select a different
+dedicated test target.
 
 For non-interactive CI, provide only
 `AHA_R2_SMOKETEST_ACCESS_KEY_ID` and

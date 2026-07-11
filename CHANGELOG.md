@@ -74,11 +74,12 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   R2 child logs are never streamed into operator output; explicit
   `--verbose`/`AHA_R2_SMOKETEST_VERBOSE=1` retains the private 0600 log and
   reports its path for local inspection.
-- Live R2 smoke tests now require an explicit test-only capability: destination
-  via flags/`AHA_R2_SMOKETEST_*`, and a distinct bucket-scoped credential pair
-  via secure prompt or test-only variables. Production `AHA_R2_*`, `R2_*`, and
-  `AWS_*` credentials are neither fallback inputs nor present in the child
-  environment; matching production/test keys fail before networking.
+- Live R2 smoke tests now default to the project's pinned dedicated test
+  bucket/account (with explicit override flags available) and require a
+  distinct bucket-scoped credential pair via secure prompt or test-only
+  variables. Production `AHA_R2_*`, `R2_*`, and `AWS_*` credentials are neither
+  fallback inputs nor present in the child environment; matching
+  production/test keys fail before networking.
 
 ### Depot v2 — content-addressed snapshots (June 2026)
 

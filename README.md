@@ -279,11 +279,12 @@ scripts/smoketest.sh opencode          # uses the default root
 scripts/smoketest.sh codex ~/.codex/sessions
 ```
 
-The live R2 test is separately isolated: `scripts/r2-smoketest.sh` requires an
-explicit `--bucket` plus account/endpoint, securely prompts for missing
-`AHA_R2_SMOKETEST_*` credentials, and never falls back to production
+The live R2 test is separately isolated: `scripts/r2-smoketest.sh` defaults to
+the project's pinned dedicated test bucket/account, securely prompts for
+missing `AHA_R2_SMOKETEST_*` credentials, and never falls back to production
 `AHA_R2_*`, `R2_*`, or `AWS_*` providers. Use a distinct Object Read & Write
-token scoped only to the dedicated test bucket.
+token scoped only to that test bucket; flags remain available to override the
+pinned target with another dedicated test destination.
 
 ## Defaults
 

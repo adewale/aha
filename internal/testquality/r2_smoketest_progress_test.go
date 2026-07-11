@@ -71,6 +71,37 @@ func TestR2IntegrationTestUsesOnlyExplicitSmoketestCapability(t *testing.T) {
 	}
 }
 
+func TestR2SmoketestDefaultsToPinnedTestBucketAndAccount(t *testing.T) {
+	bin := t.TempDir()
+	fakeGo := filepath.Join(bin, "go")
+	fakeGoScript := `#!/usr/bin/env bash
+if [ "$AHA_R2_SMOKETEST_BUCKET" != "aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd" ]; then
+  echo "wrong default bucket"; exit 81
+fi
+if [ "$AHA_R2_SMOKETEST_ACCOUNT_ID" != "8837d43caf5a2ab3df5143eb3e2f1b96" ]; then
+  echo "wrong default account"; exit 82
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeGo, []byte(fakeGoScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
+	cmd.Env = append(envWithout(r2ProductionEnv),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"AHA_R2_SMOKETEST_ACCESS_KEY_ID=smoke-access",
+		"AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=smoke-secret",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("default test target failed: %v stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "bucket=aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd") {
+		t.Fatalf("stderr does not identify pinned test target: %s", stderr.String())
+	}
+}
+
 func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	bin := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "go-ran")
