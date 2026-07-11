@@ -656,7 +656,7 @@ func TestCLILocalDepotSnapshotIngestJourney(t *testing.T) {
 	if err := cli.Run([]string{"snapshot", "--machine", "m1", "--source", "pi=" + fx.PiRoot, "--depot", "local:" + depotDir, "--accept-secrets", "--captured-at", "2026-01-03T00:00:00Z"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "uploaded=") {
+	if !strings.Contains(out.String(), "snapshot ") || !strings.Contains(out.String(), "uploaded=") || !strings.Contains(out.String(), "existing=") {
 		t.Fatalf("snapshot did not report the pushed manifest: %s", out.String())
 	}
 	manifests, err := filepath.Glob(filepath.Join(depotDir, "machines", "*", "manifests", "*.json"))

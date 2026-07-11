@@ -101,8 +101,8 @@ fuzz() {
   run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
   run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="$FUZZTIME"
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
-  run go test ./internal/depot -run=^$ -fuzz=FuzzParseAddress -fuzztime="$FUZZTIME"
-  run go test ./internal/depot -run=^$ -fuzz=FuzzValidateBundleKey -fuzztime="$FUZZTIME"
+  run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeLatestPointer -fuzztime="$FUZZTIME"
+  run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeMachinesIndex -fuzztime="$FUZZTIME"
   # The MCP framer is owned by github.com/modelcontextprotocol/go-sdk and
   # fuzzed in that repo's mcp/*_test.go. Wire-format regressions land in
   # the conformance suite (`scripts/verify.sh mcp`) before they could

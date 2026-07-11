@@ -185,14 +185,17 @@ or supplied through the dedicated `AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
 `AHA_R2_SMOKETEST_SECRET_ACCESS_KEY` variables. Production `AHA_R2_*`, `R2_*`,
 and `AWS_*` credentials are never fallback inputs and are removed from the
 child environment. A test key matching an ambient production key is rejected
-before networking.
+before networking. The target is source-pinned and must present the exact
+pre-existing identity attestation before the test can mutate anything.
 
 ```bash
 scripts/r2-smoketest.sh
 ```
 
-Use `--bucket` plus `--account-id`/`--endpoint` only for another dedicated test
-target.
+Target flags and target environment variables are intentionally unsupported.
+Maintainers can restore the pinned test bucket's identity attestation with
+`scripts/r2-smoketest-provision.sh`; that provisioner is also source-pinned and
+accepts no destination arguments.
 
 ## References
 

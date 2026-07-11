@@ -302,7 +302,7 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT
 - `aha refresh`
 - `aha refresh --session abc --max-sessions 1`
 
-**JSON contract:** `object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_carried},report,reports}`
+**JSON contract:** `object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried},report,reports}`
 
 ## aha search
 
@@ -391,7 +391,7 @@ aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] 
 
 - `aha snapshot --accept-secrets --depot local:~/.aha/depot`
 
-**JSON contract:** `object{manifest_sha256,reused,files,blobs_uploaded,blobs_carried}`
+**JSON contract:** `object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried}`
 
 ## aha status
 

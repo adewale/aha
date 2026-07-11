@@ -103,12 +103,19 @@ the default leaves every depot's data untouched.
 | `aha depot setup r2:<bucket>` | read-only preflight | unchanged | yes, after local validation | Rejects malformed/placeholders before networking, reports the depot state, and emits exactly one safe next command. |
 | `aha depot init <addr>` | Uninitialized → Initialized (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `aha-depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
 | `aha depot use <addr>` | requires Initialized | sets default = `<addr>` | yes | Switches the default to an already-initialized `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
-| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognized from the pointer alone (zero writes). Does not touch the corpus and never reads another machine's namespace. |
+| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognized from the pointer alone; it performs no blob/manifest/latest writes but repairs missing machine-index registration left by an interrupted first push. Does not touch the corpus and never reads another machine's namespace. |
 | `aha refresh` | same as `snapshot` → Populated | unchanged | yes | Push, then pull every machine's latest snapshot into the local corpus, fetching only unknown content. |
 | `aha ingest` | reads Populated (no provisioning) | unchanged | yes | Pull-only: anti-entropy the corpus against every machine's latest snapshot. |
 | `aha export` | reads Populated | unchanged | yes | Materializes a machine's latest snapshot as one portable v1 `bundle.tar.zst`. |
 | `aha depot ls` | reads Initialized/Populated | unchanged | yes | Lists each machine's latest snapshot (identity, capture time, file count). |
 | `aha depot verify [--deep]` | reads (reports Degraded) | unchanged | yes | Quick: marker, index, pointers resolve, manifest identities, blob presence. `--deep`: verifies blob content and audits historical manifests. |
+
+Latest-pointer publication carries the canonical machine namespace and expected
+parent as an opaque publication token. The store accepts that token only while
+the pointer still names that parent (or is still absent for a first push).
+Concurrent same-machine writers therefore cannot publish an older prepared
+state over the winner; the loser receives a typed retryable stale-publication
+error. Shared machine-index updates retain bounded conditional-write retries.
 
 `--depot <addr>` on `snapshot` / `refresh` / `ingest` / `status` / `doctor` runs
 that one command against `<addr>` without moving the default pointer. Because the

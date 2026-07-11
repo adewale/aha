@@ -3,6 +3,7 @@ package testquality_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -27,6 +28,36 @@ func TestVerifyUsesPrivateRunWorkspaceAndNeverInstallsDependencies(t *testing.T)
 	for _, required := range []string{"mktemp -d", "AHA_MCP_CONFORMANCE_ROOT", "AHA_MCP_CONFORMANCE_TOKEN", "cross_compile"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("verify.sh missing isolation/cross-compile contract %q", required)
+		}
+	}
+}
+
+func TestVerifyFuzzCommandsNameRealFuzzTargets(t *testing.T) {
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	names := regexp.MustCompile(`-fuzz=(Fuzz[[:alnum:]_]+)`).FindAllStringSubmatch(verify, -1)
+	if len(names) == 0 {
+		t.Fatal("verify.sh does not run any fuzz targets")
+	}
+	var tests strings.Builder
+	err := filepath.Walk(filepath.Join("..", "..", "internal"), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, "_test.go") {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			tests.Write(body)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range names {
+		if !strings.Contains(tests.String(), "func "+match[1]+"(") {
+			t.Fatalf("verify.sh names missing fuzz target %s", match[1])
 		}
 	}
 }

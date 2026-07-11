@@ -320,20 +320,25 @@ Missing test credentials are requested securely from an interactive terminal:
 scripts/r2-smoketest.sh
 ```
 
-Use `--bucket` with `--account-id` or `--endpoint` only to select a different
-dedicated test target.
+The bucket, account-derived endpoint, and identity nonce are source-pinned;
+the script and direct integration test accept no target flags or target
+environment variables. Before any mutation, the test reads the pre-existing
+`aha-r2-smoketest-target-v1.json` object and requires an exact identity match.
+Maintainers can restore that object with the separately pinned
+`scripts/r2-smoketest-provision.sh` command.
 
 For non-interactive CI, provide only
 `AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
-`AHA_R2_SMOKETEST_SECRET_ACCESS_KEY` (plus the destination flags or their
-`AHA_R2_SMOKETEST_BUCKET`/account/endpoint equivalents). The script rejects a
-test key that matches ambient production credentials, removes all production
-credential names from the child process, and never accepts secrets in argv.
+`AHA_R2_SMOKETEST_SECRET_ACCESS_KEY`. The script rejects a test key that
+matches ambient production credentials, removes all production credential
+names from the child process, and never accepts secrets in argv.
 
 The smoke test includes simultaneous first pushes from multiple machine IDs,
 so the real service—not only the local fake—vouches for shared-index
-conditional-write contention. Its verify step reads the dedicated bucket, and
-an interrupted run can leave uniquely-named smoke objects behind.
+conditional-write contention. Cleanup removes discovery/index registration
+before deleting each run namespace; the target attestation and depot metadata
+are intentionally persistent. An interrupted run can leave uniquely named
+smoke objects behind.
 
 ### Switch the default depot
 

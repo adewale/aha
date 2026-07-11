@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # aha R2 live-bucket smoketest — runs depot v2 integration tests against one
-# explicitly selected, dedicated test bucket.
+# source-pinned, dedicated test bucket.
 #
-# Usage (the project test bucket/account are pinned defaults):
+# Usage (the project test bucket/account cannot be overridden at runtime):
 #   scripts/r2-smoketest.sh
 #
 # Missing credentials are prompted for securely on an interactive terminal.
@@ -15,12 +15,14 @@
 # diagnostic log and print its path after the run.
 #
 # Isolation contract:
-#   * only AHA_R2_SMOKETEST_* target/credential variables are consumed;
+#   * only the two AHA_R2_SMOKETEST_* credential variables are consumed; the
+#     target is compile-time pinned by the integration test;
 #   * production AHA_R2_*, R2_*, and AWS_* credentials are never fallbacks and
 #     are removed from the child environment;
 #   * test credentials matching an ambient production key are rejected;
-#   * every object is run-namespaced and removed afterward; production depot
-#     code itself still has no delete primitive.
+#   * discovery registration is removed before run-created namespace objects;
+#     the attestation and depot metadata persist, and production depot code
+#     itself still has no delete primitive.
 #
 set -u -o pipefail
 
@@ -48,8 +50,6 @@ DEFAULT_SMOKE_ACCOUNT_ID="8837d43caf5a2ab3df5143eb3e2f1b96"
 DEFAULT_SMOKE_TARGET_ID="f7a6d43e8c1b49b0a2d58e7f31c60492"
 SMOKE_BUCKET="$DEFAULT_SMOKE_BUCKET"
 SMOKE_ACCOUNT_ID="$DEFAULT_SMOKE_ACCOUNT_ID"
-SMOKE_ENDPOINT=""
-SMOKE_REGION="auto"
 SMOKE_TARGET_ID="$DEFAULT_SMOKE_TARGET_ID"
 SMOKE_ACCESS_KEY_ID="${AHA_R2_SMOKETEST_ACCESS_KEY_ID:-}"
 SMOKE_SECRET_ACCESS_KEY="${AHA_R2_SMOKETEST_SECRET_ACCESS_KEY:-}"
@@ -112,6 +112,7 @@ export AHA_R2_SMOKETEST_SECRET_ACCESS_KEY="$SMOKE_SECRET_ACCESS_KEY"
 # Defense in depth: even a future accidental default-provider lookup in the
 # integration process cannot see production credential names.
 unset AHA_R2_ACCOUNT_ID AHA_R2_ENDPOINT AHA_R2_REGION AHA_R2_ACCESS_KEY_ID AHA_R2_SECRET_ACCESS_KEY
+unset AHA_R2_SMOKETEST_BUCKET AHA_R2_SMOKETEST_ACCOUNT_ID AHA_R2_SMOKETEST_ENDPOINT AHA_R2_SMOKETEST_REGION AHA_R2_SMOKETEST_TARGET_ID
 unset R2_ACCOUNT_ID R2_ENDPOINT R2_REGION R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_ENDPOINT_URL AWS_ENDPOINT_URL_S3
 unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SHARED_CREDENTIALS_FILE AWS_CONFIG_FILE AWS_REGION AWS_DEFAULT_REGION
@@ -126,7 +127,7 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 echo "progress phase=preflight state=completed" >&2
-echo "R2 smoketest: bucket=$SMOKE_BUCKET" >&2
+echo "R2 smoketest: bucket=$SMOKE_BUCKET account=$SMOKE_ACCOUNT_ID target-id=$SMOKE_TARGET_ID" >&2
 echo "using an attested test-only target and credential capability; production credential names are absent from the child" >&2
 echo "objects are namespaced per run and deleted afterwards; see header for details" >&2
 echo "the suite includes concurrent first pushes and can take longer than the single-writer check" >&2
@@ -177,7 +178,7 @@ else
     echo "next: create a matching Object Read & Write R2 S3 token scoped only to '$SMOKE_BUCKET', then rerun with the AHA_R2_SMOKETEST_* variables" >&2
   else
     echo "The integration test failed; raw child diagnostics are hidden by default." >&2
-    echo "next: rerun scripts/r2-smoketest.sh with the same explicit target and --verbose" >&2
+    echo "next: rerun scripts/r2-smoketest.sh against the same pinned target with --verbose" >&2
   fi
   exit "$status"
 fi

@@ -282,9 +282,10 @@ scripts/smoketest.sh codex ~/.codex/sessions
 The live R2 test is separately isolated: `scripts/r2-smoketest.sh` defaults to
 the project's pinned dedicated test bucket/account, securely prompts for
 missing `AHA_R2_SMOKETEST_*` credentials, and never falls back to production
-`AHA_R2_*`, `R2_*`, or `AWS_*` providers. Use a distinct Object Read & Write
-token scoped only to that test bucket; flags remain available to override the
-pinned target with another dedicated test destination.
+`AHA_R2_*`, `R2_*`, or `AWS_*` providers. The target and its pre-existing
+identity attestation are source-pinned and cannot be changed by flags or
+environment variables. Use a distinct Object Read & Write token scoped only to
+that test bucket.
 
 ## Defaults
 

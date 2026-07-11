@@ -86,6 +86,15 @@ func TestR2SmoketestProvisionerIsPinnedAndHasNoTargetArguments(t *testing.T) {
 	if strings.Contains(text, "$1/") || strings.Contains(text, "--bucket") {
 		t.Fatalf("provisioner accepts a target override: %s", text)
 	}
+	manifest, err := os.ReadFile(filepath.Join("..", "..", "scripts", "r2-smoketest-target.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pinned := range []string{"aha-depot-test-ebb92642-3301-4021-84b7-31ae4c34e7cd", "8837d43caf5a2ab3df5143eb3e2f1b96", "f7a6d43e8c1b49b0a2d58e7f31c60492", "https://8837d43caf5a2ab3df5143eb3e2f1b96.r2.cloudflarestorage.com"} {
+		if !bytes.Contains(manifest, []byte(pinned)) {
+			t.Fatalf("attestation manifest missing pinned value %q", pinned)
+		}
+	}
 }
 
 func TestR2SmoketestDefaultsToPinnedTestBucketAndAccount(t *testing.T) {
@@ -106,6 +115,10 @@ exit 0
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"AHA_R2_SMOKETEST_ACCESS_KEY_ID=smoke-access",
 		"AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=smoke-secret",
+		"AHA_R2_SMOKETEST_BUCKET=production-override",
+		"AHA_R2_SMOKETEST_ACCOUNT_ID=production-account-override",
+		"AHA_R2_SMOKETEST_ENDPOINT=https://production.invalid",
+		"AHA_R2_SMOKETEST_TARGET_ID=production-target-override",
 	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
