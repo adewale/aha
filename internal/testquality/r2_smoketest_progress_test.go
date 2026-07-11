@@ -10,40 +10,127 @@ import (
 	"testing"
 )
 
-func TestR2SmoketestRejectsConflictingAliasesBeforeRunningGo(t *testing.T) {
+var r2ProductionEnv = []string{
+	"AHA_R2_ACCOUNT_ID", "AHA_R2_ENDPOINT", "AHA_R2_REGION", "AHA_R2_ACCESS_KEY_ID", "AHA_R2_SECRET_ACCESS_KEY",
+	"R2_ACCOUNT_ID", "R2_ENDPOINT", "R2_REGION", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+	"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3",
+	"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "AWS_REGION", "AWS_DEFAULT_REGION",
+	"AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+	"AWS_CONTAINER_AUTHORIZATION_TOKEN", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+}
+
+func envWithout(keys []string) []string {
+	blocked := map[string]bool{}
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	var out []string
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		if !blocked[key] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func TestLocalSmoketestDepotIsAlwaysUnderFreshWorkspace(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "scripts", "smoketest.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{`WORK="$(mktemp -d`, `DEPOT="$WORK/depot"`, `"depot": { "type": "local", "location": "$DEPOT" }`} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("local smoketest lacks fresh-workspace invariant %q", required)
+		}
+	}
+	for _, forbidden := range []string{`DEPOT="${AHA_DEPOT`, `DEPOT="$HOME`, `location": "~/.aha`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("local smoketest can inherit production depot via %q", forbidden)
+		}
+	}
+}
+
+func TestR2IntegrationTestUsesOnlyExplicitSmoketestCapability(t *testing.T) {
+	path := filepath.Join("..", "depot", "r2_integration_v2_test.go")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{"AHA_R2_SMOKETEST_BUCKET", "AHA_R2_SMOKETEST_ACCESS_KEY_ID", "AHA_R2_SMOKETEST_SECRET_ACCESS_KEY", "ResolveR2ConfigExplicit", "matchingAmbientProductionCredential"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("integration test missing explicit capability component %s", required)
+		}
+	}
+	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2DepotConfig{})`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("integration test can consult production credential source %s", forbidden)
+		}
+	}
+}
+
+func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	bin := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "go-ran")
 	fakeGo := filepath.Join(bin, "go")
 	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
-	cmd.Env = append(os.Environ(),
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+	cmd.Env = append(envWithout(r2ProductionEnv),
 		"PATH="+bin+":"+os.Getenv("PATH"),
-		"AHA_R2_TEST_BUCKET=aha-depot-test",
-		"AHA_R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef",
-		"AHA_R2_ACCESS_KEY_ID=access-canary-a",
-		"R2_ACCESS_KEY_ID=access-canary-b",
-		"AHA_R2_SECRET_ACCESS_KEY=secret-canary-a",
-		"R2_SECRET_ACCESS_KEY=secret-canary-b",
+		"AHA_R2_ACCESS_KEY_ID=production-access-canary",
+		"AHA_R2_SECRET_ACCESS_KEY=production-secret-canary",
 		"FAKE_GO_MARKER="+marker,
 	)
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
 	if err := cmd.Run(); err == nil {
-		t.Fatal("conflicting aliases unexpectedly succeeded")
+		t.Fatal("production-only credentials unexpectedly authorized the smoketest")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("go ran despite preflight conflict: %v", err)
+		t.Fatalf("go ran despite absent smoketest credentials: %v", err)
 	}
 	text := stderr.String()
-	if !strings.Contains(text, "conflicting") || strings.Count(text, "next:") != 1 {
-		t.Fatalf("stderr=%q want conflict and one next action", text)
+	if !strings.Contains(text, "AHA_R2_SMOKETEST_ACCESS_KEY_ID") || strings.Count(text, "next:") != 1 {
+		t.Fatalf("stderr=%q want test-specific credential request and one action", text)
 	}
-	for _, value := range []string{"access-canary-a", "access-canary-b", "secret-canary-a", "secret-canary-b"} {
-		if strings.Contains(text, value) {
-			t.Fatalf("stderr leaked value %q: %s", value, text)
-		}
+	if strings.Contains(text, "production-access-canary") || strings.Contains(text, "production-secret-canary") {
+		t.Fatalf("stderr leaked production credentials: %s", text)
+	}
+}
+
+func TestR2SmoketestRejectsCredentialsMatchingAmbientProduction(t *testing.T) {
+	bin := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "go-ran")
+	fakeGo := filepath.Join(bin, "go")
+	if err := os.WriteFile(fakeGo, []byte("#!/usr/bin/env bash\ntouch \"$FAKE_GO_MARKER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+	cmd.Env = append(envWithout(r2ProductionEnv),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"AHA_R2_ACCESS_KEY_ID=same-access-canary",
+		"AHA_R2_SECRET_ACCESS_KEY=same-secret-canary",
+		"AHA_R2_SMOKETEST_ACCESS_KEY_ID=same-access-canary",
+		"AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=same-secret-canary",
+		"FAKE_GO_MARKER="+marker,
+	)
+	var stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("production credentials were accepted as smoketest credentials")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("go ran with production credentials: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "distinct test-scoped") || strings.Count(stderr.String(), "next:") != 1 {
+		t.Fatalf("stderr=%q want isolation failure and one action", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "same-access-canary") || strings.Contains(stderr.String(), "same-secret-canary") {
+		t.Fatalf("stderr leaked credentials: %s", stderr.String())
 	}
 }
 
@@ -51,10 +138,17 @@ func TestR2SmoketestProgressUsesStderrAndPreservesChildExit(t *testing.T) {
 	bin := t.TempDir()
 	fakeGo := filepath.Join(bin, "go")
 	fakeGoScript := `#!/usr/bin/env bash
+for name in AHA_R2_ACCOUNT_ID AHA_R2_ENDPOINT AHA_R2_REGION AHA_R2_ACCESS_KEY_ID AHA_R2_SECRET_ACCESS_KEY R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_SHARED_CREDENTIALS_FILE AWS_CONFIG_FILE AWS_WEB_IDENTITY_TOKEN_FILE AWS_ROLE_ARN AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_CONTAINER_CREDENTIALS_RELATIVE_URI AWS_CONTAINER_AUTHORIZATION_TOKEN AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE; do
+  eval "value=\${$name:-}"
+  if [ -n "$value" ]; then echo "production environment leaked: $name"; exit 88; fi
+done
+if [ "$AHA_R2_SMOKETEST_ACCESS_KEY_ID" != "smoke-access" ] || [ "$AHA_R2_SMOKETEST_SECRET_ACCESS_KEY" != "smoke-secret-canary" ]; then
+  echo 'wrong smoketest capability'; exit 89
+fi
 if [ "${FAKE_GO_FORBIDDEN:-0}" = 1 ]; then
   echo 'operation error S3: HeadBucket, https response error StatusCode: 403, api error Forbidden: Forbidden'
 else
-  echo child-test-output
+  echo "child-test-output access=$AHA_R2_SMOKETEST_ACCESS_KEY_ID secret=$AHA_R2_SMOKETEST_SECRET_ACCESS_KEY"
 fi
 exit "${FAKE_GO_EXIT:-0}"
 `
@@ -62,13 +156,11 @@ exit "${FAKE_GO_EXIT:-0}"
 		t.Fatal(err)
 	}
 	run := func(exit, forbidden string) (string, string, error) {
-		cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"))
-		cmd.Env = append(os.Environ(),
+		cmd := exec.Command("bash", filepath.Join("..", "..", "scripts", "r2-smoketest.sh"), "--bucket", "aha-depot-test", "--account-id", "0123456789abcdef0123456789abcdef")
+		cmd.Env = append(envWithout(r2ProductionEnv),
 			"PATH="+bin+":"+os.Getenv("PATH"),
-			"AHA_R2_TEST_BUCKET=aha-depot-test",
-			"AHA_R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef",
-			"AHA_R2_ACCESS_KEY_ID=key",
-			"AHA_R2_SECRET_ACCESS_KEY=secret-canary",
+			"AHA_R2_SMOKETEST_ACCESS_KEY_ID=smoke-access",
+			"AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=smoke-secret-canary",
 			"FAKE_GO_EXIT="+exit,
 			"FAKE_GO_FORBIDDEN="+forbidden,
 		)
@@ -81,8 +173,11 @@ exit "${FAKE_GO_EXIT:-0}"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "child-test-output") || strings.Contains(stdout, "progress phase=") {
-		t.Fatalf("stdout=%q", stdout)
+	if stdout != "" {
+		t.Fatalf("child output must stay private, stdout=%q", stdout)
+	}
+	if strings.Contains(stderr, "smoke-access") || strings.Contains(stderr, "smoke-secret-canary") || strings.Contains(stderr, "child-test-output") {
+		t.Fatalf("success output leaked child log or credentials: %q", stderr)
 	}
 	if !strings.Contains(stderr, "phase=preflight state=completed") || !strings.Contains(stderr, "phase=integration_test state=completed") {
 		t.Fatalf("stderr=%q", stderr)
@@ -95,7 +190,7 @@ exit "${FAKE_GO_EXIT:-0}"
 	if err == nil {
 		t.Fatal("forbidden smoke test unexpectedly succeeded")
 	}
-	for _, want := range []string{"R2 authorization denied during HeadBucket", "before any smoke objects were written", "Object Read & Write", "matching access key and secret", "next:"} {
+	for _, want := range []string{"R2 authorization denied during HeadBucket", "before any smoke objects were written", "explicit test credential", "Object Read & Write", "AHA_R2_SMOKETEST_*", "next:"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("forbidden stderr=%q missing %q", stderr, want)
 		}
@@ -106,7 +201,7 @@ exit "${FAKE_GO_EXIT:-0}"
 	if strings.Contains(stdout, "StatusCode") || strings.Contains(stdout, "api error") || strings.Contains(stdout, "HeadBucket") {
 		t.Fatalf("default forbidden stdout leaked raw child diagnostics: %q", stdout)
 	}
-	if strings.Contains(stderr, "secret-canary") {
+	if strings.Contains(stderr, "smoke-access") || strings.Contains(stderr, "smoke-secret-canary") {
 		t.Fatalf("forbidden stderr leaked credentials: %q", stderr)
 	}
 }

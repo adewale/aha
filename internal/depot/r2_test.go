@@ -41,6 +41,37 @@ func TestNewR2FollowsCloudflareChecksumGuidance(t *testing.T) {
 	}
 }
 
+func TestResolveR2ConfigExplicitIgnoresAmbientProductionCredentials(t *testing.T) {
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "production-access-canary")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "production-secret-canary")
+	t.Setenv("AHA_R2_ACCOUNT_ID", "fedcba9876543210fedcba9876543210")
+	credentials, err := depot.NewR2Credentials("smoketest-access", "smoketest-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := depot.ResolveR2ConfigExplicit(model.R2DepotConfig{AccountID: "0123456789abcdef0123456789abcdef"}, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccountID() != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("explicit config used ambient production account: %s", cfg.AccountID())
+	}
+}
+
+func TestNewR2CredentialsRejectsMissingAndPlaceholderValuesWithoutLeaking(t *testing.T) {
+	for _, tc := range []struct{ access, secret string }{{"", "secret-canary"}, {"access-canary", ""}, {"<access>", "secret-canary"}, {"access-canary", "<secret>"}} {
+		_, err := depot.NewR2Credentials(tc.access, tc.secret)
+		if err == nil {
+			t.Fatalf("credentials (%q,%q) accepted", tc.access, tc.secret)
+		}
+		for _, canary := range []string{"access-canary", "secret-canary"} {
+			if strings.Contains(err.Error(), canary) {
+				t.Fatalf("credential error leaked supplied value: %v", err)
+			}
+		}
+	}
+}
+
 func TestResolveR2ConfigUsesCloudflareEndpointAndAutoRegion(t *testing.T) {
 	const accountID = "0123456789abcdef0123456789abcdef"
 	t.Setenv("AHA_R2_ACCOUNT_ID", accountID)

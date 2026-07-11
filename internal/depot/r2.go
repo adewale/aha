@@ -83,6 +83,23 @@ func (c R2Config) Valid() bool {
 	return c.endpoint != "" && c.region == "auto" && c.accessKeyID != "" && c.secretAccessKey != ""
 }
 
+// R2Credentials is an opaque matching S3 key pair. Explicit consumers such as
+// live smoke tests can carry a test-only capability without consulting ambient
+// production environment variables.
+type R2Credentials struct {
+	accessKeyID     string
+	secretAccessKey string
+}
+
+func NewR2Credentials(accessKeyID, secretAccessKey string) (R2Credentials, error) {
+	accessKeyID = strings.TrimSpace(accessKeyID)
+	secretAccessKey = strings.TrimSpace(secretAccessKey)
+	if looksLikePlaceholder(accessKeyID) || looksLikePlaceholder(secretAccessKey) {
+		return R2Credentials{}, fmt.Errorf("R2 credentials required: access key and secret must be real non-placeholder values from one S3 token")
+	}
+	return R2Credentials{accessKeyID: accessKeyID, secretAccessKey: secretAccessKey}, nil
+}
+
 func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
 	pairs := [][2]string{
 		{"AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID"},
@@ -101,24 +118,41 @@ func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
 	if len(conflicts) > 0 {
 		return R2Config{}, fmt.Errorf("conflicting R2 environment aliases are set to different values: %s; unset one variable from each pair", strings.Join(conflicts, ", "))
 	}
-	accountValue := firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID)
-	endpoint := firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint)
-	region := firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region)
-	accessKeyID := firstEnv("AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", "")
-	secretAccessKey := firstEnv("AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", "")
+	explicit := model.R2DepotConfig{
+		AccountID: firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID),
+		Endpoint:  firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint),
+		Region:    firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region),
+	}
+	creds, err := NewR2Credentials(
+		firstEnv("AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", ""),
+		firstEnv("AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", ""),
+	)
+	if err != nil {
+		return R2Config{}, err
+	}
+	return ResolveR2ConfigExplicit(explicit, creds)
+}
+
+// ResolveR2ConfigExplicit resolves only its arguments. It never reads the
+// process environment, which makes production-credential fallback impossible
+// for smoke tests and other isolated callers.
+func ResolveR2ConfigExplicit(cfg model.R2DepotConfig, creds R2Credentials) (R2Config, error) {
+	accountValue := strings.TrimSpace(cfg.AccountID)
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	region := strings.TrimSpace(cfg.Region)
 	if region == "" {
 		region = "auto"
 	}
 	if region != "auto" {
 		return R2Config{}, fmt.Errorf("invalid R2 region %q: Cloudflare R2 uses auto", region)
 	}
-	if looksLikePlaceholder(accessKeyID) || looksLikePlaceholder(secretAccessKey) {
-		return R2Config{}, fmt.Errorf("R2 credentials required: values are missing or contain documentation placeholders; set real AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY values")
+	if creds.accessKeyID == "" || creds.secretAccessKey == "" {
+		return R2Config{}, fmt.Errorf("explicit R2 configuration requires validated credentials")
 	}
 	var accountID R2AccountID
 	if endpoint == "" {
 		if accountValue == "" {
-			return R2Config{}, fmt.Errorf("R2 account id required (AHA_R2_ACCOUNT_ID or R2_ACCOUNT_ID)")
+			return R2Config{}, fmt.Errorf("R2 account id required")
 		}
 		var err error
 		accountID, err = ParseR2AccountID(accountValue)
@@ -149,7 +183,7 @@ func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
 			}
 		}
 	}
-	return R2Config{accountID: accountID, endpoint: endpoint, region: region, accessKeyID: accessKeyID, secretAccessKey: secretAccessKey}, nil
+	return R2Config{accountID: accountID, endpoint: endpoint, region: region, accessKeyID: creds.accessKeyID, secretAccessKey: creds.secretAccessKey}, nil
 }
 
 type R2 struct {

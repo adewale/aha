@@ -305,18 +305,32 @@ export AHA_R2_SECRET_ACCESS_KEY="real-secret-access-key"
 
 From a repo clone, `scripts/r2-smoketest.sh` runs the depot integration test
 against a real bucket — real conditional writes and read-after-write, the two
-things local fakes cannot vouch for. Point it at a **separate test bucket**,
-not your depot: its verify step reads whatever the bucket contains, and an
-interrupted run can leave uniquely-named smoke objects behind.
+things local fakes cannot vouch for. Create a **separate test bucket** and a
+distinct **Object Read & Write** S3 token scoped only to that bucket.
+
+The smoke test never reads production `AHA_R2_*`, `R2_*`, or `AWS_*`
+credentials. Its destination is required explicitly, and missing test
+credentials are requested securely from an interactive terminal:
 
 ```bash
-export AHA_R2_TEST_BUCKET=aha-depot-test
-scripts/r2-smoketest.sh
+printf 'R2 account ID: '
+IFS= read -r SMOKE_ACCOUNT_ID
+scripts/r2-smoketest.sh \
+  --bucket aha-depot-test \
+  --account-id "$SMOKE_ACCOUNT_ID"
 ```
+
+For non-interactive CI, provide only
+`AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
+`AHA_R2_SMOKETEST_SECRET_ACCESS_KEY` (plus the destination flags or their
+`AHA_R2_SMOKETEST_BUCKET`/account/endpoint equivalents). The script rejects a
+test key that matches ambient production credentials, removes all production
+credential names from the child process, and never accepts secrets in argv.
 
 The smoke test includes simultaneous first pushes from multiple machine IDs,
 so the real service—not only the local fake—vouches for shared-index
-conditional-write contention.
+conditional-write contention. Its verify step reads the dedicated bucket, and
+an interrupted run can leave uniquely-named smoke objects behind.
 
 ### Switch the default depot
 
@@ -396,8 +410,9 @@ conflicts are rejected before networking without printing either value.
 Next: export a matching key pair from one **Object Read & Write** R2 S3 token
 scoped to the named bucket, then rerun the failed command. `aha` and the live
 smoke test classify this case without printing credential values. Set
-`AHA_R2_SMOKETEST_VERBOSE=1` only when raw Go test diagnostics are explicitly
-needed; default smoke failures are concise.
+`--verbose`/`AHA_R2_SMOKETEST_VERBOSE=1` retains the private 0600 Go test log
+and reports its path for explicit local inspection. Child logs are never
+streamed into normal output because dependencies could echo credentials.
 
 ### The endpoint contains `%3Cyour-...%3E` or TLS fails on `<your-account-id>`
 

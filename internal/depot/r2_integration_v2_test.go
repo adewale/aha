@@ -24,8 +24,9 @@ import (
 // TestR2IntegrationV2PushPullVerify is the live-bucket smoke test: the
 // full depot v2 contract against a real R2 (or S3-compatible) bucket.
 //
-//	AHA_R2_TEST_BUCKET=aha-depot-test \
-//	AHA_R2_ACCOUNT_ID=... AHA_R2_ACCESS_KEY_ID=... AHA_R2_SECRET_ACCESS_KEY=... \
+//	AHA_R2_SMOKETEST_BUCKET=aha-depot-test \
+//	AHA_R2_SMOKETEST_ACCOUNT_ID=... AHA_R2_SMOKETEST_ACCESS_KEY_ID=... \
+//	AHA_R2_SMOKETEST_SECRET_ACCESS_KEY=... \
 //	go test -tags integration ./internal/depot/ -run TestR2IntegrationV2 -v
 //
 // It exercises what the fake cannot vouch for: real conditional writes
@@ -39,7 +40,7 @@ import (
 // namespaces itself under a unique machine ID and cleans up after itself
 // with raw SDK calls — test code, not depot code.
 func TestR2IntegrationV2PushPullVerify(t *testing.T) {
-	bucket := osGetenvNonEmpty(t, "AHA_R2_TEST_BUCKET")
+	bucket := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_BUCKET")
 	cfg := resolveLiveR2Config(t)
 	validatedBucket, err := depot.ParseR2Bucket(bucket)
 	if err != nil {
@@ -174,7 +175,7 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 // converges under real R2 conditional-write contention, not only under the
 // in-repo fake. Every writer has a unique namespace and a deadline.
 func TestR2IntegrationV2ConcurrentFirstPushes(t *testing.T) {
-	bucketName := osGetenvNonEmpty(t, "AHA_R2_TEST_BUCKET")
+	bucketName := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_BUCKET")
 	cfg := resolveLiveR2Config(t)
 	bucket, err := depot.ParseR2Bucket(bucketName)
 	if err != nil {
@@ -264,32 +265,57 @@ func randomRunID(t *testing.T) string {
 
 func resolveLiveR2Config(t *testing.T) depot.R2Config {
 	t.Helper()
-	accessKey := strings.TrimSpace(firstTestEnv("AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"))
-	secretKey := strings.TrimSpace(firstTestEnv("AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"))
-	if accessKey == "" || secretKey == "" {
-		t.Skip("set AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY to run the live R2 test")
+	accessKey := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_ACCESS_KEY_ID")
+	secretKey := osGetenvNonEmpty(t, "AHA_R2_SMOKETEST_SECRET_ACCESS_KEY")
+	if productionName := matchingAmbientProductionCredential(accessKey, secretKey); productionName != "" {
+		t.Fatalf("smoketest credential matches ambient production variable %s; use a distinct bucket-scoped test token", productionName)
 	}
-	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	credentials, err := depot.NewR2Credentials(accessKey, secretKey)
 	if err != nil {
-		t.Fatalf("invalid supplied R2 configuration: %v", err)
+		t.Fatalf("invalid smoketest R2 credentials: %v", err)
 	}
-	return cfg
+	cfg := model.R2DepotConfig{
+		AccountID: strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")),
+		Endpoint:  strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")),
+		Region:    strings.TrimSpace(os.Getenv("AHA_R2_SMOKETEST_REGION")),
+	}
+	resolved, err := depot.ResolveR2ConfigExplicit(cfg, credentials)
+	if err != nil {
+		t.Fatalf("invalid explicit smoketest R2 configuration: %v", err)
+	}
+	return resolved
 }
 
-func firstTestEnv(keys ...string) string {
-	for _, key := range keys {
-		if value := os.Getenv(key); value != "" {
-			return value
+func matchingAmbientProductionCredential(accessKey, secretKey string) string {
+	for _, key := range []string{"AHA_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"} {
+		if value := os.Getenv(key); value != "" && value == accessKey {
+			return key
+		}
+	}
+	for _, key := range []string{"AHA_R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY"} {
+		if value := os.Getenv(key); value != "" && value == secretKey {
+			return key
 		}
 	}
 	return ""
+}
+
+func TestR2SmoketestCredentialsRejectAmbientProductionReuse(t *testing.T) {
+	t.Setenv("AHA_R2_ACCESS_KEY_ID", "same-access-canary")
+	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "same-secret-canary")
+	if got := matchingAmbientProductionCredential("same-access-canary", "different-secret"); got != "AHA_R2_ACCESS_KEY_ID" {
+		t.Fatalf("matching access key returned %q", got)
+	}
+	if got := matchingAmbientProductionCredential("different-access", "same-secret-canary"); got != "AHA_R2_SECRET_ACCESS_KEY" {
+		t.Fatalf("matching secret returned %q", got)
+	}
 }
 
 func osGetenvNonEmpty(t *testing.T, key string) string {
 	t.Helper()
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
-		t.Skipf("set %s plus R2/AHA_R2 credentials to run the live-bucket smoke test", key)
+		t.Skipf("set %s plus the AHA_R2_SMOKETEST_* target capability to run the live-bucket smoke test", key)
 	}
 	return v
 }

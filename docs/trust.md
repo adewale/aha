@@ -122,11 +122,13 @@ go test ./internal/adapters -run SourceAdaptersStayReadOnly
 # Corpus invariant/repair tooling
 go test ./internal/corpus -run 'Verify|ReconcileFTS'
 
-# End-to-end private smoke test; use temp dirs and delete them after inspection
-go build -o /tmp/aha ./cmd/aha
-AHA_ACCEPT_SECRETS=1 /tmp/aha snapshot \
+# End-to-end private smoke test; allocate a new destination rather than naming
+# an existing depot. scripts/smoketest.sh does this automatically.
+WORK="$(mktemp -d /tmp/aha-smoketest.XXXXXX)"
+go build -o "$WORK/aha" ./cmd/aha
+AHA_ACCEPT_SECRETS=1 "$WORK/aha" snapshot \
   --machine local-test \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --depot local:/tmp/aha-depot
+  --depot "local:$WORK/depot"
 ```

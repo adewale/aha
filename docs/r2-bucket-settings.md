@@ -174,16 +174,21 @@ Recommended bucket controls:
 
 From a repo clone, `scripts/r2-smoketest.sh` runs the live-bucket integration
 tests: push, delta push, unchanged-state reuse, pull, deep verify, and
-simultaneous first pushes from multiple machine IDs against the real service,
-exercising conditional-write contention and read-after-write consistency that
-local fakes cannot vouch for. Run it against a dedicated
-test bucket (its verify step reads everything in the bucket, and an
-interrupted run can leave uniquely-named smoke objects behind):
+simultaneous first pushes from multiple machine IDs against the real service.
+Use a dedicated bucket and a distinct Object Read & Write token scoped only to
+that bucket.
+
+The destination must be explicit. Credentials are securely prompted on a TTY
+or supplied through the dedicated `AHA_R2_SMOKETEST_ACCESS_KEY_ID` and
+`AHA_R2_SMOKETEST_SECRET_ACCESS_KEY` variables. Production `AHA_R2_*`, `R2_*`,
+and `AWS_*` credentials are never fallback inputs and are removed from the
+child environment. A test key matching an ambient production key is rejected
+before networking.
 
 ```bash
-AHA_R2_TEST_BUCKET=aha-depot-test \
-AHA_R2_ACCOUNT_ID=... AHA_R2_ACCESS_KEY_ID=... AHA_R2_SECRET_ACCESS_KEY=... \
-scripts/r2-smoketest.sh
+printf 'R2 account ID: '
+IFS= read -r SMOKE_ACCOUNT_ID
+scripts/r2-smoketest.sh --bucket aha-depot-test --account-id "$SMOKE_ACCOUNT_ID"
 ```
 
 ## References
