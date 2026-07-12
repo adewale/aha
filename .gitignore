@@ -12,6 +12,10 @@ coverage.out
 /.claude/
 /.pi-subagents/
 internal/corpus/testdata/rapid/
+internal/depot/testdata/rapid/
 
 # Wrangler's machine-local account cache (never project source)
 /.wrangler/
+
+# Pinned TypeScript dependencies are installed from package-lock.json.
+/clients/typescript/node_modules/

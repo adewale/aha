@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// WorkspaceDatabaseFilename separates 0.2 Workspaces from the pre-0.2
+// corpus.db writer surface. An older binary therefore cannot open or mutate
+// the current SQLite materialisation even when pointed at the same directory.
+const WorkspaceDatabaseFilename = "workspace.db"
+
 // ArchiveBinding is a validated durable identity/address pair recorded by a
 // Workspace. Its fields are private so callers cannot construct an empty or
 // partially bound Workspace state.

@@ -91,10 +91,10 @@ cross_compile() {
   run env GOOS=linux GOARCH=amd64 go build -o "$root/aha-linux-amd64" ./cmd/aha
   run env GOOS=darwin GOARCH=amd64 go build -o "$root/aha-darwin-amd64" ./cmd/aha
   run env GOOS=windows GOARCH=amd64 go build -o "$root/aha-windows-amd64.exe" ./cmd/aha
-  # Cross-running test binaries is impossible, and compiling all *_test.go
-  # currently reaches platform-specific syscall tests. Building the complete
-  # command graph still gates production portability without broad test-only
-  # platform refactors.
+  # Compile the platform contract tests even though they cannot be executed on
+  # this host. This pins Windows repair refusal and destination-claim support.
+  run env GOOS=windows GOARCH=amd64 go test -c -o "$root/corpus-windows.test.exe" ./internal/corpus
+  run env GOOS=windows GOARCH=amd64 go test -c -o "$root/safety-windows.test.exe" ./internal/safety
 }
 
 fuzz() {
@@ -113,21 +113,20 @@ fuzz() {
 }
 
 # ts typechecks the generated TypeScript client surface and runs its runtime
-# tests. It is optional: if a TypeScript toolchain is not installed the step
-# is skipped with a notice rather than failing, so Go-only environments and
-# CI without Node still pass `full`.
+# tests. The toolchain is pinned in package-lock.json; full/CI verification
+# fails rather than silently shipping an unchecked generated client.
 ts() {
   local dir="clients/typescript"
-  if command -v tsc >/dev/null 2>&1; then
-    run_shell "cd '$dir' && tsc --noEmit"
-  else
-    printf '\n==> ts typecheck: skipped (tsc not found)\n' >&2
+  if ! command -v node >/dev/null 2>&1; then
+    printf '\nTypeScript verification requires Node 22 and the locked client dependencies.\n' >&2
+    return 1
   fi
-  if command -v node >/dev/null 2>&1; then
-    run node --experimental-strip-types --test "$dir/test/stdio.test.ts"
-  else
-    printf '\n==> ts runtime tests: skipped (node not found)\n' >&2
+  if [[ ! -x "$dir/node_modules/.bin/tsc" ]]; then
+    printf '\nTypeScript dependencies are missing; install the locked dependencies under %s.\n' "$dir" >&2
+    return 1
   fi
+  run_shell "cd '$dir' && npm run typecheck"
+  run node --experimental-strip-types --test "$dir/test/stdio.test.ts"
 }
 
 # mcp runs the cross-SDK conformance suite. Six SDK legs across three SDKs
@@ -158,7 +157,9 @@ mcp_conformance() {
   local have_python=0 have_node=0 have_tsc=0 have_ts_sdk=0
   command -v python3 >/dev/null 2>&1 && python3 -c "import mcp" 2>/dev/null && have_python=1
   command -v node    >/dev/null 2>&1 && have_node=1
-  command -v tsc     >/dev/null 2>&1 && have_tsc=1
+  if command -v tsc >/dev/null 2>&1 || [[ -x clients/typescript/node_modules/.bin/tsc ]]; then
+    have_tsc=1
+  fi
   if (( have_node )) && [[ -d scripts/mcp-conformance/node_modules/@modelcontextprotocol/sdk ]]; then
     have_ts_sdk=1
   fi
@@ -244,6 +245,7 @@ full() {
   fuzz
   ts
   build_private
+  run ./scripts/compat-n-minus-one.sh
   cross_compile
   mcp_conformance
 }

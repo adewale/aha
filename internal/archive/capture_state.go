@@ -27,6 +27,8 @@ type StateOptions struct {
 	Progress       *ahaprogress.Tracker
 	// Cache is the advisory scan cache; nil means always read (--force).
 	Cache *CaptureCache
+	// MetadataOnly refuses a cache miss rather than opening source content.
+	MetadataOnly bool
 }
 
 // StateCapture is one machine's captured state for a depot v2 push: a
@@ -37,6 +39,12 @@ type StateOptions struct {
 //
 // CaptureState never parses sessions: entry counts are ingest-derived
 // corpus facts, not capture-time work (docs/depot-v2-spec.md, Phase 4).
+type CaptureStateUnknownError struct{}
+
+func (*CaptureStateUnknownError) Error() string {
+	return "capture state is not known from metadata cache"
+}
+
 type StateCapture struct {
 	Manifest model.SnapshotManifest
 	tempDir  string
@@ -76,7 +84,10 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 	}
 	opts.Progress.Advance(ahaprogress.PhaseCapture, 0, captureTotal, ahaprogress.UnitFiles)
 	processedFiles := uint64(0)
-	tmpDir, err := os.MkdirTemp("", "aha-capture-*")
+	tmpDir := ""
+	if !opts.MetadataOnly {
+		tmpDir, err = os.MkdirTemp("", "aha-capture-*")
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			opts.Progress.Cancel(ahaprogress.PhaseCapture, processedFiles, captureTotal, ahaprogress.UnitFiles)
@@ -118,6 +129,9 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 					return nil
 				}
 			}
+		}
+		if opts.MetadataOnly {
+			return &CaptureStateUnknownError{}
 		}
 		copyPath, sha, size, state, err := StableCopy(rawPath, tmpDir)
 		if err != nil {
@@ -168,25 +182,33 @@ func CaptureState(ctx context.Context, cfg model.Config, registry map[string]ada
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].RelativePath < files[j].RelativePath })
 	var mad []model.ManifestAdapt
-	names := make([]string, 0, len(registry))
-	for n := range registry {
+	usedAdapters := make(map[string]bool)
+	for _, file := range files {
+		usedAdapters[file.Source] = true
+	}
+	names := make([]string, 0, len(usedAdapters))
+	for n := range usedAdapters {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		ad := registry[name]
+		ad, ok := registry[name]
+		if !ok {
+			return nil, fmt.Errorf("captured file uses unregistered adapter %q", name)
+		}
 		mad = append(mad, model.ManifestAdapt{Name: ad.Name(), Version: ad.Version(), Capabilities: ad.Capabilities()})
 	}
 	sc.Manifest = model.SnapshotManifest{
-		Schema:       model.SnapshotManifestSchema,
-		MachineID:    cfg.MachineID,
-		MachineLabel: cfg.MachineLabel,
-		CapturedAt:   opts.CapturedAt,
-		CreatedBy:    "aha " + model.Version,
-		Source:       model.ManifestSource{HostOS: runtime.GOOS},
-		Policy:       model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction},
-		Adapters:     mad,
-		Files:        files,
+		Schema:           model.SnapshotManifestSchema,
+		RequiredFeatures: model.RequiredSnapshotFeatures(),
+		MachineID:        cfg.MachineID,
+		MachineLabel:     cfg.MachineLabel,
+		CapturedAt:       opts.CapturedAt,
+		CreatedBy:        "aha " + model.Version,
+		Source:           model.ManifestSource{HostOS: runtime.GOOS},
+		Policy:           model.ManifestPolicy{PathMode: cfg.PathMode, IncludeSubagents: cfg.IncludeSubagents, IncludeImages: cfg.IncludeImages, IndexToolOutput: cfg.IndexToolOutput, Redaction: cfg.Redaction},
+		Adapters:         mad,
+		Files:            files,
 	}
 	if _, _, err := model.EncodeSnapshotManifest(sc.Manifest); err != nil {
 		return nil, err
@@ -223,6 +245,9 @@ func (sc *StateCapture) BlobPath(key model.BlobKey) (string, error) {
 
 // Close removes the capture's temp files.
 func (sc *StateCapture) Close() error {
+	if sc == nil || sc.tempDir == "" {
+		return nil
+	}
 	return os.RemoveAll(sc.tempDir)
 }
 

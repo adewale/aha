@@ -10,6 +10,7 @@ import (
 	"time"
 
 	ahaclock "github.com/adewale/aha/internal/clock"
+	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 )
@@ -32,7 +33,7 @@ func IsLegacyCorpus(root string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	dbPath := filepath.Join(expanded, "corpus.db")
+	dbPath := filepath.Join(expanded, model.WorkspaceDatabaseFilename)
 	if _, err := os.Stat(dbPath); err != nil {
 		return false, err
 	}

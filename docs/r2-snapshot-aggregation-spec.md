@@ -192,7 +192,7 @@ everything analytical stays on the local corpus:
    aha archive upload ──── bundle ──────push──►  bundles/v1/<sha>.tar.zst
                                            catalog/v1/<machine>.json            
                                                    │                            
-                                                   └──pull── aha archive download ──► corpus.db
+                                                   └──pull── aha archive download ──► workspace.db
                                                                             + FTS + blobs
                                                                                  │
                                                            search · read · status · conflicts
@@ -321,7 +321,7 @@ subtrees under `~/.aha`:
 ```text
 ~/.aha/
   depot/        ← the depot (durable bundle pool + repairable catalog)
-  corpus.db     ← the corpus (local database/index)
+  workspace.db     ← the corpus (local database/index)
   blobs/        ← corpus's own content-addressed blobs (files/, images/, …)
 ```
 
@@ -448,7 +448,7 @@ a separate local database:
 What this makes concrete:
 
 - **One bundle pool, many corpora.** After T4 the depot holds `{A, B, C, A2}` —
-  one deduped, content-addressed copy. Each `corpus.db` is a separate file that
+  one deduped, content-addressed copy. Each `workspace.db` is a separate file that
   converges in content as it ingests.
 - **Convergence is pull-driven and eventual.** Right after T4, `work-mac`'s
   corpus is still `{A, B}` until its next `refresh`.
@@ -575,7 +575,7 @@ and per-op costs low.
 ### Remove / explicitly avoid
 
 - Do **not** weaken the local-first default; remote/R2 depot use is opt-in.
-- Do **not** store `corpus.db` in R2 as a shared writable query engine (unsafe
+- Do **not** store `workspace.db` in R2 as a shared writable query engine (unsafe
   multi-writer SQLite; contradicts "SQLite is the engine, not a cache").
 - Avoid querying bundles in place over the network for analyses.
 - Rename the bundle destination to `--archive` (e.g. `--archive local:./bundles`)
@@ -856,11 +856,11 @@ contradictions.
 
 ## Rejected and deferred alternatives
 
-- **`corpus.db` in R2 as a shared query engine** — rejected: unsafe multi-writer
+- **`workspace.db` in R2 as a shared query engine** — rejected: unsafe multi-writer
   SQLite; contradicts "SQLite is the engine, not a cache."
 - **Query bundles in place over the network per analysis** — rejected: many
   round-trips, loses offline use, FTS, determinism.
-- **Publish a read-only prebuilt `corpus.db` snapshot to the depot** for fast
+- **Publish a read-only prebuilt `workspace.db` snapshot to the depot** for fast
   bootstrap — deferred: a single-writer host publishes an immutable, versioned,
   read-only corpus snapshot others download to seed before incremental `ingest`.
   A cache/replica, never the multi-writer source of truth.

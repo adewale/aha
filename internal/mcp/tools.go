@@ -146,6 +146,11 @@ type IncidentTrajectoryInput struct {
 // reject extraneous arguments at the SDK boundary.
 type EmptyInput struct{}
 
+type ConflictsInput struct {
+	Limit  int `json:"limit,omitempty" jsonschema:"Page size (default 100, max 200)"`
+	Offset int `json:"offset,omitempty" jsonschema:"Zero-based page offset"`
+}
+
 // ---------- Pure business logic (used by both the SDK handlers and CallTool) ----------
 
 func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
@@ -182,6 +187,9 @@ func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
 const MaxReadContextEntries = 200
 
 func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
+	if (in.Ref == "") == (in.Session == "") {
+		return nil, fmt.Errorf("show requires exactly one of ref or session")
+	}
 	var (
 		entries []corpus.ReadEntry
 		err     error
@@ -203,9 +211,6 @@ func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
 			}
 			entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
 		} else {
-			if in.Session == "" {
-				return nil, fmt.Errorf("read requires either ref or session")
-			}
 			entries, err = corpus.ReadContext(b.DB(), in.Session, in.Entry, before, after)
 		}
 	case "branch", "live":
@@ -240,8 +245,12 @@ func doVerify(b Backend) (corpus.VerifyReport, error) {
 	return corpus.Verify(b.Store())
 }
 
-func doConflicts(b Backend) ([]corpus.Conflict, error) {
-	rows, err := corpus.Conflicts(b.DB())
+func doConflicts(b Backend, in ConflictsInput) ([]corpus.Conflict, error) {
+	limit := in.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	rows, err := corpus.ConflictsPage(b.DB(), limit, in.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -410,8 +419,8 @@ func registerTools(server *mcp.Server, b Backend) {
 		Name:        "workspace_conflicts",
 		Description: ToolDescriptions["workspace_conflicts"],
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		out, err := doConflicts(b)
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in ConflictsInput) (*mcp.CallToolResult, any, error) {
+		out, err := doConflicts(b, in)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
@@ -533,10 +542,11 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 		}
 		return doVerify(b)
 	case "workspace_conflicts":
-		if err := rejectArgsIfPresent(raw, name); err != nil {
+		in, err := decodeInput[ConflictsInput](raw, name)
+		if err != nil {
 			return nil, err
 		}
-		return doConflicts(b)
+		return doConflicts(b, in)
 	case "workspace_size":
 		if err := rejectArgsIfPresent(raw, name); err != nil {
 			return nil, err
@@ -566,6 +576,7 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 func capabilities() map[string]any {
 	return map[string]any{
 		"schema":            ContractSchema,
+		"http_schema":       "aha.http.v2",
 		"required_features": []string{"read-only-v1", "strict-input-v1", "structured-errors-v1"},
 		"tools":             append([]string(nil), ToolNames...),
 	}

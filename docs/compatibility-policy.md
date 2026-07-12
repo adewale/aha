@@ -7,14 +7,14 @@ Aha separates **data-format compatibility**, **wire-contract compatibility**, an
 | Boundary | Compatibility mechanism |
 |---|---|
 | Config | `aha.config.v1`; unsupported schemas fail before commands mutate state; namespaced `extensions` survive read/write; JSONC comments survive updates |
-| Archive | immutable v2 layout plus `format_major`, `format_minor`, `required_features`, and `optional_features` in the marker |
-| Workspace | SQLite migration number plus checksummed `aha.workspace.identity.v1` recovery witness outside SQLite |
+| Archive | current `aha-depot/v3` marker plus authoritative `aha-v3/` writer namespace, bounded major/minor versions, and required/optional features; exact unprefixed v2 Archives and `aha-snapshot-manifest/v2` bytes remain read-only; each v3 snapshot declares semantic features |
+| Workspace | `workspace.db` (distinct from the pre-0.2 writer filename), SQLite migration number, and a checksummed `aha.workspace.identity.v1` witness refreshed after migration |
 | CLI JSON | response-local schemas such as `aha.status.v2` |
 | HTTP | `/api/v2/...`, `Aha-Contract-Schema: aha.http.v2`, and `/api/v2/capabilities` |
 | MCP | `aha.mcp.v2`, discoverable through `aha_capabilities` |
-| TypeScript | generated from the canonical MCP tool registry |
+| TypeScript | generated from the canonical MCP tool registry; HTTP and stdio transports negotiate and reject unsupported required features before tool calls |
 
-An older binary may read additive optional metadata. It must reject an unknown required feature, format major, config schema, Workspace identity schema, or newer SQLite migration before obtaining a write capability.
+An older binary may read additive optional metadata. It must reject an unknown required feature, unsupported format major or minor, config schema, Workspace identity schema, or newer SQLite migration before obtaining a write capability. The Archive writer fence and separate Workspace database filename prevent the immediately preceding binary from becoming a mixed-version writer.
 
 Archive objects are never reinterpreted in place. A new representation gets a new schema or required feature. Workspace databases are rebuildable, but an unsupported database is not opened for mutation.
 
@@ -123,7 +123,7 @@ Security and integrity requirements may establish a minimum supported date, as A
 
 ### 8. Test N/N+1, not only the current release
 
-Committed fixtures must prove:
+`scripts/compat-n-minus-one.sh` pins the exact predecessor commit, builds both binaries, materialises a real predecessor snapshot with the current binary, and proves reverse-direction refusal without mutation. Committed fixtures additionally prove:
 
 - an older reader safely accepts additive optional metadata;
 - an older writer rejects unknown required features before mutation;

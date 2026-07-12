@@ -15,9 +15,12 @@ import (
 // identity, so one logical manifest can never carry two identities.
 func FuzzDecodeSnapshotManifest(f *testing.F) {
 	canonical, _, err := model.EncodeSnapshotManifest(model.SnapshotManifest{
-		Schema:     model.SnapshotManifestSchema,
-		MachineID:  "fuzz-machine",
-		CapturedAt: "2026-06-10T00:00:00Z",
+		Schema:           model.SnapshotManifestSchema,
+		RequiredFeatures: model.RequiredSnapshotFeatures(),
+		MachineID:        "fuzz-machine",
+		CapturedAt:       "2026-06-10T00:00:00Z",
+		Policy:           model.ManifestPolicy{PathMode: "raw", Redaction: "none-v1"},
+		Adapters:         []model.ManifestAdapt{{Name: "pi", Version: "test"}},
 		Files: []model.ManifestFile{
 			{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/a.jsonl", RawPath: "/r/a.jsonl", SHA256: strings.Repeat("a", 64), Bytes: 3, SessionID: "a", CopyState: "stable"},
 		},

@@ -157,13 +157,15 @@ Consequences encoded in this design:
 ### Object model and key layout
 
 ```text
-<depot root or bucket>/
-  aha-depot.json                                # marker (schema aha-depot/v2)
-  blobs/v2/<sha256>.zst                         # one compressed file version, write-once
-  machines/index.json                           # machine-namespace registry, conditional PUT
-  machines/<machine_id>/manifests/<sha256>.json # one snapshot manifest, write-once
-  machines/<machine_id>/latest                  # pointer {manifest_sha256}, conditional PUT
+<Archive root or bucket>/
+  aha-depot.json                                       # marker (current schema aha-depot/v3)
+  aha-v3/blobs/v2/<sha256>.zst                         # one compressed file version, write-once
+  aha-v3/machines/index.json                           # machine-namespace registry, conditional PUT
+  aha-v3/machines/<machine_id>/manifests/<sha256>.json # one snapshot manifest, write-once
+  aha-v3/machines/<machine_id>/latest                  # pointer {manifest_sha256}, conditional PUT
 ```
+
+The v3 prefix is a writer-generation fence: pre-0.2 binaries reject the v3 marker before publication, and even a previously issued legacy writer cannot move the authoritative v3 pointers. Aha still reads the exact unprefixed v2 layout and v2 snapshot bytes, but never grants it a writer capability.
 
 The **machines index** exists so pull can discover machine namespaces with a
 single GET instead of a LIST (I6). It is appended to (conditional PUT with
@@ -199,7 +201,12 @@ version") is unchanged in shape.
 - **refresh** = push + pull, unchanged as the muscle-memory command. Because
   push derives its delta from the parent manifest and pull derives its
   fetches from the corpus, a steady-state refresh with no changes is a
-  handful of small GETs and zero PUTs, zero parses, zero blob fetches.
+  handful of small GETs and zero PUTs, zero parses, zero blob fetches. This
+  budget relies on the Archive's append-only storage boundary: a verified
+  parent manifest is the receipt for carried blobs, so ordinary upload does
+  not issue one HEAD per file. Explicit deep verification detects
+  out-of-band operator deletion or storage corruption; upload is not an
+  implicit whole-Archive repair scan.
 
 ### Invariants — by construction first
 

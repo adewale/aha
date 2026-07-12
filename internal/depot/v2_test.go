@@ -30,14 +30,15 @@ func writeBlobSrc(t *testing.T, dir, name, content string) (string, model.BlobKe
 
 func snapshotManifestFor(machine string, files ...model.ManifestFile) model.SnapshotManifest {
 	return model.SnapshotManifest{
-		Schema:     model.SnapshotManifestSchema,
-		MachineID:  machine,
-		CapturedAt: "2026-06-09T00:00:00Z",
-		CreatedBy:  "aha test",
-		Source:     model.ManifestSource{HostOS: "linux"},
-		Policy:     model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
-		Adapters:   []model.ManifestAdapt{{Name: "pi", Version: "test"}},
-		Files:      files,
+		Schema:           model.SnapshotManifestSchema,
+		RequiredFeatures: model.RequiredSnapshotFeatures(),
+		MachineID:        machine,
+		CapturedAt:       "2026-06-09T00:00:00Z",
+		CreatedBy:        "aha test",
+		Source:           model.ManifestSource{HostOS: "linux"},
+		Policy:           model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+		Adapters:         []model.ManifestAdapt{{Name: "pi", Version: "test"}},
+		Files:            files,
 	}
 }
 
@@ -273,7 +274,7 @@ func TestV2BlobAndManifestObjectsAreWriteOnce(t *testing.T) {
 	state := map[string]string{"a.jsonl": "stable content"}
 	sha1 := pushState(t, ctx, v2, "mach-a", state)
 	key, _ := model.NewBlobKey(hash.SHA256Bytes([]byte("stable content")))
-	blobPath := filepath.Join(root, filepath.FromSlash(depot.BlobObjectKey(key)))
+	blobPath := filepath.Join(root, "aha-v3", filepath.FromSlash(depot.BlobObjectKey(key)))
 	st1, err := os.Stat(blobPath)
 	if err != nil {
 		t.Fatal(err)
@@ -325,7 +326,7 @@ func TestV2OpenBlobVerifiesContent(t *testing.T) {
 	}
 	pushState(t, ctx, v2, "mach-a", map[string]string{"a.jsonl": "honest content"})
 	key, _ := model.NewBlobKey(hash.SHA256Bytes([]byte("honest content")))
-	blobPath := filepath.Join(root, filepath.FromSlash(depot.BlobObjectKey(key)))
+	blobPath := filepath.Join(root, "aha-v3", filepath.FromSlash(depot.BlobObjectKey(key)))
 	b, err := os.ReadFile(blobPath)
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +360,7 @@ func TestV2ManifestFetchVerifiesIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := pushState(t, ctx, v2, "mach-a", map[string]string{"a.jsonl": "content"})
-	manifestPath := filepath.Join(root, filepath.FromSlash(depot.ManifestObjectKey("mach-a", sha)))
+	manifestPath := filepath.Join(root, "aha-v3", filepath.FromSlash(depot.ManifestObjectKey("mach-a", sha)))
 	// Replace with a different but well-formed canonical manifest.
 	other, _, err := model.EncodeSnapshotManifest(snapshotManifestFor("mach-a"))
 	if err != nil {
@@ -394,9 +395,10 @@ func TestV2R2PushOperationInvariants(t *testing.T) {
 		if method == "LIST" {
 			t.Fatalf("push performed a LIST: %q", op)
 		}
-		allowed := strings.HasPrefix(key, "machines/mach-a/") ||
-			key == depot.MachinesIndexKey ||
-			strings.HasPrefix(key, "blobs/v2/") ||
+		dataKey := strings.TrimPrefix(key, "aha-v3/")
+		allowed := strings.HasPrefix(dataKey, "machines/mach-a/") ||
+			dataKey == depot.MachinesIndexKey ||
+			strings.HasPrefix(dataKey, "blobs/v2/") ||
 			key == depot.MarkerObjectKey
 		if !allowed {
 			t.Fatalf("push touched a key outside its write set: %q", op)
@@ -448,12 +450,13 @@ func TestV2R2DeltaPushUploadsOnlyTheDelta(t *testing.T) {
 		if method != "PUT" {
 			continue
 		}
+		dataKey := strings.TrimPrefix(key, "aha-v3/")
 		switch {
-		case strings.HasPrefix(key, "blobs/v2/"):
+		case strings.HasPrefix(dataKey, "blobs/v2/"):
 			blobPuts += n
-		case strings.HasPrefix(key, "machines/mach-a/manifests/"):
+		case strings.HasPrefix(dataKey, "machines/mach-a/manifests/"):
 			manifestPuts += n
-		case key == depot.LatestPointerKey("mach-a"):
+		case dataKey == depot.LatestPointerKey("mach-a"):
 			// pointer move expected
 		default:
 			otherPuts += n
@@ -631,7 +634,7 @@ func TestV2VerifyReportsMissingBlob(t *testing.T) {
 		t.Fatalf("healthy depot reported problems: %v", report.Problems)
 	}
 	key, _ := model.NewBlobKey(hash.SHA256Bytes([]byte("content")))
-	if err := os.Remove(filepath.Join(root, filepath.FromSlash(depot.BlobObjectKey(key)))); err != nil {
+	if err := os.Remove(filepath.Join(root, "aha-v3", filepath.FromSlash(depot.BlobObjectKey(key)))); err != nil {
 		t.Fatal(err)
 	}
 	report, err = v2.Verify(ctx, false)

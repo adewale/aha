@@ -123,6 +123,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		if asserted := r.Header.Get("Aha-HTTP-Contract"); asserted != "" && asserted != HTTPContractSchema {
+			writeError(w, http.StatusPreconditionFailed, "unsupported HTTP contract")
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -222,7 +228,7 @@ func (s *Server) routes() {
 	s.mux.Handle("/static/", s.staticHand)
 	s.mux.HandleFunc("/api/v2/status", s.jsonGet("status"))
 	s.mux.HandleFunc("/api/v2/workspace/verify", s.jsonGet("workspace_verify"))
-	s.mux.HandleFunc("/api/v2/workspace/conflicts", s.jsonGet("workspace_conflicts"))
+	s.mux.HandleFunc("/api/v2/workspace/conflicts", func(w http.ResponseWriter, r *http.Request) { s.handleJSONPost(w, r, "workspace_conflicts") })
 	s.mux.HandleFunc("/api/v2/workspace/size", s.jsonGet("workspace_size"))
 	s.mux.HandleFunc("/api/v2/search", s.handleSearch)
 	s.mux.HandleFunc("/api/v2/search/traces", s.handleSearchTraces)
@@ -757,6 +763,8 @@ func errorCodeForStatus(status int) string {
 		return "method_not_allowed"
 	case http.StatusMisdirectedRequest:
 		return "host_not_permitted"
+	case http.StatusPreconditionFailed:
+		return "compatibility_required"
 	case http.StatusRequestTimeout:
 		return "timeout"
 	case http.StatusNotFound:

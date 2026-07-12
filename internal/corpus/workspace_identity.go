@@ -61,7 +61,7 @@ func BindWorkspaceStore(store *Store, binding model.ArchiveBinding) error {
 		return err
 	}
 	if ok {
-		return nil
+		return refreshWorkspaceIdentitySchema(store.Root)
 	}
 	doc, err := newWorkspaceIdentityDocument(binding)
 	if err != nil {
@@ -117,6 +117,29 @@ func WorkspaceIdentity(root string) (model.ArchiveBinding, bool, error) {
 		return model.ArchiveBinding{}, false, err
 	}
 	return binding, true, nil
+}
+
+func refreshWorkspaceIdentitySchema(root string) error {
+	_, ok, err := WorkspaceIdentity(root)
+	if err != nil || !ok {
+		return err
+	}
+	path := filepath.Join(root, WorkspaceIdentityFilename)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc workspaceIdentityDocument
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return err
+	}
+	if doc.DatabaseSchema == workspaceDatabaseSchema {
+		return nil
+	}
+	doc.DatabaseSchema = workspaceDatabaseSchema
+	sum := workspaceIdentityChecksum(doc)
+	doc.ChecksumSHA256 = hex.EncodeToString(sum[:])
+	return writeWorkspaceIdentity(root, doc)
 }
 
 func newWorkspaceIdentityDocument(binding model.ArchiveBinding) (workspaceIdentityDocument, error) {

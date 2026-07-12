@@ -66,7 +66,7 @@ func TestV2DepotStateMachine(t *testing.T) {
 				rel = filepath.ToSlash(rel)
 				// Pointer and index are conditional-write objects, not
 				// write-once; everything else must never change.
-				if strings.HasSuffix(rel, "/latest") || rel == depot.MachinesIndexKey || rel == depot.MarkerObjectKey {
+				if strings.HasSuffix(rel, "/latest") || strings.HasSuffix(rel, depot.MachinesIndexKey) || rel == depot.MarkerObjectKey {
 					return nil
 				}
 				if prev, ok := shadow[rel]; ok && prev != digest {
@@ -180,7 +180,7 @@ func pushV2State(ctx context.Context, v2 *depot.V2, machine string, state map[st
 		files = append(files, sessionFile(content, name))
 		src.byKey[hash.SHA256Bytes([]byte(content))] = []byte(content)
 	}
-	return depot.PushV2(ctx, v2, snapshotManifestFor(machine, files...), src)
+	return pushPrepared(ctx, v2, snapshotManifestFor(machine, files...), src)
 }
 
 type stateBlobSource struct {

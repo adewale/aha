@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ahaclock "github.com/adewale/aha/internal/clock"
+	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 )
@@ -33,7 +34,7 @@ func RepairWithBackup(root string, build func(string) error, opts RebuildOptions
 	if err != nil {
 		return RebuildReport{}, err
 	}
-	if _, err := os.Stat(filepath.Join(expanded, "corpus.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(expanded, model.WorkspaceDatabaseFilename)); err != nil {
 		return RebuildReport{}, err
 	}
 	lock, err := acquireLifecycleLock(ctx, expanded, true)
@@ -62,12 +63,12 @@ func RepairWithBackup(root string, build func(string) error, opts RebuildOptions
 	opts.Progress.Start(ahaprogress.PhaseRebuildBuild, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
 	if err := build(backup); err != nil {
 		opts.Progress.Fail(ahaprogress.PhaseRebuildBuild, 0, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
-		return RebuildReport{}, fmt.Errorf("%w: build replacement: %v", ErrRebuildFailed, err)
+		return RebuildReport{}, fmt.Errorf("%w: build replacement: %w", ErrRebuildFailed, err)
 	}
 	opts.Progress.Complete(ahaprogress.PhaseRebuildBuild, 1, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
 	store, err := OpenExisting(backup)
 	if err != nil {
-		return RebuildReport{}, fmt.Errorf("%w: open replacement: %v", ErrRebuildFailed, err)
+		return RebuildReport{}, fmt.Errorf("%w: open replacement: %w", ErrRebuildFailed, err)
 	}
 	verification, verifyErr := VerifyContext(ctx, store)
 	closeErr := store.Close()
@@ -75,14 +76,14 @@ func RepairWithBackup(root string, build func(string) error, opts RebuildOptions
 		return RebuildReport{}, fmt.Errorf("%w: replacement verification failed", ErrRebuildFailed)
 	}
 	if err := syncRebuildTree(backup); err != nil {
-		return RebuildReport{}, fmt.Errorf("%w: sync replacement: %v", ErrRebuildFailed, err)
+		return RebuildReport{}, fmt.Errorf("%w: sync replacement: %w", ErrRebuildFailed, err)
 	}
 	parent := filepath.Dir(expanded)
 	if err := syncRebuildDirectory(parent); err != nil {
 		return RebuildReport{}, err
 	}
 	if err := atomicSwapDirectories(backup, expanded); err != nil {
-		return RebuildReport{}, fmt.Errorf("%w: atomic promotion: %v", ErrRebuildFailed, err)
+		return RebuildReport{}, fmt.Errorf("%w: atomic promotion: %w", ErrRebuildFailed, err)
 	}
 	promoted = true
 	if err := syncRebuildDirectory(parent); err != nil {

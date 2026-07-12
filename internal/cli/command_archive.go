@@ -26,6 +26,8 @@ type archiveLatestView struct {
 }
 
 type archiveStatusView struct {
+	plan                    *depot.DownloadPlan
+	latestStates            map[string]string
 	Schema                  string              `json:"schema"`
 	State                   model.ArchiveState  `json:"state"`
 	Kind                    string              `json:"kind,omitempty"`
@@ -170,7 +172,7 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 			}
 			return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": "planned", "dry_run": true, "machine": cfg.MachineID, "files": summary.Files, "blobs_upload": summary.BlobsUpload, "blobs_existing": summary.BlobsExisting, "blobs_carried": summary.BlobsCarried, "address": v2.Address().String()})
 		}
-		result, err := pushSnapshotV2(req)
+		result, err := pushSnapshotV2(req, writer)
 		if err != nil {
 			return err
 		}
@@ -228,17 +230,19 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 			_ = blobLookup.Close()
 			return err
 		}
-		if err := plan.RequireAdapters(ctx, materialised, supportedAdapterSet()); err != nil {
-			_ = blobLookup.Close()
-			return err
-		}
-		summary, err := plan.SummaryDelta(ctx, materialised, blobLookup.Has)
+		materialisation, err := plan.PrepareMaterialisation(ctx, materialised, supportedAdapterSet(), blobLookup.Has)
 		closeErr := blobLookup.Close()
 		if err != nil {
 			return err
 		}
 		if closeErr != nil {
+			_ = materialisation.Close()
 			return closeErr
+		}
+		defer materialisation.Close()
+		summary, err := materialisation.Summary()
+		if err != nil {
+			return err
 		}
 		if *dryRun {
 			return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": true, "no_op": false, "machines": summary.Machines, "latest_snapshots": summary.LatestSnapshots, "unknown_blobs": summary.UnknownBlobs, "unknown_bytes": summary.UnknownBytes, "historical_manifests_excluded": true})
@@ -247,18 +251,23 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 		if err != nil {
 			return err
 		}
-		defer store.Close()
 		ing, err := ingestorForConfig(store, cfg)
 		if err != nil {
-			return err
+			return errors.Join(err, store.Close())
 		}
 		ing.Context = ctx
-		reports, err := pullFromDepotV2(ctx, stdout, ing, plan, *jsonOut, progress.Tracker)
-		if err != nil {
+		reports, pullErr := pullFromDepotV2(ctx, stdout, ing, materialisation, *jsonOut, progress.Tracker)
+		if err := errors.Join(pullErr, store.Close()); err != nil {
 			return err
 		}
 		return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": model.WorkspaceCurrent, "machines": len(vector), "reports": reports, "historical_manifests_excluded": true, "no_op": len(reports) == 0})
 	case "verify":
+		state := inspectArchive(ctx, cfg, address)
+		transition := model.ArchiveTransition(state.State, model.ArchiveVerify)
+		if !transition.Allowed {
+			next := nextAction{Command: transition.NextAction.Command, Args: transition.NextAction.Args}
+			return fmt.Errorf("Archive state %s does not permit verify; run `%s`", state.State, next.String())
+		}
 		v2, err := depotV2ForConfig(cfg, address)
 		if err != nil {
 			return err
@@ -303,14 +312,19 @@ func inspectArchive(ctx context.Context, cfg model.Config, address string) archi
 		view.NextAction = archiveNext(view.State)
 		return view
 	}
+	if plan, ok := report.DownloadPlan(); ok {
+		view.plan = &plan
+	}
 	view.Machines = report.Machines
 	view.LatestSnapshots = len(report.Latest)
 	view.Problems = report.Problems
 	if report.Binding.Valid() {
 		view.Identity = report.Binding.Identity()
 	}
+	view.latestStates = make(map[string]string, len(report.Latest))
 	for _, latest := range report.Latest {
-		view.Latest = append(view.Latest, archiveLatestView{Machine: latest.Machine, ManifestSHA256: latest.ManifestSHA256.String(), CapturedAt: latest.Manifest.CapturedAt, Files: len(latest.Manifest.Files)})
+		view.latestStates[latest.Machine] = latest.StateSHA256
+		view.Latest = append(view.Latest, archiveLatestView{Machine: latest.Machine, ManifestSHA256: latest.ManifestSHA256.String(), CapturedAt: latest.CapturedAt, Files: latest.Files})
 	}
 	switch {
 	case report.UpgradeRequired:
@@ -378,7 +392,7 @@ func writeArchiveMutation(stdout io.Writer, jsonOut bool, value map[string]any) 
 }
 
 func interspersedArchiveFlagArgs(args []string) []string {
-	valueFlags := map[string]bool{"--config": true, "-config": true, "--workspace": true, "-workspace": true, "--progress": true, "-progress": true}
+	valueFlags := map[string]bool{"--config": true, "-config": true, "--workspace": true, "-workspace": true, "--progress": true, "-progress": true, "--limit": true, "-limit": true, "--offset": true, "-offset": true}
 	var flags, positionals []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

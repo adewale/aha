@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/adewale/aha/internal/adapters"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/hash"
@@ -33,13 +34,19 @@ func TestDepotBehindV2CountsMachinesWithUningestedSnapshots(t *testing.T) {
 			t.Fatal(err)
 		}
 		manifest := model.SnapshotManifest{
-			Schema:     model.SnapshotManifestSchema,
-			MachineID:  machine,
-			CapturedAt: "2026-06-09T00:00:00Z",
-			Policy:     model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
-			Files:      []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/s.jsonl", RawPath: src, SHA256: hash.SHA256Bytes([]byte(content)), Bytes: int64(len(content)), SessionID: "s", CopyState: "stable"}},
+			Schema:           model.SnapshotManifestSchema,
+			RequiredFeatures: model.RequiredSnapshotFeatures(),
+			MachineID:        machine,
+			CapturedAt:       "2026-06-09T00:00:00Z",
+			Policy:           model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+			Adapters:         []model.ManifestAdapt{{Name: "pi", Version: adapters.Builtins()["pi"].Version()}},
+			Files:            []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/s.jsonl", RawPath: src, SHA256: hash.SHA256Bytes([]byte(content)), Bytes: int64(len(content)), SessionID: "s", CopyState: "stable"}},
 		}
-		res, err := depot.PushV2(ctx, v2, manifest, pathBlobSource{path: src, sha: hash.SHA256Bytes([]byte(content))})
+		writer, err := v2.PrepareUpload(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := writer.Push(ctx, manifest, pathBlobSource{path: src, sha: hash.SHA256Bytes([]byte(content))}, depot.PushOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

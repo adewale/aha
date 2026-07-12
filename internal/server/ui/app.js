@@ -46,7 +46,7 @@ async function refreshStatus() {
 
 async function refreshConflicts() {
   try {
-    const rows = await call("/api/v2/workspace/conflicts");
+    const rows = await call("/api/v2/workspace/conflicts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ limit: 100, offset: 0 }) });
     const el = $("conflicts");
     if (!rows || !rows.length) {
       el.innerHTML = `<li class="muted">no quarantined conflicts</li>`;

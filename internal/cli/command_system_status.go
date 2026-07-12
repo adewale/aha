@@ -51,10 +51,10 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		cfg.WorkspaceDir = *workspacePath
 	}
 	archiveView := inspectArchive(ctx, cfg, *archiveAddress)
-	workspaceView := inspectWorkspaceAgainst(ctx, cfg, *archiveAddress)
+	workspaceView := inspectWorkspaceAgainst(ctx, cfg, *archiveAddress, archiveView.plan)
 	archiveView.NextAction = nil
 	workspaceView.NextAction = nil
-	agent := inspectAgentHistory(ctx, cfg, *archiveAddress, archiveView.State)
+	agent := inspectAgentHistory(ctx, cfg, archiveView.State, archiveView.latestStates[cfg.MachineID])
 	systemState, next := deriveSystemState(agent.State, archiveView.State, workspaceView.State)
 	view := systemStatusView{Schema: "aha.status.v2", Version: model.Version, AgentHistory: agent, Archive: archiveView, Workspace: workspaceView, SystemState: systemState, NextAction: next}
 	if *jsonOut {
@@ -67,43 +67,35 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	return renderMap(stdout, fields)
 }
 
-func inspectAgentHistory(ctx context.Context, cfg model.Config, address string, archiveState model.ArchiveState) agentHistoryStatusView {
+func inspectAgentHistory(ctx context.Context, cfg model.Config, archiveState model.ArchiveState, remoteState string) agentHistoryStatusView {
 	view := agentHistoryStatusView{State: "unknown", Machine: cfg.MachineID}
 	if archiveState != model.ArchiveEmpty && archiveState != model.ArchivePopulated {
 		return view
 	}
-	sc, err := archive.CaptureState(ctx, cfg, adapters.Builtins(), archive.StateOptions{Clock: ahaclock.RealClock{}})
+	if archiveState == model.ArchiveEmpty {
+		view.State = "upload_needed"
+		return view
+	}
+	cachePath, err := captureCachePath(cfg)
+	if err != nil {
+		return view
+	}
+	clock := ahaclock.RealClock{}
+	sc, err := archive.CaptureState(ctx, cfg, adapters.Builtins(), archive.StateOptions{Clock: clock, Cache: archive.LoadCaptureCache(cachePath, clock), MetadataOnly: true})
 	if err != nil {
 		return view
 	}
 	defer sc.Close()
 	view.Files = len(sc.Manifest.Files)
-	if archiveState == model.ArchiveEmpty {
+	if remoteState == "" {
 		view.State = "upload_needed"
-		return view
-	}
-	v2, err := depotV2ForConfig(cfg, address)
-	if err != nil {
-		return view
-	}
-	sha, ok, err := v2.Latest(ctx, cfg.MachineID)
-	if err != nil || !ok {
-		view.State = "upload_needed"
-		return view
-	}
-	latest, err := v2.Manifest(ctx, cfg.MachineID, sha)
-	if err != nil {
 		return view
 	}
 	localState, err := model.SnapshotStateSHA256(sc.Manifest)
 	if err != nil {
 		return view
 	}
-	remoteState, err := model.SnapshotStateSHA256(latest)
-	if err != nil {
-		return view
-	}
-	if localState == remoteState {
+	if localState.String() == remoteState {
 		view.State = "current"
 	} else {
 		view.State = "upload_needed"
@@ -111,7 +103,10 @@ func inspectAgentHistory(ctx context.Context, cfg model.Config, address string, 
 	return view
 }
 
-func inspectWorkspaceAgainst(ctx context.Context, cfg model.Config, address string) workspaceStatusView {
+func inspectWorkspaceAgainst(ctx context.Context, cfg model.Config, address string, plan *depot.DownloadPlan) workspaceStatusView {
+	if plan != nil {
+		return inspectWorkspaceWithPlan(ctx, cfg, plan)
+	}
 	if address == "" {
 		return inspectWorkspace(ctx, cfg)
 	}
@@ -127,6 +122,15 @@ func inspectWorkspaceAgainst(ctx context.Context, cfg model.Config, address stri
 }
 
 func deriveSystemState(agentState string, archiveState model.ArchiveState, workspaceState model.WorkspaceState) (string, *nextAction) {
+	if archiveState == model.ArchiveUpgradeRequired || workspaceState == model.WorkspaceUpgradeRequired {
+		return "upgrade_required", &nextAction{Command: "aha", Args: []string{"version", "--json"}}
+	}
+	if archiveState == model.ArchiveInvalidAddress || archiveState == model.ArchiveInvalidConfiguration || archiveState == model.ArchiveUnreachable {
+		return "archive_unavailable", &nextAction{Command: "aha", Args: []string{"archive", "status"}}
+	}
+	if workspaceState == model.WorkspaceArchiveMismatch || workspaceState == model.WorkspaceInvalidDestination {
+		return "workspace_attention_required", &nextAction{Command: "aha", Args: []string{"workspace", "status"}}
+	}
 	if archiveState == model.ArchiveUninitialised {
 		return "archive_uninitialised", &nextAction{Command: "aha", Args: []string{"archive", "init"}}
 	}
@@ -135,6 +139,9 @@ func deriveSystemState(agentState string, archiveState model.ArchiveState, works
 			return "damaged", &nextAction{Command: "aha", Args: []string{"archive", "verify", "--deep"}}
 		}
 		return "damaged", &nextAction{Command: "aha", Args: []string{"workspace", "repair", "--backup"}}
+	}
+	if agentState == "unknown" {
+		return "agent_history_unknown", &nextAction{Command: "aha", Args: []string{"archive", "upload", "--dry-run"}}
 	}
 	upload := agentState == "upload_needed"
 	download := workspaceState == model.WorkspaceBehind || workspaceState == model.WorkspaceAbsent

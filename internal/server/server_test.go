@@ -68,6 +68,24 @@ func loopback(req *http.Request) *http.Request {
 	return req
 }
 
+func TestDashboardAndConflictsRouteUseBoundedPOSTContract(t *testing.T) {
+	srv := newTestServer(t)
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/workspace/conflicts", strings.NewReader(`{"limit":100,"offset":0}`)))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST conflicts status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/static/app.js", nil))
+	srv.ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), `call("/api/v2/workspace/conflicts", { method: "POST"`) {
+		t.Fatal("bundled dashboard does not use conflicts POST pagination contract")
+	}
+}
+
 func TestIndexServesHTML(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
@@ -666,6 +684,38 @@ func TestListenRefusesRemoteWithoutToken(t *testing.T) {
 	if !strings.Contains(err.Error(), "without --token") {
 		t.Fatalf("expected token-required error, got %v", err)
 	}
+}
+
+func TestHTTPContractAssertionRunsAfterHostAndAuthentication(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	req.Host = "foreign.example"
+	req.Header.Set("Aha-HTTP-Contract", "aha.http.v99")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("wrong Host precedence status=%d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
+	req.Header.Set("Aha-HTTP-Contract", "aha.http.v99")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("authentication precedence status=%d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	req = loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
+	req.Header.Set("Authorization", "Bearer s3cret")
+	req.Header.Set("Aha-HTTP-Contract", "aha.http.v99")
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusPreconditionFailed {
+		t.Fatalf("contract assertion status=%d body=%s", w.Code, w.Body.String())
+	}
+	assertErrorEnvelope(t, w.Body.Bytes(), "compatibility_required")
 }
 
 func TestTokenAuthAcceptsValidBearer(t *testing.T) {

@@ -1,3 +1,5 @@
+OUTPUT ?= aha
+
 .PHONY: help build verify verify-quick verify-full verify-ci verify-fuzz verify-ts verify-race verify-build verify-mutation-dry verify-mutation gen-ts gen-docs
 
 help:
@@ -21,7 +23,7 @@ build:
 	@commit="$$(git rev-parse --short=12 HEAD 2>/dev/null || printf development)"; \
 	built_at="$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	dirty=false; test -z "$$(git status --porcelain 2>/dev/null)" || dirty=true; \
-	go build -ldflags "-X github.com/adewale/aha/internal/model.BuildCommit=$$commit -X github.com/adewale/aha/internal/model.BuildTime=$$built_at -X github.com/adewale/aha/internal/model.BuildDirty=$$dirty" -o aha ./cmd/aha
+	go build -ldflags "-X github.com/adewale/aha/internal/model.BuildCommit=$$commit -X github.com/adewale/aha/internal/model.BuildTime=$$built_at -X github.com/adewale/aha/internal/model.BuildDirty=$$dirty" -o "$(OUTPUT)" ./cmd/aha
 
 verify: verify-full
 

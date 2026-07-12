@@ -5,7 +5,7 @@
 // shapes interoperate with a third independent SDK implementation
 // alongside the Python FastMCP and TypeScript McpServer references.
 //
-// The exact tool surface (echo / add / fail) is pinned in
+// The exact tool surface is pinned in
 // scripts/mcp-conformance/REFERENCE.md. The Python (reference_server.py)
 // and TypeScript (reference_server.ts) reference servers in this repo
 // must match this file's surface tool-for-tool — the cross-language
@@ -34,6 +34,12 @@ func main() {
 		Name:    "aha-ref-mcp-go",
 		Version: "0.1.0",
 	}, nil)
+
+	mcp.AddTool(server,
+		&mcp.Tool{Name: "aha_capabilities", Description: "Advertise the aha compatibility contract for transport conformance."},
+		func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"schema":"aha.mcp.v2","http_schema":"aha.http.v2","required_features":["read-only-v1","strict-input-v1","structured-errors-v1"],"tools":["aha_capabilities","echo","add","fail"]}`}}}, nil, nil
+		})
 
 	mcp.AddTool(server,
 		&mcp.Tool{Name: "echo", Description: "Echo the input text."},

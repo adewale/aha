@@ -2,7 +2,7 @@
 // stdio Transport.
 //
 // Sibling of scripts/mcp-conformance/reference_server.py and
-// cmd/aha-ref-mcp/main.go — same three-tool surface (echo / add / fail),
+// cmd/aha-ref-mcp/main.go — same compatibility-plus-exercise surface,
 // implemented with @modelcontextprotocol/sdk's McpServer +
 // StdioServerTransport so our connectStdio() can be tested against a
 // known-good TypeScript reference.
@@ -18,6 +18,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const server = new McpServer({ name: "reference-mcp-ts", version: "0.1.0" });
+
+server.registerTool(
+  "aha_capabilities",
+  { description: "Advertise the aha contract for transport conformance.", inputSchema: {} },
+  async () => ({ content: [{ type: "text", text: JSON.stringify({
+    schema: "aha.mcp.v2",
+    http_schema: "aha.http.v2",
+    required_features: ["read-only-v1", "strict-input-v1", "structured-errors-v1"],
+    tools: ["aha_capabilities", "echo", "add", "fail"],
+  }) }] }),
+);
 
 server.registerTool(
   "echo",

@@ -6,7 +6,7 @@ Aha reads private coding-agent histories and therefore treats every Archive and 
 
 Agent histories are owned by Pi, Claude Code, Codex, and OpenCode. Aha may discover, open, and stably copy configured files; it must never modify, rename, delete, lock, migrate, or rewrite them.
 
-Archive and Workspace destinations are rejected when they contain or overlap an enabled source root, including symlink-resolved overlap.
+Archive and Workspace destinations are rejected when they contain or overlap an enabled source root, including symlink-resolved overlap. Immediately before Workspace mutation, aha creates or opens the destination with no-follow/reparse-point semantics, verifies the directory identity and owner against the prepared capability, rejects unsafe group/world-writable non-sticky parents, and holds the directory handle for the Store lifetime (with rename/delete sharing disabled on Windows). On Unix, the first mutation atomically moves a direct Workspace directory to a deterministic hidden stable name and publishes the configured path as a symlink; subsequent SQLite opens use the stable name, so replacing the public path cannot redirect an authorised write. The operating-system user running aha is the local trust principal: another process with the same user identity can already modify both histories and Workspaces directly and is not treated as an isolation boundary.
 
 ## Upload boundary
 
@@ -21,6 +21,8 @@ Archive and Workspace destinations are rejected when they contain or overlap an 
 - never auto-initialises an Archive.
 
 The capture cache is advisory and stored outside the Workspace. Failure to persist it affects performance only.
+
+The Archive store is an append-only trust boundary: once a content-addressed object has been accepted, normal upload trusts its parent receipt and the object store to retain it. Aha exposes no Archive-object deletion operation. This avoids one remote existence request per carried file. Direct operator deletion, credential misuse outside aha, or storage corruption invalidates that premise; `archive verify --deep` detects the damage and upload must not be used as an implicit repair operation. Run deep verification after a storage or credential incident, then restore the missing immutable object from a retained source or backup.
 
 ## Download boundary
 

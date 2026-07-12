@@ -65,7 +65,7 @@ func TestWorkspaceIdentityWitnessSurvivesDatabaseDestruction(t *testing.T) {
 	if err != nil || !ok || witness != binding {
 		t.Fatalf("identity witness=(%+v,%v,%v)", witness, ok, err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "corpus.db"), []byte("destroyed"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, model.WorkspaceDatabaseFilename), []byte("destroyed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	state, err := corpus.InspectWorkspaceState(root, binding, nil)

@@ -62,7 +62,7 @@ aha workspace repair [PATH] --backup
 aha workspace conflicts [PATH]
 ```
 
-Repair builds and verifies a sibling replacement, durably syncs it, atomically exchanges it, and preserves the former Workspace as a backup. Unsafe no-backup repair is not available.
+Read-only status/search commands never create SQLite sidecars; if a Workspace has pending WAL recovery state they refuse it until a writable `workspace verify --repair-fts` completes recovery. Repair builds and verifies a sibling replacement, durably syncs it, atomically exchanges it, and preserves the former Workspace as a backup. Unsafe no-backup repair is not available. Full-directory atomic exchange is unavailable on Windows, so `workspace repair` refuses before creating staging there; rebuild with `archive download` into a fresh Workspace instead.
 
 ## Inspection and processing
 

@@ -122,8 +122,13 @@ func TestLoadRejectsRemovedConfigVocabulary(t *testing.T) {
 			if err := os.WriteFile(path, []byte(`{"`+key+`": true}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := config.Load(path); err == nil {
-				t.Fatalf("removed config key %q was accepted", key)
+			_, err := config.Load(path)
+			var legacy *config.LegacyConfigError
+			if !errors.As(err, &legacy) {
+				t.Fatalf("removed config key %q error=%T %v, want LegacyConfigError", key, err, err)
+			}
+			if len(legacy.Fields) != 1 || legacy.Fields[0] != key {
+				t.Fatalf("LegacyConfigError fields=%v, want [%s]", legacy.Fields, key)
 			}
 		})
 	}

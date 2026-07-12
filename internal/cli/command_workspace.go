@@ -10,6 +10,7 @@ import (
 
 	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 	"github.com/adewale/aha/internal/safety"
@@ -20,13 +21,8 @@ type workspaceStatusView struct {
 	State           model.WorkspaceState   `json:"state"`
 	Path            string                 `json:"path"`
 	ArchiveMatches  bool                   `json:"archive_matches"`
-	MachinesCurrent int                    `json:"machines_current"`
-	MachinesBehind  int                    `json:"machines_behind"`
-	Snapshots       int                    `json:"snapshots"`
-	Sessions        int                    `json:"sessions"`
-	Entries         int                    `json:"entries"`
-	Messages        int                    `json:"messages"`
-	FTSMessages     int                    `json:"fts_messages"`
+	MachinesCurrent int                    `json:"machines_current,omitempty"`
+	MachinesBehind  int                    `json:"machines_behind,omitempty"`
 	Problems        []corpus.VerifyProblem `json:"problems,omitempty"`
 	NextAction      *nextAction            `json:"next_action"`
 }
@@ -52,6 +48,8 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 	backup := fs.Bool("backup", false, "preserve the current Workspace as a backup")
 	dryRun := fs.Bool("dry-run", false, "inspect and plan without mutation")
 	progressSetting := fs.String("progress", "auto", "progress mode: auto, off, plain, tty, or json")
+	limit := fs.Int("limit", 100, "maximum conflicts to return (1-200)")
+	offset := fs.Int("offset", 0, "conflict page offset")
 	if err := fs.Parse(interspersedArchiveFlagArgs(args[1:])); err != nil {
 		return err
 	}
@@ -92,7 +90,7 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		if *jsonOut {
 			return writeJSON(stdout, view)
 		}
-		fields := map[string]any{"state": view.State, "path": view.Path, "archive_matches": view.ArchiveMatches, "snapshots": view.Snapshots, "sessions": view.Sessions}
+		fields := map[string]any{"state": view.State, "path": view.Path, "archive_matches": view.ArchiveMatches, "machines_current": view.MachinesCurrent, "machines_behind": view.MachinesBehind}
 		if view.NextAction != nil {
 			fields["next"] = view.NextAction.String()
 		}
@@ -117,27 +115,27 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		}()
 		var store *corpus.Store
 		if *repairFTS {
-			if err := safety.ValidateWriteOutsideSources(cfg, cfg.WorkspaceDir, "Workspace"); err != nil {
-				return err
+			destination, prepareErr := prepareWritableCorpus(cfg)
+			if prepareErr != nil {
+				return prepareErr
 			}
-			store, err = corpus.OpenExisting(cfg.WorkspaceDir)
+			store, err = openPreparedCorpus(destination)
 		} else {
 			store, err = openCorpusForCommand(cfg, false)
 		}
 		if err != nil {
 			return err
 		}
-		defer store.Close()
 		repaired := false
 		if *repairFTS {
 			if _, err := corpus.ReconcileFTSWithReportContext(ctx, store); err != nil {
-				return err
+				return errors.Join(err, store.Close())
 			}
 			repaired = true
 			progress.Tracker.Advance(ahaprogress.PhaseVerify, 1, total, ahaprogress.UnitSteps)
 		}
-		report, err := corpus.VerifyContext(ctx, store)
-		if err != nil {
+		report, verifyErr := corpus.VerifyContext(ctx, store)
+		if err := errors.Join(verifyErr, store.Close()); err != nil {
 			return err
 		}
 		progress.Tracker.Complete(ahaprogress.PhaseVerify, verifyTotal, total, ahaprogress.UnitSteps)
@@ -155,7 +153,7 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 			return err
 		}
 		defer store.Close()
-		items, err := corpus.Conflicts(store.DB)
+		items, err := corpus.ConflictsPage(store.DB, *limit, *offset)
 		if err != nil {
 			return err
 		}
@@ -211,9 +209,11 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		if state != model.WorkspaceDamaged {
 			return fmt.Errorf("Workspace repair requires damaged state; current state is %s", state)
 		}
-		if err := plan.RequireAdapters(ctx, nil, supportedAdapterSet()); err != nil {
+		materialisation, err := plan.PrepareMaterialisation(ctx, nil, supportedAdapterSet(), nil)
+		if err != nil {
 			return err
 		}
+		defer materialisation.Close()
 		if *dryRun {
 			return writeWorkspaceValue(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": true, "backup": true})
 		}
@@ -233,7 +233,7 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 				return errors.Join(err, store.Close())
 			}
 			ing.Context = ctx
-			_, pullErr := pullFromDepotV2(ctx, io.Discard, ing, plan, true, progress.Tracker)
+			_, pullErr := pullFromDepotV2(ctx, io.Discard, ing, materialisation, true, progress.Tracker)
 			return errors.Join(pullErr, store.Close())
 		}, corpus.RebuildOptions{Context: ctx, Progress: progress.Tracker, ValidateStaging: func(path string) error {
 			return safety.ValidateWriteOutsideSources(cfg, path, "Workspace repair staging")
@@ -241,13 +241,17 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		if err != nil {
 			return err
 		}
-		return writeWorkspaceValue(stdout, *jsonOut, map[string]any{"state": model.WorkspaceCurrent, "root": report.Root, "backup": report.Backup})
+		return writeWorkspaceValue(stdout, *jsonOut, map[string]any{"state": model.WorkspaceCurrent, "root": cfg.WorkspaceDir, "backup": report.Backup})
 	default:
 		return fmt.Errorf("unknown workspace subcommand %q", sub)
 	}
 }
 
 func inspectWorkspace(ctx context.Context, cfg model.Config) workspaceStatusView {
+	return inspectWorkspaceWithPlan(ctx, cfg, nil)
+}
+
+func inspectWorkspaceWithPlan(ctx context.Context, cfg model.Config, selectedPlan *depot.DownloadPlan) workspaceStatusView {
 	view := workspaceStatusView{Schema: "aha.workspace.status.v2", Path: cfg.WorkspaceDir}
 	if _, err := safety.PrepareWorkspaceDestination(cfg, cfg.WorkspaceDir); err != nil {
 		view.State = model.WorkspaceInvalidDestination
@@ -256,64 +260,53 @@ func inspectWorkspace(ctx context.Context, cfg model.Config) workspaceStatusView
 	}
 	local, err := corpus.OpenExistingReadOnly(cfg.WorkspaceDir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		var unsupported *corpus.UnsupportedWorkspaceSchemaError
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			view.State = model.WorkspaceAbsent
-		} else {
+		case errors.As(err, &unsupported):
+			view.State = model.WorkspaceUpgradeRequired
+		default:
 			view.State = model.WorkspaceDamaged
 		}
 		view.NextAction = workspaceNext(view.State)
 		return view
 	}
-	_ = local.Close()
-	v2, err := depotV2ForConfig(cfg, "")
-	if err != nil {
-		view.State = model.WorkspaceDamaged
-		view.NextAction = workspaceNext(view.State)
-		return view
+	defer local.Close()
+	if selectedPlan == nil {
+		v2, err := depotV2ForConfig(cfg, "")
+		if err != nil {
+			view.State = model.WorkspaceDamaged
+			view.NextAction = workspaceNext(view.State)
+			return view
+		}
+		reader, err := v2.PreparePull(ctx)
+		if err != nil {
+			view.State = model.WorkspaceDamaged
+			view.NextAction = workspaceNext(view.State)
+			return view
+		}
+		plan, err := reader.PlanDownload(ctx)
+		if err != nil {
+			view.State = model.WorkspaceDamaged
+			view.NextAction = workspaceNext(view.State)
+			return view
+		}
+		selectedPlan = &plan
 	}
-	reader, err := v2.PreparePull(ctx)
-	if err != nil {
-		view.State = model.WorkspaceDamaged
-		view.NextAction = workspaceNext(view.State)
-		return view
-	}
-	plan, err := reader.PlanDownload(ctx)
-	if err != nil {
-		view.State = model.WorkspaceDamaged
-		view.NextAction = workspaceNext(view.State)
-		return view
-	}
-	binding, _ := plan.ArchiveBinding()
-	vector, _ := plan.LatestVector()
-	view.State, err = corpus.InspectWorkspaceState(cfg.WorkspaceDir, binding, vector)
+	binding, _ := selectedPlan.ArchiveBinding()
+	vector, _ := selectedPlan.LatestVector()
+	view.State, err = corpus.InspectOpenWorkspaceState(cfg.WorkspaceDir, local.DB, binding, vector)
 	if err != nil {
 		view.State = model.WorkspaceDamaged
 	}
 	view.ArchiveMatches = view.State != model.WorkspaceArchiveMismatch
-	if view.State != model.WorkspaceAbsent && view.State != model.WorkspaceInvalidDestination {
-		if store, openErr := corpus.OpenExistingReadOnly(cfg.WorkspaceDir); openErr == nil {
-			if report, verifyErr := corpus.VerifyContext(ctx, store); verifyErr != nil || len(report.Problems) > 0 {
-				view.State = model.WorkspaceDamaged
-				if verifyErr == nil {
-					view.Problems = report.Problems
-				}
-			}
-			if stats, statusErr := corpus.Status(store.DB, store.Root); statusErr == nil {
-				view.Snapshots, _ = stats["snapshots"].(int)
-				view.Sessions, _ = stats["sessions"].(int)
-				view.Entries, _ = stats["entries"].(int)
-				view.Messages, _ = stats["messages"].(int)
-				view.FTSMessages, _ = stats["fts_messages"].(int)
-			}
-			materialised, _ := corpus.MaterialisedVector(store.DB)
-			for machine, sha := range vector {
-				if materialised[machine] == sha {
-					view.MachinesCurrent++
-				} else {
-					view.MachinesBehind++
-				}
-			}
-			_ = store.Close()
+	materialised, _ := corpus.MaterialisedVector(local.DB)
+	for machine, sha := range vector {
+		if materialised[machine] == sha {
+			view.MachinesCurrent++
+		} else {
+			view.MachinesBehind++
 		}
 	}
 	view.NextAction = workspaceNext(view.State)

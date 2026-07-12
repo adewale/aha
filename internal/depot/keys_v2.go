@@ -18,12 +18,14 @@ import (
 //	machines/<machine>/manifests/<sha256>.json    one snapshot manifest, write-once
 //	machines/<machine>/latest                     pointer, conditional PUT
 const (
-	MarkerSchemaV2      = "aha-depot/v2"
-	LayoutVersionV2     = "v2"
-	LatestPointerSchema = "aha-depot-latest/v2"
-	MachinesIndexSchema = "aha-depot-machines/v2"
-	MachinesIndexKey    = "machines/index.json"
-	MarkerObjectKey     = "aha-depot.json"
+	MarkerSchemaV2       = "aha-depot/v2" // readable pre-fence Archive
+	LayoutVersionV2      = "v2"
+	MarkerSchemaCurrent  = "aha-depot/v3"
+	LayoutVersionCurrent = "v3"
+	LatestPointerSchema  = "aha-depot-latest/v2"
+	MachinesIndexSchema  = "aha-depot-machines/v2"
+	MachinesIndexKey     = "machines/index.json"
+	MarkerObjectKey      = "aha-depot.json"
 )
 
 // BlobObjectKey is the object key for a stored file version. The key is

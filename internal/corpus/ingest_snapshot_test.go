@@ -30,13 +30,14 @@ func snapshotFixture(state map[string][]byte) (model.SnapshotManifest, *counting
 		opener.byKey[mf.SHA256] = data
 	}
 	manifest := model.SnapshotManifest{
-		Schema:     model.SnapshotManifestSchema,
-		MachineID:  "machine",
-		CapturedAt: "2026-01-01T00:00:00Z",
-		CreatedBy:  "aha test",
-		Policy:     model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
-		Adapters:   []model.ManifestAdapt{{Name: "counting", Version: "test"}},
-		Files:      files,
+		Schema:           model.SnapshotManifestSchema,
+		RequiredFeatures: model.RequiredSnapshotFeatures(),
+		MachineID:        "machine",
+		CapturedAt:       "2026-01-01T00:00:00Z",
+		CreatedBy:        "aha test",
+		Policy:           model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+		Adapters:         []model.ManifestAdapt{{Name: "counting", Version: "test"}},
+		Files:            files,
 	}
 	return manifest, opener
 }

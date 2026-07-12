@@ -50,6 +50,13 @@ function parseFrames(buf: Uint8Array): unknown[] {
 
 // FakeStreams is a controllable stdin/stdout pair. Writes to stdin are
 // captured; stdout frames are pushed via emitData().
+const compatibleCapabilities = {
+  schema: "aha.mcp.v2",
+  http_schema: "aha.http.v2",
+  required_features: ["read-only-v1", "strict-input-v1", "structured-errors-v1"],
+  tools: ["aha_capabilities", "analyse_failure_trajectory", "analyse_failures", "overview", "search", "show", "status", "workspace_conflicts", "workspace_size", "workspace_verify"],
+};
+
 class FakeStreams {
   written: Uint8Array = new Uint8Array(0);
   private dataCb: ((c: Uint8Array) => void) | null = null;
@@ -82,6 +89,19 @@ class FakeStreams {
   }
 }
 
+async function answerStdioCapabilities(fake: FakeStreams, value: unknown = compatibleCapabilities, listedNames?: string[]) {
+  await Promise.resolve();
+  const list = fake.requests().find((m) => m.method === "tools/list");
+  assert.ok(list, "client did not request tools/list");
+  const advertised = (value as { tools?: unknown })?.tools;
+  const names = listedNames ?? (Array.isArray(advertised) ? advertised.filter((name): name is string => typeof name === "string") : []);
+  fake.emitData(frame({ jsonrpc: "2.0", id: list!.id, result: { tools: names.map((name) => ({ name })) } }));
+  await Promise.resolve();
+  const call = fake.requests().find((m) => m.method === "tools/call" && (m.params as { name?: string })?.name === "aha_capabilities");
+  assert.ok(call, "client did not negotiate aha_capabilities");
+  fake.emitData(frame({ jsonrpc: "2.0", id: call!.id, result: { content: [{ type: "text", text: JSON.stringify(value) }] } }));
+}
+
 test("handshake, dispatch, and result correlation", async () => {
   const fake = new FakeStreams();
   const connecting = connectStdio(fake.stdin, fake.stdout);
@@ -90,6 +110,7 @@ test("handshake, dispatch, and result correlation", async () => {
   const init = fake.requests().find((m) => m.method === "initialize");
   assert.ok(init, "client did not send initialize");
   fake.emitData(frame({ jsonrpc: "2.0", id: init!.id, result: { protocolVersion: "2024-11-05" } }));
+  await answerStdioCapabilities(fake);
 
   const transport = await connecting;
   const tools = aha(transport);
@@ -101,9 +122,8 @@ test("handshake, dispatch, and result correlation", async () => {
   );
 
   const pending = tools.search({ query: "needle", limit: 5 });
-  const call = fake.requests().find((m) => m.method === "tools/call");
-  assert.ok(call, "client did not send tools/call");
-  assert.equal((call!.params as { name: string }).name, "search");
+  const call = fake.requests().find((m) => m.method === "tools/call" && (m.params as { name?: string })?.name === "search");
+  assert.ok(call, "client did not send search tools/call");
 
   const payload = [{ ref_text: "msg:v1:abc", role: "user", snippet: "found the needle" }];
   fake.emitData(
@@ -128,9 +148,37 @@ test("reassembles a response split across two data events", async () => {
   const cut = Math.floor(full.length / 2);
   fake.emitData(full.subarray(0, cut)); // partial header/body
   fake.emitData(full.subarray(cut)); // remainder completes the frame
+  await answerStdioCapabilities(fake);
 
   const transport = await connecting; // resolves only if the split frame parsed
   assert.ok(transport);
+});
+
+test("stdio rejects unsupported required compatibility features", async () => {
+  const fake = new FakeStreams();
+  const connecting = connectStdio(fake.stdin, fake.stdout);
+  const init = fake.requests().find((m) => m.method === "initialize")!;
+  fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  await answerStdioCapabilities(fake, { ...compatibleCapabilities, required_features: ["future-v9"] });
+  await assert.rejects(connecting, /unsupported feature/);
+});
+
+test("stdio rejects a server missing generated tools", async () => {
+  const fake = new FakeStreams();
+  const connecting = connectStdio(fake.stdin, fake.stdout);
+  const init = fake.requests().find((m) => m.method === "initialize")!;
+  fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  await answerStdioCapabilities(fake, { ...compatibleCapabilities, tools: compatibleCapabilities.tools.filter((tool) => tool !== "search") });
+  await assert.rejects(connecting, /does not provide search/);
+});
+
+test("stdio rejects tools advertised but absent from tools/list", async () => {
+  const fake = new FakeStreams();
+  const connecting = connectStdio(fake.stdin, fake.stdout);
+  const init = fake.requests().find((m) => m.method === "initialize")!;
+  fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  await answerStdioCapabilities(fake, compatibleCapabilities, compatibleCapabilities.tools.filter((tool) => tool !== "search"));
+  await assert.rejects(connecting, /falsely advertises search/);
 });
 
 test("surfaces JSON-RPC errors as rejections", async () => {
@@ -138,10 +186,11 @@ test("surfaces JSON-RPC errors as rejections", async () => {
   const connecting = connectStdio(fake.stdin, fake.stdout);
   const init = fake.requests().find((m) => m.method === "initialize")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  await answerStdioCapabilities(fake);
   const tools = aha(await connecting);
 
   const pending = tools.show({ ref: "bad" });
-  const call = fake.requests().find((m) => m.method === "tools/call")!;
+  const call = fake.requests().find((m) => m.method === "tools/call" && (m.params as { name?: string })?.name === "show")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
 
   await assert.rejects(pending, /invalid ref/);
@@ -152,10 +201,11 @@ test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
   const connecting = connectStdio(fake.stdin, fake.stdout);
   const init = fake.requests().find((m) => m.method === "initialize")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
+  await answerStdioCapabilities(fake);
   const tools = aha(await connecting);
 
   const pending = tools.show({ ref: "bad" });
-  const call = fake.requests().find((m) => m.method === "tools/call")!;
+  const call = fake.requests().find((m) => m.method === "tools/call" && (m.params as { name?: string })?.name === "show")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
 
   try {
@@ -172,23 +222,59 @@ test("HTTP transport routes typed failure-analysis and overview tools", async ()
   const calls: { url: string; init: RequestInit }[] = [];
   const fakeFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     calls.push({ url: String(url), init: init ?? {} });
-    const body = String(url).endsWith("/api/v2/overview") ? "{}" : "[]";
+    const body = String(url).endsWith("/api/v2/capabilities")
+      ? JSON.stringify(compatibleCapabilities)
+      : String(url).endsWith("/api/v2/overview") ? "{}" : "[]";
     return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
   };
   const tools = aha(connectHTTP("http://127.0.0.1:18428/", { fetch: fakeFetch as typeof fetch }));
   await tools.analyse_failures({ limit: 1, state: "unresolved" });
   await tools.analyse_failure_trajectory({ ref: "msg:v1:c2s:ZTE", ordinal: 0 });
   await tools.overview();
-  assert.equal(calls.length, 3);
-  assert.equal(calls[0].url, "http://127.0.0.1:18428/api/v2/analyse/failures");
-  assert.equal(calls[0].init.method, "POST");
-  assert.equal((calls[0].init.headers as Record<string, string>)["Content-Type"], "application/json");
-  assert.equal(calls[0].init.body, JSON.stringify({ limit: 1, state: "unresolved" }));
-  assert.equal(calls[1].url, "http://127.0.0.1:18428/api/v2/analyse/failure-trajectory");
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0].url, "http://127.0.0.1:18428/api/v2/capabilities");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[1].url, "http://127.0.0.1:18428/api/v2/analyse/failures");
   assert.equal(calls[1].init.method, "POST");
-  assert.equal(calls[1].init.body, JSON.stringify({ ref: "msg:v1:c2s:ZTE", ordinal: 0 }));
-  assert.equal(calls[2].url, "http://127.0.0.1:18428/api/v2/overview");
-  assert.equal(calls[2].init.method, "GET");
+  assert.equal((calls[1].init.headers as Record<string, string>)["Content-Type"], "application/json");
+  assert.equal((calls[1].init.headers as Record<string, string>)["Aha-HTTP-Contract"], "aha.http.v2");
+  assert.equal(calls[1].init.body, JSON.stringify({ limit: 1, state: "unresolved" }));
+  assert.equal(calls[2].url, "http://127.0.0.1:18428/api/v2/analyse/failure-trajectory");
+  assert.equal(calls[2].init.method, "POST");
+  assert.equal(calls[2].init.body, JSON.stringify({ ref: "msg:v1:c2s:ZTE", ordinal: 0 }));
+  assert.equal(calls[3].url, "http://127.0.0.1:18428/api/v2/overview");
+  assert.equal(calls[3].init.method, "GET");
+});
+
+test("HTTP conflicts transport sends explicit bounded pagination", async () => {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fakeFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    calls.push({ url: String(url), init: init ?? {} });
+    const body = String(url).endsWith("/capabilities") ? compatibleCapabilities : [];
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  const tools = aha(connectHTTP("http://127.0.0.1:18428", { fetch: fakeFetch as typeof fetch }));
+  await tools.workspace_conflicts({ limit: 50, offset: 200 });
+  assert.equal(calls[1].url, "http://127.0.0.1:18428/api/v2/workspace/conflicts");
+  assert.equal(calls[1].init.method, "POST");
+  assert.equal(calls[1].init.body, JSON.stringify({ limit: 50, offset: 200 }));
+});
+
+test("HTTP rejects incompatible capability negotiation before tool calls", async () => {
+  const calls: string[] = [];
+  const fakeFetch = async (url: string | URL | Request): Promise<Response> => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ ...compatibleCapabilities, http_schema: "aha.http.v99" }), { status: 200 });
+  };
+  const tools = aha(connectHTTP("http://127.0.0.1:18428", { fetch: fakeFetch as typeof fetch }));
+  await assert.rejects(tools.status(), /compatibility_required/);
+  assert.deepEqual(calls, ["http://127.0.0.1:18428/api/v2/capabilities"]);
+});
+
+test("HTTP rejects a server missing generated tools", async () => {
+  const fakeFetch = async (): Promise<Response> => new Response(JSON.stringify({ ...compatibleCapabilities, tools: compatibleCapabilities.tools.filter((tool) => tool !== "status") }), { status: 200 });
+  const tools = aha(connectHTTP("http://127.0.0.1:18428", { fetch: fakeFetch as typeof fetch }));
+  await assert.rejects(tools.status(), /does not provide status/);
 });
 
 test("parseRef + formatRef round-trip every canonical shape", () => {

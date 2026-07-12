@@ -342,6 +342,24 @@ func TestCallToolEmptySearchReturnsList(t *testing.T) {
 // two paths produce equivalent text today, but a future refactor on one
 // side without the other would silently break consumers that mix MCP
 // and HTTP. This test fails loudly on any such drift.
+func TestWorkspaceConflictsRejectsUnboundedPage(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "workspace_conflicts", json.RawMessage(`{"limit":201,"offset":0}`))
+	if err == nil || !strings.Contains(err.Error(), "between 1 and 200") {
+		t.Fatalf("workspace_conflicts error=%v, want bounded page rejection", err)
+	}
+}
+
+func TestShowRejectsAmbiguousRefAndSession(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "show", json.RawMessage(`{"ref":"session:v1:pi:pi-session","session":"pi-session"}`))
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("show error=%v, want exact-one invariant", err)
+	}
+}
+
 func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 	// Build a single corpus + backend and use it for BOTH paths so the
 	// comparison is over production code, not over test fixture setup.

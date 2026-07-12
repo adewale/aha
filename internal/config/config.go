@@ -26,6 +26,15 @@ type UnsupportedSchemaError struct {
 	Supported string
 }
 
+// LegacyConfigError identifies removed pre-0.2 keys without echoing their
+// values. There is deliberately no compatibility alias: callers must create a
+// current config explicitly before any command may mutate durable state.
+type LegacyConfigError struct{ Fields []string }
+
+func (e *LegacyConfigError) Error() string {
+	return "config uses removed pre-0.2 fields " + strings.Join(e.Fields, ", ") + "; run `aha init` and transfer the supported settings"
+}
+
 func (e *UnsupportedSchemaError) Error() string {
 	return "config schema " + strconv.Quote(e.Found) + " is not supported; upgrade aha before using this config"
 }
@@ -93,6 +102,19 @@ func Load(path string) (model.Config, error) {
 	}
 	ast.Standardize()
 	packed := ast.Pack()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(packed, &raw); err != nil {
+		return cfg, err
+	}
+	legacyFields := make([]string, 0, 3)
+	for _, field := range []string{"accept_secrets_warning", "corpus_dir", "depot"} {
+		if _, exists := raw[field]; exists {
+			legacyFields = append(legacyFields, field)
+		}
+	}
+	if len(legacyFields) > 0 {
+		return cfg, &LegacyConfigError{Fields: legacyFields}
+	}
 	var envelope struct {
 		Schema string `json:"schema"`
 	}
@@ -107,7 +129,8 @@ func Load(path string) (model.Config, error) {
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, err
 	}
-	// Configs created before schemas were explicit are the baseline v1 shape.
+	// The current v1 shape may omit its schema during the 0.2 pre-release.
+	// Actual pre-0.2 keys were classified above and are never treated as v1.
 	if cfg.Schema == "" {
 		cfg.Schema = SchemaV1
 	}

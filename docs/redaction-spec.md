@@ -12,7 +12,7 @@ blocker:
   accident (a `cat .env` for debugging, an `Authorization:` header in a
   curl reproduction, an API key the user pasted to ask "is this scoped
   correctly?").
-- Once those bytes flow into `~/.aha/corpus/corpus.db`, every `aha search`
+- Once those bytes flow into `~/.aha/corpus/workspace.db`, every `aha search`
   hit, every dashboard row, every MCP `tools/call`, and every `aha show`
   response can echo them back — to the user, to an agent, or to a teammate
   inspecting a shared depot.

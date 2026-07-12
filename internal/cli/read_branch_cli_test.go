@@ -59,3 +59,20 @@ func TestReadBranchAndLiveCLI(t *testing.T) {
 		t.Fatal("expected error combining --branch and --live")
 	}
 }
+
+func TestCLIShowEnforcesRefXORSession(t *testing.T) {
+	cases := map[string][]string{
+		"both":              {"show", "session:v1:c2Vzc2lvbg", "--session", "pi-session"},
+		"neither":           {"show"},
+		"extra positionals": {"show", "session:v1:c2Vzc2lvbg", "session:v1:b3RoZXI"},
+		"plain positional":  {"show", "pi-session"},
+		"ref with leaf":     {"show", "session:v1:c2Vzc2lvbg", "--entry", "e1"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := cli.Run(args, io.Discard, io.Discard); err == nil {
+				t.Fatalf("show accepted ambiguous args %v", args)
+			}
+		})
+	}
+}

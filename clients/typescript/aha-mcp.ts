@@ -195,6 +195,7 @@ export interface Overview {
 export type StatusReport = Record<string, unknown>;
 export interface CapabilitiesReport {
   schema: string;
+  http_schema: string;
   required_features: string[];
   tools: string[];
 }
@@ -282,6 +283,17 @@ export interface AnalyseFailureTrajectoryArgs {
   ordinal?: number;
 }
 
+export interface ConflictsArgs {
+  /**
+   * Page size (default 100, max 200)
+   */
+  limit?: number;
+  /**
+   * Zero-based page offset
+   */
+  offset?: number;
+}
+
 /**
  * ShowArgs is a discriminated union: provide either a canonical `ref` OR
  * a `session` (plus optional `entry`), never both. The wire form is the
@@ -355,7 +367,7 @@ export function aha(transport: Transport) {
     /** Return Workspace health summary: counts and disk usage. */
     status: () => transport.call("status", {}) as Promise<StatusReport>,
     /** List quarantined merge conflicts. */
-    workspace_conflicts: () => transport.call("workspace_conflicts", {}) as Promise<Conflict[]>,
+    workspace_conflicts: (args: ConflictsArgs = {}) => transport.call("workspace_conflicts", args as unknown as Record<string, unknown>) as Promise<Conflict[]>,
     /** Return Workspace on-disk size breakdown. */
     workspace_size: () => transport.call("workspace_size", {}) as Promise<SizeReport>,
     /** Run read-only Workspace invariant checks (no repair). */

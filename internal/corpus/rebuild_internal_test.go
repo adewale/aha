@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/adewale/aha/internal/model"
 )
 
 func TestRebuildCanonicalizesSymlinkRootBeforeLockAndSwap(t *testing.T) {
@@ -156,7 +158,7 @@ func writeInternalLegacyCorpus(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, model.WorkspaceDatabaseFilename))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +171,24 @@ func writeInternalLegacyCorpus(t *testing.T, root string) {
 	}
 	if err := os.WriteFile(filepath.Join(root, "legacy-marker"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRepairPreservesBuilderCancellationCause(t *testing.T) {
+	if !rebuildLifecycleSupported() || !atomicSwapSupported() {
+		t.Skip("repair is unsupported on this platform")
+	}
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = RepairWithBackup(root, func(string) error { return context.Canceled }, RebuildOptions{Context: t.Context()})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RepairWithBackup error=%v, want context.Canceled", err)
 	}
 }
 
@@ -192,7 +212,7 @@ func TestRebuildWithBackupAtomicPromotionFailureLeavesLegacyRootUntouched(t *tes
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, model.WorkspaceDatabaseFilename))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +250,7 @@ func TestRebuildWithBackupAvoidsExistingTimestampedBackup(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, model.WorkspaceDatabaseFilename))
 	if err != nil {
 		t.Fatal(err)
 	}

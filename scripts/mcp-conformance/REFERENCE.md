@@ -13,11 +13,16 @@ implementation in each major language SDK:
 
 ## Canonical tool surface (THE CONTRACT)
 
-All three servers MUST expose exactly these three tools with these
-signatures. The TS conformance harness at
-`clients/typescript/test/stdio.conformance.test.ts` round-trips all three
+All three servers MUST expose the compatibility declaration plus these three exercise tools. The TS conformance harness at
+`clients/typescript/test/stdio.conformance.test.ts` negotiates `aha_capabilities` and round-trips the three exercise tools
 against each reference; a change to any of them must be made in all four
 places (this doc plus the three implementations).
+
+### `aha_capabilities`
+
+- **Input:** `{}`
+- **Output:** the `aha.mcp.v2` schema, required features, and generated aha tool set
+- **Purpose:** proves that the default aha transport refuses incompatible servers before ordinary calls.
 
 ### `echo`
 

@@ -68,7 +68,7 @@ func Registry() map[string]Command {
 		"search":    {Name: "search", Usage: "aha search [--workspace PATH] QUERY [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages and artefacts; use show on returned refs before answering", Run: cmdSearch},
 		"show":      {Name: "show", Usage: "aha show [--workspace PATH] REF [--session ID] [--entry ID] [--before N] [--after N] [--json|--md]", Flags: flagNames(showFlagSpecs), FlagSpecs: showFlagSpecs, Examples: []string{"aha show <ref_text> --json", "aha show --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "display contextual evidence for a search result", Run: cmdShow},
 		"status":    {Name: "status", Usage: "aha status [--archive ARCHIVE] [--workspace PATH] [--json]", Flags: []string{"--archive", "--config", "--json", "--workspace"}, Examples: []string{"aha status --json", "aha status --archive r2:team-history --workspace ~/.aha/workspace --json"}, JSONSchema: "aha.status.v2", Docs: "inspect agent-history, Archive, and Workspace state with one next transition", Run: cmdStatus, RunContext: runStatusContext},
-		"workspace": {Name: "workspace", Usage: "aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--dry-run] [--progress MODE] [--json]", Flags: []string{"--backup", "--config", "--dry-run", "--json", "--progress", "--repair-fts"}, Examples: []string{"aha workspace status", "aha workspace verify --repair-fts", "aha workspace repair --backup", "aha workspace conflicts --json"}, JSONSchema: "aha.workspace.status.v2|object|array", Docs: "select, inspect, verify, repair, or inspect conflicts in a local Workspace", Run: cmdWorkspace, RunContext: runWorkspaceContext},
+		"workspace": {Name: "workspace", Usage: "aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--limit N] [--offset N] [--dry-run] [--progress MODE] [--json]", Flags: []string{"--backup", "--config", "--dry-run", "--json", "--limit", "--offset", "--progress", "--repair-fts"}, Examples: []string{"aha workspace status", "aha workspace verify --repair-fts", "aha workspace repair --backup", "aha workspace conflicts --json"}, JSONSchema: "aha.workspace.status.v2|object|array", Docs: "select, inspect, verify, repair, or inspect conflicts in a local Workspace", Run: cmdWorkspace, RunContext: runWorkspaceContext},
 	}
 }
 
@@ -275,11 +275,7 @@ func prepareWritableCorpus(cfg model.Config) (safety.WorkspaceDestination, error
 }
 
 func openPreparedCorpus(destination safety.WorkspaceDestination) (*corpus.Store, error) {
-	path, err := destination.Path()
-	if err != nil {
-		return nil, err
-	}
-	return corpus.Open(path)
+	return corpus.OpenPreparedDestination(destination)
 }
 
 func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) {

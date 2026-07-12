@@ -159,6 +159,7 @@ const opaqueTypes = `// Tools whose Go return type is map[string]any are exposed
 export type StatusReport = Record<string, unknown>;
 export interface CapabilitiesReport {
   schema: string;
+  http_schema: string;
   required_features: string[];
   tools: string[];
 }
@@ -175,6 +176,7 @@ func inputInterfaces() string {
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
 	writeStructInterfaceWithDocs(&b, "AnalyseFailuresArgs", reflect.TypeOf(mcp.IncidentsInput{}))
 	writeStructInterfaceWithDocs(&b, "AnalyseFailureTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
+	writeStructInterfaceWithDocs(&b, "ConflictsArgs", reflect.TypeOf(mcp.ConflictsInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
@@ -261,7 +263,7 @@ export function aha(transport: Transport) {
 			b.WriteString(`    workspace_verify: () => transport.call("workspace_verify", {}) as Promise<VerifyReport>,
 `)
 		case "workspace_conflicts":
-			b.WriteString(`    workspace_conflicts: () => transport.call("workspace_conflicts", {}) as Promise<Conflict[]>,
+			b.WriteString(`    workspace_conflicts: (args: ConflictsArgs = {}) => transport.call("workspace_conflicts", args as unknown as Record<string, unknown>) as Promise<Conflict[]>,
 `)
 		case "workspace_size":
 			b.WriteString(`    workspace_size: () => transport.call("workspace_size", {}) as Promise<SizeReport>,

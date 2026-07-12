@@ -239,7 +239,7 @@ aha status [--archive ARCHIVE] [--workspace PATH] [--json]
 select, inspect, verify, repair, or inspect conflicts in a local Workspace
 
 ```txt
-aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--dry-run] [--progress MODE] [--json]
+aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--limit N] [--offset N] [--dry-run] [--progress MODE] [--json]
 ```
 
 **Flags:**
@@ -248,6 +248,8 @@ aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts]
 - `--config`
 - `--dry-run`
 - `--json`
+- `--limit`
+- `--offset`
 - `--progress`
 - `--repair-fts`
 

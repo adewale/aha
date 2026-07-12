@@ -70,10 +70,10 @@ func runCrashScenario(t *testing.T, ctx context.Context, v2 *depot.V2) (model.Ma
 		}
 		return snapshotManifestFor("crash-machine", files...)
 	}
-	if _, err := depot.PushV2(ctx, v2, manifest(stateA), newMapBlobSource(t, stateA)); err != nil {
+	if _, err := pushPrepared(ctx, v2, manifest(stateA), newMapBlobSource(t, stateA)); err != nil {
 		return model.ManifestSHA256{}, err
 	}
-	res, err := depot.PushV2(ctx, v2, manifest(stateAB), newMapBlobSource(t, stateAB))
+	res, err := pushPrepared(ctx, v2, manifest(stateAB), newMapBlobSource(t, stateAB))
 	if err != nil {
 		return model.ManifestSHA256{}, err
 	}

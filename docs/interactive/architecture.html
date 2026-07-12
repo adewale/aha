@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">19,583</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">20,772</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">22</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -2167,7 +2167,7 @@ footer a:hover { color: var(--ink-2); }
       <!-- Stage 4: corpus -->
       <g class="grp" data-pkg="internal/corpus" data-info="Derived SQLite + FTS5 + blobs, keyed by snapshots(manifest_sha256). Append-only ingest, trigger-maintained FTS, parse-once provenance in session_versions. Rebuildable from depot.">
         <text x="910" y="40" class="title" text-anchor="middle">corpus</text>
-        <text x="910" y="62" text-anchor="middle" class="lbl">corpus.db (SQLite + FTS5)</text>
+        <text x="910" y="62" text-anchor="middle" class="lbl">workspace.db (SQLite + FTS5)</text>
         <text x="910" y="80" text-anchor="middle" class="lbl">blobs/ &nbsp; images/</text>
         <text x="910" y="98" text-anchor="middle" class="lbl">append-only triggers</text>
         <text x="910" y="124" text-anchor="middle" class="good">derived &amp; repairable</text>
@@ -2317,7 +2317,7 @@ footer a:hover { color: var(--ink-2); }
       <div class="noun-tier-h">query  ·  derived, rebuildable</div>
       <div class="noun primary" data-id="corpus"
            data-def="A local SQLite + FTS5 database. Append-only ingest, trigger-maintained FTS, content-addressed file blob store. The query engine, NOT the source of truth – entirely rebuildable from depot snapshots."
-           data-example="~/.aha/corpus.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
+           data-example="~/.aha/workspace.db  +  ~/.aha/blobs/  +  ~/.aha/images/"
            data-rel="depot,session,entry,artifact">
         <div class="noun-name">Corpus</div>
         <div class="noun-tag">SQLite + FTS5</div>
