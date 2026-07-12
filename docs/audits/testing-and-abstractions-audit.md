@@ -31,7 +31,7 @@ Inputs:
 - Added CLI flag metadata/FlagSet sync coverage.
 - Added resolver tests for exact-vs-prefix precedence and literal `%`/`_` handling.
 - Added search path-filter wildcard escaping coverage.
-- Routed `aha read <ref>` through typed `corpus.ReadRef` and added artefact search-ref round-trip coverage.
+- Routed `aha show <ref>` through typed `corpus.ReadRef` and added artefact search-ref round-trip coverage.
 
 ## TDD misses found
 

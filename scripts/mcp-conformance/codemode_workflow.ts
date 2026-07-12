@@ -29,7 +29,7 @@ import { assertAttestedConformance } from "./attestation.ts";
 
 const { ahaBin, ahaConfig } = assertAttestedConformance();
 
-const child = spawn(ahaBin, ["mcp", "--config", ahaConfig], {
+const child = spawn(ahaBin, ["mcp", "serve", "--config", ahaConfig], {
   stdio: ["pipe", "pipe", "pipe"],
 });
 child.stderr.on("data", () => {}); // drain server diagnostics

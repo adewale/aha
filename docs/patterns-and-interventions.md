@@ -8,8 +8,8 @@ Use this guide to manually turn `aha` incidents and evidence refs into the right
 
 `aha` exposes the pattern substrate through several read-only surfaces:
 
-- CLI: `aha incidents`, `aha search`, `aha read`.
-- Dashboard: `aha serve` → **Failures** for recurring failures, **Search** for trace/evidence review, **Sources** for scope/trust.
+- CLI: `aha analyse failures`, `aha search`, `aha show`.
+- Dashboard: `aha dashboard` → **Failures** for recurring failures, **Search** for trace/evidence review, **Sources** for scope/trust.
 - MCP: `incidents`, `incident_trajectory`, `search`, `read`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`.
 - TypeScript client: `clients/typescript/` wrappers for MCP/HTTP/code-mode runtimes.
 
@@ -102,7 +102,7 @@ Backlog items should include hypotheses and evidence refs, not a premature fix.
 
 ```bash
 aha status --json
-aha verify --json
+aha workspace verify --json
 ```
 
 Use `status` to see corpus size, sources, redaction levels, and whether the data is large enough to trust. Use `verify` before drawing conclusions from an old corpus.
@@ -110,9 +110,9 @@ Use `status` to see corpus size, sources, redaction levels, and whether the data
 ### 2. Find high-pain patterns
 
 ```bash
-aha incidents --limit 50 --json
-aha incidents --state unresolved --limit 25 --json
-aha incidents --state resolved --limit 25 --json
+aha analyse failures --limit 50 --json
+aha analyse failures --state unresolved --limit 25 --json
+aha analyse failures --state resolved --limit 25 --json
 ```
 
 Interpret states as:
@@ -124,9 +124,9 @@ Interpret states as:
 ### 3. Scope to a project/source/tool
 
 ```bash
-aha incidents --project myrepo --json
-aha incidents --tool bash --json
-aha incidents --source claude-code --json
+aha analyse failures --project myrepo --json
+aha analyse failures --tool bash --json
+aha analyse failures --source claude-code --json
 ```
 
 Scope when a pattern looks too broad. A generic `edit` or `rg` incident may become meaningful once scoped to a project or workflow.
@@ -136,7 +136,7 @@ Scope when a pattern looks too broad. A generic `edit` or `rg` incident may beco
 Every incident carries a `sample_ref`. Resolved incidents may also include path refs.
 
 ```bash
-aha read 'msg:v1:...' --before 3 --after 10 --md
+aha show 'msg:v1:...' --before 3 --after 10 --md
 ```
 
 Treat search snippets and incident summaries as leads. Treat `read` output as evidence.
@@ -326,7 +326,7 @@ For Pi dynamic workflows, this maps naturally to `phase(...)`, `agent(...)`, `pa
 When asking an agent to do this manually today, use:
 
 ```text
-Use aha read-only surfaces only. Inspect `aha incidents --json`, sample evidence with `aha read`, and classify the top patterns into runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog. Do not write or install artifacts yet. For each recommendation include stats, why this artifact type fits, and evidence refs.
+Use aha show-only surfaces only. Inspect `aha analyse failures --json`, sample evidence with `aha show`, and classify the top patterns into runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog. Do not write or install artifacts yet. For each recommendation include stats, why this artifact type fits, and evidence refs.
 ```
 
 ## Current limits

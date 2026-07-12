@@ -286,7 +286,7 @@ func TestOpenRejectsLegacyBundleCorpus(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := corpus.Open(dir); err == nil || !containsAll(err.Error(), "rebuild") {
+	if _, err := corpus.Open(dir); err == nil || !containsAll(err.Error(), "workspace repair") {
 		t.Fatalf("Open accepted a legacy corpus: err=%v", err)
 	}
 }

@@ -23,13 +23,12 @@ const (
 	flagInt    = "int"
 )
 
-var corpusFlagSpecs = []FlagSpec{
-	{Name: "corpus", Kind: flagString, Help: "corpus dir", PostPosition: true},
-	{Name: "repo", Kind: flagString, Help: "repo/corpus dir", PostPosition: true},
+var workspaceFlagSpecs = []FlagSpec{
+	{Name: "workspace", Kind: flagString, Help: "Workspace directory", PostPosition: true},
 	{Name: "config", Kind: flagString, Help: "config path", PostPosition: true},
 }
 
-var searchFlagSpecs = appendFlagSpecs(corpusFlagSpecs,
+var searchFlagSpecs = appendFlagSpecs(workspaceFlagSpecs,
 	FlagSpec{Name: "source", Kind: flagString, Help: "source filter", PostPosition: true},
 	FlagSpec{Name: "machine", Kind: flagString, Help: "machine filter", PostPosition: true},
 	FlagSpec{Name: "role", Kind: flagString, Help: "role filter", PostPosition: true},
@@ -45,7 +44,7 @@ var searchFlagSpecs = appendFlagSpecs(corpusFlagSpecs,
 	FlagSpec{Name: "limit", Kind: flagInt, Default: "20", Help: "limit (capped at 200)", PostPosition: true},
 )
 
-var readFlagSpecs = appendFlagSpecs(corpusFlagSpecs,
+var showFlagSpecs = appendFlagSpecs(workspaceFlagSpecs,
 	FlagSpec{Name: "session", Kind: flagString, Help: "session key/id", PostPosition: true},
 	FlagSpec{Name: "entry", Kind: flagString, Help: "entry id", PostPosition: true},
 	FlagSpec{Name: "branch", Kind: flagString, Help: "walk parent_id from this leaf entry back to root (Pi tree-walking read)", PostPosition: true},
@@ -155,6 +154,12 @@ func reorderArgsBySpec(args []string, specs []FlagSpec) []string {
 			name = a[:eq]
 		}
 		if boolFlags[name] || strings.Contains(a, "=") && valueFlags[name] {
+			flags = append(flags, a)
+			continue
+		}
+		if strings.HasPrefix(a, "-") && !valueFlags[name] {
+			// Keep removed/unknown options ahead of positional arguments so the
+			// flag parser rejects them instead of silently treating them as query text.
 			flags = append(flags, a)
 			continue
 		}

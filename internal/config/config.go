@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,16 +17,16 @@ import (
 
 func Default() model.Config {
 	return model.Config{
-		MachineID:            defaultMachineID(),
-		Sources:              defaultSources(),
-		CorpusDir:            "~/.aha",
-		Depot:                model.DepotConfig{Type: "local", Location: "~/.aha/depot"},
-		PathMode:             "raw",
-		IncludeSubagents:     true,
-		IncludeImages:        true,
-		IndexToolOutput:      false,
-		Redaction:            "none-v1",
-		AcceptSecretsWarning: false,
+		MachineID:              defaultMachineID(),
+		Sources:                defaultSources(),
+		WorkspaceDir:           "~/.aha/workspace",
+		Archive:                model.ArchiveConfig{Type: "local", Location: "~/.aha/archive"},
+		PathMode:               "raw",
+		IncludeSubagents:       true,
+		IncludeImages:          true,
+		IndexToolOutput:        false,
+		Redaction:              "none-v1",
+		AcknowledgedRawHistory: false,
 	}
 }
 
@@ -75,7 +76,9 @@ func Load(path string) (model.Config, error) {
 		return cfg, err
 	}
 	ast.Standardize()
-	if err := json.Unmarshal(ast.Pack(), &cfg); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(ast.Pack()))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
@@ -86,14 +89,14 @@ func StarterJSONC() []byte {
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	header := "// aha config (JSONC)\n" +
 		"// machine_id defaults to the local hostname; edit it if you want a stable label across renames.\n" +
-		"// Set accept_secrets_warning to true only after reading the privacy warning.\n" +
+		"// Set acknowledged_raw_history to true only after reading the privacy warning.\n" +
 		"//\n" +
-		"// depot: where snapshots are stored. Local is the default until you configure one.\n" +
-		"//   Configure a depot with `aha depot init <addr>` (e.g. r2:aha-depot or local:/path);\n" +
-		"//   switch the default later with `aha depot use <addr>`. Either command sets the default.\n" +
-		"// R2 depots: keep the two secret keys in the environment, never in this file —\n" +
-		"//   AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY. `aha depot init`/`use` persist the\n" +
-		"//   non-secret depot.r2.account_id for you, so a flagless `aha refresh` then targets R2.\n" +
+		"// archive: durable aggregated history. Local is the default until you configure one.\n" +
+		"//   Initialise an Archive with `aha archive init <address>` (for example r2:aha-archive or local:/path).\n" +
+		"//   Select it with `aha archive set-default <address>`.\n" +
+		"// R2 Archives: keep the two secret keys in the environment, never in this file —\n" +
+		"//   AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY. Archive commands persist only\n" +
+		"//   the non-secret archive.r2.account_id.\n" +
 		"//   direnv (.envrc): export AHA_R2_ACCESS_KEY_ID=... ; export AHA_R2_SECRET_ACCESS_KEY=...\n"
 	return append([]byte(header), append(b, '\n')...)
 }

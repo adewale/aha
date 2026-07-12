@@ -47,7 +47,7 @@ func TestNormalizeAmbiguousDepotAddressRequiresExplicitKind(t *testing.T) {
 }
 
 func TestNormalizeUnownedCorpusDestinationIsActionable(t *testing.T) {
-	view := usererror.Normalize(&safety.CorpusDestinationError{}, "ingest")
+	view := usererror.Normalize(&safety.WorkspaceDestinationError{}, "ingest")
 	if view.Code() != usererror.CodeInvalidInput || !strings.Contains(view.Message(), "dedicated") {
 		t.Fatalf("view=%+v want dedicated corpus guidance", view)
 	}

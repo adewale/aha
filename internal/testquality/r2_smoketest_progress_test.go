@@ -40,7 +40,7 @@ func TestLocalSmoketestDepotIsAlwaysUnderFreshWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{`WORK="$(mktemp -d`, `DEPOT="$WORK/depot"`, `"depot": { "type": "local", "location": "$DEPOT" }`} {
+	for _, required := range []string{`WORK="$(mktemp -d`, `DEPOT="$WORK/depot"`, `"archive": { "type": "local", "location": "$DEPOT" }`} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("local smoketest lacks fresh-workspace invariant %q", required)
 		}
@@ -64,7 +64,7 @@ func TestR2IntegrationTestUsesOnlyExplicitSmoketestCapability(t *testing.T) {
 			t.Fatalf("integration test missing explicit capability component %s", required)
 		}
 	}
-	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2DepotConfig{})`, `os.Getenv("AHA_R2_SMOKETEST_BUCKET")`, `os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")`, `os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")`, `os.Getenv("AHA_R2_SMOKETEST_TARGET_ID")`} {
+	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2ArchiveConfig{})`, `os.Getenv("AHA_R2_SMOKETEST_BUCKET")`, `os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")`, `os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")`, `os.Getenv("AHA_R2_SMOKETEST_TARGET_ID")`} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("integration test can consult production credential source %s", forbidden)
 		}

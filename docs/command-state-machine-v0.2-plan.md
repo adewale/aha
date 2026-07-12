@@ -1,6 +1,6 @@
 # aha 0.2 Archive and Workspace state-machine plan
 
-Status: **accepted product model; implementation deliberately deferred until the model is reviewed**
+Status: **implemented in 0.2; retained as the normative lifecycle contract**
 
 Compatibility policy: **none** — aha has not launched and has no users. Version 0.2 will remove the old command/config vocabulary rather than preserve aliases.
 
@@ -586,7 +586,7 @@ aha workspace repair "$HOME/aha-work" --backup
 
 ## 15. Implementation sequence
 
-Implementation starts only after this model is accepted.
+Implementation followed these phases after the model was accepted.
 
 ### Phase 1 — closed state model
 

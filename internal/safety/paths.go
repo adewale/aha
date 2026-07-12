@@ -58,83 +58,67 @@ func EnsureUnderRoot(root, target string) error {
 	return nil
 }
 
-// CorpusDestination is a write target that has been proven not to overlap a
-// source and not to repurpose an unrelated non-empty directory. Its path is
-// private so CLI mutation code must pass through PrepareCorpusDestination.
-type CorpusDestination struct{ path string }
+// WorkspaceDestination is a write target proven not to overlap a source or
+// repurpose an unrelated non-empty directory. Its path is private so mutation
+// code must pass through PrepareWorkspaceDestination.
+type WorkspaceDestination struct{ path string }
 
-func (d CorpusDestination) Path() (string, error) {
+func (d WorkspaceDestination) Path() (string, error) {
 	if d.path == "" {
-		return "", errors.New("invalid corpus destination capability")
+		return "", errors.New("invalid Workspace destination capability")
 	}
 	return d.path, nil
 }
 
-// CorpusDestinationError deliberately carries no path: callers can safely
+// WorkspaceDestinationError deliberately carries no path, so callers can
 // present it without disclosing local filesystem details.
-type CorpusDestinationError struct{}
+type WorkspaceDestinationError struct{}
 
-func (*CorpusDestinationError) Error() string {
-	return "corpus destination must be a dedicated empty directory or an existing aha corpus"
+func (*WorkspaceDestinationError) Error() string {
+	return "Workspace destination must be a dedicated empty directory or an existing aha Workspace"
 }
 
-func PrepareCorpusDestination(cfg model.Config, target string) (CorpusDestination, error) {
-	if err := ValidateWriteOutsideSources(cfg, target, "corpus"); err != nil {
-		return CorpusDestination{}, err
+func PrepareWorkspaceDestination(cfg model.Config, target string) (WorkspaceDestination, error) {
+	if err := ValidateWriteOutsideSources(cfg, target, "Workspace"); err != nil {
+		return WorkspaceDestination{}, err
 	}
 	expanded, err := paths.Expand(target)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	if expanded == "" {
-		expanded, err = paths.Expand("~/.aha")
+		expanded, err = paths.Expand("~/.aha/workspace")
 		if err != nil {
-			return CorpusDestination{}, err
+			return WorkspaceDestination{}, err
 		}
 	}
 	root, err := ResolveExisting(expanded)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) {
-		return CorpusDestination{path: root}, nil
+		return WorkspaceDestination{path: root}, nil
 	}
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	if !info.IsDir() {
-		return CorpusDestination{}, &CorpusDestinationError{}
+		return WorkspaceDestination{}, &WorkspaceDestinationError{}
 	}
 	if _, err := os.Stat(filepath.Join(root, "corpus.db")); err == nil {
-		return CorpusDestination{path: root}, nil
+		return WorkspaceDestination{path: root}, nil
 	} else if !os.IsNotExist(err) {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
-	allowed := map[string]bool{"depot": true, "capture-cache.json": true, "blobs": true}
-	if cfg.Depot.Type == "local" && strings.TrimSpace(cfg.Depot.Location) != "" {
-		localDepot, expandErr := paths.Expand(cfg.Depot.Location)
-		if expandErr != nil {
-			return CorpusDestination{}, expandErr
-		}
-		localDepot, resolveErr := ResolveExisting(localDepot)
-		if resolveErr != nil {
-			return CorpusDestination{}, resolveErr
-		}
-		if rel, relErr := filepath.Rel(root, localDepot); relErr == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
-			allowed[strings.Split(rel, string(os.PathSeparator))[0]] = true
-		}
+	if len(entries) > 0 {
+		return WorkspaceDestination{}, &WorkspaceDestinationError{}
 	}
-	for _, entry := range entries {
-		if !allowed[entry.Name()] {
-			return CorpusDestination{}, &CorpusDestinationError{}
-		}
-	}
-	return CorpusDestination{path: root}, nil
+	return WorkspaceDestination{path: root}, nil
 }
 
 func ValidateWriteOutsideSources(cfg model.Config, target, label string) error {

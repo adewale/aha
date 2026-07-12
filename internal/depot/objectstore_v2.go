@@ -275,7 +275,7 @@ type R2AuthorizationError struct {
 }
 
 func (e *R2AuthorizationError) Error() string {
-	return fmt.Sprintf("R2 authorisation denied during HeadBucket and ListObjectsV2 for bucket %q, before any depot mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint (403 Forbidden)", e.Bucket)
+	return fmt.Sprintf("R2 authorisation denied during HeadBucket and ListObjectsV2 for bucket %q, before any Archive mutation: use a matching access key and secret from one R2 S3 token scoped to this bucket with Object Read & Write, and ensure its account matches the endpoint (403 Forbidden)", e.Bucket)
 }
 
 func (e *R2AuthorizationError) Unwrap() error { return e.Cause }

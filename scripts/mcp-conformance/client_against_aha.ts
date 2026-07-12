@@ -29,7 +29,7 @@ const { ahaBin, ahaConfig } = assertAttestedConformance();
 
 const transport = new StdioClientTransport({
   command: ahaBin,
-  args: ["mcp", "--config", ahaConfig],
+  args: ["mcp", "serve", "--config", ahaConfig],
 });
 
 const client = new Client({ name: "aha-conformance-ts", version: "0.1.0" });
@@ -68,7 +68,7 @@ async function main() {
   }
   const block = statusRes.content[0] as { type: string; text: string };
   const status = JSON.parse(block.text);
-  for (const key of ["corpus_dir", "sessions", "entries", "fts_messages"]) {
+  for (const key of ["workspace_dir", "sessions", "entries", "fts_messages"]) {
     if (!(key in status)) throw new Error(`status missing ${key}`);
   }
   console.log(`tools/call status OK: sessions=${status.sessions} entries=${status.entries}`);

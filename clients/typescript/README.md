@@ -13,7 +13,7 @@ code-mode runtime ([Cloudflare `@cloudflare/codemode`][cf],
 | -------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `aha-mcp.ts`               | Generated typed surface: `Transport` interface, per-tool typed wrappers, all input/output type definitions. |
 | `transports/stdio.ts`      | Node stdio transport — spawns `aha mcp` and frames JSON-RPC.                                              |
-| `transports/http.ts`       | HTTP transport — talks to `aha serve` over `fetch`.                                                       |
+| `transports/http.ts`       | HTTP transport — talks to `aha dashboard` over `fetch`.                                                       |
 
 `aha-mcp.ts` is regenerated from the Go types via `go run ./cmd/aha-gen-ts`.
 Do not edit it by hand. The transport files are hand-written.
@@ -42,13 +42,13 @@ for (const entries of contexts) {
 }
 ```
 
-## Usage — HTTP (point at `aha serve`)
+## Usage — HTTP (point at `aha dashboard`)
 
 ```ts
 import { aha } from "./aha-mcp.js";
 import { connectHTTP } from "./transports/http.js";
 
-// Defaults: aha serve listens on http://127.0.0.1:18428
+// Defaults: aha dashboard listens on http://127.0.0.1:18428
 const transport = connectHTTP("http://127.0.0.1:18428");
 const tools = aha(transport);
 

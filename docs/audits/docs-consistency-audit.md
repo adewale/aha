@@ -17,7 +17,7 @@ Scope: README, changelog, command docs, trust docs, user journeys, architecture,
 - Updated user journeys to distinguish explicit bundle-path ingest from depot publishing.
 - Updated R2 spec wording to avoid using `sync` as an operation name; it now says refresh/ingest or pending-delta where appropriate.
 - Removed the standalone depot model sketch and replaced it with CI-backed Go state-machine/property references.
-- Added `aha verify` / `verify --repair-fts` to README, generated command docs, user journeys, and agent-facing TODO guidance.
+- Added `aha workspace verify` / `verify --repair-fts` to README, generated command docs, user journeys, and agent-facing TODO guidance.
 - Updated stale schema references to current bundle schema `agent-session-snapshot-bundle/v2` while keeping depot key/catalogue layout `v1` terminology distinct.
 - Added `docs/performance-audit.md` and linked it from README/TODO.
 

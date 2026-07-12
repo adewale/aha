@@ -385,7 +385,7 @@ func resolveLiveR2Config(t *testing.T) depot.R2Config {
 	if err != nil {
 		t.Fatalf("invalid smoketest R2 credentials: %v", err)
 	}
-	cfg := model.R2DepotConfig{AccountID: pinnedR2SmoketestAccountID, Region: "auto"}
+	cfg := model.R2ArchiveConfig{AccountID: pinnedR2SmoketestAccountID, Region: "auto"}
 	resolved, err := depot.ResolveR2ConfigExplicit(cfg, credentials)
 	if err != nil {
 		t.Fatalf("invalid explicit smoketest R2 configuration: %v", err)

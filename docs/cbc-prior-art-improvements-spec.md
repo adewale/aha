@@ -12,9 +12,9 @@ This spec captures the follow-up work suggested by comparing `aha` with prior ar
 |---|---|---|
 | Sealed refs | Search/read identity must use closed canonical variants, not optional string DTOs. | `model.Ref`, `MessageRef`, `SessionRef`, `ArtifactRef`; canonical `FormatRef`/`ParseRef`; JSON marshaling on variants. |
 | Typed errors | User-visible fallible resolution must expose typed errors before string classification. | `corpus.NotFoundError`, `corpus.AmbiguousError`, `archive.UnsupportedSchemaError`, CLI JSON error classification. |
-| Corpus verify/repair | Users and agents need direct corpus verification and FTS repair, not only `doctor`. | `aha verify [--repair-fts] [--json]`. |
+| Corpus verify/repair | Users and agents need direct corpus verification and FTS repair, not only `doctor`. | `aha workspace verify [--repair-fts] [--json]`. |
 | Storage invariants | True row relations should be represented in SQLite where they do not block quarantine/provenance. | Targeted FK/CHECK constraints plus append-only/conflict triggers. |
-| FTS drift | FTS remains derived from raw corpus rows and must be repairable. | Trigger-maintained FTS for normal writes; `corpus.Verify`; `corpus.ReconcileFTS`; `aha verify --repair-fts`. |
+| FTS drift | FTS remains derived from raw corpus rows and must be repairable. | Trigger-maintained FTS for normal writes; `corpus.Verify`; `corpus.ReconcileFTS`; `aha workspace verify --repair-fts`. |
 | State/failure tests | Operation sequences and crash windows must be tested with real files/SQLite/depot stores. | Existing rapid state machines plus ingest failure-injection hooks; keep expanding sequences. |
 | Static analysis | Correctness debt must fail tests when it grows. | AST/static tests for time, FTS writes, append-only mutation, identity construction, network imports. |
 | Canonical bundle fixture | Archive drift needs a small deterministic golden beyond repeat equality. | `TestCanonicalBundleGoldenSHA`. |

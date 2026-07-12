@@ -82,16 +82,16 @@ var ToolNames = []string{
 // code-mode LLM reading the surface gets the same descriptions it would
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
-	"search":              "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
+	"search":              "Search the Workspace over messages and artefacts. Returns ref-bearing results suitable for chaining into show.",
 	"read":                "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
-	"status":              "Return corpus health summary: counts and disk usage.",
-	"verify":              "Run read-only corpus invariant checks (no repair).",
+	"status":              "Return Workspace health summary: counts and disk usage.",
+	"verify":              "Run read-only Workspace invariant checks (no repair).",
 	"conflicts":           "List quarantined merge conflicts.",
-	"corpus_size":         "Return corpus on-disk size breakdown.",
-	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
+	"corpus_size":         "Return Workspace on-disk size breakdown.",
+	"doctor":              "Return local environment, config, source, and Workspace diagnostics. Archive probing is omitted to keep this tool local-only.",
 	"incidents":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
 	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
-	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
+	"overview":            "Workspace orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this Workspace and is it healthy?'.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -101,7 +101,7 @@ var ToolDescriptions = map[string]string{
 // AddTool's strict-input behaviour, so MCP clients sending unknown fields
 // are rejected before the handler runs.
 type SearchInput struct {
-	Query     string `json:"query" jsonschema:"Full-text query passed to the corpus FTS index"`
+	Query     string `json:"query" jsonschema:"Full-text query passed to the Workspace FTS index"`
 	Source    string `json:"source,omitempty" jsonschema:"Filter by source adapter name (pi, claude-code, codex)"`
 	Machine   string `json:"machine,omitempty" jsonschema:"Filter by machine id"`
 	Role      string `json:"role,omitempty" jsonschema:"Filter by message role (user, assistant, ...)"`
@@ -319,22 +319,22 @@ func doDoctor(b Backend) (map[string]any, error) {
 			"enabled": sc.Enabled,
 		})
 	}
-	corpusBlock := map[string]any{
+	workspaceBlock := map[string]any{
 		"path": b.Root(),
 		"ok":   true,
 	}
 	if st, err := corpus.Status(b.DB(), b.Root()); err == nil {
-		corpusBlock["entries"] = st["entries"]
-		corpusBlock["sessions"] = st["sessions"]
-		corpusBlock["index_size_bytes"] = st["index_size_bytes"]
+		workspaceBlock["entries"] = st["entries"]
+		workspaceBlock["sessions"] = st["sessions"]
+		workspaceBlock["index_size_bytes"] = st["index_size_bytes"]
 	}
 	return map[string]any{
-		"version":  model.Version,
-		"config":   config.DefaultPath(),
-		"adapters": ads,
-		"sources":  sources,
-		"corpus":   corpusBlock,
-		"next":     []string{"aha search <query>", "aha read <ref>"},
+		"version":   model.Version,
+		"config":    config.DefaultPath(),
+		"adapters":  ads,
+		"sources":   sources,
+		"workspace": workspaceBlock,
+		"next":      []string{"aha search <query>", "aha show <ref>"},
 	}, nil
 }
 

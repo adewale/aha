@@ -7,15 +7,15 @@ type Config struct {
 	MachineID              string                  `json:"machine_id"`
 	MachineLabel           string                  `json:"machine_label,omitempty"`
 	Sources                []SourceConfig          `json:"sources"`
-	CorpusDir              string                  `json:"corpus_dir"`
-	Depot                  DepotConfig             `json:"depot"`
+	WorkspaceDir           string                  `json:"workspace_dir"`
+	Archive                ArchiveConfig           `json:"archive"`
 	PathMode               string                  `json:"path_mode"`
 	IncludeSubagents       bool                    `json:"include_subagents"`
 	IncludeImages          bool                    `json:"include_images"`
 	IndexToolOutput        bool                    `json:"index_tool_output"`
 	Redaction              string                  `json:"redaction"`
 	RedactionExtraPatterns []RedactionExtraPattern `json:"redaction_extra_patterns,omitempty"`
-	AcceptSecretsWarning   bool                    `json:"accept_secrets_warning"`
+	AcknowledgedRawHistory bool                    `json:"acknowledged_raw_history"`
 }
 
 // RedactionExtraPattern is a user-supplied regex added to the
@@ -32,13 +32,13 @@ type SourceConfig struct {
 	Enabled bool   `json:"enabled"`
 }
 
-type DepotConfig struct {
-	Type     string        `json:"type"`
-	Location string        `json:"location"`
-	R2       R2DepotConfig `json:"r2,omitempty"`
+type ArchiveConfig struct {
+	Type     string          `json:"type"`
+	Location string          `json:"location"`
+	R2       R2ArchiveConfig `json:"r2,omitempty"`
 }
 
-type R2DepotConfig struct {
+type R2ArchiveConfig struct {
 	AccountID string `json:"account_id,omitempty"`
 	Endpoint  string `json:"endpoint,omitempty"`
 	Region    string `json:"region,omitempty"`

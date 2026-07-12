@@ -32,10 +32,10 @@ func TestDefaultSourcesComeFromRegisteredAdapters(t *testing.T) {
 	}
 }
 
-func TestDefaultUsesLocalDepot(t *testing.T) {
+func TestDefaultUsesSeparateLocalArchiveAndWorkspace(t *testing.T) {
 	cfg := config.Default()
-	if cfg.Depot.Type != "local" || cfg.Depot.Location != "~/.aha/depot" {
-		t.Fatalf("bad depot defaults: depot=%+v", cfg.Depot)
+	if cfg.Archive.Type != "local" || cfg.Archive.Location != "~/.aha/archive" || cfg.WorkspaceDir != "~/.aha/workspace" {
+		t.Fatalf("bad resource defaults: archive=%+v workspace=%q", cfg.Archive, cfg.WorkspaceDir)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestLoadJSONC(t *testing.T) {
   "sources": [
     {"type":"pi", "root":"/tmp/pi", "enabled":true},
   ],
-  "corpus_dir": "/tmp/corpus",
+  "workspace_dir": "/tmp/workspace",
 }
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -57,7 +57,21 @@ func TestLoadJSONC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MachineID != "m1" || len(cfg.Sources) != 1 || cfg.Sources[0].Type != "pi" {
+	if cfg.MachineID != "m1" || cfg.WorkspaceDir != "/tmp/workspace" || len(cfg.Sources) != 1 || cfg.Sources[0].Type != "pi" {
 		t.Fatalf("bad config: %+v", cfg)
+	}
+}
+
+func TestLoadRejectsRemovedConfigVocabulary(t *testing.T) {
+	for _, key := range []string{"corpus_dir", "depot", "accept_secrets_warning"} {
+		t.Run(key, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.jsonc")
+			if err := os.WriteFile(path, []byte(`{"`+key+`": true}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.Load(path); err == nil {
+				t.Fatalf("removed config key %q was accepted", key)
+			}
+		})
 	}
 }

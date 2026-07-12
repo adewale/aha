@@ -15,7 +15,7 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
+	cf := workspaceFlags{workspaceDir: stringPtr(pf.String("workspace")), config: stringPtr(pf.String("config"))}
 	if pf.NArg() == 0 {
 		return errors.New("search requires query")
 	}

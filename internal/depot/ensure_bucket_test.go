@@ -57,7 +57,7 @@ func TestEnsureBucketSurfacesHeadErrorsWithoutCreating(t *testing.T) {
 		t.Fatalf("ListObjectsV2 attempts=%d want 1 diagnostic probe", got)
 	}
 	message := err.Error()
-	for _, want := range []string{"403", "HeadBucket", "ListObjectsV2", "before any depot mutation", "Object Read & Write", "matching access key and secret", "smoke-bucket"} {
+	for _, want := range []string{"403", "HeadBucket", "ListObjectsV2", "before any Archive mutation", "Object Read & Write", "matching access key and secret", "smoke-bucket"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("error %q missing actionable detail %q", message, want)
 		}
@@ -140,8 +140,25 @@ func TestEnsureBucketCreateDenialNamesBucketCreation(t *testing.T) {
 	}
 }
 
-// The happy auto-create path: missing bucket plus an Admin token creates
-// the bucket exactly once and succeeds.
+func TestArchiveInitNeverAttemptsBucketCreation(t *testing.T) {
+	var createBucketAttempts atomic.Int32
+	store := bucketStoreAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/smoke-bucket" {
+			createBucketAttempts.Add(1)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	archive := &V2{addr: Address{Type: "r2", Location: "smoke-bucket"}, store: store}
+	if err := archive.Init(t.Context()); err == nil {
+		t.Fatal("initialising a missing external bucket unexpectedly succeeded")
+	}
+	if got := createBucketAttempts.Load(); got != 0 {
+		t.Fatalf("Archive init attempted CreateBucket %d time(s)", got)
+	}
+}
+
+// The internal legacy helper can create with administrative authority, but
+// no 0.2 Archive command calls it.
 func TestEnsureBucketCreatesMissingBucket(t *testing.T) {
 	var createAttempts atomic.Int32
 	store := bucketStoreAgainst(t, func(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,13 +107,8 @@ func (v *V2) Address() Address { return v.addr }
 // layout: the two layouts never silently mix, and there is no migration
 // (pre-release decision; v1 bundles remain importable via `aha ingest`).
 func (v *V2) Init(ctx context.Context) error {
-	if r2, ok := v.store.(*r2StoreV2); ok {
-		if err := r2.ensureBucket(ctx); err != nil {
-			return err
-		}
-	}
 	if _, _, err := v.store.get(ctx, "depot.json"); err == nil {
-		return fmt.Errorf("depot at %s uses the v1 bundle layout; depot v2 does not migrate it (export/import v1 bundles instead)", v.addr.Location)
+		return fmt.Errorf("Archive at %s uses the unsupported v1 bundle layout; 0.2 requires a freshly initialised Archive", v.addr.Location)
 	} else if !errors.Is(err, errObjectNotExist) {
 		return err
 	}
@@ -146,6 +142,21 @@ func (v *V2) Init(ctx context.Context) error {
 type PreparedPull struct {
 	depot    *V2
 	machines []string
+	binding  model.ArchiveBinding
+}
+
+// PreparedUpload is an opaque write capability for an initialised Archive.
+// The zero value cannot publish or expose an Archive identity.
+type PreparedUpload struct {
+	depot   *V2
+	binding model.ArchiveBinding
+}
+
+// DownloadPlan freezes the Archive latest vector before any Workspace is
+// opened. Effectful download code accepts this opaque plan, not raw addresses.
+type DownloadPlan struct {
+	reader PreparedPull
+	latest map[string]model.ManifestSHA256
 }
 
 // PreparePull performs the complete metadata preflight required before a
@@ -153,19 +164,166 @@ type PreparedPull struct {
 func (v *V2) PreparePull(ctx context.Context) (PreparedPull, error) {
 	marker, _, err := v.store.get(ctx, MarkerObjectKey)
 	if errors.Is(err, errObjectNotExist) {
-		return PreparedPull{}, errors.New("depot is not initialised")
+		return PreparedPull{}, errors.New("Archive is not initialised")
 	}
 	if err != nil {
 		return PreparedPull{}, err
 	}
-	if err := validateMarkerV2Bytes(marker); err != nil {
+	binding, err := archiveBindingFromMarker(marker, v.addr)
+	if err != nil {
 		return PreparedPull{}, err
 	}
 	machines, err := v.Machines(ctx)
 	if err != nil {
 		return PreparedPull{}, err
 	}
-	return PreparedPull{depot: v, machines: append([]string(nil), machines...)}, nil
+	return PreparedPull{depot: v, machines: append([]string(nil), machines...), binding: binding}, nil
+}
+
+func (v *V2) PrepareUpload(ctx context.Context) (PreparedUpload, error) {
+	markerBytes, _, err := v.store.get(ctx, MarkerObjectKey)
+	if errors.Is(err, errObjectNotExist) {
+		return PreparedUpload{}, errors.New("archive is not initialised")
+	}
+	if err != nil {
+		return PreparedUpload{}, err
+	}
+	binding, err := archiveBindingFromMarker(markerBytes, v.addr)
+	if err != nil {
+		return PreparedUpload{}, err
+	}
+	return PreparedUpload{depot: v, binding: binding}, nil
+}
+
+func archiveBindingFromMarker(data []byte, addr Address) (model.ArchiveBinding, error) {
+	if err := validateMarkerV2Bytes(data); err != nil {
+		return model.ArchiveBinding{}, err
+	}
+	var m marker
+	if err := json.Unmarshal(data, &m); err != nil {
+		return model.ArchiveBinding{}, err
+	}
+	return model.NewArchiveBinding(m.DepotID, addr.String())
+}
+
+func (p PreparedPull) ArchiveBinding() (model.ArchiveBinding, error) {
+	if p.depot == nil || !p.binding.Valid() {
+		return model.ArchiveBinding{}, errors.New("invalid prepared Archive reader capability")
+	}
+	return p.binding, nil
+}
+
+func (p PreparedUpload) ArchiveBinding() (model.ArchiveBinding, error) {
+	if p.depot == nil || !p.binding.Valid() {
+		return model.ArchiveBinding{}, errors.New("invalid prepared Archive writer capability")
+	}
+	return p.binding, nil
+}
+
+func (p PreparedPull) PlanDownload(ctx context.Context) (DownloadPlan, error) {
+	if p.depot == nil || !p.binding.Valid() {
+		return DownloadPlan{}, errors.New("invalid prepared Archive reader capability")
+	}
+	latest := make(map[string]model.ManifestSHA256, len(p.machines))
+	for _, machine := range p.machines {
+		sha, ok, err := p.Latest(ctx, machine)
+		if err != nil {
+			return DownloadPlan{}, err
+		}
+		if !ok {
+			return DownloadPlan{}, fmt.Errorf("Archive machine %q has no latest snapshot", machine)
+		}
+		latest[machine] = sha
+	}
+	return DownloadPlan{reader: p, latest: latest}, nil
+}
+
+func (p DownloadPlan) ArchiveBinding() (model.ArchiveBinding, error) {
+	return p.reader.ArchiveBinding()
+}
+
+func (p DownloadPlan) LatestVector() (map[string]string, error) {
+	if p.reader.depot == nil || p.latest == nil {
+		return nil, errors.New("invalid Archive download plan")
+	}
+	out := make(map[string]string, len(p.latest))
+	for machine, sha := range p.latest {
+		out[machine] = sha.String()
+	}
+	return out, nil
+}
+
+func (p DownloadPlan) Machines() ([]string, error) {
+	if p.reader.depot == nil || p.latest == nil {
+		return nil, errors.New("invalid Archive download plan")
+	}
+	out := make([]string, 0, len(p.latest))
+	for machine := range p.latest {
+		out = append(out, machine)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (p DownloadPlan) Latest(machine string) (model.ManifestSHA256, bool, error) {
+	if p.reader.depot == nil || p.latest == nil {
+		return model.ManifestSHA256{}, false, errors.New("invalid Archive download plan")
+	}
+	sha, ok := p.latest[machine]
+	return sha, ok, nil
+}
+
+func (p DownloadPlan) Manifest(ctx context.Context, machine string, sha model.ManifestSHA256) (model.SnapshotManifest, error) {
+	return p.reader.Manifest(ctx, machine, sha)
+}
+
+func (p DownloadPlan) OpenBlob(ctx context.Context, key model.BlobKey) (io.ReadCloser, error) {
+	return p.reader.OpenBlob(ctx, key)
+}
+
+type DownloadPlanSummary struct {
+	Machines        int   `json:"machines"`
+	LatestSnapshots int   `json:"latest_snapshots"`
+	UnknownBlobs    int64 `json:"unknown_blobs"`
+	UnknownBytes    int64 `json:"unknown_bytes"`
+}
+
+func (p DownloadPlan) Summary(ctx context.Context, known func(model.BlobKey) (bool, error)) (DownloadPlanSummary, error) {
+	machines, err := p.Machines()
+	if err != nil {
+		return DownloadPlanSummary{}, err
+	}
+	if known == nil {
+		known = func(model.BlobKey) (bool, error) { return false, nil }
+	}
+	summary := DownloadPlanSummary{Machines: len(machines), LatestSnapshots: len(p.latest)}
+	seen := map[string]bool{}
+	for _, machine := range machines {
+		sha := p.latest[machine]
+		manifest, err := p.Manifest(ctx, machine, sha)
+		if err != nil {
+			return DownloadPlanSummary{}, err
+		}
+		for _, file := range manifest.Files {
+			if seen[file.SHA256] {
+				continue
+			}
+			seen[file.SHA256] = true
+			key, err := model.NewBlobKey(file.SHA256)
+			if err != nil {
+				return DownloadPlanSummary{}, err
+			}
+			present, err := known(key)
+			if err != nil {
+				return DownloadPlanSummary{}, err
+			}
+			if !present {
+				summary.UnknownBlobs++
+				summary.UnknownBytes += file.Bytes
+			}
+		}
+	}
+	return summary, nil
 }
 
 func (p PreparedPull) Machines() ([]string, error) {
@@ -240,7 +398,7 @@ func (v *V2) Manifest(ctx context.Context, machine string, sha model.ManifestSHA
 		return model.SnapshotManifest{}, err
 	}
 	if gotSHA != sha {
-		return model.SnapshotManifest{}, fmt.Errorf("manifest %s content hashes to %s: depot object corrupt or tampered", sha, gotSHA)
+		return model.SnapshotManifest{}, fmt.Errorf("manifest %s content hashes to %s: Archive object corrupt or tampered", sha, gotSHA)
 	}
 	if safeCatalogComponent(m.MachineID) != safeCatalogComponent(machine) {
 		return model.SnapshotManifest{}, fmt.Errorf("manifest %s claims machine %q but lives in %q's namespace", sha, m.MachineID, machine)
@@ -568,10 +726,10 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 	report := VerifyReport{Deep: deep}
 	if b, _, err := v.store.get(ctx, MarkerObjectKey); err == nil {
 		if err := validateMarkerV2Bytes(b); err != nil {
-			report.Problems = append(report.Problems, "invalid depot marker")
+			report.Problems = append(report.Problems, "invalid Archive marker")
 		}
 	} else if errors.Is(err, errObjectNotExist) {
-		report.Problems = append(report.Problems, "missing depot marker")
+		report.Problems = append(report.Problems, "missing Archive marker")
 	} else {
 		return report, err
 	}
@@ -740,10 +898,13 @@ func validateMarkerV2Bytes(b []byte) error {
 		return err
 	}
 	if m.Schema != MarkerSchemaV2 {
-		return fmt.Errorf("depot marker schema %q, want %q", m.Schema, MarkerSchemaV2)
+		return fmt.Errorf("Archive marker schema %q, want %q", m.Schema, MarkerSchemaV2)
 	}
 	if m.Layout != LayoutVersionV2 {
-		return fmt.Errorf("depot marker layout %q, want %q", m.Layout, LayoutVersionV2)
+		return fmt.Errorf("Archive marker layout %q, want %q", m.Layout, LayoutVersionV2)
+	}
+	if strings.TrimSpace(m.DepotID) == "" {
+		return errors.New("Archive marker identity is missing")
 	}
 	return nil
 }

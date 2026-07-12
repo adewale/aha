@@ -299,7 +299,7 @@ artifacts             ↔ file/blob rows where applicable
 fts rows              ↔ source rows
 ```
 
-`doctor` can surface a fast subset; `aha verify` exposes corpus checks and
+`doctor` can surface a fast subset; `aha workspace verify` exposes corpus checks and
 repairable FTS drift directly. Deeper blob hash verification can be added as a
 future `verify --deep` mode.
 
@@ -653,8 +653,8 @@ These are not all prerequisites for Phase 1, but they improve the quality of the
 
 Add `testscript`-style CLI contracts for full user journeys:
 
-- `init --accept-secrets → refresh → search --refs → read <ref>`;
-- explicit bundle-path ingest into alternate `--repo`;
+- `init --acknowledge-raw-history → refresh → search --refs → read <ref>`;
+- explicit bundle-path ingest into alternate `--workspace`;
 - depot publish/list/fetch/verify/repair;
 - JSON error envelope behaviour for bad flags, bad refs, missing config, and bad depot credentials;
 - no network for local-only commands.
@@ -748,7 +748,7 @@ Realish fixtures catch drift; minimal fixtures make failures easy to understand.
 
 ### Verify command as test oracle
 
-As corpus/depot verifier queries mature, tests should call the same verifier code that `doctor`, `aha verify`, and `aha depot verify` use. This avoids a parallel “test-only validator” drifting away from the user-facing repair tool.
+As corpus/depot verifier queries mature, tests should call the same verifier code that `doctor`, `aha workspace verify`, and `aha archive verify` use. This avoids a parallel “test-only validator” drifting away from the user-facing repair tool.
 
 ## Definition of done
 

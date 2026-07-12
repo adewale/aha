@@ -163,7 +163,7 @@ func NewR2Credentials(accessKeyID, secretAccessKey string) (R2Credentials, error
 	return R2Credentials{accessKeyID: accessKeyID, secretAccessKey: secretAccessKey}, nil
 }
 
-func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
+func ResolveR2Config(cfg model.R2ArchiveConfig) (R2Config, error) {
 	pairs := [][2]string{
 		{"AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID"},
 		{"AHA_R2_ENDPOINT", "R2_ENDPOINT"},
@@ -181,7 +181,7 @@ func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
 	if len(conflicts) > 0 {
 		return R2Config{}, fmt.Errorf("conflicting R2 environment aliases are set to different values: %s; unset one variable from each pair", strings.Join(conflicts, ", "))
 	}
-	explicit := model.R2DepotConfig{
+	explicit := model.R2ArchiveConfig{
 		AccountID: firstEnv("AHA_R2_ACCOUNT_ID", "R2_ACCOUNT_ID", cfg.AccountID),
 		Endpoint:  firstEnv("AHA_R2_ENDPOINT", "R2_ENDPOINT", cfg.Endpoint),
 		Region:    firstEnv("AHA_R2_REGION", "R2_REGION", cfg.Region),
@@ -199,7 +199,7 @@ func ResolveR2Config(cfg model.R2DepotConfig) (R2Config, error) {
 // ResolveR2ConfigExplicit resolves only its arguments. It never reads the
 // process environment, which makes production-credential fallback impossible
 // for smoke tests and other isolated callers.
-func ResolveR2ConfigExplicit(cfg model.R2DepotConfig, creds R2Credentials) (R2Config, error) {
+func ResolveR2ConfigExplicit(cfg model.R2ArchiveConfig, creds R2Credentials) (R2Config, error) {
 	accountValue := strings.TrimSpace(cfg.AccountID)
 	endpoint := strings.TrimSpace(cfg.Endpoint)
 	region := strings.TrimSpace(cfg.Region)

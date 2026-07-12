@@ -2090,11 +2090,11 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">18,618</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">18,852</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">22</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
-    <dt>Commands</dt><dd><span class="num" data-drift="prod-commands">16</span></dd>
+    <dt>Commands</dt><dd><span class="num" data-drift="prod-commands">9</span></dd>
   </dl>
 </aside>
 
@@ -2499,6 +2499,16 @@ footer a:hover { color: var(--ink-2); }
     <div class="er-family">
       <div class="er-family-h">snapshot metadata <span class="cli-note">immutable; identity for everything below</span></div>
       <div class="er-tables">
+        <div class="er-table" data-cols="singleton PK, archive_identity, archive_address, schema_version">
+          <div class="er-name">workspace_binding</div>
+          <div class="er-pk">PK <code>singleton</code></div>
+          <div class="er-note">binds one Workspace to exactly one Archive identity and address</div>
+        </div>
+        <div class="er-table" data-cols="machine_id PK, manifest_sha256">
+          <div class="er-name">workspace_materialised</div>
+          <div class="er-pk">PK <code>machine_id</code></div>
+          <div class="er-note">exact Archive latest vector materialised in this Workspace</div>
+        </div>
         <div class="er-table" data-cols="manifest_sha256 PK, machine_id, captured_at, ingested_at, manifest_json">
           <div class="er-name">snapshots</div>
           <div class="er-pk">PK <code>manifest_sha256</code></div>

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	DefaultR2Bucket = "aha-depot"
+	DefaultR2Bucket = "aha-archive"
 )
 
 type Address struct {
@@ -31,12 +31,12 @@ type VerifyReport struct {
 	Problems        []string `json:"problems,omitempty"`
 }
 
-// ExplicitAddressError means a CLI destination omitted its depot kind. It
+// ExplicitAddressError means a CLI destination omitted its Archive kind. It
 // carries no rejected value, so it is safe for public presentation.
 type ExplicitAddressError struct{}
 
 func (*ExplicitAddressError) Error() string {
-	return "explicit depot address required: prefix the destination with r2: or local:"
+	return "explicit Archive address required: prefix the destination with r2: or local:"
 }
 
 // ParseExplicitAddress parses an address supplied at a CLI boundary. Unlike
@@ -53,7 +53,7 @@ func ParseExplicitAddress(s string) (Address, error) {
 func ParseAddress(s string) (Address, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return Address{Type: "local", Location: "~/.aha/depot"}, nil
+		return Address{Type: "local", Location: "~/.aha/archive"}, nil
 	}
 	if s == "r2" {
 		return Address{Type: "r2", Location: DefaultR2Bucket}, nil
@@ -68,10 +68,10 @@ func ParseAddress(s string) (Address, error) {
 		loc = DefaultR2Bucket
 	}
 	if typ == "local" && loc == "" {
-		return Address{}, fmt.Errorf("local depot path required")
+		return Address{}, fmt.Errorf("local Archive path required")
 	}
 	if typ != "local" && typ != "r2" {
-		return Address{}, fmt.Errorf("unsupported depot type %q", typ)
+		return Address{}, fmt.Errorf("unsupported Archive type %q", typ)
 	}
 	if typ == "r2" {
 		bucket, err := ParseR2Bucket(loc)
@@ -83,15 +83,15 @@ func ParseAddress(s string) (Address, error) {
 	return Address{Type: typ, Location: loc}, nil
 }
 
-func AddressFromConfig(cfg model.DepotConfig) (Address, error) {
+func AddressFromConfig(cfg model.ArchiveConfig) (Address, error) {
 	typ := strings.ToLower(strings.TrimSpace(cfg.Type))
 	if typ == "" {
-		return Address{Type: "local", Location: "~/.aha/depot"}, nil
+		return Address{Type: "local", Location: "~/.aha/archive"}, nil
 	}
 	switch typ {
 	case "local":
 		if strings.TrimSpace(cfg.Location) == "" {
-			return Address{}, fmt.Errorf("local depot path required")
+			return Address{}, fmt.Errorf("local Archive path required")
 		}
 		return Address{Type: typ, Location: strings.TrimSpace(cfg.Location)}, nil
 	case "r2":
@@ -105,12 +105,12 @@ func AddressFromConfig(cfg model.DepotConfig) (Address, error) {
 		}
 		return Address{Type: typ, Location: bucket.String()}, nil
 	default:
-		return Address{}, fmt.Errorf("unsupported depot type %q", typ)
+		return Address{}, fmt.Errorf("unsupported Archive type %q", typ)
 	}
 }
 
-func ConfigFromAddress(addr Address) model.DepotConfig {
-	return model.DepotConfig{Type: addr.Type, Location: addr.Location}
+func ConfigFromAddress(addr Address) model.ArchiveConfig {
+	return model.ArchiveConfig{Type: addr.Type, Location: addr.Location}
 }
 
 func safeCatalogComponent(machine string) string {
@@ -142,7 +142,7 @@ func safeCatalogComponent(machine string) string {
 
 func expandLocalRoot(root string) (string, error) {
 	if root == "" {
-		root = "~/.aha/depot"
+		root = "~/.aha/archive"
 	}
 	return paths.Expand(root)
 }

@@ -9,13 +9,13 @@ import (
 	"github.com/adewale/aha/internal/model"
 )
 
-func cmdRead(args []string, stdout, stderr io.Writer) error {
-	args = reorderReadArgs(args)
-	pf, err := parseFlagSpecs("read", args, stderr, readFlagSpecs)
+func cmdShow(args []string, stdout, stderr io.Writer) error {
+	args = reorderShowArgs(args)
+	pf, err := parseFlagSpecs("show", args, stderr, showFlagSpecs)
 	if err != nil {
 		return err
 	}
-	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
+	cf := workspaceFlags{workspaceDir: stringPtr(pf.String("workspace")), config: stringPtr(pf.String("config"))}
 	session := pf.String("session")
 	entry := pf.String("entry")
 	branch := pf.String("branch")
@@ -95,6 +95,6 @@ func looksLikeRef(s string) bool {
 	return strings.HasPrefix(s, "msg:v1:") || strings.HasPrefix(s, "session:v1:") || strings.HasPrefix(s, "artifact:v1:") || strings.Contains(s, "#") || strings.HasPrefix(s, "artifact:")
 }
 
-func reorderReadArgs(args []string) []string {
-	return reorderArgsBySpec(args, readFlagSpecs)
+func reorderShowArgs(args []string) []string {
+	return reorderArgsBySpec(args, showFlagSpecs)
 }

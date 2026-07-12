@@ -37,7 +37,7 @@ Variables:
 | ingest bundle | `O(Z + B + E + assets + path_tokens)` | `O(max file + entries_in_session)` temp plus SQLite rows | Prepared statements and per-session prefetch remove per-entry duplicate/conflict queries; inserts remain linear. Known file blobs skip recompression. |
 | duplicate ingest | `O(Z)` currently | `O(1)` plus staging | Bundle is copied/hashed before duplicate detection completes. |
 | search | `O(FTS(query) + min(L,200) log min(L,200))` | `O(min(L,200))` | Message/artefact FTS queries each cap at `L<=200`, then Go merges/sorts. Exact `--project` and `--path-token` are indexed; `--path` remains non-indexable contains. |
-| status | `O(number of tables + D if --depot)` | `O(D)` for depot refs | Local status is count queries; `--depot` can perform network catalogue listing. |
+| status | `O(number of tables + D if --archive)` | `O(D)` for depot refs | Local status is count queries; `--archive` can perform network catalogue listing. |
 | corpus verify | `O(M + A + FTS + bundles)` | `O(problems)` | Full left-join counts and bundle blob stats. |
 | `verify --repair-fts` | `O(M + A + FTS)` | SQLite FTS rebuild space | Deletes/reinserts derived FTS rows. |
 | depot verify | quick/default `O(C + D metadata)`; `--deep` `O(D*Z)` local/R2 | quick `O(D refs)`; deep `O(max bundle)` temp | Quick checks metadata/existence; deep integrity rehashes/downloads every object. |
@@ -54,7 +54,7 @@ Variables:
 | FTS verify/reconcile | `Verify` uses rowid-backed FTS identity and emits row-count stats; `ReconcileFTS` deletes/rebuilds all FTS rows and reports deleted/inserted FTS rows. | Default verify is now near-linear; `--repair-fts` remains maintenance. | Keep query-plan guard; consider scoped repair only after evidence. |
 | Search path filters | `--project` and `--path-token` use indexes; `--path` uses `LIKE '%...%'`. | Contains filters and broad/common terms can still be slow. | Prefer indexed filters in docs/agent workflows; keep contains for convenience. |
 | Depot verify | Quick/default verify checks metadata/object existence; `--deep` rehashes every local bundle or downloads every R2 bundle and reports bytes. | Correct deep verification remains expensive and network-heavy. | Operation-budget tests cover quick/deep/repair/list/compact. |
-| Status with depot | `status --depot` lists catalogue refs and reports listed/unique refs plus zero fetches. | R2 listing performs network calls when explicitly requested. | Keep default status corpus-only; add summaries only if catalogue scans become a real bottleneck. |
+| Status with depot | `status --archive` lists catalogue refs and reports listed/unique refs plus zero fetches. | R2 listing performs network calls when explicitly requested. | Keep default status corpus-only; add summaries only if catalogue scans become a real bottleneck. |
 
 ## Benchmark and profiling plan
 
@@ -68,8 +68,8 @@ go test ./internal/archive ./internal/corpus ./internal/search ./internal/depot 
 For command-level profiles, opt in with either flags or environment variables:
 
 ```bash
-aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --repo ~/.aha/corpus
-AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha refresh
+aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --workspace ~/.aha/corpus
+AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha archive upload && aha archive download
 ```
 
 Inspect with:
@@ -85,7 +85,7 @@ Suggested scenarios:
 - Ingest: many sessions/entries/messages/artefacts; first ingest, duplicate ingest, local-depot ingest.
 - Search: 100k+ messages plus artefacts; default query, no-hit query, source/role filters, path filter, high limit.
 - Depot: local depot with 100/1k/10k catalogue refs; fake-R2 operation counts for list/put/verify.
-- Verify/status: large corpus; `Status`, `Verify`, `ReconcileFTS`, `status --depot`.
+- Verify/status: large corpus; `Status`, `Verify`, `ReconcileFTS`, `status --archive`.
 
 ## Initial benchmark observations
 

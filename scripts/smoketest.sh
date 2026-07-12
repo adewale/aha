@@ -163,20 +163,20 @@ cat > "$CFG" <<JSON
   "sources": [
     { "type": "$SOURCE_TYPE", "root": "$SOURCE_ROOT", "enabled": true }
   ],
-  "corpus_dir": "$CORPUS",
-  "depot": { "type": "local", "location": "$DEPOT" },
+  "workspace_dir": "$CORPUS",
+  "archive": { "type": "local", "location": "$DEPOT" },
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
   "redaction": "none-v1",
-  "accept_secrets_warning": true
+  "acknowledged_raw_history": true
 }
 JSON
 
 # aha parses the first non-flag token as the command, so every flag must come
 # AFTER the subcommand.
-aha_cfg()  { "$AHA" "$@" --config "$CFG"; }                  # commands that read config
-aha_repo() { "$AHA" "$@" --repo "$CORPUS" --config "$CFG"; } # read-only corpus queries
+aha_cfg() { "$AHA" "$@" --config "$CFG"; }
+aha_ws()  { "$AHA" "$@" --workspace "$CORPUS" --config "$CFG"; }
 
 # ---- BEFORE: source fingerprint (read-only guarantee) ----------------------
 
@@ -213,36 +213,32 @@ if [ "$SOURCE" = "opencode" ]; then
 fi
 echo
 
-# ---- discovery: doctor -----------------------------------------------------
+# ---- inspect, upload, and download -----------------------------------------
 
-echo "== aha doctor (discovery) =="
-aha_cfg doctor --json > "$LOGS/doctor.json" 2>"$LOGS/doctor.err"
-if [ $? -eq 0 ]; then ok "doctor exited cleanly"; else bad "doctor failed (see $LOGS/doctor.err)"; fi
+echo "== aha status (discovery) =="
+aha_cfg status --json > "$LOGS/system-status.json" 2>"$LOGS/system-status.err" || true
 if command -v jq >/dev/null 2>&1; then
-  SESS_COUNT="$(jq "[.sources[]|select(.type==\"$SOURCE_TYPE\")|.session_files]|add // 0" "$LOGS/doctor.json" 2>/dev/null)"
-  SRC_OK="$(jq -r "[.sources[]|select(.type==\"$SOURCE_TYPE\")|.ok]|all" "$LOGS/doctor.json" 2>/dev/null)"
+  SESS_COUNT="$(jq '.agent_history.files // 0' "$LOGS/system-status.json" 2>/dev/null)"
 else
-  # space-tolerant fallback for pretty-printed JSON
-  SESS_COUNT="$(grep -oE '"session_files":[[:space:]]*[0-9]+' "$LOGS/doctor.json" | grep -oE '[0-9]+' | head -1)"
-  if grep -qE '"ok":[[:space:]]*false' "$LOGS/doctor.json"; then SRC_OK="false"; else SRC_OK="true"; fi
+  SESS_COUNT="$(grep -oE '"files":[[:space:]]*[0-9]+' "$LOGS/system-status.json" | grep -oE '[0-9]+' | head -1)"
 fi
 SESS_COUNT="${SESS_COUNT:-0}"
-if [ "$SRC_OK" = "true" ]; then ok "doctor reports source ok"; else bad "doctor did not report ok (see $LOGS/doctor.json)"; fi
-note "discovered session files: $SESS_COUNT"
+note "discovered history files: $SESS_COUNT"
+
+echo "== aha archive init -> upload -> download =="
+aha_cfg archive init --json > "$LOGS/archive-init.json" 2>"$LOGS/archive-init.err" \
+  && ok "Archive initialised" || bad "Archive init failed"
+aha_cfg archive upload --json > "$LOGS/archive-upload.json" 2>"$LOGS/archive-upload.err" \
+  && ok "Archive upload exited cleanly" || bad "Archive upload failed"
+aha_cfg archive download --json > "$LOGS/archive-download.json" 2>"$LOGS/archive-download.err" \
+  && ok "Archive download exited cleanly" || bad "Archive download failed"
 echo
 
-# ---- snapshot + ingest into the /tmp corpus --------------------------------
-
-echo "== aha refresh (snapshot -> /tmp depot -> /tmp corpus) =="
-aha_cfg refresh --json > "$LOGS/refresh.json" 2>"$LOGS/refresh.err"
-if [ $? -eq 0 ]; then ok "refresh exited cleanly"; else bad "refresh failed (see $LOGS/refresh.err)"; fi
-echo
-
-echo "== aha status / verify (corpus health) =="
-aha_repo status --json > "$LOGS/status.json" 2>"$LOGS/status.err" \
-  && ok "status exited cleanly" || bad "status failed (see $LOGS/status.err)"
-aha_repo verify --json > "$LOGS/verify.json" 2>"$LOGS/verify.err" \
-  && ok "verify exited cleanly" || bad "verify failed (see $LOGS/verify.err)"
+echo "== aha workspace status / verify =="
+aha_cfg workspace status --json > "$LOGS/status.json" 2>"$LOGS/status.err" \
+  && ok "Workspace status exited cleanly" || bad "Workspace status failed (see $LOGS/status.err)"
+aha_cfg workspace verify --json > "$LOGS/verify.json" 2>"$LOGS/verify.err" \
+  && ok "Workspace verify exited cleanly" || bad "Workspace verify failed (see $LOGS/verify.err)"
 # Ingestion depth: distinguishes "adapter parsed nothing" from "indexed fine".
 NSESS="$(json_num "$LOGS/status.json" sessions)"
 NMSG="$(json_num "$LOGS/status.json" messages)"
@@ -263,24 +259,24 @@ if command -v sqlite3 >/dev/null 2>&1 && [ -f "$CORPUS/corpus.db" ]; then
 fi
 SEARCH_TERMS="$SEARCH_TERMS the and to of a error file function test code session message user"
 for word in $SEARCH_TERMS; do
-  REF="$("$AHA" search "$word" --repo "$CORPUS" --source "$SOURCE_TYPE" --refs 2>/dev/null | awk 'NF{print $1; exit}')"
+  REF="$("$AHA" search "$word" --workspace "$CORPUS" --config "$CFG" --source "$SOURCE_TYPE" --refs 2>/dev/null | awk 'NF{print $1; exit}')"
   [ -n "$REF" ] && { note "matched on \"$word\" -> $REF"; break; }
 done
 if [ -n "$REF" ]; then
   ok "search returned at least one ref"
-  if "$AHA" read "$REF" --repo "$CORPUS" --md > "$LOGS/read.md" 2>"$LOGS/read.err"; then
-    ok "read returned full context ($(wc -l <"$LOGS/read.md" | tr -d ' ') lines -> $LOGS/read.md)"
+  if "$AHA" show "$REF" --workspace "$CORPUS" --config "$CFG" --md > "$LOGS/show.md" 2>"$LOGS/show.err"; then
+    ok "show returned full context ($(wc -l <"$LOGS/show.md" | tr -d ' ') lines -> $LOGS/read.md)"
   else
-    bad "read failed for $REF (see $LOGS/read.err)"
+    bad "show failed for $REF (see $LOGS/show.err)"
   fi
 elif [ "$SESS_COUNT" -eq 0 ]; then
   note "no sessions discovered — skipping retrieval (not a failure)"
 elif [ "${NMSG:-0}" -eq 0 ]; then
-  bad "discovered $SESS_COUNT session file(s) but ingested 0 messages — the adapter parsed no messages from this source's real format (inspect $LOGS/refresh.json and a raw session file)"
+  bad "discovered $SESS_COUNT session file(s) but ingested 0 messages — the adapter parsed no messages from this source's real format (inspect $LOGS/archive-upload.json and a raw session file)"
 elif [ "${NFTS:-0}" -eq 0 ]; then
   bad "ingested $NMSG messages but indexed 0 searchable rows — message text is not being extracted for this source's real format"
 else
-  bad "indexed $NFTS searchable rows but search/read returned no refs — retrieval failed (see $LOGS/status.json)"
+  bad "indexed $NFTS searchable rows but search/show returned no refs — retrieval failed (see $LOGS/status.json)"
 fi
 echo
 

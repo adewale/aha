@@ -39,7 +39,7 @@ that the corpus is always rebuildable from the depot.
 luxury the v1 depot spec took: **no migration shims, no dual-format drivers,
 no compatibility window.** The v2 layout replaces the v1 layout outright. The
 single compatibility hedge we keep is nearly free and independently useful:
-`aha ingest <bundle.tar.zst>` continues to read v1 bundle *files* (journey 4
+`aha archive download <bundle.tar.zst>` continues to read v1 bundle *files* (journey 4
 in `docs/user-journeys.md` wants this anyway), so any v1 depot ever needed
 again is recoverable by feeding its bundles through import.
 
@@ -294,7 +294,7 @@ The daily journeys in `docs/user-journeys.md` (1–3, 5–8) are preserved
   they are the only place the v1 format survives, and the compatibility
   hedge for any pre-v2 depot.
 - **New journey: bootstrap a new machine** (promoted to first-class in
-  `user-journeys.md`): `aha init && aha refresh` against an existing depot =
+  `user-journeys.md`): `aha init && aha archive upload && aha archive download` against an existing depot =
   pointer GETs + manifest GETs + only-needed blob fetches + parse-once. Free
   egress makes this the multi-machine pitch made real.
 - **Deleted commands:** `depot compact` (per-machine pointers replaced

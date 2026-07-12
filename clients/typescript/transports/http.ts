@@ -1,6 +1,6 @@
 // HTTP Transport for the aha dashboard server.
 //
-// Points at a running `aha serve` (default 127.0.0.1:18428) and translates
+// Points at a running `aha dashboard` (default 127.0.0.1:18428) and translates
 // tool calls into the matching REST routes. GET for no-argument tools; POST
 // application/json for argument-bearing tools (`search`, `read`, `incidents`,
 // `incident_trajectory`).

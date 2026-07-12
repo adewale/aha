@@ -19,7 +19,7 @@ Shipped:
   with the resolution-path helpers in `internal/corpus/outcomes.go`). Episodes
   are recomputed per session at ingest from the stored `tool_invocations` and
   backfilled for existing corpora by the migration.
-- CLI — `aha incidents` (`internal/cli/command_incidents.go`).
+- CLI — `aha analyse failures` (`internal/cli/command_incidents.go`).
 - MCP — an `incidents` tool plus `incident_trajectory` (the fail→fix arc,
   disambiguated by `sample_ordinal` for multi-call entries) and `overview`
   (`internal/mcp/tools.go`), crossing the SDK transport, the HTTP
@@ -232,7 +232,7 @@ views are just `state` filters over the same surface.
 ### CLI
 
 ```
-aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
+aha analyse failures [--workspace DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
 ```
 
 `--state unresolved` is the unsolved-pain to-do list; `--state resolved` is the
@@ -355,7 +355,7 @@ code to pass, then refactor. No production code without a failing test first.
      paths, rates, and tiers.
    - Green: the aggregating query + top-K path selection + state classification.
 
-5. **`aha incidents` (CLI) and the `incidents`/`incident_trajectory`/`overview`
+5. **`aha analyse failures` (CLI) and the `incidents`/`incident_trajectory`/`overview`
    tools.**
    - Red: CLI cases for human and `--json` output (incl. empty-corpus and
      state-filter paths), and HTTP/MCP endpoint + consistency cases.

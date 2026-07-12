@@ -36,10 +36,10 @@ The **Secret Access Key is shown only once**. If it was not saved, create a new 
 
 Recommended token shape:
 
-- Permission: **Object Read & Write** for machines that run `aha snapshot` or `aha refresh`.
+- Permission: **Object Read & Write** for machines that run `aha archive upload` or `aha archive upload && aha archive download`.
 - Scope: restrict the token to the specific depot bucket. Create the bucket
   first — the dashboard can only scope a token to an existing bucket, and a
-  bucket-scoped token cannot create buckets (`aha depot init` says so
+  bucket-scoped token cannot create buckets (`aha archive init` says so
   explicitly when CreateBucket is denied).
 - Token type: prefer an **Account API token** over a User API token. User
   tokens deactivate when that user is removed from the Cloudflare account,
@@ -47,7 +47,7 @@ Recommended token shape:
   until revoked.
 - Use separate tokens per machine so a lost laptop can be revoked without rotating every client.
 - Use **Object Read only** only for hosts that will pull/read depot snapshots but never push.
-- Use admin permissions only for one-time bucket creation/administration; do not use broad admin tokens for daily `aha refresh`.
+- Use admin permissions only for one-time bucket creation/administration; do not use broad admin tokens for daily `aha archive upload && aha archive download`.
 - For CI jobs or borrowed machines, Cloudflare's **temporary access
   credentials** (short-lived keys derived from a parent token via the
   Temporary Credentials API) avoid leaving a long-lived secret on a host you
@@ -74,10 +74,10 @@ names must be 3–63 lowercase letters, numbers, or hyphens.
 After loading real values, preflight and follow its single next action:
 
 ```bash
-aha depot setup r2:aha-depot --json
-aha depot init r2:aha-depot
-aha snapshot --depot r2:aha-depot --accept-secrets --json
-aha depot verify r2:aha-depot --json
+aha archive status r2:aha-depot --json
+aha archive init r2:aha-depot
+aha archive upload --archive r2:aha-depot --acknowledge-raw-history --json
+aha archive verify r2:aha-depot --json
 ```
 
 ## Bucket and account discovery
@@ -152,9 +152,9 @@ Recommended bucket controls:
 - Enable access logs, audit logs, or event notifications where available so object writes/deletes are observable.
 - Consider a second backup/export path for the bucket if the depot is your only durable copy.
 
-## Common mistakes `aha doctor --depot r2:...` checks
+## Common mistakes `aha status --archive r2:...` checks
 
-`aha doctor --depot r2:aha-depot --json` warns about common R2/S3 mistakes:
+`aha status --archive r2:aha-depot --json` warns about common R2/S3 mistakes:
 
 - putting an endpoint URL in the depot address instead of using `r2:BUCKET`;
 - using public `r2.dev` URLs as the S3 endpoint;

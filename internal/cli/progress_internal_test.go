@@ -100,7 +100,7 @@ func TestVerifyJSONProgressStaysOnStderrAndFinalJSONStaysDecodable(t *testing.T)
 	}
 	_ = store.Close()
 	var stdout, stderr bytes.Buffer
-	if err := Run([]string{"verify", "--corpus", root, "--json", "--progress=json"}, &stdout, &stderr); err != nil {
+	if err := Run([]string{"workspace", "verify", root, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--json", "--progress=json"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	var final map[string]any
@@ -115,7 +115,7 @@ func TestVerifyJSONProgressStaysOnStderrAndFinalJSONStaysDecodable(t *testing.T)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if err := Run([]string{"verify", "--corpus", root, "--json"}, &stdout, &stderr); err != nil {
+	if err := Run([]string{"workspace", "verify", root, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--json"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	if stderr.Len() != 0 {
@@ -125,7 +125,7 @@ func TestVerifyJSONProgressStaysOnStderrAndFinalJSONStaysDecodable(t *testing.T)
 
 func TestStructuredProgressFailureKeepsStderrValidNDJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := RunMain([]string{"verify", "--repo", filepath.Join(t.TempDir(), "missing"), "--json", "--progress=json"}, &stdout, &stderr)
+	code := RunMain([]string{"workspace", "verify", filepath.Join(t.TempDir(), "missing"), "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--json", "--progress=json"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("verify unexpectedly succeeded")
 	}
@@ -152,7 +152,7 @@ func TestStructuredProgressFailureKeepsStderrValidNDJSON(t *testing.T) {
 
 func TestOperationalFailureEmitsTerminalProgress(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	err := RunContext(t.Context(), []string{"verify", "--repo", filepath.Join(t.TempDir(), "missing"), "--progress=plain"}, &stdout, &stderr)
+	err := RunContext(t.Context(), []string{"workspace", "verify", filepath.Join(t.TempDir(), "missing"), "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--progress=plain"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("verify unexpectedly succeeded")
 	}
@@ -171,7 +171,7 @@ func TestRunContextCancellationStopsVerifyAndRendersCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var stderr bytes.Buffer
-	err = RunContext(ctx, []string{"verify", "--corpus", root, "--progress=plain"}, &bytes.Buffer{}, &stderr)
+	err = RunContext(ctx, []string{"workspace", "verify", root, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--progress=plain"}, &bytes.Buffer{}, &stderr)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunContext error=%v want context.Canceled", err)
 	}

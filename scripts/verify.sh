@@ -186,12 +186,14 @@ JSONL
 {
   "machine_id":"mcp-conformance",
   "sources":[{"type":"pi","root":"$pi","enabled":true}],
-  "corpus_dir":"$root/corpus",
-  "depot":{"type":"local","location":"$root/depot"},
-  "accept_secrets_warning":true
+  "workspace_dir":"$root/workspace",
+  "archive":{"type":"local","location":"$root/archive"},
+  "acknowledged_raw_history":true
 }
 JSONC
-  run "$aha_bin" refresh --config "$cfg" --captured-at 2026-01-01T00:00:00Z >/dev/null
+  run "$aha_bin" archive init --config "$cfg" >/dev/null
+  run "$aha_bin" archive upload --config "$cfg" >/dev/null
+  run "$aha_bin" archive download --config "$cfg" >/dev/null
 
   local -a attested_env=(
     "AHA_BIN=$aha_bin"

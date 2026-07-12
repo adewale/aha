@@ -32,6 +32,96 @@ type PushOptions struct {
 	Progress *ahaprogress.Tracker
 }
 
+// UploadPlan freezes validated publication inputs behind an opaque type.
+type UploadPlan struct {
+	writer   PreparedUpload
+	manifest model.SnapshotManifest
+	source   BlobSource
+	summary  UploadPlanSummary
+}
+
+type UploadPlanSummary struct {
+	Files         int `json:"files"`
+	BlobsUpload   int `json:"blobs_upload"`
+	BlobsExisting int `json:"blobs_existing"`
+	BlobsCarried  int `json:"blobs_carried"`
+}
+
+func (p PreparedUpload) PlanUpload(ctx context.Context, manifest model.SnapshotManifest, source BlobSource) (UploadPlan, error) {
+	if p.depot == nil || !p.binding.Valid() {
+		return UploadPlan{}, fmt.Errorf("invalid prepared Archive writer capability")
+	}
+	if source == nil {
+		return UploadPlan{}, fmt.Errorf("Archive upload source is required")
+	}
+	if _, _, err := model.EncodeSnapshotManifest(manifest); err != nil {
+		return UploadPlan{}, err
+	}
+	machine, err := p.depot.ForMachine(manifest.MachineID)
+	if err != nil {
+		return UploadPlan{}, err
+	}
+	parent, hasParent, err := machine.Parent(ctx)
+	if err != nil {
+		return UploadPlan{}, err
+	}
+	summary := UploadPlanSummary{Files: len(manifest.Files)}
+	seen := make(map[string]bool, len(manifest.Files))
+	for _, file := range manifest.Files {
+		if seen[file.SHA256] {
+			continue
+		}
+		seen[file.SHA256] = true
+		key, err := model.NewBlobKey(file.SHA256)
+		if err != nil {
+			return UploadPlan{}, err
+		}
+		if hasParent {
+			if _, ok := machine.CarriedBlob(parent, key); ok {
+				summary.BlobsCarried++
+				continue
+			}
+		}
+		exists, err := p.depot.HasBlob(ctx, key)
+		if err != nil {
+			return UploadPlan{}, err
+		}
+		if exists {
+			summary.BlobsExisting++
+		} else {
+			summary.BlobsUpload++
+		}
+	}
+	return UploadPlan{writer: p, manifest: manifest, source: source, summary: summary}, nil
+}
+
+func (p UploadPlan) Summary() (UploadPlanSummary, error) {
+	if p.writer.depot == nil || !p.writer.binding.Valid() || p.source == nil {
+		return UploadPlanSummary{}, fmt.Errorf("invalid Archive upload plan")
+	}
+	return p.summary, nil
+}
+
+func (p UploadPlan) Execute(ctx context.Context, opts PushOptions) (PushResult, error) {
+	if p.writer.depot == nil || !p.writer.binding.Valid() || p.source == nil {
+		return PushResult{}, fmt.Errorf("invalid Archive upload plan")
+	}
+	return PushV2WithOptions(ctx, p.writer.depot, p.manifest, p.source, opts)
+}
+
+// Push publishes through a capability constructed only after Archive marker
+// validation. Upload commands use this method rather than accepting a raw V2.
+func (p PreparedUpload) Push(ctx context.Context, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {
+	if p.depot == nil || !p.binding.Valid() {
+		return PushResult{}, fmt.Errorf("invalid prepared Archive writer capability")
+	}
+	plan, err := p.PlanUpload(ctx, manifest, src)
+	if err != nil {
+		return PushResult{}, err
+	}
+	return plan.Execute(ctx, opts)
+}
+
 // PushV2 publishes one machine's state to a depot v2. The compatibility
 // wrapper keeps progress optional and allocation-free for existing callers.
 func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource) (PushResult, error) {

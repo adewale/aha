@@ -1,10 +1,10 @@
-# `aha serve` UI spec
+# `aha dashboard` UI spec
 
 Status: implemented in `internal/server/ui/` as the search-first dashboard direction.
 
 ## Product stance
 
-`aha serve` is a read-only local trace browser for coding-agent history.
+`aha dashboard` is a read-only local trace browser for coding-agent history.
 
 The first useful object is not a corpus, task rail, hero headline, or collection of tools. The first useful object is a large search box. A user should be able to type a remembered prompt, file, command, error, or decision and immediately see recognisable slices of real agent work.
 
@@ -309,7 +309,7 @@ Mobile/narrow:
 ## Privacy and trust boundaries
 
 - The UI is read-only.
-- It uses only same-origin local endpoints served by `aha serve`.
+- It uses only same-origin local endpoints served by `aha dashboard`.
 - It does not fetch remote assets.
 - It does not snapshot, ingest, repair, edit source histories, write skills, or install anything.
 - Search/read output remains governed by the corpus projection and existing redaction behaviour.

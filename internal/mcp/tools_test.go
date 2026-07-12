@@ -49,26 +49,28 @@ func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 			{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true},
 			{"type":"claude-code","root":"` + filepath.ToSlash(fx.ClaudeRoot) + `","enabled":true}
 		],
-		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
-		"depot":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
+		"workspace_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"archive":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
 		"include_subagents":true,
 		"include_images":true,
 		"index_tool_output":false,
 		"redaction":"none-v1",
-		"accept_secrets_warning":true
+		"acknowledged_raw_history":true
 	}`
 	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, io.Discard, io.Discard); err != nil {
-		t.Fatalf("refresh: %v", err)
+	for _, args := range [][]string{{"archive", "init", "--config", configPath}, {"archive", "upload", "--config", configPath}, {"archive", "download", "--config", configPath}} {
+		if err := cli.Run(args, io.Discard, io.Discard); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
 	}
 	store, err := corpus.OpenExisting(corpusDir)
 	if err != nil {
 		t.Fatalf("OpenExisting: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return store, model.Config{CorpusDir: corpusDir, MachineID: "mcp-test"}
+	return store, model.Config{WorkspaceDir: corpusDir, MachineID: "mcp-test"}
 }
 
 // connectPair sets up an in-process Client↔Server pair against a populated
@@ -142,7 +144,7 @@ func TestToolsCallStatusReturnsCorpusShape(t *testing.T) {
 		t.Fatalf("status returned isError: %s", contentText(t, res))
 	}
 	body := contentText(t, res)
-	for _, key := range []string{`"corpus_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
+	for _, key := range []string{`"workspace_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
 		if !strings.Contains(body, key) {
 			t.Fatalf("status missing %q: %s", key, body)
 		}
@@ -234,13 +236,13 @@ func TestToolsCallDoctorReturnsLocalDiagnostics(t *testing.T) {
 		t.Fatalf("CallTool(doctor): %v", err)
 	}
 	body := contentText(t, res)
-	for _, want := range []string{`"version"`, `"adapters"`, `"sources"`, `"corpus"`} {
+	for _, want := range []string{`"version"`, `"adapters"`, `"sources"`, `"workspace"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("doctor missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, `"depot"`) {
-		t.Fatalf("MCP doctor must not include depot probe: %s", body)
+	if strings.Contains(body, `"archive"`) {
+		t.Fatalf("MCP local diagnostics must not include Archive probes: %s", body)
 	}
 }
 

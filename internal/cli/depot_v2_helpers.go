@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/adewale/aha/internal/adapters"
@@ -19,7 +20,7 @@ import (
 // depotV2ForConfig opens the configured (or overridden) depot in the v2
 // content-addressed layout.
 func depotV2ForConfig(cfg model.Config, override string) (*depot.V2, error) {
-	addr, err := depot.AddressFromConfig(cfg.Depot)
+	addr, err := depot.AddressFromConfig(cfg.Archive)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +35,7 @@ func depotV2ForConfig(cfg model.Config, override string) (*depot.V2, error) {
 	case "local":
 		return depot.NewLocalV2(addr.Location)
 	case "r2":
-		rc, err := depot.ResolveR2Config(cfg.Depot.R2)
+		rc, err := depot.ResolveR2Config(cfg.Archive.R2)
 		if err != nil {
 			return nil, err
 		}
@@ -48,21 +49,21 @@ func depotV2ForConfig(cfg model.Config, override string) (*depot.V2, error) {
 		}
 		return depot.NewV2FromR2(r2), nil
 	default:
-		return nil, fmt.Errorf("unsupported depot type %q", addr.Type)
+		return nil, fmt.Errorf("unsupported Archive type %q", addr.Type)
 	}
 }
 
-// captureCachePath places the advisory scan cache next to the corpus.
+// captureCachePath keeps upload's advisory scan cache outside the Workspace,
+// which archive upload is forbidden to open or mutate.
 func captureCachePath(cfg model.Config) (string, error) {
-	dir := cfg.CorpusDir
-	if dir == "" {
-		dir = "~/.aha"
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot, err = paths.Expand("~/.cache")
+		if err != nil {
+			return "", err
+		}
 	}
-	expanded, err := paths.Expand(dir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(expanded, "capture-cache.json"), nil
+	return filepath.Join(cacheRoot, "aha", "capture-"+safeName(cfg.MachineID)+".json"), nil
 }
 
 // pushSnapshotV2 captures the configured sources (scan cache permitting)
@@ -76,7 +77,8 @@ func pushSnapshotV2(req snapshotRequest) (depot.PushResult, error) {
 	if err != nil {
 		return depot.PushResult{}, err
 	}
-	if err := v2.Init(ctx); err != nil {
+	writer, err := v2.PrepareUpload(ctx)
+	if err != nil {
 		return depot.PushResult{}, err
 	}
 	var cache *archive.CaptureCache
@@ -92,7 +94,7 @@ func pushSnapshotV2(req snapshotRequest) (depot.PushResult, error) {
 		return depot.PushResult{}, err
 	}
 	defer sc.Close()
-	res, err := depot.PushV2WithOptions(ctx, v2, sc.Manifest, sc, depot.PushOptions{Progress: req.Progress})
+	res, err := writer.Push(ctx, sc.Manifest, sc, depot.PushOptions{Progress: req.Progress})
 	if err != nil {
 		return res, err
 	}
@@ -107,11 +109,22 @@ func pushSnapshotV2(req snapshotRequest) (depot.PushResult, error) {
 // pullFromDepotV2 anti-entropies the corpus against every machine's
 // latest snapshot: pointer + manifest GETs to find what's new, then only
 // unknown blobs are fetched (inside IngestSnapshot).
-func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor, prepared depot.PreparedPull, jsonOut bool, tracker *ahaprogress.Tracker) ([]map[string]any, error) {
+func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor, plan depot.DownloadPlan, jsonOut bool, tracker *ahaprogress.Tracker) ([]map[string]any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	machines, err := prepared.Machines()
+	machines, err := plan.Machines()
+	if err != nil {
+		return nil, err
+	}
+	binding, err := plan.ArchiveBinding()
+	if err != nil {
+		return nil, err
+	}
+	if err := corpus.BindWorkspace(ing.Store.DB, binding); err != nil {
+		return nil, err
+	}
+	latestVector, err := plan.LatestVector()
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +155,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		sha, ok, err := prepared.Latest(ctx, machine)
+		sha, ok, err := plan.Latest(machine)
 		if err != nil {
 			return nil, err
 		}
@@ -152,7 +165,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 				return nil, err
 			}
 			if !known {
-				manifest, err := prepared.Manifest(ctx, machine, sha)
+				manifest, err := plan.Manifest(ctx, machine, sha)
 				if err != nil {
 					return nil, err
 				}
@@ -161,7 +174,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 					ingestStarted = true
 				}
 				rep, err := ing.IngestSnapshot(manifest, func(key model.BlobKey) (io.ReadCloser, error) {
-					return prepared.OpenBlob(ctx, key)
+					return plan.OpenBlob(ctx, key)
 				})
 				if err != nil {
 					return nil, err
@@ -178,6 +191,9 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 		}
 		processedMachines++
 		tracker.Advance(ahaprogress.PhasePull, processedMachines, machineTotal, ahaprogress.UnitMachines)
+	}
+	if err := corpus.RecordMaterialisedVector(ing.Store.DB, latestVector); err != nil {
+		return nil, err
 	}
 	tracker.Complete(ahaprogress.PhasePull, processedMachines, machineTotal, ahaprogress.UnitMachines)
 	if ingestStarted {

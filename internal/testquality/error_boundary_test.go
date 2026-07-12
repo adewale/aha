@@ -16,9 +16,11 @@ func TestUserFacingBoundariesDoNotRenderRawErrors(t *testing.T) {
 			`fmt.Fprintln(stderr, "error:",`,
 			`Message: err.Error()`,
 		},
-		filepath.Join("..", "cli", "command_doctor.go"): {
+		filepath.Join("..", "cli", "command_archive.go"): {
 			`["error"] = err.Error()`,
-			`["error"] = cfgErr.Error()`,
+		},
+		filepath.Join("..", "cli", "command_workspace.go"): {
+			`["error"] = err.Error()`,
 		},
 		filepath.Join("..", "mcp", "tools.go"): {
 			`Text: err.Error()`,

@@ -20,7 +20,7 @@ The second layer is especially important for depot/status/refresh behaviour beca
 Use the cheapest layer that can falsify the performance claim:
 
 1. **Pure/model PBT first** for set semantics, deduplication, idempotence, ordering, cardinality, and “must not become work” claims. Example: pending/behind refs are `unique(catalog_sha) - ingested_sha` even when generators produce many duplicate trivial bundles.
-2. **Fake-driver operation-count tests** for network, fetch, byte-read, and API-call claims. Example: `status --depot` may list metadata once, but must not fetch bundle bytes.
+2. **Fake-driver operation-count tests** for network, fetch, byte-read, and API-call claims. Example: `status --archive` may list metadata once, but must not fetch bundle bytes.
 3. **Tiny SQLite/query-plan tests** for schema/index claims. Example: verifier/search regressions should fail because `EXPLAIN QUERY PLAN` shows an unindexed/virtual-table scan, not because a 5k-row benchmark got slow.
 4. **Package benchmarks** for constant factors and row/byte-heavy loops. Example: `corpus.Verify`, `search.Query`, `archive.Write`, and `depot.Verify` benchmarks are useful once the algorithmic invariant is correct.
 5. **Package-level pprof** before CLI-level pprof. Profile the smallest benchmark that reproduces the cost; use CLI profiles only to confirm end-to-end command behaviour.
@@ -47,13 +47,13 @@ If a row lacks a characterization gate, the abstraction is not ready to change y
 
 ## Cheapest-layer audit results
 
-*v1-era audit record: the depot rows below (trivial bundles, `status --depot` metadata, `state_sha256` no-fetch, expected-SHA ingest, `PutBundleKnown`) describe v1 machinery that depot v2 deleted; their named tests/helpers no longer exist. The corpus/search/profiling rows remain current.*
+*v1-era audit record: the depot rows below (trivial bundles, `status --archive` metadata, `state_sha256` no-fetch, expected-SHA ingest, `PutBundleKnown`) describe v1 machinery that depot v2 deleted; their named tests/helpers no longer exist. The corpus/search/profiling rows remain current.*
 
 | Risk | Cheapest effective layer | Current status | Next cheapest guard |
 |---|---|---|---|
 | FTS verify superlinear behaviour | Schema/query-plan tests over tiny corpora; package benchmark only for magnitude/profile | Implemented: FTS rows use rowid identity; `TestVerifyFTSChecksUseRowIDLookups` guards the query shape; 5k pathological verify dropped from ~`7.7s` to ~`15ms` on the same machine class. | Keep query-plan guard; use benchmarks only for trend checks. |
 | Many trivial depot bundles / duplicate refs | Pure set-model PBT and in-memory catalogue merge benchmark | Implemented: `pendingDepotRefs`, `depotBehindFromRefs`, and `MergeBundleRefs` have set/metadata properties; repair/compact use map-backed bulk merge. | Keep benchmark trend checks as catalogues grow. |
-| `status --depot` should be metadata-only | Helper/fake-driver operation-count unit test | Implemented: `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches; status JSON now exposes listed/unique refs and `depot_fetches=0`. | Add summaries only if raw catalogue scans become visible on real depots. |
+| `status --archive` should be metadata-only | Helper/fake-driver operation-count unit test | Implemented: `TestDepotBehindCountFromDriverListsMetadataWithoutFetchingBundles` proves one list and zero fetches; status JSON now exposes listed/unique refs and `depot_fetches=0`. | Add summaries only if raw catalogue scans become visible on real depots. |
 | Unchanged refresh should not fetch old bundles | Fake-driver/PBT over refs with `state_sha256` metadata | Implemented: catalogue refs carry `state_sha256`; `findDepotBundleWithSameState` checks it before fetching; fake-driver test proves zero fetches for matching state metadata. | Add broader PBT over duplicate refs/machines/orderings. |
 | Depot ingest duplicate/pre-hash behaviour | Pending-set PBT plus expected-SHA ingest seam tests | Implemented: `corpus.IngestBundleWithExpectedSHA` validates during staging; depot ingest no longer pre-hashes separately. | Add byte-counter instrumentation for large pending bundles. |
 | Archive repeated hashing | Unit/golden test for `WriteWithInfo` SHA handoff | Implemented: `archive.WriteWithInfo` streams compressed SHA/size/manifest/state info; CLI depot publish uses `depot.PutBundleKnown`. | Add byte-counter instrumentation for snapshot/refresh publish. |
@@ -107,7 +107,7 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem`. Numbers are dire
 | Archive | one 32MiB compressible file | `25ms`, `52MB allocs` | Large-file path is throughput-oriented; memory comes mostly from zstd buffers/test data. |
 | Local depot | 250 refs | list `0.7ms`; append to growing catalogue `2.0ms`; verify `24.9ms` / `20MB` | Local catalogue costs are acceptable at 250 refs, but deep verify scales with object count/bytes. |
 | In-memory catalogue merge | 1000 unique trivial refs × 4 duplicates | single-digit milliseconds, `1.24MB` | Cheapest-layer benchmark shows bulk merge is linear-scan based and should become map-based before very large catalogues. |
-| Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --depot` set-difference memory grows with ingested bundle count. |
+| Status support | 5k messages + 5k bundles | counts `1.9ms`; `BundleSHAs` `1.8ms` / `1.25MB` | `status --archive` set-difference memory grows with ingested bundle count. |
 
 ## Latest post-plan benchmark snapshot
 
@@ -126,19 +126,19 @@ Machine: Apple M2 Ultra, `go test ... -benchtime=1x -benchmem` unless noted. The
 
 ## Metrics and measurable improvement targets
 
-The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood. The depot rows below are v1-era targets, retained as the record of what this plan achieved; depot v2 then removed the underlying mechanisms entirely (no catalogue refs, no `state_sha256`, no pending-bundle fetches, no `depot compact` — a steady-state v2 refresh is a handful of pointer/manifest GETs with zero PUTs/fetches/parses, and `status --depot` reports `depot_behind_snapshots`/`depot_machines_listed`).
+The plan should produce improvements we can point to. Treat these as scenario metrics, not hard CI thresholds until benchmark variance is understood. The depot rows below are v1-era targets, retained as the record of what this plan achieved; depot v2 then removed the underlying mechanisms entirely (no catalogue refs, no `state_sha256`, no pending-bundle fetches, no `depot compact` — a steady-state v2 refresh is a handful of pointer/manifest GETs with zero PUTs/fetches/parses, and `status --archive` reports `depot_behind_snapshots`/`depot_machines_listed`).
 
 | Scenario / user journey | Current pain signal | Primary metric | Expected measurable improvement |
 |---|---|---|---|
-| `aha verify` on a growing corpus | Before rowid identity, 5k-message pathological verify took about `7.7s`; after the fix, the same benchmark took about `15ms`. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope, `ns/op`, and query-plan guard. | Maintain near-linear verification and prevent regressions to unindexed FTS joins. |
-| Routine no-op `aha refresh` with local/R2 depot | Old refs without state metadata still require fallback fetch; new refs carry state metadata. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | New catalogue refs allow no-op refresh to list metadata but fetch `0` old bundles when a matching `state_sha256` exists. |
-| `aha ingest --depot` with pending bundles | Expected SHA is now checked during ingest staging instead of by a separate pre-hash. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
-| `aha snapshot` / `aha refresh` publish | `WriteWithInfo` now computes compressed bundle SHA while writing; known identity is handed to depot. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Snapshot/refresh publish avoids re-reading the just-written bundle for archive/depot identity. |
+| `aha workspace verify` on a growing corpus | Before rowid identity, 5k-message pathological verify took about `7.7s`; after the fix, the same benchmark took about `15ms`. | `BenchmarkPathologicalVerifyFTSJoinScaling` slope, `ns/op`, and query-plan guard. | Maintain near-linear verification and prevent regressions to unindexed FTS joins. |
+| Routine no-op `aha archive upload && aha archive download` with local/R2 depot | Old refs without state metadata still require fallback fetch; new refs carry state metadata. | Old bundle `Fetch` calls, old bundle bytes read, unchanged-refresh latency. | New catalogue refs allow no-op refresh to list metadata but fetch `0` old bundles when a matching `state_sha256` exists. |
+| `aha archive download --archive` with pending bundles | Expected SHA is now checked during ingest staging instead of by a separate pre-hash. | Bundle read/hash passes per pending ref; ingest `ns/op` for large bundles. | Pending depot ingest performs one staging copy/hash, not a pre-hash plus staging hash. |
+| `aha archive upload` / `aha archive upload && aha archive download` publish | `WriteWithInfo` now computes compressed bundle SHA while writing; known identity is handed to depot. | Compressed bundle bytes read after write; publish `ns/op`; bundle hash pass count. | Snapshot/refresh publish avoids re-reading the just-written bundle for archive/depot identity. |
 | Many tiny entries in one ingest | First 10k-entry ingest took about `1.23s`, `136MB`, `1.19M allocs`; latest captured result is `1.12s`, `84.1MB`, `728k allocs`. | `allocs/entry`, SQL executions/entry, ingest `ns/op`. | Prepared statements, duplicate/conflict prefetch, known-blob skip, and zstd pooling lower memory and SQL chatter while reports/conflicts remain identical. |
 | Broad `aha search` / high `--limit` | First 10k broad-term high-limit search allocated `1.78MB`/`33k allocs`; latest capped high-limit search is `344KB`/`6.7k allocs`. | Search `ns/op`, allocations/result, output size, query plan. | Exact indexed filters and sane limits reduce output/allocation cost for common agent workflows; broad FTS candidate work is still term-selectivity bound. |
-| `aha status --depot` on years of trivial bundles | Behind calculation and catalogue parsing scale with raw catalogue rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
-| `aha depot verify` on local/R2 depot | Quick/default verify now checks metadata/existence; `--deep`/`--repair` retains full object reads. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
-| Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalogue bytes, vacuum/compaction/prune reclaimed bytes. | `aha corpus size`, `vacuum`, dry-run/forced `prune-orphans`, and `aha depot compact` make growth visible and maintenance explicit without weakening raw preservation defaults. |
+| `aha status --archive` on years of trivial bundles | Behind calculation and catalogue parsing scale with raw catalogue rows; duplicates must not inflate work units. | Unique work units, raw refs scanned, R2 list/fetch counts, JSON bytes parsed. | Status remains metadata-only (`0` fetches); duplicate refs do not change counts; future summaries/compaction reduce raw metadata scanned. |
+| `aha archive verify` on local/R2 depot | Quick/default verify now checks metadata/existence; `--deep`/`--repair` retains full object reads. | R2 GET/download count, bytes downloaded, local bytes hashed, verify latency. | Quick verify performs metadata/head checks only; deep verify remains explicit and reports its cost. |
+| Multi-year local use | Append-only bundles/corpus grow monotonically. | Corpus/depot disk bytes, bundle count, catalogue bytes, vacuum/compaction/prune reclaimed bytes. | `aha workspace status`, `vacuum`, dry-run/forced `prune-orphans`, and internal Archive compaction (no public command) make growth visible and maintenance explicit without weakening raw preservation defaults. |
 
 Instrumentation to add as optimisations land:
 
@@ -315,17 +315,17 @@ Actions:
 
 Expected impact: users can run cheap health checks often and reserve deep audits for scheduled/manual integrity checks.
 
-### 9. `status --depot` network catalogue operation
+### 9. `status --archive` network catalogue operation
 
 Target complexity: default status stays local and cheap; depot status has explicit quick/deep semantics.
 
 Actions:
 
 1. Keep plain `aha status` corpus-only.
-2. Make `status --depot` report that it lists the depot; document that R2 may incur network calls.
-3. Add optional depot summary files/counters so `status --depot --quick` can avoid reading every shard when available.
+2. Make `status --archive` report that it lists the depot; document that R2 may incur network calls.
+3. Add optional depot summary files/counters so `status --archive --quick` can avoid reading every shard when available.
 4. Cache last depot status in the local corpus metadata with timestamp and depot address; show stale age clearly.
-5. Keep `aha depot ls` / `aha depot verify --deep` for exact current answers.
+5. Keep `aha archive status` / `aha archive verify --deep` for exact current answers.
 
 Expected impact: routine status remains fast; remote status cost becomes predictable and visible.
 
@@ -334,7 +334,7 @@ Expected impact: routine status remains fast; remote status cost becomes predict
 1. **Cheapest-layer gate before optimisation**: before changing a hot path, state the claim and choose the cheapest falsifier: pure PBT, fake-driver counter, tiny query-plan test, package benchmark, package profile, or CLI profile. Do not start with large fixtures unless the claim is specifically about real-world perception.
 2. **Performance contracts in tests**: keep pathological benchmarks non-gating, but add query-plan/static/PBT tests for known algorithmic hazards: unindexed FTS verification, non-indexed exact project filters, accidental network/fetch calls in status/refresh, repeated hash passes where APIs promise known SHA, and duplicate trivial bundles inflating work.
 3. **Telemetry-free local metrics**: add `--json` timing/counter fields for expensive commands: files scanned, bytes read, bytes written, bundles listed/fetched, SQL rows inserted, FTS rows repaired.
-4. **Disk-growth tools**: add `aha corpus size`, `aha corpus vacuum`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
+4. **Disk-growth tools**: add `aha workspace status`, `aha workspace status`, and eventually retention/export policies. Append-only raw preservation remains default; deletion/retention must be explicit.
 5. **Depot catalogue compaction**: as refs grow, support compacted per-machine catalogue snapshots or sharded-by-time catalogues while keeping bundle objects content-addressed.
 6. **Background/deferred maintenance**: deep verify, FTS repair, vacuum, and corpus rebuild are explicit maintenance operations; typed progress and context cancellation are implemented. Snapshot/depot/rebuild operations are idempotent, but checkpoint-based mid-operation resume remains future work.
 7. **Scalable defaults**: cap dangerous limits, choose quick checks by default, and require explicit flags for deep/network-heavy work.
@@ -350,7 +350,7 @@ Completed from the original priority list:
 - Ingest uses transaction-scoped prepared statements, prefetches same-session and cross-machine conflict state, has a covering query-plan guard, skips known file-blob recompression, and pools zstd encoders for file blobs.
 - Search has exact indexed `--project`, indexed `--path-token` for sessions/artefacts, a capped `--limit` (`200`) with CLI warning, actual-SQL query-plan guards, and artefact filter coverage. `--path` remains a documented contains filter.
 - Depot verify has quick/default and deep/repair paths, with fake-R2 operation-budget coverage for quick, deep, repair, list, and compact. Verify JSON reports bytes read/downloaded.
-- Disk/longevity tooling exists: `aha corpus size`, `aha corpus vacuum`, dry-run/forced `aha corpus prune-orphans`, and `aha depot compact`.
+- Disk/longevity tooling exists: `aha workspace status`, `aha workspace status`, dry-run/forced `aha workspace status`, and internal Archive compaction (no public command).
 
 Remaining watch list, not blockers for this plan:
 

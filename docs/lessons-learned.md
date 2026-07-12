@@ -170,7 +170,7 @@ earned.
 - The bundle is the durable evidence; the corpus is the query index. Ingest must trust bundled bytes over mutable live paths.
 - V1 should preserve raw source data even when normalization is incomplete.
 - Artefact data is part of agent history, not ancillary output. Text artefacts need full indexing; image artefacts need blob preservation; unlinked artefacts need readable identities.
-- Search/read coherence is a product invariant: every hit must be passable to `aha read`.
+- Search/read coherence is a product invariant: every hit must be passable to `aha show`.
 - Depot behaviour is clearest as set and round-trip properties: `Fetch(Put(x)) == x`, duplicate `Put(x)` is not new work, pending ingest is `catalog - corpus`, and catalogue merge preserves one ref per bundle SHA.
 - Sidecar metadata is a product surface. Removing local receipt sidecars simplified the depot model: bundle bytes, embedded manifests, catalogue refs, and command JSON are enough.
 - Tool output is preserved but not indexed in v1. This must be enforced in ingest, not left as documentation.
@@ -206,7 +206,7 @@ earned.
 - Because `aha` is pre-user/pre-release, the CbC phases should delete transitional compatibility bridges: emit and parse canonical refs only, use v2 session keys only, and reject unsupported bundle schemas instead of carrying aliases.
 - SQLite construction is strongest when paired with repair: targeted `CHECK`/`FOREIGN KEY` constraints and triggers block true invalid states, while verifier/reconciler queries remain necessary for direct SQL drift and recovery.
 - Sealed canonical refs paid off more than compatibility shims. Removing optional ref DTOs and old ref syntax made search/read contracts simpler and made malformed states easier to reject at the boundary.
-- Verification needs to be user-facing, not only test-facing. `aha verify --json` and `aha verify --repair-fts` turn corpus drift detection into an operational recovery path for humans and agents.
+- Verification needs to be user-facing, not only test-facing. `aha workspace verify --json` and `aha workspace verify --repair-fts` turn corpus drift detection into an operational recovery path for humans and agents.
 - Lightweight formal sketches are not useful unless they are executable or checked. Prefer Go state machines/properties already run by CI over standalone model notes that can drift.
 - Open-world agent data should not get strict enum `CHECK` constraints too early. Typed role helpers can centralize decisions without rejecting future roles from raw histories.
 
@@ -221,7 +221,7 @@ earned.
 - Dashboard security is defense-in-depth and fail-closed. Loopback bind by default; non-loopback refused at `Listen` time unless `--allow-remote` and a bearer token are both set; Host-header allowlist with numeric-port enforcement (blunts DNS-rebinding); JSON content-type enforcement on POST; strict CSP. Each layer landed with a hostile-input regression test (IMDS hostnames, IDN homographs, malformed IPv6 brackets).
 - Position honestly: substrate versus product. The README originally promised pattern detection ("spot patterns, turn them into skills"). This branch ships the substrate that makes that cheap, not the detection itself. Walking the claim back to "examine your behaviour today; pattern detection is the next layer" keeps the front door truthful.
 - CI is a contract, and a silent shell bug makes it a lie. A global bash `RETURN` trap referencing a function-local `$tmpdir` re-fired when an outer function returned and tripped `set -u`, so `verify.sh ci` had been failing since the conformance suite landed while `verify.sh mcp` passed. Mode-specific green is not whole-suite green; run the exact mode CI runs before claiming the build is fixed.
-- A dashboard is a product surface, not a database table with nicer CSS. `aha serve` became clearer only after the first screen was organised around user journeys (`Search`, `Failures`, `Sources`) and stable domain objects (`Trace`, `Event`, `Evidence`) instead of implementation nouns (`corpus`, `read`, `incidents`, `conflicts`, `clusters`).
+- A dashboard is a product surface, not a database table with nicer CSS. `aha dashboard` became clearer only after the first screen was organised around user journeys (`Search`, `Failures`, `Sources`) and stable domain objects (`Trace`, `Event`, `Evidence`) instead of implementation nouns (`corpus`, `read`, `incidents`, `conflicts`, `clusters`).
 - Search results need recognisable provenance. Raw FTS rows are not a result design; server-enriched trace cards grouped by session, titled from prompts, and carrying counts/timelines/commands/files make a user able to recognise old work before opening it.
 - Evidence is a selected-detail pane, not another primary journey. The selected trace must be mirrored in the reader with a stable ref, `aria-current` state, copy-ref/widen-context actions, and highlighted transcript entry so Search → Trace → Event → Evidence remains legible.
 - Frontend-design guidance is useful only when the aesthetic direction is explicit. For `aha`, the durable direction is a restrained technical ledger: dense, aligned, rule-based, quiet. “Bold” meant committing to evidence clarity, not adding gradients, glass, novelty icons, hero bloat, or decorative motion.

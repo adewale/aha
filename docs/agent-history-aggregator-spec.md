@@ -25,7 +25,7 @@ aliases:
 
 # Agent History Aggregator Spec
 
-*Historical: this is the original v1 spec and predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalogue snapshot mechanics described here were replaced by content-addressed snapshots (write-once blobs + per-machine manifests) in June 2026; the v1 `tar.zst` bundle format survives only behind `aha export` / `aha ingest <bundle.tar.zst>`. The product boundary, adapters, corpus, and trust posture remain.*
+*Historical: this is the original v1 spec and predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalogue snapshot mechanics described here were replaced by content-addressed snapshots (write-once blobs + per-machine manifests) in June 2026; the v1 `tar.zst` bundle format survives only behind `aha archive status` / `aha archive download <bundle.tar.zst>`. The product boundary, adapters, corpus, and trust posture remain.*
 
 ## Product boundary
 
@@ -339,7 +339,7 @@ cloud-devbox-01
 Default `machine_id` is a sanitised local hostname, written visibly by `aha init`. Users can override it in config or with a flag when they need stable naming across host renames:
 
 ```bash
-aha snapshot --machine ade-mbp
+aha archive upload --machine ade-mbp
 ```
 
 Raw paths are preserved by default because they are useful for search and project reconstruction. Hostname and username should be hashed by default if stored in the manifest.
@@ -349,11 +349,11 @@ Raw paths are preserved by default because they are useful for search and projec
 Example:
 
 ```bash
-aha snapshot \
+aha archive upload \
   --machine ade-mbp \
   --source pi=$HOME/.pi/agent/sessions \
   --source claude-code=$HOME/.claude/projects \
-  --depot local:~/.aha/depot
+  --archive local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -446,7 +446,7 @@ V1 does not require OCR or image captioning. Image text search is metadata-only 
 Example:
 
 ```bash
-aha ingest --depot local:~/.aha/depot
+aha archive download --archive local:~/.aha/depot
 ```
 
 Responsibilities:
@@ -545,7 +545,7 @@ session_path_tokens(session_key, token)         -- indexed exact segment tokens
 artifact_path_tokens(artifact_id, token)       -- indexed exact segment tokens
 ```
 
-For v1, store raw source entries and normalized fields. Derived columns can be regenerated. FTS rows are trigger-maintained and repairable with `aha verify --repair-fts`; verifier queries use rowid identity to avoid unindexed FTS key scans. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts. `project_key` is an exact indexed project filter; `--path-token` uses the token tables; `--path` remains a convenience contains filter.
+For v1, store raw source entries and normalized fields. Derived columns can be regenerated. FTS rows are trigger-maintained and repairable with `aha workspace verify --repair-fts`; verifier queries use rowid identity to avoid unindexed FTS key scans. `entry_assets` links images and other prompt assets back to the exact entry and content position needed to reconstruct prompts. `project_key` is an exact indexed project filter; `--path-token` uses the token tables; `--path` remains a convenience contains filter.
 
 ## Search command
 
@@ -556,10 +556,10 @@ aha search "loadable ephemeral context"
 aha search "dynamic workflows" --machine ade-mbp --after 2026-05-01
 aha search "xampler workflows" --source pi --project aha
 aha search "workflow" --path-token workflows.py
-aha read msg:v1:... --before 3 --after 5
+aha show msg:v1:... --before 3 --after 5
 aha status
-aha verify
-aha conflicts
+aha workspace verify
+aha workspace conflicts
 ```
 
 Minimum search features:
@@ -653,14 +653,14 @@ Config should cover:
     { "type": "pi", "root": "~/.pi/agent/sessions", "enabled": true }
   ],
 
-  "corpus_dir": "~/.aha",
-  "depot": { "type": "local", "location": "~/.aha/depot" },
+  "workspace_dir": "~/.aha",
+  "archive": { "type": "local", "location": "~/.aha/depot" },
   "path_mode": "raw",
   "include_subagents": true,
   "include_images": true,
   "index_tool_output": false,
   "redaction": "none-v1",
-  "accept_secrets_warning": false
+  "acknowledged_raw_history": false
 }
 ```
 
@@ -669,17 +669,17 @@ CLI flags override config values. The first-run UX creates a starter JSONC confi
 ## CLI shape
 
 ```txt
-aha refresh
-aha snapshot
-aha ingest
+aha archive upload && aha archive download
+aha archive upload
+aha archive download
 aha search
-aha read
+aha show
 aha status
-aha verify
-aha conflicts
-aha corpus <size|vacuum|prune-orphans>
-aha depot <init|use|ls|verify|compact>
-aha doctor
+aha workspace verify
+aha workspace conflicts
+aha workspace <status|verify|repair|conflicts>
+aha archive <init|set-default|status|upload|download|verify>
+aha status
 ```
 
 Implementation preferences:
@@ -734,7 +734,7 @@ read output with surrounding entries
 - `search` returns matches across Pi and Claude Code sessions from multiple machines.
 - `read` shows bounded context around a result.
 - Conflicting same-entry IDs with different hashes are quarantined, not overwritten.
-- `status` reports machines, bundles, sources, sessions, entries, artefacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--depot` is explicit.
+- `status` reports machines, bundles, sources, sessions, entries, artefacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--archive` is explicit.
 - `corpus size|vacuum|prune-orphans` exposes explicit local maintenance; `prune-orphans` is dry-run unless `--force`.
 - `depot verify` is quick by default, `--deep`/`--repair` are explicit byte-reading integrity operations, and `depot compact` deduplicates catalogue metadata without touching bundle bytes.
 - README states that `none-v1` does not redact, `redaction:"v1"` redacts corpus projections, and bundles remain raw.
@@ -777,7 +777,7 @@ Use Go's standard testing stack first:
 
 | Test type | Required coverage for `aha` |
 |---|---|
-| Smoke | `aha --help`, `aha snapshot --help`, `aha ingest --help`, `aha search --help`, and a tiny snapshot→ingest→search flow all run. |
+| Smoke | `aha --help`, `aha archive upload --help`, `aha archive download --help`, `aha search --help`, and a tiny snapshot→ingest→search flow all run. |
 | Unit | Path discovery, JSONL parsing, manifest validation, hash calculation, dedupe keys, FTS query construction. |
 | Golden files | Deterministic `manifest.json`, ingest reports, search output, `read` output, conflict reports. |
 | Property/fuzz | Parsers and normalizers never panic on arbitrary input; archive write/read roundtrips; ingest is idempotent; deterministic snapshot output is stable for stable inputs. |
@@ -799,7 +799,7 @@ Use Go's standard testing stack first:
 - **Parser robustness:** malformed JSONL lines, unknown roles, unknown block types, invalid timestamps, huge tool outputs, and Unicode text do not crash parsing.
 - **Claude discovery:** Unix-style `-Users-...` project directories are discovered if they contain JSONL files; hidden dirs are ignored. Windows-style `C--Users-...` stays in v2 fixtures.
 - **Prompt reconstruction:** image-bearing prompts can be recreated from raw entry JSON plus `entry_assets` and image blobs.
-- **Search/read coherence:** every search hit can be passed to `aha read` and returns bounded context containing the hit entry.
+- **Search/read coherence:** every search hit can be passed to `aha show` and returns bounded context containing the hit entry.
 
 ### Test quality rules
 
@@ -1057,8 +1057,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
 | Limitation docs | README must describe accepted v1 limitations, not only features. |
 | User journeys | `docs/user-journeys.md` defines the no-flag defaults optimised for local first use, routine refresh, search/read, and imported bundles. |
-| Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources or reuse unchanged depot state, then ingest pending/new depot bundles into the configured corpus. It supports `--session` and `--max-sessions` for one-to-all local-session scope. |
-| Repo alias | Corpus path flags also accept `--repo` where users are thinking in terms of an aggregation repo. |
+| Refresh command | `aha archive upload && aha archive download` is the default local aggregation command: snapshot configured sources or reuse unchanged depot state, then ingest pending/new depot bundles into the configured corpus. It supports `--session` and `--max-sessions` for one-to-all local-session scope. |
+| Repo alias | Corpus path flags also accept `--workspace` where users are thinking in terms of an aggregation repo. |
 
 ### Performance/scalability implementation lessons
 
@@ -1080,8 +1080,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Search limit | Requested search limits above 200 are capped with a user-visible warning. |
 | Depot catalogue merge | Repair and compaction use map-backed dedupe by `bundle_sha256`, preserving first non-empty metadata. |
 | Depot verification cost | Quick/default verify uses metadata/head/existence checks; `--deep` and `--repair` are the byte-reading modes and report byte counters. |
-| Corpus maintenance | `aha corpus size`, `vacuum`, and dry-run/forced `prune-orphans` are the v1 local maintenance surface. |
-| Depot maintenance | `aha depot compact` deduplicates catalogue refs without reading bundle bytes. |
+| Corpus maintenance | `aha workspace status`, `vacuum`, and dry-run/forced `prune-orphans` are the v1 local maintenance surface. |
+| Depot maintenance | internal Archive compaction (no public command) deduplicates catalogue refs without reading bundle bytes. |
 | Licence | The project is MIT-licensed. |
 
 ## Validation plan

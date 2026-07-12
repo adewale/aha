@@ -1,47 +1,30 @@
 # TODO
 
-## Agent-friendly roadmap
+## 0.2 follow-up
 
-- Keep `--json` available for every command and continue enriching schemas over time with paths, counts, timestamps, policy/config context, diagnostics, and next suggested commands. Machine-readable top-level JSON errors and copy-pastable search refs are in place.
-- Add explicit agent documentation/skill for `aha`:
-  - teach the required `search -> read -> answer` workflow;
-  - state that snippets are leads, not evidence;
-  - list read-only commands (`search`, `read`, `incidents`, `status`, `verify`, `conflicts`, `corpus size`, `doctor`) vs mutating commands (`refresh`, `snapshot`, `ingest`, `verify --repair-fts`, `corpus vacuum`, `corpus prune-orphans --force`, `depot init`, `depot use`, `depot verify --repair`, `depot compact`);
-  - include JSON examples for `search --json`, `search --refs`, `read <ref> --json`, `status --json`, `verify --json`, and JSON error envelopes;
-  - explain privacy caveats: v1 does not redact secrets, R2 is opt-in upload, and bundles/corpora are private;
-  - show how an agent should cite/quote refs in its own notes;
-  - include failure handling: if search returns nothing, broaden query; if read fails, report the stale ref and run `aha status --json`/`aha verify --json`/`aha doctor --json`;
-  - include config/depot caveats: use `--repo` for alternate corpora and do not pass `--depot` to search/read.
-- Continue improving canonical refs as first-class CLI input/output. Search JSON now includes structured `ref` plus copy-pastable `ref_text`; next steps are multi-read and MCP resource mapping.
-- Keep qmd-inspired output modes for agent retrieval (`--refs`, `--files`, and `--md`) stable and documented.
-- Keep command metadata as the source of truth for generated command docs, docs sync tests, examples, JSON schema notes, and future MCP tool schemas; eventually remove remaining manual flag-definition duplication.
-- Add an agent skill/guide for aha, similar to qmd's skill: search for leads, retrieve full source context, then answer with citations/refs.
+- Complete live R2 journey evidence for the new `archive` surface: existing shared Archive upload, pull-only aggregation, repeated no-op download, denied credentials, unsafe destination, cancellation, and deep verification.
+- Rename the remaining internal `depot` and `corpus` package/schema vocabulary only through explicit storage-format migrations; public 0.2 vocabulary is already Archive/Workspace.
+- Decide whether MCP wire tool names (`read`, `incidents`, `doctor`, `corpus_size`) should receive a versioned schema replacement. They are not CLI aliases and remain documented compatibility boundaries for generated clients.
+- Bring HTTP route names into the same versioned decision instead of silently breaking dashboard clients.
+- Add release packaging that calls `make build` so commit/time/dirty metadata is always linker-injected.
 
-## Make the aggregated corpus more accessible
+## Retrieval and processing
 
-- Explore additional search forms beyond SQLite FTS: structured filters, saved searches, semantic/vector search, hybrid ranking, query expansion, and explain/debug output for rankings.
-- Continue hardening the MCP interface exposing `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor`; defer any mutating or long-running daemon surface.
-- Continue improving `doctor`: source, corpus, depot, and common R2 misconfiguration diagnostics exist; remaining depth includes schema migration details, bundle blob-store checks, adapter fixture/version drift checks, and optional R2 bucket setting verification where Cloudflare exposes it.
-- Add multi-read or batch-read for agent workflows that need to retrieve several hits from one search. A likely syntax is `aha read --refs-file refs.txt --json` or `aha read <ref1> <ref2> ... --json`, returning grouped context per ref.
+- Add batch `show` for workflows that need context for several search refs.
+- Explore structured/saved searches, hybrid ranking, query expansion, and ranking explanations; semantic/vector search remains outside 0.2.
+- Keep `--refs`, `--files`, and `--md` output contracts stable.
+- Continue outcome-weighted failure analysis and trajectory quality work without turning every recurring pattern into a generated skill.
 
-## Performance work
+## Performance and longevity
 
-- Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
-- Continue tracking `aha verify` with pathological benchmarks; the rowid/query-plan fix removed the first superlinear cliff, but future FTS changes must keep the cheap query-plan guard green.
-- Continue tracking byte/call counters for archive/depot/ingest known-SHA handoffs; depot verify/status/ingest counters, verify/FTS repair counters, and known-blob tests now exist. Add SQL row-insert counters only if agent workflows need them.
-- Expand `state_sha256` refresh PBT only if duplicate/many-machine catalogue shapes regress; zero-fetch state metadata coverage exists.
-- Consider true multi-row ingest inserts if benchmarks show SQLite step overhead dominating after prepared statements/prefetch/zstd pooling.
-- Prefer indexed `--project`/`--path-token`; keep `--path` contains as convenience and monitor broad-term FTS costs.
-- Add catalogue summaries/local stale status cache only if raw catalogue scans become a real depot bottleneck; `depot compact` and map-backed repair exist.
+- Follow `docs/performance-scalability-plan.md` using scenario metrics and package-level profiles before optimisation.
+- Keep pathological Workspace verify/FTS query-plan guards green.
+- Continue byte/call accounting for Archive upload/download and known-content anti-entropy.
+- Add internal automatic SQLite maintenance only when measured evidence justifies it; do not reintroduce a public optimise command.
 
-## Code health and duplication watch list
+## Trust and verification
 
-- Use `docs/audits/code-duplication-audit.md` and `docs/refactor-metrics-and-go-audit.md` as the current duplication/refactor baseline.
-- Completed the first duplication-refactor pass: depot known-ref prep, quick catalogue verification, compact/repair shard rewriting, R2 marker helpers, snapshot/refresh flag registration, search predicate building, FTS verify/repair predicates, and atomic temp-write/copy helpers are shared.
-- Future code-health work should be evidence-driven: add another duplication audit only when changing depot/R2 integrity flows, search filters, FTS repair semantics, or blob-publish durability.
-
-## Future adapters
-
-- Research and prototype adapters for local stores from Aider, Cline/Roo Code, Continue, Gemini CLI, Cursor, Windsurf/Codeium, Zed, and Goose.
-- OpenCode support shipped: the `opencode` adapter converts the SQLite database to deterministic, lossless JSONL during discovery (see `internal/opencodeexport` and `docs/research/opencode.md`). Current tests cover synthetic SQLite fixtures, image file parts, duplicate release-channel DB IDs, and real-machine smoketest support. Remaining follow-up is additive: capture anonymized fixtures only when real current `anomalyco/opencode` installs reveal new `message`/`part` `data` shapes (subtask/agent parts, compaction summaries, fork/parent semantics).
-- Prefer raw-preserving, read-only adapters first; treat Electron/VS Code state DB adapters as experimental until backed by fixtures from real current versions.
+- Keep source roots, production R2 credentials, and smoke destinations isolated by construction.
+- Extend the live smoke attestation only through source-pinned test capabilities.
+- Preserve Linux, Darwin, and Windows build checks; Workspace repair remains explicitly unsupported where safe atomic exchange is unavailable.
+- Continue mutation testing on lifecycle transitions, capability zero values, destination preflight, publication CAS, and error normalisation.

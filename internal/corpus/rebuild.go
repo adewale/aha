@@ -15,10 +15,10 @@ import (
 )
 
 var (
-	ErrLegacyCorpus       = errors.New("pre-v2 corpus")
-	ErrNotLegacyCorpus    = errors.New("corpus is not a pre-v2 corpus")
-	ErrRebuildFailed      = errors.New("corpus rebuild failed")
-	ErrRebuildUnsupported = errors.New("safe corpus rebuild is unsupported on this platform")
+	ErrLegacyCorpus       = errors.New("pre-0.2 Workspace")
+	ErrNotLegacyCorpus    = errors.New("Workspace is not pre-0.2")
+	ErrRebuildFailed      = errors.New("Workspace repair failed")
+	ErrRebuildUnsupported = errors.New("safe Workspace repair is unsupported on this platform")
 )
 
 type RebuildReport struct {
@@ -222,5 +222,5 @@ func unusedBackupPath(root string, now time.Time) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("cannot allocate unique corpus backup path")
+	return "", fmt.Errorf("cannot allocate unique Workspace backup path")
 }

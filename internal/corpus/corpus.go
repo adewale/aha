@@ -30,6 +30,34 @@ func OpenExisting(dir string) (*Store, error) {
 	return OpenWithOptions(dir, OpenOptions{Create: false, Migrate: true})
 }
 
+// OpenExistingReadOnly opens a Workspace without creating directories,
+// lifecycle locks, WAL files, or migrations. Inspection commands use it to
+// preserve their zero-mutation contract.
+func OpenExistingReadOnly(dir string) (*Store, error) {
+	root, err := paths.Expand(dir)
+	if err != nil {
+		return nil, err
+	}
+	root, err = canonicalCorpusIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	dbPath := filepath.Join(root, "corpus.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro&immutable=1")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{DB: db, Root: root}, nil
+}
+
 func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 	root, err := paths.Expand(dir)
 	if err != nil {
@@ -99,7 +127,7 @@ func rejectLegacyBundleCorpus(db *sql.DB, root string) error {
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("%w: corpus at %s uses the pre-v2 bundle schema; run `aha corpus rebuild --backup`", ErrLegacyCorpus, root)
+		return fmt.Errorf("%w: Workspace at %s uses the pre-0.2 schema; run `aha workspace repair --backup`", ErrLegacyCorpus, root)
 	}
 	return nil
 }
