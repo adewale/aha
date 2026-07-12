@@ -1,221 +1,473 @@
-# aha 0.2 command and state-machine redesign
+# aha 0.2 Archive and Workspace state-machine plan
 
-Status: **accepted implementation plan**
+Status: **accepted product model; implementation deliberately deferred until the model is reviewed**
 
-Compatibility policy: **none** — aha has not launched and has no users, so 0.2 should remove the old command model rather than preserve aliases.
+Compatibility policy: **none** — aha has not launched and has no users. Version 0.2 will remove the old command/config vocabulary rather than preserve aliases.
 
 Target product version: **0.2.0**
 
-## 1. Why redesign now
+## 1. Product model
 
-The multi-machine R2 onboarding session exposed a mismatch between aha's storage implementation and the mental model offered by its CLI:
+Aha has two managed resources and one external input:
 
-- the goal “pull every machine into one searchable local folder” required knowing that `ingest` means pull, while `refresh` means push then pull;
-- `ingest` also means importing a bundle, an unrelated transition;
-- `snapshot` is a push verb disguised as a storage noun;
-- `depot use` changes a persistent default, while `--depot` is a one-command override;
-- `doctor`, `depot ls`, `depot verify`, and `status --depot` each expose a different fragment of state;
-- an old installed binary could not be distinguished from the current checkout because every build reported `0.1.0`;
-- a bare bucket name was guessed to be a local path;
-- invalid R2 configuration was discovered after a corpus had already been opened;
-- safe error presentation removed the field identity needed to correct the environment;
-- “all snapshots” could mean every historical manifest or each machine's latest complete snapshot.
-
-PR #15 fixed the immediate construction boundaries. Version 0.2 should make the state machine and vocabulary explicit instead of documenting around the old verbs.
-
-## 2. The 0.2 mental model
-
-Aha has three primary nouns:
-
-1. **Sources** — read-only agent histories on this machine.
-2. **Store** — durable raw snapshots, backed by a local directory or R2. A store can be shared by machines.
-3. **Library** — one local searchable SQLite/FTS directory assembled from store snapshots.
-
-“Depot” and “corpus” remain implementation terms only. They disappear from the user-facing CLI and JSON contracts.
+1. **Agent histories** — mutable files owned by Pi, Claude Code, Codex, and OpenCode. Aha reads them but never manages or modifies them.
+2. **Archive** — durable, private, aggregated history from one or many machines. An Archive may be a local directory or an R2 bucket. It is authoritative for recovery.
+3. **Workspace** — one local materialization of an Archive's selected latest snapshots, prepared for search and processing. It is rebuildable and never authoritative for raw archived history.
 
 ```mermaid
 flowchart LR
-    S[Sources<br/>agent histories] -->|aha push| D[Store<br/>local directory or R2]
-    D -->|aha pull| L[Library<br/>local searchable directory]
-    S -. "aha sync: step 1" .-> D
-    D -. "aha sync: step 2" .-> L
-    B[Portable bundle] -->|aha import| L
-    D -->|aha export| B
-    L --> Q[search · read · incidents · serve · mcp]
+    subgraph Machines
+        H1[Machine A agent histories]
+        H2[Machine B agent histories]
+        H3[Machine C agent histories]
+    end
+
+    H1 -->|archive upload| A
+    H2 -->|archive upload| A
+    H3 -->|archive upload| A
+
+    A[Archive<br/>durable aggregated truth]
+    A -->|archive download| W1
+    A -->|archive download| W2
+
+    W1[Workspace A<br/>local processing]
+    W2[Workspace B<br/>local processing]
+
+    W1 --> P1[search · read · analyze · classify]
+    W2 --> P2[search · read · analyze · classify]
 ```
 
-The verbs are directions:
+The transfer direction is intentionally asymmetric:
 
-- **push**: sources → store;
-- **pull**: store → library;
-- **sync**: push, then pull;
-- **import**: portable bundle → library;
-- **export**: store snapshot → portable bundle.
-
-A snapshot is a domain object, not a command name.
-
-## 3. Proposed command surface
-
-### Primary workflows
-
-| 0.2 command | Meaning | Replaces |
-|---|---|---|
-| `aha push [--to STORE]` | Capture this machine and publish its latest complete snapshot. Never opens a library. | `aha snapshot` |
-| `aha pull [--from STORE] [--into LIBRARY]` | Pull every machine's latest complete snapshot into one local library. Never reads source roots and never writes the store. | no-path `aha ingest` |
-| `aha sync [--with STORE] [--library LIBRARY]` | Push this machine, then pull every machine. Reports partial completion explicitly. | `aha refresh` |
-| `aha import BUNDLE... [--into LIBRARY]` | Import portable bundle files only. | path-taking `aha ingest` |
-| `aha export --machine ID --out FILE [--from STORE]` | Materialize one machine's latest snapshot as a portable bundle. | renamed flags on `aha export` |
-
-### Store lifecycle
-
-| 0.2 command | Meaning | Replaces |
-|---|---|---|
-| `aha store init STORE` | Initialize an already-created local directory/R2 bucket and optionally select it. | `aha depot init` |
-| `aha store select STORE` | Persist the default store after proving it is initialized and healthy. | `aha depot use` |
-| `aha store status [STORE]` | One read-only view of reachability, configuration, initialization, health, machines, latest snapshots, and selection. | `depot setup`, `depot ls`, depot portion of `doctor` |
-| `aha store verify [STORE] [--deep]` | Verify marker/index/pointers/manifests; `--deep` verifies blob bytes and history. | `aha depot verify` |
-
-`push` and `sync` do **not** auto-initialize a store in 0.2. An uninitialized store produces a typed state plus the one explicit transition `aha store init STORE`. R2 bucket creation remains external unless a future command receives a separately typed administrative capability.
-
-### Library lifecycle
-
-| 0.2 command | Meaning | Replaces |
-|---|---|---|
-| `aha library status [LIBRARY]` | Counts, integrity summary, ingested machine/latest vector, and disk use. | corpus portion of `status`, `corpus size` |
-| `aha library verify [LIBRARY] [--repair-fts]` | Verify local database/blob/FTS invariants. | `aha verify` |
-| `aha library optimize [LIBRARY]` | Vacuum/optimize derived local state. | `aha corpus vacuum` |
-| `aha library prune [LIBRARY] --force` | Explicitly prune unreferenced local blobs. | `aha corpus prune-orphans` |
-| `aha library rebuild [LIBRARY] --backup` | Durable backup-preserving rebuild. | `aha corpus rebuild` |
-
-### Whole-system inspection
-
-`aha status` becomes the single normal inspection command. It is read-only and accepts optional explicit endpoints:
-
-```bash
-aha status \
-  --store 'r2:team-history' \
-  --library "$HOME/aha-history" \
-  --json
+```text
+Agent histories → Archive → Workspace
 ```
 
-It reports:
+Workspace processing never flows back into the Archive implicitly. If processing outputs later need sharing, they must become a separately designed artifact type and explicit operation.
 
-- build/product version;
-- configured sources and discovered counts;
-- store state and whether it is selected;
-- machine IDs and latest manifest identities;
-- historical manifest count separately from latest snapshots;
-- library state and ingested latest vector;
-- per-machine behind/current status;
-- one typed next transition, or `null` when current;
-- safe configuration field/reason metadata, never values.
+## 2. Why Archive, not Depot
 
-`aha doctor` is removed. Unexpected diagnostics belong in `aha status --diagnose`; ordinary onboarding must not require a separate diagnostic mental model.
+**Archive** communicates:
 
-### Retrieval and serving
+- durable retention;
+- historical authority;
+- recovery value;
+- aggregation across machines;
+- local or remote backing without changing the model.
 
-`search`, `read`, `incidents`, `conflicts`, `serve`, and `mcp` remain. They use one flag, `--library`; the misleading `--repo` and implementation-oriented `--corpus` aliases are removed.
+**Depot** suggests a temporary transit or staging location. That conflicts with immutable content-addressed history, historical manifests, and the no-GC retention policy.
 
-### Initialization and privacy
+The implementation may retain `depot` package names temporarily during refactoring, but public commands, config, JSON, errors, and documentation use **Archive** only.
 
-`aha init --acknowledge-raw-history` creates the config, initializes the default local store, and prepares the default library destination. The acknowledgement name states the actual invariant: store snapshots retain raw provenance even when library projections are redacted.
+## 3. What a Workspace is
 
-The first local journey becomes:
+A Workspace is not a byte-for-byte mirror of an Archive. It materializes a selected Archive view—by default, each machine's latest complete snapshot—plus derived local processing state:
 
-```bash
-aha init --acknowledge-raw-history
-aha sync
-aha search 'query'
+```text
+Archive latest vector
+  machine-a → sha-A2
+  machine-b → sha-B4
+
+Workspace materialized vector
+  machine-a → sha-A1
+  machine-b → sha-B4
 ```
 
-## 4. Explicit state model
+The Workspace is behind because machine A differs.
 
-Selection is configuration, not a store lifecycle state. “Selected” is therefore an orthogonal property in status output.
+Formally:
 
-### 4.1 Store inspection and lifecycle
+```text
+Workspace is current
+⇔
+for every machine in Archive.latest,
+Workspace.materialized[machine] == Archive.latest[machine]
+```
+
+A Workspace persists:
+
+- Archive identity and address identity;
+- materialized machine/snapshot vector;
+- Workspace schema version;
+- raw content required for evidence reads;
+- SQLite/FTS and future derived processing state.
+
+A Workspace bound to Archive A cannot silently download from Archive B. Rebinding requires a separately designed backup-preserving transition; it is not part of 0.2.
+
+## 4. The two observable gaps
+
+The system has two independent lag dimensions:
+
+```text
+Agent histories ───────▶ Archive ───────▶ Workspace
+              upload gap        download gap
+```
+
+### Upload gap
+
+Does the Archive contain this machine's current agent-history state?
+
+```text
+unchanged since latest Archive snapshot → uploaded/current
+changed or never uploaded              → upload needed
+```
+
+### Download gap
+
+Does the Workspace materialize the Archive's selected latest vector?
+
+```text
+Workspace vector == Archive vector → current
+Workspace vector != Archive vector → download needed
+```
+
+Combined system states:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> RawStoreInput
-    RawStoreInput --> InvalidAddress: parse fails
-    RawStoreInput --> InvalidConfiguration: address valid; config missing/placeholder/conflicting
-    RawStoreInput --> Unreachable: config valid; read probe fails
-    RawStoreInput --> Uninitialized: reachable; marker absent
-    RawStoreInput --> ReadyEmpty: marker/index valid; no latest snapshots
-    RawStoreInput --> ReadyPopulated: marker/index/latest vector valid
-    RawStoreInput --> Degraded: marker/index/pointer/manifest invariant fails
+    [*] --> Current
 
-    Uninitialized --> ReadyEmpty: store init
-    ReadyEmpty --> ReadyPopulated: push
-    ReadyPopulated --> ReadyPopulated: push new latest
-    ReadyEmpty --> Degraded: external damage
-    ReadyPopulated --> Degraded: external damage
-    Degraded --> ReadyPopulated: owner re-push when repairable
+    Current --> UploadNeeded: local agent history changes
+    Current --> DownloadNeeded: another machine uploads
+    Current --> UploadAndDownloadNeeded: both happen
+
+    UploadNeeded --> DownloadNeeded: archive upload succeeds
+    DownloadNeeded --> Current: archive download succeeds
+
+    UploadAndDownloadNeeded --> DownloadNeeded: archive upload succeeds
+    UploadAndDownloadNeeded --> UploadNeeded: download old Archive state
+```
+
+There is deliberately no `sync` command in 0.2. Upload and download are explicit independent transitions. Users may compose them in a shell only when that is their intent:
+
+```bash
+aha archive upload && aha archive download
+```
+
+Removing `sync` avoids an atomicity fiction and the `UploadCommittedDownloadPending` partial state from the public command surface.
+
+## 5. Final 0.2 command surface
+
+### Archive lifecycle and transfer
+
+```bash
+aha archive init [ARCHIVE]
+aha archive select ARCHIVE
+aha archive status [ARCHIVE]
+aha archive upload [ARCHIVE]
+aha archive download [ARCHIVE] --workspace PATH
+aha archive verify [ARCHIVE] [--deep]
+aha archive export [ARCHIVE] --machine ID --out FILE
+```
+
+### Workspace lifecycle and processing
+
+```bash
+aha workspace status [PATH]
+aha workspace verify [PATH] [--repair-fts]
+aha workspace repair [PATH] --backup
+aha workspace import BUNDLE... [--workspace PATH]
+```
+
+### Whole-system inspection and retrieval
+
+```bash
+aha status [--archive ARCHIVE] [--workspace PATH]
+aha search [--workspace PATH] QUERY
+aha read [--workspace PATH] REF
+aha incidents [--workspace PATH]
+aha conflicts [--workspace PATH]
+aha serve [--workspace PATH]
+aha mcp [--workspace PATH]
+```
+
+### Initial local setup
+
+```bash
+aha init --acknowledge-raw-history
+```
+
+`aha init` writes config, assigns a stable machine ID, configures agent-history roots, initializes the default local Archive, and prepares the default Workspace destination. The first Archive download creates the Workspace database/materialization.
+
+## 6. Commands deliberately removed
+
+| Removed command/term | Replacement/reason |
+|---|---|
+| `snapshot` | `archive upload`; snapshot remains a domain noun |
+| `refresh` | no replacement; explicit upload then download |
+| no-path `ingest` | `archive download` |
+| bundle-taking `ingest` | `workspace import` |
+| `depot` | `archive` |
+| `corpus` | `workspace` |
+| `doctor` | unified read-only `status` |
+| top-level `verify` | `archive verify` or `workspace verify` |
+| `sync` | removed to avoid hidden composition/partial completion |
+| `snapshots`/`ls` command | folded into `archive status` |
+| `optimize`/`vacuum` command | removed from public lifecycle; automatic/internal maintenance |
+| `rebuild` command name | `workspace repair --backup` |
+| `--depot` | `--archive` |
+| `--corpus`, `--repo` | `--workspace` |
+| `--accept-secrets` | `--acknowledge-raw-history` |
+
+No compatibility aliases or deprecation period are planned.
+
+## 7. Why the retained commands remain
+
+### `archive init` — retain
+
+Initialization is a real durable state transition:
+
+```text
+reachable uninitialized location
+  → write Archive marker/index
+  → initialized empty Archive
+```
+
+Upload/download must not auto-initialize. An uninitialized Archive returns one explicit next transition: `aha archive init ARCHIVE`.
+
+R2 bucket creation remains external. Ordinary object credentials do not imply bucket-administration authority.
+
+### `archive export` — retain
+
+Export serves a distinct offline portability job:
+
+```text
+one selected Archive snapshot → one portable bundle file
+```
+
+It is not the same as download:
+
+- download materializes a Workspace;
+- export creates a portable handoff artifact;
+- a future mirror operation would copy the complete Archive.
+
+### `verify` — retain, resource-scoped
+
+Quick invariant inspection belongs in `archive status` and `workspace status`. Explicit verification remains because deep integrity checks are expensive and because Workspace repair may be inappropriate or undesired.
+
+```bash
+aha archive verify --deep
+aha workspace verify
+aha workspace verify --repair-fts
+```
+
+### `workspace repair` — retain instead of rebuild
+
+Users care that the Workspace is repaired, not that one implementation strategy rebuilds it. The transition remains backup-preserving:
+
+```text
+Damaged Workspace
+  → lock
+  → materialize sibling replacement from Archive
+  → verify and sync replacement
+  → atomic exchange
+  → preserve old Workspace as backup
+  → Current Workspace
+```
+
+### `sync` — remove
+
+It is only shorthand for two valid commands and introduces a partial-completion state. With no users, the simpler explicit lifecycle wins.
+
+### `snapshots` — remove as a command
+
+Archive status includes machine/latest rows and aggregate historical counts. Detailed historical browsing can be introduced later only when there is a concrete user journey.
+
+### `optimize` — remove
+
+SQLite vacuum/optimization is implementation maintenance, not a primary product transition. It should be automatic, internal, or introduced later under an explicitly advanced maintenance surface if evidence demands it.
+
+## 8. Archive operation contracts
+
+### `archive status`
+
+Read-only. It answers:
+
+- address/config validity;
+- credential field/reason state without values;
+- reachability;
+- initialized/empty/populated/damaged state;
+- selected-default status;
+- machines and each latest snapshot;
+- aggregate historical manifest/blob counts when cheaply available;
+- optional Workspace relationship;
+- one next transition or `null`.
+
+It replaces setup, doctor Archive diagnostics, list, and metadata-only verification.
+
+### `archive init`
+
+Required state: reachable and uninitialized.
+
+Writes only marker/index initialization state. It neither uploads agent history nor changes the selected default unless `archive select` is run separately.
+
+Postcondition: initialized empty Archive.
+
+### `archive select`
+
+Required state: initialized, healthy Archive.
+
+Writes local config only. It never changes Archive contents.
+
+### `archive upload`
+
+```text
+read local agent histories
+  → compare with this machine's Archive latest
+  → upload unknown content-addressed blobs
+  → publish immutable manifest
+  → conditionally advance this machine's latest pointer/index
+```
+
+Preflight displays safe observable scope:
+
+```text
+Archive
+machine ID
+agent-history roots and discovered file counts
+new/existing/carried blobs
+```
+
+It never opens or changes a Workspace.
+
+Postcondition:
+
+```text
+Archive.latest[this machine] == published snapshot
+```
+
+### `archive download`
+
+```text
+read Archive marker/index/latest vector
+  → prove Workspace destination ownership
+  → compare Archive and Workspace vectors
+  → fetch unknown blobs
+  → parse/index into Workspace
+  → record materialized vector
+```
+
+Default scope: every machine's latest complete snapshot. Historical snapshots remain Archive-only.
+
+Preflight reports:
+
+```text
+Archive identity
+Workspace path/state
+machines/latest snapshots selected
+unknown blobs and known bytes
+historical snapshots excluded
+```
+
+It never reads local agent histories and never writes the Archive.
+
+Postcondition:
+
+```text
+Workspace.materialized == planned Archive.latest
+```
+
+### `archive verify`
+
+Read-only. Quick status already checks marker/index/latest invariants. Explicit verify performs a stable audit; `--deep` downloads and hashes durable blob/history content.
+
+### `archive export`
+
+Read-only Archive operation plus one explicit output-file write. It resolves one machine/latest snapshot and materializes a portable bundle. It does not create/update a Workspace.
+
+## 9. Archive lifecycle
+
+Selection is local configuration, not an Archive lifecycle state.
+
+```mermaid
+stateDiagram-v2
+    [*] --> RawArchiveInput
+    RawArchiveInput --> InvalidAddress: parse fails
+    RawArchiveInput --> InvalidConfiguration: missing/placeholder/conflicting field
+    RawArchiveInput --> Unreachable: read probe fails
+    RawArchiveInput --> Uninitialized: reachable, marker absent
+    RawArchiveInput --> Empty: initialized, no latest snapshots
+    RawArchiveInput --> Populated: initialized, latest snapshots present
+    RawArchiveInput --> Damaged: invariant fails
+
+    Uninitialized --> Empty: archive init
+    Empty --> Populated: archive upload
+    Populated --> Populated: archive upload
+
+    Empty --> Empty: archive download (read-only)
+    Populated --> Populated: archive download (read-only)
+
+    Empty --> Damaged: external damage
+    Populated --> Damaged: external damage
+    Damaged --> Populated: owner upload when repairable
 
     InvalidAddress --> [*]
     InvalidConfiguration --> [*]
     Unreachable --> [*]
 ```
 
-Closed Go variants should represent this result, rather than maps containing combinations of `ok`, `initialized`, `error`, and `problems`:
+User-facing states:
 
-```go
-type StoreState interface { storeState() }
-type InvalidStoreAddress struct { /* safe reason only */ }
-type InvalidStoreConfig struct { Field ConfigField; Reason ConfigReason }
-type UnreachableStore struct { Class ReachabilityClass }
-type UninitializedStore struct { Target InitializableStore }
-type ReadyStore struct { Reader StoreReader; Writer StoreWriter; Latest LatestVector }
-type DegradedStore struct { Reader StoreReader; Problems []StoreProblem }
+```text
+invalid_address
+invalid_configuration
+unreachable
+uninitialized
+empty
+populated
+damaged
 ```
 
-Only `ReadyStore` can construct push/pull plans. Only `UninitializedStore` can initialize. Raw addresses and generic `*V2` handles do not reach mutation code.
+Use `damaged`, not the vague `degraded`, in public output.
 
-### 4.2 Library lifecycle
+## 10. Workspace lifecycle
+
+A Workspace is bound to exactly one Archive identity.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> RawLibraryInput
-    RawLibraryInput --> InvalidDestination: overlaps source or unrelated non-empty directory
-    RawLibraryInput --> Absent: valid dedicated path; not created
-    RawLibraryInput --> Empty: owned library; zero snapshots
-    RawLibraryInput --> Current: ingested latest vector equals store latest vector
-    RawLibraryInput --> Behind: store latest vector has unknown identities
-    RawLibraryInput --> Degraded: SQLite/blob/FTS invariant fails
+    [*] --> Absent
+    Absent --> Current: archive download
+    Current --> Behind: Archive latest vector advances
+    Behind --> Current: archive download
 
-    Absent --> Empty: initialize library
-    Empty --> Current: successful pull
-    Current --> Behind: store publishes a newer latest
-    Behind --> Current: successful pull
-    Empty --> Degraded: local damage
-    Current --> Degraded: local damage
-    Behind --> Degraded: local damage
-    Degraded --> Current: verified rebuild from ready store
+    Current --> Damaged: local invariant failure
+    Behind --> Damaged: local invariant failure
+    Damaged --> Current: workspace repair
+
+    Absent --> InvalidDestination: unrelated non-empty directory/source overlap
+    Current --> ArchiveMismatch: download requested from another Archive
+    Behind --> ArchiveMismatch: download requested from another Archive
 
     InvalidDestination --> [*]
+    ArchiveMismatch --> [*]
 ```
 
-A library stores an **ingested latest vector** keyed by machine ID. This makes “current” precise:
+User-facing states:
 
 ```text
-current ⇔ for every machine in store.latest,
-          library.snapshots contains store.latest[machine]
+absent
+current
+behind
+damaged
+archive_mismatch
+invalid_destination
 ```
 
-Historical store manifests are not implicitly pulled. Status reports them separately so “latest complete snapshots” cannot be confused with “every historical snapshot version.”
+An Archive with zero snapshots can produce `current` with `snapshots: 0`; content count is not a lifecycle state.
 
-### 4.3 Command execution lifecycle
+## 11. Mutating-command execution lifecycle
 
-Every mutating command follows the same state machine:
+Every mutation uses the same construction sequence:
 
 ```mermaid
 stateDiagram-v2
     [*] --> ParseInputs
     ParseInputs --> RejectedNoEffects: invalid explicit address/flag
     ParseInputs --> LocalPreflight
-    LocalPreflight --> RejectedNoEffects: invalid config/source/destination
+    LocalPreflight --> RejectedNoEffects: invalid config/history/destination
     LocalPreflight --> RemoteInspection
-    RemoteInspection --> RejectedNoEffects: denied/unreachable/uninitialized/degraded
+    RemoteInspection --> RejectedNoEffects: denied/unreachable/uninitialized/damaged
     RemoteInspection --> Planned
     Planned --> DryRunComplete: --dry-run
     Planned --> Mutating: execute
@@ -233,164 +485,206 @@ stateDiagram-v2
 Required postcondition:
 
 ```text
-state ∈ {ParseInputs, LocalPreflight, RemoteInspection, RejectedNoEffects}
-⇒ zero local and remote mutations
+state before Mutating
+⇒ zero local config, Archive, Workspace, SQLite, lock, or source mutations
 ```
 
-Planning returns typed capabilities:
+Effectful code accepts opaque constructed capabilities, never raw strings:
 
 ```go
-type PushPlan struct { Sources ReadableSources; Store WritableReadyStore }
-type PullPlan struct { Store ReadableReadyStore; Library WritableLibraryDestination }
-type SyncPlan struct { Push PushPlan; PullDestination WritableLibraryDestination }
+type ReadyArchiveReader interface { /* sealed */ }
+type ReadyArchiveWriter interface { /* sealed */ }
+type OwnedWorkspaceDestination interface { /* sealed */ }
+type UploadPlan interface { /* sealed */ }
+type DownloadPlan interface { /* sealed */ }
 ```
 
-Zero values are invalid and every effectful method rejects them.
+Zero values and externally manufactured implementations cannot authorize effects.
 
-### 4.4 Honest sync outcomes
+## 12. Status model
 
-`sync` is composition, not an atomic fiction. A successful push followed by a failed pull must not render as a generic total failure:
-
-```mermaid
-stateDiagram-v2
-    [*] --> PlannedSync
-    PlannedSync --> PushFailed: push commits nothing
-    PlannedSync --> PushCommitted: push succeeds
-    PushCommitted --> Synced: pull succeeds
-    PushCommitted --> PushCommittedPullPending: pull fails or is cancelled
-
-    PushFailed --> [*]
-    Synced --> [*]
-    PushCommittedPullPending --> [*]
-```
-
-The partial outcome includes one next transition: rerun `aha pull`, not rerun the already-committed push blindly.
-
-## 5. Command contracts
-
-| Command | Required constructed state | Writes | Success postcondition |
-|---|---|---|---|
-| `store status` | explicit/default address | none | one closed `StoreState` |
-| `store init` | `UninitializedStore` | marker/index only | `ReadyEmpty` |
-| `store select` | `ReadyStore` | config pointer only | selected address equals inspected address |
-| `push` | `PushPlan` | store blobs/manifest/latest/index | this machine latest equals published manifest |
-| `pull` | `PullPlan` | library blobs/SQLite/FTS | library contains the planned latest vector |
-| `sync` | `SyncPlan` | push writes, then library writes | `Synced` or explicit `PushCommittedPullPending` |
-| `import` | validated bundles + library destination | library only | every accepted bundle identity recorded |
-| `status` | optional inspected store/library/source states | none | coherent system snapshot from one model |
-
-## 6. Status JSON sketch
+`aha status` is the one normal inspection command. It combines agent-history observation, Archive state, and Workspace relationship without mutation.
 
 ```json
 {
   "schema": "aha.status.v2",
   "version": "0.2.0",
-  "sources": {
-    "state": "ready",
-    "enabled": 3,
-    "session_files": 214
+  "agent_history": {
+    "state": "upload_needed",
+    "machine": "mac.mynet",
+    "files": 214
   },
-  "store": {
-    "state": "ready",
+  "archive": {
+    "state": "populated",
     "kind": "r2",
     "selected": false,
     "machines": 2,
     "latest_snapshots": 2,
     "historical_manifests": 7
   },
-  "library": {
-    "state": "current",
-    "machines_current": 2,
-    "machines_behind": 0,
+  "workspace": {
+    "state": "behind",
+    "archive_matches": true,
+    "machines_current": 1,
+    "machines_behind": 1,
     "sessions": 2844
   },
-  "next_action": null
+  "system_state": "upload_and_download_needed",
+  "next_action": {
+    "command": "aha",
+    "args": ["archive", "upload"]
+  }
 }
 ```
 
-State-specific fields are closed variants in Go and discriminated objects in JSON. Impossible combinations such as `state:"ready"` plus `initialized:false` cannot be emitted.
+Impossible combinations such as `state:"current"` with `archive_matches:false` are excluded by closed internal variants and discriminated JSON output.
 
-## 7. Implementation sequence
+## 13. Build identity
 
-### Phase 1 — model before commands
+`aha version --json` must identify the running build, not only the product version:
 
-1. Add sealed store, library, operation, and sync-outcome variants.
+```json
+{
+  "version": "0.2.0",
+  "commit": "4c482a3",
+  "built_at": "2026-07-11T22:40:20Z",
+  "dirty": false
+}
+```
+
+Development builds use linker-injected commit/build metadata with safe fallbacks. This prevents stale installed binaries from masquerading as the current checkout.
+
+## 14. Expected journeys
+
+### First local use
+
+```bash
+aha init --acknowledge-raw-history
+aha archive upload
+aha archive download --workspace "$HOME/.aha/workspace"
+aha search 'query'
+```
+
+### Upload to an existing shared R2 Archive
+
+```bash
+aha archive status 'r2:team-history'
+aha archive upload 'r2:team-history'
+```
+
+No init/select step is required when the Archive already exists and an explicit address is supplied.
+
+### Aggregate every machine locally
+
+```bash
+aha archive status 'r2:team-history'
+aha archive download 'r2:team-history' \
+  --workspace "$HOME/aha-all-history"
+aha status \
+  --archive 'r2:team-history' \
+  --workspace "$HOME/aha-all-history"
+```
+
+### Portable handoff
+
+```bash
+aha archive export 'r2:team-history' \
+  --machine work-mac \
+  --out work-mac.tar.zst
+aha workspace import work-mac.tar.zst \
+  --workspace "$HOME/aha-work"
+```
+
+### Repair local processing state
+
+```bash
+aha workspace verify "$HOME/aha-work"
+aha workspace repair "$HOME/aha-work" --backup
+```
+
+## 15. Implementation sequence
+
+Implementation starts only after this model is accepted.
+
+### Phase 1 — closed state model
+
+1. Add sealed Archive, Workspace, upload/download plan, and status variants.
 2. Replace internal `map[string]any` state assembly with typed views.
-3. Add exhaustive model tests for every state/transition pair.
-4. Add model-gap tests proving zero values cannot authorize effects.
-5. Derive `next_action` from the transition model, deleting command-specific next-action branches.
+3. Persist Archive identity and materialized snapshot vector in each Workspace.
+4. Derive all next actions from one transition table.
+5. Add exhaustive state/command tests and zero-value capability model-gap tests.
 
-Exit criterion: all old commands still work internally, but status/transition decisions come from one typed model.
+Exit: old commands may still call new internals, but all state decisions come from one model.
 
-### Phase 2 — unified inspection
+### Phase 2 — inspection and planning
 
-1. Implement `store status`, `library status`, and unified `status`.
-2. Compute latest vectors and per-machine behind state without blob downloads.
-3. Separate latest and historical manifest counts.
-4. Add `--dry-run` plans for push, pull, and sync.
+1. Implement unified `status` and `archive status`.
+2. Add exact build identity.
+3. Add upload/download dry-run plans with known machine/snapshot/blob/byte counts.
+4. Add Workspace Archive-mismatch enforcement.
 
-Exit criterion: one command answers the complete state question from this onboarding session.
+Exit: every mutating journey can be fully inspected without effects.
 
-### Phase 3 — replace the command surface
+### Phase 3 — replace the CLI atomically
 
-1. Implement `push`, `pull`, `sync`, and `import` over typed plans.
-2. Implement `store` and `library` command groups.
-3. Rename `--depot`→`--store`, `--corpus`/`--repo`→`--library`.
-4. Remove `snapshot`, `refresh`, `ingest`, `depot`, `corpus`, `doctor`, and their aliases in the same change.
-5. Regenerate CLI docs and TypeScript surfaces from the registry.
+1. Implement the final Archive and Workspace command groups.
+2. Replace config keys with `archive` and `workspace_dir`.
+3. Replace flags with `--archive` and `--workspace`.
+4. Remove every old command, flag, alias, error action, JSON field, and documentation reference in the same change.
+5. Regenerate command and TypeScript surfaces.
 
-Exit criterion: only the 0.2 vocabulary appears in help, docs, JSON schemas, errors, and next actions.
+Exit: only 0.2 vocabulary is reachable.
 
-### Phase 4 — journeys and release evidence
+### Phase 4 — journey evidence
 
-1. Rewrite onboarding around the five directional verbs.
-2. Run local-first, existing-R2 pull, contribute-only push, two-machine sync, bundle handoff, denied credential, cancellation, and partial-sync journeys.
-3. Run fake-R2 model tests and the pinned live R2 smoke suite.
-4. Verify Linux/Darwin/Windows builds and MCP/HTTP status parity.
+1. Run local Archive, existing R2 upload, pull-only aggregation, repeated no-op download, portable handoff, denied credential, unsafe destination, Archive mismatch, cancellation, repair, and deep-verify journeys.
+2. Run fake-R2 model tests and the pinned live R2 smoke suite.
+3. Verify Linux/Darwin/Windows builds and MCP/HTTP status parity.
 
-Exit criterion: every documented command is executable as written and every state transition has a deterministic oracle.
+Exit: every documented command runs as written and every invalid transition proves zero effects.
 
-## 8. Required tests
+## 16. Required tests
 
-### Exhaustive state-machine tests
+- Exhaustively enumerate every `(ArchiveState, operation)` and `(WorkspaceState, operation)` pair.
+- Valid transitions produce exactly the declared next state.
+- Invalid transitions return typed rejections and zero filesystem/SQLite/config/Archive operations.
+- Upload never opens or mutates a Workspace.
+- Download never reads agent histories or writes the Archive.
+- Repeated upload/download report meaningful no-op outcomes.
+- Download defaults to every machine's latest complete snapshot and explicitly reports excluded historical manifests.
+- Workspace Archive mismatch is unrepresentable in mutating code.
+- `archive status` agrees with unified `status` for the same inspected state.
+- Old commands and flags fail as unknown; no compatibility aliases remain.
+- Build identity distinguishes stale binaries with the same product version.
 
-Enumerate every `(state, command)` pair:
+## 17. Non-goals for 0.2
 
-- valid transitions must produce the declared next state;
-- invalid transitions must return a typed rejection;
-- all preflight rejections must leave filesystem, SQLite, store operation log, and config unchanged;
-- zero-value capabilities must fail before effects;
-- cancellation at each effect boundary must leave a valid recoverable state;
-- `sync` must distinguish `PushFailed`, `Synced`, and `PushCommittedPullPending`.
-
-### Public journey tests
-
-1. `init → sync → search → read` on one machine.
-2. `pull --from r2:... --into ...` on a machine with no sources.
-3. Two machines push; a third library pulls both.
-4. Repeated pull is a no-op with an explicit “already current” summary.
-5. Bare store address, placeholder credential, denied remote, and unrelated library directory all produce zero effects and exact safe corrections.
-6. `status` agrees with `store status` and `library status` from the same state.
-7. Old command names fail as unknown commands; no compatibility aliases remain.
-
-## 9. Non-goals for 0.2
-
+- full byte-for-byte Archive mirroring;
+- historical-snapshot Workspace browsing;
+- Workspace-to-Archive processing-result publication;
+- Archive deletion or garbage collection;
 - semantic/vector search;
-- depot garbage collection;
 - automatic R2 bucket creation with ordinary object credentials;
-- pulling every historical manifest into the active library;
 - credential persistence in aha config;
 - fabricated ETAs.
 
-## 10. Definition of done
+## 18. Definition of done
 
-Version 0.2 is complete when a new user can accurately predict these commands without learning internal storage names:
+A user can predict the system from this diagram alone:
 
-```bash
-aha push --to r2:team-history
-aha pull --from r2:team-history --into ~/aha-history
-aha sync --with r2:team-history --library ~/aha-history
-aha status --store r2:team-history --library ~/aha-history
+```text
+Agent histories --archive upload--> Archive --archive download--> Workspace
 ```
 
-The implementation must make every precondition structural, every partial outcome explicit, every status combination representable by one closed variant, and every preflight rejection side-effect free.
+They can answer:
+
+- where durable truth lives;
+- what is aggregated across machines;
+- what exists locally for processing;
+- which operation mutates which resource;
+- whether the Workspace is current;
+- whether historical snapshots are included;
+- what happened after cancellation/failure;
+- which exact next transition is valid.
+
+The implementation is complete only when those answers are structural properties of closed states and capabilities, not conventions explained after an error.

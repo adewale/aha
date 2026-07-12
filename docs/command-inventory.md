@@ -1,6 +1,6 @@
 # Command inventory
 
-This is the human command inventory for the current implementation: what each command is for and when to reach for it. Version 0.2 will deliberately replace this surface with the directional `push`/`pull`/`sync`/`import` and `store`/`library` model in [`command-state-machine-v0.2-plan.md`](command-state-machine-v0.2-plan.md); no compatibility aliases are planned. For generated usage strings, flags, examples, and JSON contracts, see `docs/commands.md`.
+This is the human command inventory for the current implementation: what each command is for and when to reach for it. Version 0.2 will deliberately replace this surface with the `Agent histories → Archive → Workspace` model in [`command-state-machine-v0.2-plan.md`](command-state-machine-v0.2-plan.md): explicit `archive upload`/`archive download`, Archive lifecycle commands, and local Workspace processing; no compatibility aliases are planned. For generated usage strings, flags, examples, and JSON contracts, see `docs/commands.md`.
 
 ## Daily retrieval and analysis
 
