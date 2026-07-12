@@ -10,7 +10,7 @@ Use this guide to manually turn `aha` incidents and evidence refs into the right
 
 - CLI: `aha analyse failures`, `aha search`, `aha show`.
 - Dashboard: `aha dashboard` → **Failures** for recurring failures, **Search** for trace/evidence review, **Sources** for scope/trust.
-- MCP: `incidents`, `incident_trajectory`, `search`, `read`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`.
+- MCP: `analyse_failures`, `analyse_failure_trajectory`, `search`, `show`, `overview`, `status`, `workspace_verify`, `workspace_conflicts`, `workspace_size`, `aha_capabilities`.
 - TypeScript client: `clients/typescript/` wrappers for MCP/HTTP/code-mode runtimes.
 
 `aha` does **not** currently choose or write the final artefact for you. It gives you ranked incidents, normalized fix paths, and stable evidence refs so a human or agent can decide what to create.
@@ -22,7 +22,7 @@ Use this guide to manually turn `aha` incidents and evidence refs into the right
 | Deterministic operational sequence | Runbook | The answer is a repeatable checklist or command order. | GitHub CI triage: list runs → inspect logs → fix → rerun/check → merge. |
 | Reusable judgment, habit, or review lens | Skill | The answer is when/how to think, inspect, or critique. | Exact edit hygiene; testing quality review; frontend slop avoidance. |
 | Broad, parallel, high-uncertainty work | Dynamic workflow | The answer needs fan-out, independent attempts, synthesis, or adversarial review. | Large codebase audit; multi-angle PR review; dead-code discovery. |
-| Repeated tool friction with narrow fixability | Tool/platform fix | The answer should remove the failure mode from the system. | Better `read` bounds, safer edit previews, card layout containment tests. |
+| Repeated tool friction with narrow fixability | Tool/platform fix | The answer should remove the failure mode from the system. | Better `show` bounds, safer edit previews, card layout containment tests. |
 | High-pain pattern with weak or missing fix evidence | Investigation backlog | The pattern is real, but the remedy is not proven yet. | Repeated unresolved browser flake or merge conflict with no reliable path. |
 
 ## Decision rules
@@ -81,7 +81,7 @@ Dynamic workflows are usually too expensive for simple command loops. Prefer a r
 
 Common signals:
 
-- `read` offset errors;
+- `show` offset errors;
 - `edit oldText` mismatch patterns;
 - shell quoting failures that a wrapper could avoid;
 - dashboard cards overflowing or overlaying neighbors;
@@ -105,7 +105,7 @@ aha status --json
 aha workspace verify --json
 ```
 
-Use `status` to see corpus size, sources, redaction levels, and whether the data is large enough to trust. Use `verify` before drawing conclusions from an old corpus.
+Use `status` to see Workspace size, sources, redaction levels, and whether the data is large enough to trust. Use `aha workspace verify` before drawing conclusions from an old Workspace.
 
 ### 2. Find high-pain patterns
 
@@ -139,11 +139,11 @@ Every incident carries a `sample_ref`. Resolved incidents may also include path 
 aha show 'msg:v1:...' --before 3 --after 10 --md
 ```
 
-Treat search snippets and incident summaries as leads. Treat `read` output as evidence.
+Treat search snippets and incident summaries as leads. Treat `show` output as evidence.
 
 ### 5. Inspect the fix trajectory
 
-For a resolved path, use `sample_ref` plus `sample_ordinal` with the MCP/HTTP `incident_trajectory` surface. From the dashboard, click **trace** on a fix path.
+For a resolved path, use `sample_ref` plus `sample_ordinal` with the MCP/HTTP `analyse_failure_trajectory` surface. From the dashboard, click **trace** on a fix path.
 
 For agents using MCP, call:
 

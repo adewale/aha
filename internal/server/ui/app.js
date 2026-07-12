@@ -36,7 +36,7 @@ async function call(path, init) {
 
 async function refreshStatus() {
   try {
-    const s = await call("/api/status");
+    const s = await call("/api/v2/status");
     $("status-strip").textContent =
       `${s.sessions || 0} sessions · ${s.entries || 0} entries · ${s.messages || 0} messages · ${s.artifacts || 0} artifacts · ${s.snapshots || 0} snapshots`;
   } catch (e) {
@@ -46,7 +46,7 @@ async function refreshStatus() {
 
 async function refreshConflicts() {
   try {
-    const rows = await call("/api/conflicts");
+    const rows = await call("/api/v2/workspace/conflicts");
     const el = $("conflicts");
     if (!rows || !rows.length) {
       el.innerHTML = `<li class="muted">no quarantined conflicts</li>`;
@@ -68,7 +68,7 @@ async function refreshConflicts() {
 // project composition, time span, and index size: "what am I looking at?".
 async function refreshOverview() {
   try {
-    const o = await call("/api/overview");
+    const o = await call("/api/v2/overview");
     const chips = (label, arr) =>
       `<div class="ov-row"><span class="ov-label">${label}</span>` +
       (arr && arr.length
@@ -150,7 +150,7 @@ async function refreshIncidents() {
     if (incidentState !== "all") args.state = incidentState;
     setIncidentFeedback(`Loading ${incidentStateLabel(incidentState).toLowerCase()} failures…`);
     $("incident-summary-status").textContent = "loading";
-    const rows = await call("/api/incidents", {
+    const rows = await call("/api/v2/analyse/failures", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
@@ -286,7 +286,7 @@ async function loadTrajectory(ref, ordinal, container) {
   container.hidden = false;
   container.innerHTML = `<span class="muted">loading trajectory…</span>`;
   try {
-    const steps = await call("/api/incident_trajectory", {
+    const steps = await call("/api/v2/analyse/failure-trajectory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref, ordinal }),
@@ -320,7 +320,7 @@ async function doSearch(ev) {
   setSearchFeedback(`Searching ${roleFilterLabel().toLowerCase()} for “${query}”…`);
   ol.innerHTML = `<li class="empty-state">Searching traces…</li>`;
   try {
-    const traces = await call("/api/search_traces", {
+    const traces = await call("/api/v2/search/traces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
@@ -468,7 +468,7 @@ async function loadRead(refText, updateHash = true, window = { before: 3, after:
     if (location.hash !== next) history.replaceState(null, "", next);
   }
   try {
-    const entries = await call("/api/read", {
+    const entries = await call("/api/v2/show", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref: refText, before: window.before, after: window.after }),

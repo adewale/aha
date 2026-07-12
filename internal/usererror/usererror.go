@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
@@ -169,6 +170,15 @@ func Normalize(err error, command string) View {
 	var legacyArchive *depot.LegacyArchiveError
 	if errors.As(err, &legacyArchive) {
 		return view(CodeUnsupportedSchema, "This location contains a v1 Archive; aha 0.2 will not modify or migrate it in place.", command, action("aha", "archive", "init", "local:~/.aha/archive-v2"), "legacy_archive", false)
+	}
+	var configSchema *config.UnsupportedSchemaError
+	var archiveFeature *depot.UnsupportedArchiveFeatureError
+	var archiveFormat *depot.UnsupportedArchiveFormatError
+	var snapshotAdapter *depot.UnsupportedSnapshotAdapterError
+	var workspaceIdentity *corpus.UnsupportedWorkspaceIdentityError
+	var workspaceSchema *corpus.UnsupportedWorkspaceSchemaError
+	if errors.As(err, &configSchema) || errors.As(err, &archiveFeature) || errors.As(err, &archiveFormat) || errors.As(err, &snapshotAdapter) || errors.As(err, &workspaceIdentity) || errors.As(err, &workspaceSchema) {
+		return view(CodeUnsupportedSchema, "Stored state requires a newer aha before it can be read or changed.", command, action("aha", "version", "--json"), "upgrade_required", false)
 	}
 	var unsupportedSchema archive.UnsupportedSchemaError
 	if errors.As(err, &unsupportedSchema) {

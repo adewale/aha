@@ -140,7 +140,7 @@ test("surfaces JSON-RPC errors as rejections", async () => {
   fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
   const tools = aha(await connecting);
 
-  const pending = tools.read({ ref: "bad" });
+  const pending = tools.show({ ref: "bad" });
   const call = fake.requests().find((m) => m.method === "tools/call")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
 
@@ -154,7 +154,7 @@ test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
   fake.emitData(frame({ jsonrpc: "2.0", id: init.id, result: {} }));
   const tools = aha(await connecting);
 
-  const pending = tools.read({ ref: "bad" });
+  const pending = tools.show({ ref: "bad" });
   const call = fake.requests().find((m) => m.method === "tools/call")!;
   fake.emitData(frame({ jsonrpc: "2.0", id: call.id, error: { code: -32000, message: "invalid ref" } }));
 
@@ -168,26 +168,26 @@ test("JSON-RPC errors surface as AhaMcpError with the wire code", async () => {
   }
 });
 
-test("HTTP transport routes typed incident and overview tools", async () => {
+test("HTTP transport routes typed failure-analysis and overview tools", async () => {
   const calls: { url: string; init: RequestInit }[] = [];
   const fakeFetch = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     calls.push({ url: String(url), init: init ?? {} });
-    const body = String(url).endsWith("/api/overview") ? "{}" : "[]";
+    const body = String(url).endsWith("/api/v2/overview") ? "{}" : "[]";
     return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
   };
   const tools = aha(connectHTTP("http://127.0.0.1:18428/", { fetch: fakeFetch as typeof fetch }));
-  await tools.incidents({ limit: 1, state: "unresolved" });
-  await tools.incident_trajectory({ ref: "msg:v1:c2s:ZTE", ordinal: 0 });
+  await tools.analyse_failures({ limit: 1, state: "unresolved" });
+  await tools.analyse_failure_trajectory({ ref: "msg:v1:c2s:ZTE", ordinal: 0 });
   await tools.overview();
   assert.equal(calls.length, 3);
-  assert.equal(calls[0].url, "http://127.0.0.1:18428/api/incidents");
+  assert.equal(calls[0].url, "http://127.0.0.1:18428/api/v2/analyse/failures");
   assert.equal(calls[0].init.method, "POST");
   assert.equal((calls[0].init.headers as Record<string, string>)["Content-Type"], "application/json");
   assert.equal(calls[0].init.body, JSON.stringify({ limit: 1, state: "unresolved" }));
-  assert.equal(calls[1].url, "http://127.0.0.1:18428/api/incident_trajectory");
+  assert.equal(calls[1].url, "http://127.0.0.1:18428/api/v2/analyse/failure-trajectory");
   assert.equal(calls[1].init.method, "POST");
   assert.equal(calls[1].init.body, JSON.stringify({ ref: "msg:v1:c2s:ZTE", ordinal: 0 }));
-  assert.equal(calls[2].url, "http://127.0.0.1:18428/api/overview");
+  assert.equal(calls[2].url, "http://127.0.0.1:18428/api/v2/overview");
   assert.equal(calls[2].init.method, "GET");
 });
 

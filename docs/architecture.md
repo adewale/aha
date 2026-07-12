@@ -87,7 +87,7 @@ workspace_materialised
   machine_id → manifest_sha256
 ```
 
-`workspace_binding` makes cross-Archive download structurally rejectable. `workspace_materialised` is the exact vector used for current/behind comparison.
+`workspace_binding` makes cross-Archive download structurally rejectable. `workspace_materialised` is the exact vector used for current/behind comparison. A checksummed `aha.workspace.identity.v1` witness outside SQLite retains the Workspace and Archive identities when SQLite is too damaged to read; unsupported witness or database schemas require an aha upgrade before mutation.
 
 Raw/evidence tables include snapshots, machines, sources, files, sessions, session versions, entries, messages, artefacts, images, tool invocations, redaction events, and conflicts. Derived tables include FTS and path-token indexes.
 
@@ -112,13 +112,14 @@ Archive:
 
 ```text
 invalid_address · invalid_configuration · unreachable · uninitialised
-empty · populated · damaged
+empty · populated · damaged · upgrade_required
 ```
 
 Workspace:
 
 ```text
 absent · current · behind · damaged · archive_mismatch · invalid_destination
+upgrade_required
 ```
 
 The implementation centralises allowed transitions in typed state tables and exhaustively tests every state/operation pair. Rejected transitions include one next action.
@@ -138,6 +139,10 @@ The implementation centralises allowed transitions in typed state tables and exh
 - `aha.error.v1`: one safe message, one next action, optional allowlisted diagnostics;
 - no raw SQL, SDK, path, endpoint, or credential-bearing causes;
 - no fabricated ETA.
+
+## Compatibility boundaries
+
+Config, Archive, Workspace, HTTP, MCP, and response schemas evolve independently. Archive write capabilities reject unknown required features; HTTP uses `/api/v2` and advertises `aha.http.v2`; MCP advertises `aha.mcp.v2`. Behaviour dates are reserved for intentional semantic gates rather than persisted byte formats. See [Compatibility policy](compatibility-policy.md).
 
 ## Build identity
 

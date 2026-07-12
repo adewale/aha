@@ -60,6 +60,34 @@ func (*LegacyArchiveError) Error() string {
 	return "Archive uses the unsupported v1 layout"
 }
 
+// UnsupportedArchiveFeatureError is returned before an Archive capability is
+// constructed. This prevents an older reader or writer from partially
+// interpreting a format that requires newer semantics.
+type UnsupportedArchiveFeatureError struct {
+	Feature string
+}
+
+func (e *UnsupportedArchiveFeatureError) Error() string {
+	return fmt.Sprintf("Archive requires unsupported feature %q; upgrade aha before using this Archive", e.Feature)
+}
+
+type UnsupportedArchiveFormatError struct {
+	FoundMajor     int
+	SupportedMajor int
+}
+
+type UnsupportedSnapshotAdapterError struct {
+	Adapter string
+}
+
+func (e *UnsupportedSnapshotAdapterError) Error() string {
+	return fmt.Sprintf("snapshot requires unsupported adapter %q; upgrade aha before materialising this Archive", e.Adapter)
+}
+
+func (e *UnsupportedArchiveFormatError) Error() string {
+	return fmt.Sprintf("Archive format major %d is not supported (this aha supports %d); upgrade aha before using this Archive", e.FoundMajor, e.SupportedMajor)
+}
+
 type ContentionError struct {
 	Key      string
 	Attempts int
@@ -358,6 +386,32 @@ type DownloadPlanSummary struct {
 
 func (p DownloadPlan) Summary(ctx context.Context, known func(model.BlobKey) (bool, error)) (DownloadPlanSummary, error) {
 	return p.SummaryDelta(ctx, nil, known)
+}
+
+// RequireAdapters checks only changed-machine manifests and does so before a
+// writable Workspace is opened. Unsupported snapshots remain durable in the
+// Archive but cannot make this Workspace falsely current.
+func (p DownloadPlan) RequireAdapters(ctx context.Context, materialised map[string]string, supported map[string]bool) error {
+	machines, err := p.Machines()
+	if err != nil {
+		return err
+	}
+	for _, machine := range machines {
+		sha := p.latest[machine]
+		if materialised[machine] == sha.String() {
+			continue
+		}
+		manifest, err := p.Manifest(ctx, machine, sha)
+		if err != nil {
+			return err
+		}
+		for _, file := range manifest.Files {
+			if !supported[file.Source] {
+				return &UnsupportedSnapshotAdapterError{Adapter: file.Source}
+			}
+		}
+	}
+	return nil
 }
 
 // SummaryDelta examines manifests only for machines whose planned latest
@@ -795,11 +849,12 @@ type ArchiveLatestMetadata struct {
 }
 
 type ArchiveMetadataReport struct {
-	Initialised bool
-	Binding     model.ArchiveBinding
-	Machines    int
-	Latest      []ArchiveLatestMetadata
-	Problems    []string
+	Initialised     bool
+	UpgradeRequired bool
+	Binding         model.ArchiveBinding
+	Machines        int
+	Latest          []ArchiveLatestMetadata
+	Problems        []string
 }
 
 // InspectMetadata validates marker, machine index, latest pointers, and latest
@@ -825,6 +880,13 @@ func (v *V2) InspectMetadata(ctx context.Context) (ArchiveMetadataReport, error)
 	report.Initialised = true
 	report.Binding, err = archiveBindingFromMarker(markerBytes, v.addr)
 	if err != nil {
+		var feature *UnsupportedArchiveFeatureError
+		var format *UnsupportedArchiveFormatError
+		if errors.As(err, &feature) || errors.As(err, &format) {
+			report.UpgradeRequired = true
+			report.Problems = append(report.Problems, "Archive requires a newer aha")
+			return report, nil
+		}
 		report.Problems = append(report.Problems, "invalid Archive marker")
 		return report, nil
 	}
@@ -876,6 +938,11 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 	}
 	if b, _, err := v.store.get(ctx, MarkerObjectKey); err == nil {
 		if err := validateMarkerV2Bytes(b); err != nil {
+			var feature *UnsupportedArchiveFeatureError
+			var format *UnsupportedArchiveFormatError
+			if errors.As(err, &feature) || errors.As(err, &format) {
+				return report, err
+			}
 			report.Problems = append(report.Problems, "invalid Archive marker")
 		}
 	} else if errors.Is(err, errObjectNotExist) {
@@ -1032,9 +1099,24 @@ func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOption
 	return report, nil
 }
 
+const archiveFormatMajor = 2
+
+var supportedArchiveFeatures = map[string]struct{}{
+	"full-manifest-v2": {},
+}
+
 func markerV2Bytes() ([]byte, error) {
 	now := ahaclock.RealClock{}.Now()
-	m := marker{Schema: MarkerSchemaV2, DepotID: fmt.Sprintf("depot-%d", now.UnixNano()), Layout: LayoutVersionV2, CreatedAt: now.Format(time.RFC3339), CreatedBy: "aha " + model.Version}
+	m := marker{
+		Schema:           MarkerSchemaV2,
+		DepotID:          fmt.Sprintf("depot-%d", now.UnixNano()),
+		Layout:           LayoutVersionV2,
+		FormatMajor:      archiveFormatMajor,
+		FormatMinor:      0,
+		RequiredFeatures: []string{"full-manifest-v2"},
+		CreatedAt:        now.Format(time.RFC3339),
+		CreatedBy:        "aha " + model.Version,
+	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return nil, err
@@ -1055,6 +1137,49 @@ func validateMarkerV2Bytes(b []byte) error {
 	}
 	if strings.TrimSpace(m.DepotID) == "" {
 		return errors.New("Archive marker identity is missing")
+	}
+	// Markers created before format_major was introduced are the baseline v2
+	// representation. This is the only implicit format upgrade.
+	major := m.FormatMajor
+	if major == 0 {
+		major = archiveFormatMajor
+	}
+	if major != archiveFormatMajor {
+		return &UnsupportedArchiveFormatError{FoundMajor: major, SupportedMajor: archiveFormatMajor}
+	}
+	seen := make(map[string]string, len(m.RequiredFeatures)+len(m.OptionalFeatures))
+	for _, feature := range m.RequiredFeatures {
+		if err := validateArchiveFeatureName(feature); err != nil {
+			return err
+		}
+		if previous, ok := seen[feature]; ok {
+			return fmt.Errorf("Archive feature %q is declared more than once (%s and required)", feature, previous)
+		}
+		seen[feature] = "required"
+		if _, ok := supportedArchiveFeatures[feature]; !ok {
+			return &UnsupportedArchiveFeatureError{Feature: feature}
+		}
+	}
+	for _, feature := range m.OptionalFeatures {
+		if err := validateArchiveFeatureName(feature); err != nil {
+			return err
+		}
+		if previous, ok := seen[feature]; ok {
+			return fmt.Errorf("Archive feature %q is declared more than once (%s and optional)", feature, previous)
+		}
+		seen[feature] = "optional"
+	}
+	return nil
+}
+
+func validateArchiveFeatureName(feature string) error {
+	if strings.TrimSpace(feature) == "" || feature != strings.TrimSpace(feature) {
+		return errors.New("Archive marker contains an invalid empty feature name")
+	}
+	for _, r := range feature {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return fmt.Errorf("Archive feature %q contains an invalid character", feature)
+		}
 	}
 	return nil
 }

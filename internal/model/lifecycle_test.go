@@ -15,6 +15,7 @@ func TestArchiveTransitionTableIsExhaustive(t *testing.T) {
 		ArchiveEmpty:                {ArchiveStatus: ArchiveEmpty, ArchiveSetDefault: ArchiveEmpty, ArchiveUpload: ArchivePopulated, ArchiveDownload: ArchiveEmpty, ArchiveVerify: ArchiveEmpty},
 		ArchivePopulated:            {ArchiveStatus: ArchivePopulated, ArchiveSetDefault: ArchivePopulated, ArchiveUpload: ArchivePopulated, ArchiveDownload: ArchivePopulated, ArchiveVerify: ArchivePopulated},
 		ArchiveDamaged:              {ArchiveStatus: ArchiveDamaged, ArchiveVerify: ArchiveDamaged},
+		ArchiveUpgradeRequired:      {ArchiveStatus: ArchiveUpgradeRequired},
 	}
 	for _, state := range AllArchiveStates() {
 		for _, operation := range AllArchiveOperations() {
@@ -38,6 +39,7 @@ func TestWorkspaceTransitionTableIsExhaustive(t *testing.T) {
 		WorkspaceDamaged:            {WorkspaceStatus: WorkspaceDamaged, WorkspaceSetDefault: WorkspaceDamaged, WorkspaceVerify: WorkspaceDamaged, WorkspaceRepair: WorkspaceCurrent, WorkspaceConflicts: WorkspaceDamaged},
 		WorkspaceArchiveMismatch:    {WorkspaceStatus: WorkspaceArchiveMismatch},
 		WorkspaceInvalidDestination: {WorkspaceStatus: WorkspaceInvalidDestination},
+		WorkspaceUpgradeRequired:    {WorkspaceStatus: WorkspaceUpgradeRequired},
 	}
 	for _, state := range AllWorkspaceStates() {
 		for _, operation := range AllWorkspaceOperations() {
@@ -76,10 +78,10 @@ func TestConfigJSONUsesOnlyV02ResourceVocabulary(t *testing.T) {
 }
 
 func TestStateSetsAreClosedAndStable(t *testing.T) {
-	if got, want := AllArchiveStates(), []ArchiveState{ArchiveInvalidAddress, ArchiveInvalidConfiguration, ArchiveUnreachable, ArchiveUninitialised, ArchiveEmpty, ArchivePopulated, ArchiveDamaged}; !reflect.DeepEqual(got, want) {
+	if got, want := AllArchiveStates(), []ArchiveState{ArchiveInvalidAddress, ArchiveInvalidConfiguration, ArchiveUnreachable, ArchiveUninitialised, ArchiveEmpty, ArchivePopulated, ArchiveDamaged, ArchiveUpgradeRequired}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("archive states=%v want %v", got, want)
 	}
-	if got, want := AllWorkspaceStates(), []WorkspaceState{WorkspaceAbsent, WorkspaceCurrent, WorkspaceBehind, WorkspaceDamaged, WorkspaceArchiveMismatch, WorkspaceInvalidDestination}; !reflect.DeepEqual(got, want) {
+	if got, want := AllWorkspaceStates(), []WorkspaceState{WorkspaceAbsent, WorkspaceCurrent, WorkspaceBehind, WorkspaceDamaged, WorkspaceArchiveMismatch, WorkspaceInvalidDestination, WorkspaceUpgradeRequired}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("workspace states=%v want %v", got, want)
 	}
 }

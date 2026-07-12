@@ -3,9 +3,11 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -15,8 +17,22 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+const SchemaV1 = "aha.config.v1"
+
+// UnsupportedSchemaError distinguishes a valid newer config from a misspelt
+// field in the current schema. Commands must refuse it before mutation.
+type UnsupportedSchemaError struct {
+	Found     string
+	Supported string
+}
+
+func (e *UnsupportedSchemaError) Error() string {
+	return "config schema " + strconv.Quote(e.Found) + " is not supported; upgrade aha before using this config"
+}
+
 func Default() model.Config {
 	return model.Config{
+		Schema:                 SchemaV1,
 		MachineID:              defaultMachineID(),
 		Sources:                defaultSources(),
 		WorkspaceDir:           "~/.aha/workspace",
@@ -76,10 +92,30 @@ func Load(path string) (model.Config, error) {
 		return cfg, err
 	}
 	ast.Standardize()
-	decoder := json.NewDecoder(bytes.NewReader(ast.Pack()))
+	packed := ast.Pack()
+	var envelope struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(packed, &envelope); err != nil {
+		return cfg, err
+	}
+	if envelope.Schema != "" && envelope.Schema != SchemaV1 {
+		return cfg, &UnsupportedSchemaError{Found: envelope.Schema, Supported: SchemaV1}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(packed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, err
+	}
+	// Configs created before schemas were explicit are the baseline v1 shape.
+	if cfg.Schema == "" {
+		cfg.Schema = SchemaV1
+	}
+	for namespace := range cfg.Extensions {
+		host, name, ok := strings.Cut(namespace, "/")
+		if !ok || !strings.Contains(host, ".") || strings.TrimSpace(host) != host || strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name {
+			return cfg, fmt.Errorf("config extension key %q must use a reverse-domain namespace such as example.com/tool", namespace)
+		}
 	}
 	return cfg, nil
 }

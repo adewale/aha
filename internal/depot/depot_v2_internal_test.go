@@ -282,6 +282,35 @@ func TestDownloadSummaryExaminesOnlyChangedMachineSnapshots(t *testing.T) {
 	}
 }
 
+func TestDownloadPlanRejectsUnsupportedAdaptersBeforeMaterialisation(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := singleFileManifest("a", "alpha")
+	manifest.Files[0].Source = "future-adapter"
+	manifest.Files[0].RelativePath = "sources/future-adapter/sessions/one.jsonl"
+	if _, err := PushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, "alpha")}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := v2.PreparePull(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := reader.PlanDownload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = plan.RequireAdapters(t.Context(), nil, map[string]bool{"pi": true})
+	var unsupported *UnsupportedSnapshotAdapterError
+	if !errors.As(err, &unsupported) || unsupported.Adapter != "future-adapter" {
+		t.Fatalf("RequireAdapters error=%v want future-adapter rejection", err)
+	}
+}
+
 func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T) {
 	base := &localStoreV2{root: t.TempDir()}
 	v2 := &V2{store: base}

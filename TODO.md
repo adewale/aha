@@ -4,8 +4,8 @@
 
 - Complete live R2 journey evidence for the new `archive` surface: existing shared Archive upload, pull-only aggregation, repeated no-op download, denied credentials, unsafe destination, cancellation, and deep verification.
 - Rename the remaining internal `depot` and `corpus` package/schema vocabulary only through explicit storage-format migrations; public 0.2 vocabulary is already Archive/Workspace.
-- Decide whether MCP wire tool names (`read`, `incidents`, `doctor`, `corpus_size`) should receive a versioned schema replacement. They are not CLI aliases and remain documented compatibility boundaries for generated clients.
-- Bring HTTP route names into the same versioned decision instead of silently breaking dashboard clients.
+- Add a config compatibility date only alongside the first real behaviour gate; define its immutable change registry, minimum supported date, upgrade command, and rollback policy together.
+- Add committed N/N+1 golden fixtures and a separately built older-binary writer test for Archive, Workspace, config, HTTP, and MCP compatibility boundaries.
 - Add release packaging that calls `make build` so commit/time/dirty metadata is always linker-injected.
 
 ## Retrieval and processing

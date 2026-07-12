@@ -148,9 +148,13 @@ func expandLocalRoot(root string) (string, error) {
 }
 
 type marker struct {
-	Schema    string `json:"schema"`
-	DepotID   string `json:"depot_id"`
-	Layout    string `json:"layout"`
-	CreatedAt string `json:"created_at"`
-	CreatedBy string `json:"created_by"`
+	Schema           string   `json:"schema"`
+	DepotID          string   `json:"depot_id"`
+	Layout           string   `json:"layout"`
+	FormatMajor      int      `json:"format_major,omitempty"`
+	FormatMinor      int      `json:"format_minor,omitempty"`
+	RequiredFeatures []string `json:"required_features,omitempty"`
+	OptionalFeatures []string `json:"optional_features,omitempty"`
+	CreatedAt        string   `json:"created_at"`
+	CreatedBy        string   `json:"created_by"`
 }

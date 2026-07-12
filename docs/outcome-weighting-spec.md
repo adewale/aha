@@ -20,12 +20,12 @@ Shipped:
   are recomputed per session at ingest from the stored `tool_invocations` and
   backfilled for existing corpora by the migration.
 - CLI — `aha analyse failures` (`internal/cli/command_incidents.go`).
-- MCP — an `incidents` tool plus `incident_trajectory` (the fail→fix arc,
+- MCP — an `analyse_failures` tool plus `analyse_failure_trajectory` (the fail→fix arc,
   disambiguated by `sample_ordinal` for multi-call entries) and `overview`
   (`internal/mcp/tools.go`), crossing the SDK transport, the HTTP
   dispatch, and the cross-SDK conformance harness.
-- HTTP — `POST /api/incidents`, `POST /api/incident_trajectory`,
-  `GET /api/overview` on the dashboard server (`internal/server/server.go`).
+- HTTP — `POST /api/v2/analyse/failures`, `POST /api/v2/analyse/failure-trajectory`,
+  `GET /api/v2/overview` on the dashboard server (`internal/server/server.go`).
 - Dashboard UI — a unified incidents section (recurrence + resolution, state
   filter, facets, sparklines, copy fix notes, trajectory drill-in) in
   `internal/server/ui/`.
@@ -243,10 +243,10 @@ manual classifier.
 
 ### MCP / HTTP / TS
 
-The same `incidents` surface is exposed as an MCP tool (with `incident_trajectory`
+The same `analyse_failures` surface is exposed as an MCP tool (with `analyse_failure_trajectory`
 for the fail→fix arc behind a resolving ref plus its `sample_ordinal`, and
-`overview` for corpus orientation), as HTTP routes (`/api/incidents`,
-`/api/incident_trajectory`, `/api/overview`), and in the generated TypeScript client — all via the existing
+`overview` for corpus orientation), as HTTP routes (`/api/v2/analyse/failures`,
+`/api/v2/analyse/failure-trajectory`, `/api/v2/overview`), and in the generated TypeScript client — all via the existing
 codegen/conformance pattern. Identities and paths are normalized command
 families / error signatures, never raw tool output, so no new redaction
 boundary is crossed.
@@ -355,7 +355,7 @@ code to pass, then refactor. No production code without a failing test first.
      paths, rates, and tiers.
    - Green: the aggregating query + top-K path selection + state classification.
 
-5. **`aha analyse failures` (CLI) and the `incidents`/`incident_trajectory`/`overview`
+5. **`aha analyse failures` (CLI) and the `analyse_failures`/`analyse_failure_trajectory`/`overview`
    tools.**
    - Red: CLI cases for human and `--json` output (incl. empty-corpus and
      state-filter paths), and HTTP/MCP endpoint + consistency cases.

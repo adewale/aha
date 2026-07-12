@@ -112,7 +112,7 @@ User question: “Show me what happened around this match.”
 Flow:
 
 1. User selects a trace card.
-2. The app calls `read` for the selected canonical ref.
+2. The app calls `show` for the selected canonical ref.
 3. **Evidence** shows structured transcript entries, not one raw preformatted blob.
 4. Evidence exposes actions to copy the canonical ref and widen transcript context.
 5. URL hash stores the selected ref for reloadable context.
@@ -203,17 +203,17 @@ Success criteria:
 
 | UI concept | API/tool backing | Notes |
 |---|---|---|
-| Search field | `POST /api/search_traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
+| Search field | `POST /api/v2/search/traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
 | Search in: Prompts | `role = "user"` | Default search mode; prompt recall comes first. |
 | Search in: All history | omit `role` | Search messages and artefacts. |
 | Search in: Assistant replies | `role = "assistant"` | Searches assistant-authored messages. |
 | Search in: Tool output | `role = "toolResult"` | Searches indexed tool-result messages. |
 | Trace cards | grouped enriched search hits | Server groups hits by `session_key`, adds counts, timeline, command chips, file chips, status, and matched events. |
-| Evidence | `POST /api/read` | Uses the clicked card's `ref_text`. |
-| Recurring failures | `POST /api/incidents` | State labels map to corpus states. |
-| Trace fix | `POST /api/incident_trajectory` | Requires sample ref and ordinal. |
-| Sources & scope | `GET /api/overview` | Counts and scope chips. |
-| Trust checks | `GET /api/conflicts` | Quarantined rows. |
+| Evidence | `POST /api/v2/show` | Uses the clicked card's `ref_text`. |
+| Recurring failures | `POST /api/v2/analyse/failures` | State labels map to corpus states. |
+| Trace fix | `POST /api/v2/analyse/failure-trajectory` | Requires sample ref and ordinal. |
+| Sources & scope | `GET /api/v2/overview` | Counts and scope chips. |
+| Trust checks | `GET /api/v2/workspace/conflicts` | Quarantined rows. |
 
 ## Interaction rules
 

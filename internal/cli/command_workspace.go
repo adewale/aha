@@ -211,6 +211,9 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		if state != model.WorkspaceDamaged {
 			return fmt.Errorf("Workspace repair requires damaged state; current state is %s", state)
 		}
+		if err := plan.RequireAdapters(ctx, nil, supportedAdapterSet()); err != nil {
+			return err
+		}
 		if *dryRun {
 			return writeWorkspaceValue(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": true, "backup": true})
 		}
@@ -326,6 +329,8 @@ func workspaceNext(state model.WorkspaceState) *nextAction {
 		args = []string{"workspace", "repair", "--backup"}
 	case model.WorkspaceArchiveMismatch, model.WorkspaceInvalidDestination:
 		args = []string{"workspace", "status"}
+	case model.WorkspaceUpgradeRequired:
+		args = []string{"version", "--json"}
 	default:
 		return nil
 	}

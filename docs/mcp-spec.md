@@ -16,24 +16,24 @@ aha mcp serve [--workspace PATH]
 - the official Go MCP SDK owns framing, schema validation, tool registration, ping, and `initialize` negotiation;
 - tool handlers are read-only and cannot publish, download, repair, or change config.
 
-## Tools
+## Contract and tools
 
-The canonical names are generated from `internal/mcp.ToolNames` and shared with the TypeScript client.
+The contract is `aha.mcp.v2`. `aha_capabilities` returns that schema, required client features, and the exact tool set. Canonical names come from `internal/mcp.ToolNames` and are shared with the TypeScript client.
 
 | Tool | Purpose |
 |---|---|
+| `aha_capabilities` | negotiate the MCP contract before relying on optional behaviour |
 | `search` | search Workspace messages and artefacts, returning stable refs |
-| `read` | retrieve window, branch, or live context for a canonical ref/session coordinate |
+| `show` | retrieve window, branch, or live context for a canonical ref/session coordinate |
 | `status` | return Workspace counts and health |
-| `verify` | run read-only Workspace invariant checks |
-| `conflicts` | list quarantined merge conflicts |
-| `corpus_size` | return local Workspace disk usage (legacy wire name retained for MCP schema compatibility) |
-| `doctor` | return local-only environment/config/source/Workspace diagnostics (legacy wire name retained) |
-| `incidents` | return recurring failure groups and resolution paths |
-| `incident_trajectory` | reconstruct a fail-to-fix arc from a sample resolving ref |
+| `workspace_verify` | run read-only Workspace invariant checks |
+| `workspace_conflicts` | list quarantined merge conflicts |
+| `workspace_size` | return local Workspace disk usage |
+| `analyse_failures` | return recurring failure groups and resolution paths |
+| `analyse_failure_trajectory` | reconstruct a fail-to-fix arc from a sample resolving ref |
 | `overview` | return Workspace composition and time/source/project summaries |
 
-These wire names are not CLI aliases. CLI processing uses `show`, `analyse failures`, resource-scoped status/verify/conflicts, and explicit `mcp check|serve`.
+The pre-launch wire names were removed rather than aliased. Tools are additive within `aha.mcp.v2`; a removed field, changed type, or changed meaning requires a new contract.
 
 ## Safety
 

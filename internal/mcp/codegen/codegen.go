@@ -44,7 +44,7 @@ func Generate() []byte {
 		t    reflect.Type
 	}{
 		{"SearchResult", reflect.TypeOf(search.Result{})},
-		{"ReadEntry", reflect.TypeOf(corpus.ReadEntry{})},
+		{"ShowEntry", reflect.TypeOf(corpus.ReadEntry{})},
 		{"VerifyProblem", reflect.TypeOf(corpus.VerifyProblem{})},
 		{"VerifyStats", reflect.TypeOf(corpus.VerifyStats{})},
 		{"VerifyReport", reflect.TypeOf(corpus.VerifyReport{})},
@@ -99,7 +99,7 @@ export type Ref = MessageRef | SessionRef | ArtifactRef;
 // refHelpers carries the parseRef/formatRef pair so TS callers can build
 // the canonical ref strings the read tool expects without copying regexes
 // from internal/model/ref.go. The wire format is the source of truth.
-const refHelpers = `// parseRef accepts the canonical ref strings the search/read tools use
+const refHelpers = `// parseRef accepts the canonical ref strings the search/show tools use
 // over the wire ("msg:v1:<base64url(sk)>:<base64url(entry)>", "session:v1:<base64url(sk)>", "artifact:v1:<sha>")
 // and returns the typed shape, or null on any malformed input.
 export function parseRef(s: string): Ref | null {
@@ -122,7 +122,7 @@ export function parseRef(s: string): Ref | null {
 
 // formatRef is the inverse of parseRef. Useful when callers have built a
 // Ref value programmatically (e.g. extracting a sha from text) and need to
-// pass it to tools.read({ref: ...}).
+// pass it to tools.show({ref: ...}).
 export function formatRef(ref: Ref): string {
   switch (ref.kind) {
     case "message":  return ["msg", "v1", b64urlEncodeText(ref.session_key), b64urlEncodeText(ref.entry_id)].join(":");
@@ -157,26 +157,30 @@ function b64urlDecodeText(s: string): string | null {
 const opaqueTypes = `// Tools whose Go return type is map[string]any are exposed loosely.
 // Callers that need stronger typing can cast at the call site.
 export type StatusReport = Record<string, unknown>;
-export type DoctorReport = Record<string, unknown>;
+export interface CapabilitiesReport {
+  schema: string;
+  required_features: string[];
+  tools: string[];
+}
 
 `
 
-// inputInterfaces emits the SearchArgs / ReadArgs TS shapes. SearchArgs
+// inputInterfaces emits the SearchArgs / ShowArgs TS shapes. SearchArgs
 // is derived from the Go SearchInput struct (so jsonschema descriptions
-// reach TS as JSDoc); ReadArgs is hand-rolled as a discriminated union
+// reach TS as JSDoc); ShowArgs is hand-rolled as a discriminated union
 // (Go can't express it natively, but the wire allows only ref XOR
 // session+entry meaningfully).
 func inputInterfaces() string {
 	var b bytes.Buffer
 	writeStructInterfaceWithDocs(&b, "SearchArgs", reflect.TypeOf(mcp.SearchInput{}))
-	writeStructInterfaceWithDocs(&b, "IncidentsArgs", reflect.TypeOf(mcp.IncidentsInput{}))
-	writeStructInterfaceWithDocs(&b, "IncidentTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
+	writeStructInterfaceWithDocs(&b, "AnalyseFailuresArgs", reflect.TypeOf(mcp.IncidentsInput{}))
+	writeStructInterfaceWithDocs(&b, "AnalyseFailureTrajectoryArgs", reflect.TypeOf(mcp.IncidentTrajectoryInput{}))
 	b.WriteString(readArgsUnion)
 	return b.String()
 }
 
 const readArgsUnion = `/**
- * ReadArgs is a discriminated union: provide either a canonical ` + "`ref`" + ` OR
+ * ShowArgs is a discriminated union: provide either a canonical ` + "`ref`" + ` OR
  * a ` + "`session`" + ` (plus optional ` + "`entry`" + `), never both. The wire form is the
  * same in either case; the union is documented to push callers toward
  * one mode.
@@ -187,7 +191,7 @@ const readArgsUnion = `/**
  * non-participating entries filtered). branch/live require ` + "`entry`" + ` as the
  * leaf to walk back from.
  */
-export type ReadArgs =
+export type ShowArgs =
   | {
       /** Canonical wire-format ref text. See parseRef/formatRef for ergonomic construction. */
       ref: string;
@@ -246,32 +250,32 @@ export function aha(transport: Transport) {
 			b.WriteString(`    search: (args: SearchArgs) =>
       transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
 `)
-		case "read":
-			b.WriteString(`    read: (args: ReadArgs) =>
-      transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
+		case "show":
+			b.WriteString(`    show: (args: ShowArgs) =>
+      transport.call("show", args as unknown as Record<string, unknown>) as Promise<ShowEntry[]>,
 `)
 		case "status":
 			b.WriteString(`    status: () => transport.call("status", {}) as Promise<StatusReport>,
 `)
-		case "verify":
-			b.WriteString(`    verify: () => transport.call("verify", {}) as Promise<VerifyReport>,
+		case "workspace_verify":
+			b.WriteString(`    workspace_verify: () => transport.call("workspace_verify", {}) as Promise<VerifyReport>,
 `)
-		case "conflicts":
-			b.WriteString(`    conflicts: () => transport.call("conflicts", {}) as Promise<Conflict[]>,
+		case "workspace_conflicts":
+			b.WriteString(`    workspace_conflicts: () => transport.call("workspace_conflicts", {}) as Promise<Conflict[]>,
 `)
-		case "corpus_size":
-			b.WriteString(`    corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
+		case "workspace_size":
+			b.WriteString(`    workspace_size: () => transport.call("workspace_size", {}) as Promise<SizeReport>,
 `)
-		case "doctor":
-			b.WriteString(`    doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
+		case "aha_capabilities":
+			b.WriteString(`    aha_capabilities: () => transport.call("aha_capabilities", {}) as Promise<CapabilitiesReport>,
 `)
-		case "incidents":
-			b.WriteString(`    incidents: (args: IncidentsArgs = {}) =>
-      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+		case "analyse_failures":
+			b.WriteString(`    analyse_failures: (args: AnalyseFailuresArgs = {}) =>
+      transport.call("analyse_failures", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
 `)
-		case "incident_trajectory":
-			b.WriteString(`    incident_trajectory: (args: IncidentTrajectoryArgs) =>
-      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+		case "analyse_failure_trajectory":
+			b.WriteString(`    analyse_failure_trajectory: (args: AnalyseFailureTrajectoryArgs) =>
+      transport.call("analyse_failure_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
 `)
 		case "overview":
 			b.WriteString(`    overview: () => transport.call("overview", {}) as Promise<Overview>,

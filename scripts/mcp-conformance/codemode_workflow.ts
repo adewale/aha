@@ -8,14 +8,14 @@
 //     const hits = await tools.search({ ... });            // 1 round-trip
 //     const refs = hits.filter(...).map(h => h.ref_text);  // local logic
 //     const ctx  = await Promise.all(refs.map(r =>          // N parallel
-//                    tools.read({ ref: r, before, after })));
+//                    tools.show({ ref: r, before, after })));
 //
 // This script proves that pattern works end-to-end against aha mcp via
 // our typed `aha-mcp.ts` surface and `connectStdio` transport:
 //
 //   1. spawn `aha mcp` as a child process;
 //   2. construct the typed `aha()` helper over the stdio Transport;
-//   3. run the canonical fan-out: search hits → filter user-role → read
+//   3. run the canonical fan-out: search hits → filter user-role → show
 //      each survivor in parallel;
 //   4. assert each step yields a typed value matching the surface contract.
 //
@@ -23,7 +23,7 @@
 // modification.
 
 import { spawn } from "node:child_process";
-import { aha, type SearchResult, type ReadEntry } from "../../clients/typescript/aha-mcp.ts";
+import { aha, type SearchResult, type ShowEntry } from "../../clients/typescript/aha-mcp.ts";
 import { connectStdio } from "../../clients/typescript/transports/stdio.ts";
 import { assertAttestedConformance } from "./attestation.ts";
 
@@ -56,20 +56,20 @@ async function main() {
   const refs = userRefs.length > 0 ? userRefs : hits.map((h) => h.ref_text);
   console.log(`filter OK: kept ${refs.length} of ${hits.length} refs after role filter`);
 
-  // ---- 4. fan-out: parallel read ----
-  const contexts: ReadEntry[][] = await Promise.all(
-    refs.slice(0, 5).map((ref) => tools.read({ ref, before: 1, after: 3 })),
+  // ---- 4. fan-out: parallel show ----
+  const contexts: ShowEntry[][] = await Promise.all(
+    refs.slice(0, 5).map((ref) => tools.show({ ref, before: 1, after: 3 })),
   );
   if (contexts.length === 0) throw new Error("no contexts returned");
   for (const ctx of contexts) {
     if (!Array.isArray(ctx) || ctx.length === 0) {
-      throw new Error(`read returned non-list or empty: ${JSON.stringify(ctx)}`);
+      throw new Error(`show returned non-list or empty: ${JSON.stringify(ctx)}`);
     }
     for (const field of ["entry_id", "timestamp", "role", "text"] as const) {
-      if (!(field in ctx[0])) throw new Error(`ReadEntry missing typed field: ${String(field)}`);
+      if (!(field in ctx[0])) throw new Error(`ShowEntry missing typed field: ${String(field)}`);
     }
   }
-  console.log(`read fan-out OK: ${contexts.length} contexts, ${contexts.reduce((n, c) => n + c.length, 0)} entries total`);
+  console.log(`show fan-out OK: ${contexts.length} contexts, ${contexts.reduce((n, c) => n + c.length, 0)} entries total`);
 
   // ---- 5. error-path: empty search must return [], not throw ----
   // The canonical pattern relies on filter/map over the search result, so
@@ -91,12 +91,12 @@ async function main() {
   // way to force one leg to error.
   let badRefThrew = false;
   try {
-    await tools.read({ ref: "msg:v1:not-a-real-ref", before: 1, after: 1 });
+    await tools.show({ ref: "msg:v1:not-a-real-ref", before: 1, after: 1 });
   } catch {
     badRefThrew = true;
   }
-  if (!badRefThrew) throw new Error("tools.read with invalid ref should have thrown");
-  console.log("invalid-ref read OK: typed surface propagates the error");
+  if (!badRefThrew) throw new Error("tools.show with invalid ref should have thrown");
+  console.log("invalid-ref show OK: typed surface propagates the error");
 
   // ---- 7. status (no-arg tool) ----
   const status = await tools.status();
@@ -109,7 +109,7 @@ async function main() {
   }
   console.log(`status OK: sessions=${sessions}`);
 
-  console.log("Code Mode workflow conformance OK: aha typed surface drives search→filter→read fan-out end-to-end.");
+  console.log("Code Mode workflow conformance OK: aha typed surface drives search→filter→show fan-out end-to-end.");
 }
 
 main()

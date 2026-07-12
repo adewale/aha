@@ -2090,7 +2090,7 @@ footer a:hover { color: var(--ink-2); }
   <!-- Numbers below are asserted by internal/cli/architecture_html_drift_test.go;
        update both, or the test fails. -->
   <dl class="sidebar-meta">
-    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">19,042</span> production lines</dd>
+    <dt>Go</dt>     <dd><span class="num" data-drift="prod-lines">19,583</span> production lines</dd>
     <dt>Packages</dt><dd><span class="num" data-drift="prod-pkgs">22</span> in <code>internal/</code></dd>
     <dt>Adapters</dt><dd><span class="num">4</span> Pi · Claude · Codex · OpenCode</dd>
     <dt>Depots</dt>  <dd><span class="num">2</span> local · R2</dd>
@@ -4117,7 +4117,7 @@ const PACKAGES = [
   { name: 'internal/depot',   lines: '~1240', why: 'Depot v2: content-addressed blobs + snapshot manifests in per-machine namespaces. Typestate publish flow makes dangling references unrepresentable; no delete or list primitives on steady-state paths.', read: ['depot_v2.go (V2, MachineDepot, publish flow)', 'objectstore_v2.go (primitives carrying I5/I6)', 'push_v2.go (PushV2, state-based reuse)'] },
   { name: 'internal/adapters',lines: '~1200', why: 'Source-specific discovery and parsing for Pi, Claude Code, Codex, and OpenCode. OpenCode delegates SQLite export to internal/opencodeexport. Adapter conformance fixtures.', read: ['parser.go (common JSONL stream)', 'claude.go, codex.go, pi.go, opencode.go (source quirks)', 'adapter_fixture_test.go'] },
   { name: 'internal/opencodeexport', lines: '~615', why: 'Converts an OpenCode SQLite DB into deterministic JSONL files the opencode adapter can parse. Lives outside adapters on purpose: adapters are held to a read-only invariant, and this must write (only under its own destination dir; never to the source DB).', read: ['export.go (WAL-safe copy, deterministic JSONL emit)'] },
-  { name: 'internal/mcp',     lines: '~660',  why: 'Read-only stdio MCP server over the corpus: search, read, incidents, status as MCP tools. Shares its backend functions with internal/server so output shapes stay in lockstep.', read: ['tools.go (tool definitions + backend interface)', 'server.go (SDK wiring)', 'conformance/ (go-sdk conformance test)'] },
+  { name: 'internal/mcp',     lines: '~660',  why: 'Read-only stdio MCP server over the Workspace: versioned search, show, failure-analysis, and status tools. Shares its backend functions with internal/server so output shapes stay in lockstep.', read: ['tools.go (tool definitions + backend interface)', 'server.go (SDK wiring)', 'conformance/ (go-sdk conformance test)'] },
   { name: 'internal/server',  lines: '~760',  why: 'Read-only HTTP dashboard on loopback. Host-header allowlist against DNS rebinding, JSON Content-Type gate, strict CSP, optional token auth. Routes delegate to the same backend as MCP.', read: ['server.go (routes + security posture comment)', 'ui/ (static dashboard assets)'] },
   { name: 'internal/redact',  lines: '~185',  why: 'Deterministic, idempotent regex redactor (redaction-spec v1.1) applied at ingest to indexed projections only — bundles stay untouched as source of truth. Property-tested and fuzzed.', read: ['redact.go (pattern table + Apply)', 'properties_test.go (idempotence, determinism)', 'fuzz_test.go'] },
   { name: 'internal/model',   lines: '~280',  why: 'Sealed types: SessionKey, EntryID, SHA256Hex; Ref variants; Manifest shape; enums.', read: ['identity.go (smart constructors)', 'ref.go (closed sum type + codec)'] },
@@ -4398,7 +4398,7 @@ const PKG_GRAPH = {
 
   'redact':      { deps: ['model'], role: 'v1.1 redaction pipeline: 14 built-in regex patterns plus user extras, idempotent and property-tested. Wired into corpus ingest to scrub messages.text, tool_invocations.*, entries.raw_json, artifacts.text_* before insertion.' },
   'usererror':   { deps: ['archive','corpus','depot','model'], role: 'opaque safe error views, stable codes, one structured action, and allowlisted diagnostics; raw causal errors remain available only through Unwrap.' },
-  'mcp':         { deps: ['adapters','config','corpus','model','search','usererror'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed tool surface (search/read/incidents/incident_trajectory/overview/status/verify/conflicts/corpus_size/doctor) reused by the dashboard.' },
+  'mcp':         { deps: ['adapters','config','corpus','model','search','usererror'], role: 'read-only stdio MCP server over the modelcontextprotocol/go-sdk; typed aha.mcp.v2 tool surface reused by the versioned dashboard API.' },
   'server':      { deps: ['mcp','model','usererror'],     role: 'loopback HTTP dashboard. Reuses mcp.CallTool for every endpoint; adds Host allowlist, bearer auth, CSP, JSON Content-Type gate, request timeout, and safe error envelopes.' },
 
   'cli':         { deps: ['model','adapters','archive','clock','config','corpus','depot','hash','mcp','paths','progress','redact','safety','search','server','usererror'], role: 'command parsing, safe JSON errors, progress rendering, docs generation, render helpers, depot orchestration. Thin over everything below.' },

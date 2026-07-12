@@ -20,6 +20,14 @@ import (
 //
 // Future levels (v1.2 env-file pre-pass, v1.5 audit trail) layer on
 // top by composing additional pipeline stages.
+func supportedAdapterSet() map[string]bool {
+	out := make(map[string]bool, len(adapters.Builtins()))
+	for name := range adapters.Builtins() {
+		out[name] = true
+	}
+	return out
+}
+
 func ingestorForConfig(store *corpus.Store, cfg model.Config) (corpus.Ingestor, error) {
 	ing := corpus.NewIngestor(store, adapters.Builtins())
 	level := cfg.Redaction

@@ -228,6 +228,10 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 			_ = blobLookup.Close()
 			return err
 		}
+		if err := plan.RequireAdapters(ctx, materialised, supportedAdapterSet()); err != nil {
+			_ = blobLookup.Close()
+			return err
+		}
 		summary, err := plan.SummaryDelta(ctx, materialised, blobLookup.Has)
 		closeErr := blobLookup.Close()
 		if err != nil {
@@ -309,6 +313,8 @@ func inspectArchive(ctx context.Context, cfg model.Config, address string) archi
 		view.Latest = append(view.Latest, archiveLatestView{Machine: latest.Machine, ManifestSHA256: latest.ManifestSHA256.String(), CapturedAt: latest.Manifest.CapturedAt, Files: len(latest.Manifest.Files)})
 	}
 	switch {
+	case report.UpgradeRequired:
+		view.State = model.ArchiveUpgradeRequired
 	case len(report.Problems) > 0:
 		view.State = model.ArchiveDamaged
 	case !report.Initialised:
@@ -345,6 +351,8 @@ func archiveNext(state model.ArchiveState) *nextAction {
 		args = []string{"archive", "upload"}
 	case model.ArchiveDamaged:
 		args = []string{"archive", "verify", "--deep"}
+	case model.ArchiveUpgradeRequired:
+		args = []string{"version", "--json"}
 	default:
 		return nil
 	}

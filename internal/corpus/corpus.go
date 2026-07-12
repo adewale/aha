@@ -22,6 +22,15 @@ type OpenOptions struct {
 	Migrate bool
 }
 
+type UnsupportedWorkspaceSchemaError struct {
+	Found     int
+	Supported int
+}
+
+func (e *UnsupportedWorkspaceSchemaError) Error() string {
+	return fmt.Sprintf("Workspace database schema %d is not supported (this aha supports %d); upgrade aha before using this Workspace", e.Found, e.Supported)
+}
+
 func Open(dir string) (*Store, error) {
 	return OpenWithOptions(dir, OpenOptions{Create: true, Migrate: true})
 }
@@ -52,6 +61,10 @@ func OpenExistingReadOnly(dir string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := rejectNewerWorkspaceSchema(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -100,6 +113,10 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 		return fail(err)
 	}
 	db.SetMaxOpenConns(1)
+	if err := rejectNewerWorkspaceSchema(db); err != nil {
+		_ = db.Close()
+		return fail(err)
+	}
 	if err := rejectLegacyBundleCorpus(db, root); err != nil {
 		_ = db.Close()
 		return fail(err)
@@ -111,6 +128,24 @@ func OpenWithOptions(dir string, opts OpenOptions) (*Store, error) {
 		}
 	}
 	return &Store{DB: db, Root: root, lock: lock}, nil
+}
+
+func rejectNewerWorkspaceSchema(db *sql.DB) error {
+	var exists int
+	if err := db.QueryRow(`select count(*) from sqlite_master where type='table' and name='schema_migrations'`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return nil
+	}
+	var version int
+	if err := db.QueryRow(`select coalesce(max(version),0) from schema_migrations`).Scan(&version); err != nil {
+		return err
+	}
+	if version > CurrentWorkspaceSchemaVersion {
+		return &UnsupportedWorkspaceSchemaError{Found: version, Supported: CurrentWorkspaceSchemaVersion}
+	}
+	return nil
 }
 
 // rejectLegacyBundleCorpus refuses corpora created before depot v2 (the

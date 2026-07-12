@@ -103,12 +103,17 @@ func NewWithOptions(backend mcp.Backend, opts Options) *Server {
 	return s
 }
 
+const HTTPContractSchema = "aha.http.v2"
+
 // ServeHTTP implements http.Handler. Every request first passes through the
 // Host validator and (when configured) the bearer-token check; failing
 // requests get 421 Misdirected Request or 401 Unauthorized respectively
 // rather than silently serving the corpus to an unauthenticated or
 // attacker-controlled origin.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/v2/") {
+		w.Header().Set("Aha-Contract-Schema", HTTPContractSchema)
+	}
 	if !s.hostAllowed(r.Host) {
 		writeError(w, http.StatusMisdirectedRequest, "host not permitted")
 		return
@@ -215,19 +220,19 @@ func requireLoopback(addr string) error {
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.Handle("/static/", s.staticHand)
-	s.mux.HandleFunc("/api/status", s.jsonGet("status"))
-	s.mux.HandleFunc("/api/verify", s.jsonGet("verify"))
-	s.mux.HandleFunc("/api/conflicts", s.jsonGet("conflicts"))
-	s.mux.HandleFunc("/api/corpus_size", s.jsonGet("corpus_size"))
-	s.mux.HandleFunc("/api/doctor", s.jsonGet("doctor"))
-	s.mux.HandleFunc("/api/search", s.handleSearch)
-	s.mux.HandleFunc("/api/search_traces", s.handleSearchTraces)
-	s.mux.HandleFunc("/api/read", s.handleRead)
-	s.mux.HandleFunc("/api/incidents", s.handleIncidents)
-	s.mux.HandleFunc("/api/incident_trajectory", s.handleIncidentTrajectory)
-	s.mux.HandleFunc("/api/overview", s.jsonGet("overview"))
-	s.mux.HandleFunc("/api/tools", s.handleToolsList)
-	s.mux.HandleFunc("/api/version", s.handleVersion)
+	s.mux.HandleFunc("/api/v2/status", s.jsonGet("status"))
+	s.mux.HandleFunc("/api/v2/workspace/verify", s.jsonGet("workspace_verify"))
+	s.mux.HandleFunc("/api/v2/workspace/conflicts", s.jsonGet("workspace_conflicts"))
+	s.mux.HandleFunc("/api/v2/workspace/size", s.jsonGet("workspace_size"))
+	s.mux.HandleFunc("/api/v2/search", s.handleSearch)
+	s.mux.HandleFunc("/api/v2/search/traces", s.handleSearchTraces)
+	s.mux.HandleFunc("/api/v2/show", s.handleRead)
+	s.mux.HandleFunc("/api/v2/analyse/failures", s.handleIncidents)
+	s.mux.HandleFunc("/api/v2/analyse/failure-trajectory", s.handleIncidentTrajectory)
+	s.mux.HandleFunc("/api/v2/overview", s.jsonGet("overview"))
+	s.mux.HandleFunc("/api/v2/capabilities", s.jsonGet("aha_capabilities"))
+	s.mux.HandleFunc("/api/v2/tools", s.handleToolsList)
+	s.mux.HandleFunc("/api/v2/version", s.handleVersion)
 }
 
 // indexCSP is intentionally strict: only self-hosted scripts/styles, no
@@ -257,7 +262,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	writeJSON(w, map[string]any{"version": model.Version})
+	writeJSON(w, map[string]any{"schema": "aha.http.version.v2", "version": model.Version, "http_contract": HTTPContractSchema, "mcp_contract": mcp.ContractSchema})
 }
 
 func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +271,8 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"tools": append([]string(nil), mcp.ToolNames...),
+		"schema": mcp.ContractSchema,
+		"tools":  append([]string(nil), mcp.ToolNames...),
 	})
 }
 
@@ -626,15 +632,15 @@ func compactJoin(sep string, parts ...string) string {
 }
 
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "read")
+	s.handleJSONPost(w, r, "show")
 }
 
 func (s *Server) handleIncidents(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "incidents")
+	s.handleJSONPost(w, r, "analyse_failures")
 }
 
 func (s *Server) handleIncidentTrajectory(w http.ResponseWriter, r *http.Request) {
-	s.handleJSONPost(w, r, "incident_trajectory")
+	s.handleJSONPost(w, r, "analyse_failure_trajectory")
 }
 
 func (s *Server) handleJSONPost(w http.ResponseWriter, r *http.Request, tool string) {

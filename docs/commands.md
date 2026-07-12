@@ -108,7 +108,7 @@ aha dashboard [--workspace PATH] [--addr HOST:PORT] [--allow-remote] [--allowed-
 - `aha dashboard`
 - `aha dashboard --addr 127.0.0.1:18428`
 
-**JSON contract:** `http://HOST:PORT/api/{search,show,analyse,overview,status,workspace_verify,workspace_conflicts}`
+**JSON contract:** `http://HOST:PORT/api/v2/{search,show,analyse,overview,status,workspace}`
 
 ## aha init
 

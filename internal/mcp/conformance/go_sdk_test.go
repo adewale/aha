@@ -28,16 +28,16 @@ import (
 )
 
 var expectedTools = []string{
-	"conflicts",
-	"corpus_size",
-	"doctor",
-	"incident_trajectory",
-	"incidents",
+	"aha_capabilities",
+	"analyse_failure_trajectory",
+	"analyse_failures",
 	"overview",
-	"read",
 	"search",
+	"show",
 	"status",
-	"verify",
+	"workspace_conflicts",
+	"workspace_size",
+	"workspace_verify",
 }
 
 // TestGoSDKAgainstAha drives the official Go MCP SDK Client against a

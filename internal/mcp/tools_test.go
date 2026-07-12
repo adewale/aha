@@ -175,7 +175,7 @@ func TestToolsCallSearchReturnsResultsAndChainsToRead(t *testing.T) {
 		t.Fatalf("first hit lacks ref_text: %v", hits[0])
 	}
 	readRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "read",
+		Name:      "show",
 		Arguments: map[string]any{"ref": refText, "before": 1, "after": 3},
 	})
 	if err != nil {
@@ -211,7 +211,7 @@ func TestEmptySearchReturnsList(t *testing.T) {
 func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	session, ctx, _ := connectPair(t)
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "incidents",
+		Name:      "analyse_failures",
 		Arguments: map[string]any{"limit": 1, "state": "unresolved"},
 	})
 	if err != nil {
@@ -229,20 +229,17 @@ func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	}
 }
 
-func TestToolsCallDoctorReturnsLocalDiagnostics(t *testing.T) {
+func TestToolsCallCapabilitiesReturnsExplicitContract(t *testing.T) {
 	session, ctx, _ := connectPair(t)
-	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "doctor"})
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "aha_capabilities"})
 	if err != nil {
-		t.Fatalf("CallTool(doctor): %v", err)
+		t.Fatalf("CallTool(aha_capabilities): %v", err)
 	}
 	body := contentText(t, res)
-	for _, want := range []string{`"version"`, `"adapters"`, `"sources"`, `"workspace"`} {
+	for _, want := range []string{`"schema":"aha.mcp.v2"`, `"required_features"`, `"tools"`, `"show"`} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("doctor missing %q: %s", want, body)
+			t.Fatalf("capabilities missing %q: %s", want, body)
 		}
-	}
-	if strings.Contains(body, `"archive"`) {
-		t.Fatalf("MCP local diagnostics must not include Archive probes: %s", body)
 	}
 }
 
@@ -369,14 +366,14 @@ func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 		args map[string]any
 	}{
 		{"status", nil},
-		{"verify", nil},
-		{"conflicts", nil},
-		{"corpus_size", nil},
-		{"doctor", nil},
+		{"workspace_verify", nil},
+		{"workspace_conflicts", nil},
+		{"workspace_size", nil},
+		{"aha_capabilities", nil},
 		{"search", map[string]any{"query": "needle", "limit": 5}},
 		{"search", map[string]any{"query": "definitelynotinthecorpus"}},
-		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
-		{"incidents", map[string]any{"limit": 5}},
+		{"show", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
+		{"analyse_failures", map[string]any{"limit": 5}},
 		{"overview", nil},
 	}
 
@@ -468,6 +465,18 @@ func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
 // in sorted order so cross-language reflections (Python sorted() in the
 // conformance scripts, TS .sort() in client_against_aha.ts) compare against
 // the same sequence. A drift elsewhere should be the loud failure.
+func TestMCPV2ToolContractUsesCurrentVocabulary(t *testing.T) {
+	want := []string{"aha_capabilities", "analyse_failure_trajectory", "analyse_failures", "overview", "search", "show", "status", "workspace_conflicts", "workspace_size", "workspace_verify"}
+	if !reflect.DeepEqual(mcp.ToolNames, want) {
+		t.Fatalf("MCP v2 tools=%v want %v", mcp.ToolNames, want)
+	}
+	for _, removed := range []string{"read", "incidents", "incident_trajectory", "doctor", "verify", "conflicts", "corpus_size"} {
+		if sort.SearchStrings(mcp.ToolNames, removed) < len(mcp.ToolNames) && mcp.ToolNames[sort.SearchStrings(mcp.ToolNames, removed)] == removed {
+			t.Fatalf("removed MCP tool %q returned", removed)
+		}
+	}
+}
+
 func TestCanonicalToolListIsSorted(t *testing.T) {
 	names := append([]string(nil), mcp.ToolNames...)
 	sort.Strings(names)

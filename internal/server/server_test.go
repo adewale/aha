@@ -111,7 +111,7 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 		t.Fatalf("app.js status=%d", w.Code)
 	}
 	js := w.Body.String()
-	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "renderFailureSummary", "Most frequent", "updateReaderContext", "widen-context", "example-search", "sources-tab-status", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
+	for _, want := range []string{"/api/v2/search/traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "renderFailureSummary", "Most frequent", "updateReaderContext", "widen-context", "example-search", "sources-tab-status", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("dashboard behaviour copy missing %q:\n%s", want, js)
 		}
@@ -156,10 +156,31 @@ func TestStaticAssetsAreEmbedded(t *testing.T) {
 	}
 }
 
+func TestHTTPAPIRequiresExplicitV2Contract(t *testing.T) {
+	srv := newTestServer(t)
+	for _, path := range []string{"/api/status", "/api/search", "/api/read"} {
+		w := httptest.NewRecorder()
+		req := loopback(httptest.NewRequest(http.MethodGet, path, nil))
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("legacy route %s status=%d want 404", path, w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("v2 status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Aha-Contract-Schema"); got != server.HTTPContractSchema {
+		t.Fatalf("contract header=%q want %q", got, server.HTTPContractSchema)
+	}
+}
+
 func TestStatusEndpointReturnsCorpusShape(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	srv.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -178,7 +199,7 @@ func TestStatusEndpointReturnsCorpusShape(t *testing.T) {
 func TestSearchEndpointAcceptsPOSTAndChainsToRead(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search",
 		strings.NewReader(`{"query":"needle","limit":5}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
@@ -198,7 +219,7 @@ func TestSearchEndpointAcceptsPOSTAndChainsToRead(t *testing.T) {
 	}
 	readBody, _ := json.Marshal(map[string]any{"ref": refText, "before": 1, "after": 3})
 	w = httptest.NewRecorder()
-	req = loopback(httptest.NewRequest(http.MethodPost, "/api/read", bytes.NewReader(readBody)))
+	req = loopback(httptest.NewRequest(http.MethodPost, "/api/v2/show", bytes.NewReader(readBody)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -212,7 +233,7 @@ func TestSearchEndpointAcceptsPOSTAndChainsToRead(t *testing.T) {
 func TestSearchTracesEndpointReturnsRecognizableCards(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search_traces",
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search/traces",
 		strings.NewReader(`{"query":"needle","limit":20}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
@@ -253,7 +274,7 @@ func TestSearchTracesEndpointReturnsRecognizableCards(t *testing.T) {
 func TestSearchEndpointRejectsBadArgs(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search",
 		strings.NewReader(`{"query":"x","bogus":1}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
@@ -265,7 +286,7 @@ func TestSearchEndpointRejectsBadArgs(t *testing.T) {
 func TestJSONPostRejectsTrailingJSON(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search",
 		strings.NewReader(`{"query":"needle"}{"bogus":1}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
@@ -278,7 +299,7 @@ func TestJSONPostRejectsOversizedBody(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
 	body := `{"query":"needle"}` + strings.Repeat(" ", 1<<20)
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(body)))
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search", strings.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -292,7 +313,7 @@ func TestJSONPostRejectsOversizedBody(t *testing.T) {
 func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incidents", strings.NewReader(`{"limit":5,"state":"unresolved"}`)))
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/analyse/failures", strings.NewReader(`{"limit":5,"state":"unresolved"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -310,7 +331,7 @@ func TestIncidentsEndpointAcceptsPOST(t *testing.T) {
 func TestOverviewEndpointReturnsComposition(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/overview", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/overview", nil))
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("overview status=%d body=%s", w.Code, w.Body.String())
@@ -327,7 +348,7 @@ func TestOverviewEndpointReturnsComposition(t *testing.T) {
 func TestIncidentTrajectoryEndpointValidatesRef(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/incident_trajectory", strings.NewReader(`{"ref":"session:v1:abc"}`)))
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/analyse/failure-trajectory", strings.NewReader(`{"ref":"session:v1:abc"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	srv.ServeHTTP(w, req)
 	// A non-message ref is a clean error, not a crash.
@@ -339,7 +360,7 @@ func TestIncidentTrajectoryEndpointValidatesRef(t *testing.T) {
 func TestSearchEndpointRejectsGET(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/search", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/search", nil))
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", w.Code)
@@ -350,7 +371,7 @@ func TestSearchEndpointRequiresJSONContentType(t *testing.T) {
 	srv := newTestServer(t)
 	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
 		w := httptest.NewRecorder()
-		req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+		req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search",
 			strings.NewReader(`{"query":"needle"}`)))
 		if ct != "" {
 			req.Header.Set("Content-Type", ct)
@@ -366,7 +387,7 @@ func TestSearchEndpointRequiresJSONContentType(t *testing.T) {
 func TestSearchEndpointAcceptsJSONWithCharsetParam(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodPost, "/api/search",
+	req := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search",
 		strings.NewReader(`{"query":"needle","limit":5}`)))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	srv.ServeHTTP(w, req)
@@ -395,7 +416,7 @@ func TestHostHeaderAllowlistRejectsForeignHosts(t *testing.T) {
 	}
 	for _, host := range cases {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != http.StatusMisdirectedRequest {
@@ -422,7 +443,7 @@ func TestHostHeaderAllowlistRejectsIDNHomographs(t *testing.T) {
 		"xn--lcalhost-tdh", // IDN punycode that doesn't match
 	} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != http.StatusMisdirectedRequest {
@@ -444,7 +465,7 @@ func TestHostHeaderAllowlistRejectsMalformedBrackets(t *testing.T) {
 		":18428",          // leading colon, missing host
 	} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != http.StatusMisdirectedRequest {
@@ -457,7 +478,7 @@ func TestHostHeaderAllowlistAcceptsLoopbackVariants(t *testing.T) {
 	srv := newTestServer(t)
 	for _, host := range []string{"localhost", "localhost:18428", "127.0.0.1", "127.0.0.1:18428", "[::1]:18428"} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != 200 {
@@ -475,7 +496,7 @@ func TestHostHeaderAllowlistExtendedByOption(t *testing.T) {
 	})
 	for _, host := range []string{"aha.lan", "aha.lan:18428", "10.0.0.5", "10.0.0.5:18428"} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 		req.Host = host
 		srv.ServeHTTP(w, req)
 		if w.Code != 200 {
@@ -516,14 +537,14 @@ func TestHTTPErrorEnvelopeIsPinned(t *testing.T) {
 		{
 			"wrong method on GET endpoint",
 			func() *http.Request {
-				return loopback(httptest.NewRequest(http.MethodPost, "/api/status", strings.NewReader("{}")))
+				return loopback(httptest.NewRequest(http.MethodPost, "/api/v2/status", strings.NewReader("{}")))
 			},
 			"method_not_allowed",
 		},
 		{
 			"missing required arg",
 			func() *http.Request {
-				r := loopback(httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(`{}`)))
+				r := loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search", strings.NewReader(`{}`)))
 				r.Header.Set("Content-Type", "application/json")
 				return r
 			},
@@ -532,14 +553,14 @@ func TestHTTPErrorEnvelopeIsPinned(t *testing.T) {
 		{
 			"bad content type",
 			func() *http.Request {
-				return loopback(httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(`{"query":"x"}`)))
+				return loopback(httptest.NewRequest(http.MethodPost, "/api/v2/search", strings.NewReader(`{"query":"x"}`)))
 			},
 			"unsupported_media_type",
 		},
 		{
 			"foreign host header",
 			func() *http.Request {
-				r := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+				r := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
 				r.Host = "evil.example.com"
 				return r
 			},
@@ -588,7 +609,7 @@ func assertErrorEnvelope(t *testing.T, body []byte, wantCode string) {
 func TestToolsEndpointAdvertisesReadOnlySet(t *testing.T) {
 	srv := newTestServer(t)
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/tools", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/tools", nil))
 	srv.ServeHTTP(w, req)
 	var got struct {
 		Tools []string `json:"tools"`
@@ -651,7 +672,7 @@ func TestTokenAuthAcceptsValidBearer(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	req.Header.Set("Authorization", "Bearer s3cret")
 	srv.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -663,7 +684,7 @@ func TestTokenAuthRejectsMissingHeader(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
@@ -678,7 +699,7 @@ func TestTokenAuthRejectsWrongToken(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	req.Header.Set("Authorization", "Bearer wrong")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -690,7 +711,7 @@ func TestTokenAuthRejectsBasicAuth(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	req.Header.Set("Authorization", "Basic c2VjcmV0OnNlY3JldA==")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -706,7 +727,7 @@ func TestTokenAuthRejectsLowercaseScheme(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	req.Header.Set("Authorization", "bearer s3cret")
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -722,7 +743,7 @@ func TestTokenAuthOnlyHonoursFirstAuthorizationHeader(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: "s3cret"})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	req.Header.Add("Authorization", "Bearer wrong")
 	req.Header.Add("Authorization", "Bearer s3cret")
 	srv.ServeHTTP(w, req)
@@ -735,7 +756,7 @@ func TestTokenAuthDisabledWhenEmpty(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	srv := server.NewWithOptions(mcp.NewCorpusBackend(store, cfg), server.Options{Token: ""})
 	w := httptest.NewRecorder()
-	req := loopback(httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	req := loopback(httptest.NewRequest(http.MethodGet, "/api/v2/status", nil))
 	srv.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("expected 200 without token configured, got %d", w.Code)

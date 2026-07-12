@@ -1,7 +1,9 @@
 package corpus_test
 
 import (
+	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -46,6 +48,87 @@ func TestWorkspaceBindingAndMaterialisedVectorPersist(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIdentityWitnessSurvivesDatabaseDestruction(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := model.NewArchiveBinding("archive-1", "local:/archive")
+	if err := corpus.BindWorkspaceStore(store, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	witness, ok, err := corpus.WorkspaceIdentity(root)
+	if err != nil || !ok || witness != binding {
+		t.Fatalf("identity witness=(%+v,%v,%v)", witness, ok, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "corpus.db"), []byte("destroyed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := corpus.InspectWorkspaceState(root, binding, nil)
+	if err != nil || state != model.WorkspaceDamaged {
+		t.Fatalf("state after database destruction=%s err=%v", state, err)
+	}
+}
+
+func TestWorkspaceIdentityWitnessFromNewerSchemaRequiresUpgrade(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := model.NewArchiveBinding("archive-1", "local:/archive")
+	if err := corpus.BindWorkspaceStore(store, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, corpus.WorkspaceIdentityFilename)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bytes.Replace(b, []byte("aha.workspace.identity.v1"), []byte("aha.workspace.identity.v9"), 1)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := corpus.InspectWorkspaceState(root, binding, nil)
+	if err != nil || state != model.WorkspaceUpgradeRequired {
+		t.Fatalf("state=%s err=%v want upgrade_required", state, err)
+	}
+}
+
+func TestWorkspaceIdentityWitnessRejectsTampering(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := model.NewArchiveBinding("archive-1", "local:/archive")
+	if err := corpus.BindWorkspaceStore(store, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, corpus.WorkspaceIdentityFilename)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bytes.Replace(b, []byte("archive-1"), []byte("archive-2"), 1)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := corpus.WorkspaceIdentity(root); !errors.Is(err, corpus.ErrWorkspaceIdentityChecksum) {
+		t.Fatalf("tampered witness error=%v", err)
+	}
+}
+
 func TestWorkspaceRejectsArchiveMismatchBeforeChangingState(t *testing.T) {
 	store, err := corpus.Open(filepath.Join(t.TempDir(), "workspace"))
 	if err != nil {
@@ -63,6 +146,43 @@ func TestWorkspaceRejectsArchiveMismatchBeforeChangingState(t *testing.T) {
 	got, ok, err := corpus.WorkspaceBinding(store.DB)
 	if err != nil || !ok || got != first {
 		t.Fatalf("binding after rejection=(%+v,%v,%v), want first", got, ok, err)
+	}
+}
+
+func TestNewerWorkspaceDatabaseSchemaRejectsOlderReadersAndWriters(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := model.NewArchiveBinding("archive-1", "local:/archive")
+	if err := corpus.BindWorkspaceStore(store, binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.Exec(`insert into schema_migrations(version) values(999)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for name, open := range map[string]func(string) (*corpus.Store, error){
+		"writer": corpus.OpenExisting,
+		"reader": corpus.OpenExistingReadOnly,
+	} {
+		t.Run(name, func(t *testing.T) {
+			opened, err := open(root)
+			if opened != nil {
+				_ = opened.Close()
+			}
+			var unsupported *corpus.UnsupportedWorkspaceSchemaError
+			if !errors.As(err, &unsupported) || unsupported.Found != 999 {
+				t.Fatalf("open error=%v want schema 999 rejection", err)
+			}
+		})
+	}
+	state, err := corpus.InspectWorkspaceState(root, binding, nil)
+	if err != nil || state != model.WorkspaceUpgradeRequired {
+		t.Fatalf("inspection state=%s err=%v want upgrade_required", state, err)
 	}
 }
 

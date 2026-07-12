@@ -14,15 +14,15 @@ import { assertAttestedConformance } from "./attestation.ts";
 
 const EXPECTED_TOOLS = [
   "search",
-  "read",
-  "incidents",
-  "incident_trajectory",
+  "show",
+  "analyse_failures",
+  "analyse_failure_trajectory",
   "overview",
   "status",
-  "verify",
-  "conflicts",
-  "corpus_size",
-  "doctor",
+  "workspace_verify",
+  "workspace_conflicts",
+  "workspace_size",
+  "aha_capabilities",
 ];
 
 const { ahaBin, ahaConfig } = assertAttestedConformance();

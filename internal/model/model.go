@@ -1,21 +1,25 @@
 package model
 
+import "encoding/json"
+
 const Version = "0.2.0"
 const BundleSchema = "agent-session-snapshot-bundle/v2"
 
 type Config struct {
-	MachineID              string                  `json:"machine_id"`
-	MachineLabel           string                  `json:"machine_label,omitempty"`
-	Sources                []SourceConfig          `json:"sources"`
-	WorkspaceDir           string                  `json:"workspace_dir"`
-	Archive                ArchiveConfig           `json:"archive"`
-	PathMode               string                  `json:"path_mode"`
-	IncludeSubagents       bool                    `json:"include_subagents"`
-	IncludeImages          bool                    `json:"include_images"`
-	IndexToolOutput        bool                    `json:"index_tool_output"`
-	Redaction              string                  `json:"redaction"`
-	RedactionExtraPatterns []RedactionExtraPattern `json:"redaction_extra_patterns,omitempty"`
-	AcknowledgedRawHistory bool                    `json:"acknowledged_raw_history"`
+	Schema                 string                     `json:"schema"`
+	Extensions             map[string]json.RawMessage `json:"extensions,omitempty"`
+	MachineID              string                     `json:"machine_id"`
+	MachineLabel           string                     `json:"machine_label,omitempty"`
+	Sources                []SourceConfig             `json:"sources"`
+	WorkspaceDir           string                     `json:"workspace_dir"`
+	Archive                ArchiveConfig              `json:"archive"`
+	PathMode               string                     `json:"path_mode"`
+	IncludeSubagents       bool                       `json:"include_subagents"`
+	IncludeImages          bool                       `json:"include_images"`
+	IndexToolOutput        bool                       `json:"index_tool_output"`
+	Redaction              string                     `json:"redaction"`
+	RedactionExtraPatterns []RedactionExtraPattern    `json:"redaction_extra_patterns,omitempty"`
+	AcknowledgedRawHistory bool                       `json:"acknowledged_raw_history"`
 }
 
 // RedactionExtraPattern is a user-supplied regex added to the

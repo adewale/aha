@@ -32,7 +32,7 @@ const tools = aha(transport);
 const hits = await tools.search({ query: "migration bug", project: "billing", limit: 100 });
 const userMessages = hits.filter(h => h.role === "user");
 const contexts = await Promise.all(
-  userMessages.slice(0, 5).map(h => tools.read({ ref: h.ref_text, before: 5, after: 30 })),
+  userMessages.slice(0, 5).map(h => tools.show({ ref: h.ref_text, before: 5, after: 30 })),
 );
 
 for (const entries of contexts) {
@@ -79,11 +79,11 @@ console.log(JSON.stringify(grouped));
 ```
 
 One code-mode program, arbitrary intermediate logic. The fan-out still performs
-one MCP tool call per `read`; use `Promise.all` when you want parallelism.
+one MCP tool call per `show`; use `Promise.all` when you want parallelism.
 
 ## Refs are the API
 
-`search` returns `ref_text` on every result; pass it back to `read`. Refs are
+`search` returns `ref_text` on every result; pass it back to `show`. Refs are
 deterministic across machines, so you can store them, share them, or pipe them
 into another command. The discriminated union (`MessageRef | SessionRef |
 ArtifactRef`) lets your code branch on `kind` without parsing strings.
@@ -98,7 +98,7 @@ without regex-matching message text:
 import { AhaMcpError } from "./transports/stdio.js";
 
 try {
-  await tools.read({ ref: someRef });
+  await tools.show({ ref: someRef });
 } catch (e) {
   if (e instanceof AhaMcpError) {
     if (e.code === "tool_error")        { /* aha returned isError: a missing ref, bad query, etc. */ }

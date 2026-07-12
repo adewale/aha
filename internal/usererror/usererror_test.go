@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/safety"
 	"github.com/adewale/aha/internal/usererror"
@@ -62,6 +63,24 @@ func TestNormalizeR2PlaceholderNamesSafeFieldWithoutValue(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%+v", view), secretCanary) {
 		t.Fatalf("public view leaked placeholder value: %+v", view)
+	}
+}
+
+func TestNormalizeCompatibilityFailuresRequireUpgradeWithoutLeakingDetails(t *testing.T) {
+	for name, err := range map[string]error{
+		"config":  &config.UnsupportedSchemaError{Found: "secret-canary", Supported: config.SchemaV1},
+		"archive": &depot.UnsupportedArchiveFeatureError{Feature: "secret-canary"},
+		"adapter": &depot.UnsupportedSnapshotAdapterError{Adapter: "secret-canary"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			view := usererror.Normalize(err, "status")
+			if view.Code() != usererror.CodeUnsupportedSchema || view.Next().Text() != "aha version --json" {
+				t.Fatalf("view=%+v", view)
+			}
+			if strings.Contains(fmt.Sprintf("%+v", view), "secret-canary") {
+				t.Fatalf("view leaked format detail: %+v", view)
+			}
+		})
 	}
 }
 

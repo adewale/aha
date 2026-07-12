@@ -15,7 +15,7 @@ import (
 func TestReadToolBranchMode(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)
-	out, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"branch"}`))
+	out, err := mcp.CallTool(backend, "show", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"branch"}`))
 	if err != nil {
 		t.Fatalf("CallTool(read branch): %v", err)
 	}
@@ -37,7 +37,7 @@ func TestReadToolBranchMode(t *testing.T) {
 func TestReadToolLiveMode(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)
-	out, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"live"}`))
+	out, err := mcp.CallTool(backend, "show", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"live"}`))
 	if err != nil {
 		t.Fatalf("CallTool(read live): %v", err)
 	}
@@ -53,7 +53,7 @@ func TestReadToolLiveMode(t *testing.T) {
 func TestReadToolWindowHonorsExplicitZeroContext(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)
-	out, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","entry":"p2","before":0,"after":0}`))
+	out, err := mcp.CallTool(backend, "show", json.RawMessage(`{"session":"pi-session","entry":"p2","before":0,"after":0}`))
 	if err != nil {
 		t.Fatalf("CallTool(read zero window): %v", err)
 	}
@@ -72,7 +72,7 @@ func TestReadToolWindowHonorsExplicitZeroContext(t *testing.T) {
 func TestReadToolBranchModeRequiresEntry(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)
-	_, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","mode":"branch"}`))
+	_, err := mcp.CallTool(backend, "show", json.RawMessage(`{"session":"pi-session","mode":"branch"}`))
 	if err == nil {
 		t.Fatal("expected error: branch mode without entry")
 	}
@@ -82,7 +82,7 @@ func TestReadToolBranchModeRequiresEntry(t *testing.T) {
 func TestReadToolRejectsUnknownMode(t *testing.T) {
 	store, cfg := buildCorpus(t)
 	backend := mcp.NewCorpusBackend(store, cfg)
-	_, err := mcp.CallTool(backend, "read", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"sideways"}`))
+	_, err := mcp.CallTool(backend, "show", json.RawMessage(`{"session":"pi-session","entry":"p2","mode":"sideways"}`))
 	if err == nil {
 		t.Fatal("expected error on unknown read mode")
 	}

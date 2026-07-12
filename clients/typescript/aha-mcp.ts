@@ -13,7 +13,7 @@ export interface SessionRef { kind: "session"; session_key: string; }
 export interface ArtifactRef { kind: "artifact"; artifact_sha256: string; }
 export type Ref = MessageRef | SessionRef | ArtifactRef;
 
-// parseRef accepts the canonical ref strings the search/read tools use
+// parseRef accepts the canonical ref strings the search/show tools use
 // over the wire ("msg:v1:<base64url(sk)>:<base64url(entry)>", "session:v1:<base64url(sk)>", "artifact:v1:<sha>")
 // and returns the typed shape, or null on any malformed input.
 export function parseRef(s: string): Ref | null {
@@ -36,7 +36,7 @@ export function parseRef(s: string): Ref | null {
 
 // formatRef is the inverse of parseRef. Useful when callers have built a
 // Ref value programmatically (e.g. extracting a sha from text) and need to
-// pass it to tools.read({ref: ...}).
+// pass it to tools.show({ref: ...}).
 export function formatRef(ref: Ref): string {
   switch (ref.kind) {
     case "message":  return ["msg", "v1", b64urlEncodeText(ref.session_key), b64urlEncodeText(ref.entry_id)].join(":");
@@ -83,7 +83,7 @@ export interface SearchResult {
   ref_text: string;
 }
 
-export interface ReadEntry {
+export interface ShowEntry {
   line_no: number;
   entry_id: string;
   timestamp: string;
@@ -193,7 +193,11 @@ export interface Overview {
 // Tools whose Go return type is map[string]any are exposed loosely.
 // Callers that need stronger typing can cast at the call site.
 export type StatusReport = Record<string, unknown>;
-export type DoctorReport = Record<string, unknown>;
+export interface CapabilitiesReport {
+  schema: string;
+  required_features: string[];
+  tools: string[];
+}
 
 export interface SearchArgs {
   /**
@@ -240,7 +244,7 @@ export interface SearchArgs {
   limit?: number;
 }
 
-export interface IncidentsArgs {
+export interface AnalyseFailuresArgs {
   /**
    * Cap on returned incidents (default 50, max 200)
    */
@@ -267,7 +271,7 @@ export interface IncidentsArgs {
   state?: string;
 }
 
-export interface IncidentTrajectoryArgs {
+export interface AnalyseFailureTrajectoryArgs {
   /**
    * Resolving-success ref (msg:v1:...), e.g. an incident path sample_ref
    */
@@ -279,7 +283,7 @@ export interface IncidentTrajectoryArgs {
 }
 
 /**
- * ReadArgs is a discriminated union: provide either a canonical `ref` OR
+ * ShowArgs is a discriminated union: provide either a canonical `ref` OR
  * a `session` (plus optional `entry`), never both. The wire form is the
  * same in either case; the union is documented to push callers toward
  * one mode.
@@ -290,7 +294,7 @@ export interface IncidentTrajectoryArgs {
  * non-participating entries filtered). branch/live require `entry` as the
  * leaf to walk back from.
  */
-export type ReadArgs =
+export type ShowArgs =
   | {
       /** Canonical wire-format ref text. See parseRef/formatRef for ergonomic construction. */
       ref: string;
@@ -332,43 +336,43 @@ export interface Transport {
 
 export function aha(transport: Transport) {
   return {
-    /** List quarantined merge conflicts. */
-    conflicts: () => transport.call("conflicts", {}) as Promise<Conflict[]>,
-    /** Return Workspace on-disk size breakdown. */
-    corpus_size: () => transport.call("corpus_size", {}) as Promise<SizeReport>,
-    /** Return local environment, config, source, and Workspace diagnostics. Archive probing is omitted to keep this tool local-only. */
-    doctor: () => transport.call("doctor", {}) as Promise<DoctorReport>,
+    /** Return the MCP contract schema, required client features, and exact tool set. */
+    aha_capabilities: () => transport.call("aha_capabilities", {}) as Promise<CapabilitiesReport>,
     /** Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it. */
-    incident_trajectory: (args: IncidentTrajectoryArgs) =>
-      transport.call("incident_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
+    analyse_failure_trajectory: (args: AnalyseFailureTrajectoryArgs) =>
+      transport.call("analyse_failure_trajectory", args as unknown as Record<string, unknown>) as Promise<TrajectoryStep[]>,
     /** The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output. */
-    incidents: (args: IncidentsArgs = {}) =>
-      transport.call("incidents", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
+    analyse_failures: (args: AnalyseFailuresArgs = {}) =>
+      transport.call("analyse_failures", args as unknown as Record<string, unknown>) as Promise<Incident[]>,
     /** Workspace orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this Workspace and is it healthy?'. */
     overview: () => transport.call("overview", {}) as Promise<Overview>,
-    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
-    read: (args: ReadArgs) =>
-      transport.call("read", args as unknown as Record<string, unknown>) as Promise<ReadEntry[]>,
     /** Search the Workspace over messages and artefacts. Returns ref-bearing results suitable for chaining into show. */
     search: (args: SearchArgs) =>
       transport.call("search", args as unknown as Record<string, unknown>) as Promise<SearchResult[]>,
+    /** Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries. */
+    show: (args: ShowArgs) =>
+      transport.call("show", args as unknown as Record<string, unknown>) as Promise<ShowEntry[]>,
     /** Return Workspace health summary: counts and disk usage. */
     status: () => transport.call("status", {}) as Promise<StatusReport>,
+    /** List quarantined merge conflicts. */
+    workspace_conflicts: () => transport.call("workspace_conflicts", {}) as Promise<Conflict[]>,
+    /** Return Workspace on-disk size breakdown. */
+    workspace_size: () => transport.call("workspace_size", {}) as Promise<SizeReport>,
     /** Run read-only Workspace invariant checks (no repair). */
-    verify: () => transport.call("verify", {}) as Promise<VerifyReport>,
+    workspace_verify: () => transport.call("workspace_verify", {}) as Promise<VerifyReport>,
   };
 }
 
 export const TOOLS = [
-  "conflicts",
-  "corpus_size",
-  "doctor",
-  "incident_trajectory",
-  "incidents",
+  "aha_capabilities",
+  "analyse_failure_trajectory",
+  "analyse_failures",
   "overview",
-  "read",
   "search",
+  "show",
   "status",
-  "verify",
+  "workspace_conflicts",
+  "workspace_size",
+  "workspace_verify",
 ] as const;
 export type ToolName = (typeof TOOLS)[number];

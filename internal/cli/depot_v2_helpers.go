@@ -121,7 +121,7 @@ func pullFromDepotV2(ctx context.Context, stdout io.Writer, ing corpus.Ingestor,
 	if err != nil {
 		return nil, err
 	}
-	if err := corpus.BindWorkspace(ing.Store.DB, binding); err != nil {
+	if err := corpus.BindWorkspaceStore(ing.Store, binding); err != nil {
 		return nil, err
 	}
 	latestVector, err := plan.LatestVector()

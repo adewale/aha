@@ -2,6 +2,8 @@ package corpus
 
 import "database/sql"
 
+const CurrentWorkspaceSchemaVersion = 16
+
 var artifactFTSTriggerSQL = `create trigger artifacts_ai after insert on artifacts when ` + ftsArtifactTextPredicate("new") + ` begin insert into fts_artifacts(rowid,artifact_id,text) values(new.artifact_id,new.artifact_id,` + ftsArtifactTextExpr("new") + `); end`
 
 func Init(db *sql.DB) error {

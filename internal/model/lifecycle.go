@@ -16,6 +16,7 @@ const (
 	ArchiveEmpty                ArchiveState = "empty"
 	ArchivePopulated            ArchiveState = "populated"
 	ArchiveDamaged              ArchiveState = "damaged"
+	ArchiveUpgradeRequired      ArchiveState = "upgrade_required"
 )
 
 type ArchiveOperation string
@@ -38,6 +39,7 @@ const (
 	WorkspaceDamaged            WorkspaceState = "damaged"
 	WorkspaceArchiveMismatch    WorkspaceState = "archive_mismatch"
 	WorkspaceInvalidDestination WorkspaceState = "invalid_destination"
+	WorkspaceUpgradeRequired    WorkspaceState = "upgrade_required"
 )
 
 type WorkspaceOperation string
@@ -58,7 +60,7 @@ type Transition[S ~string] struct {
 }
 
 func AllArchiveStates() []ArchiveState {
-	return []ArchiveState{ArchiveInvalidAddress, ArchiveInvalidConfiguration, ArchiveUnreachable, ArchiveUninitialised, ArchiveEmpty, ArchivePopulated, ArchiveDamaged}
+	return []ArchiveState{ArchiveInvalidAddress, ArchiveInvalidConfiguration, ArchiveUnreachable, ArchiveUninitialised, ArchiveEmpty, ArchivePopulated, ArchiveDamaged, ArchiveUpgradeRequired}
 }
 
 func AllArchiveOperations() []ArchiveOperation {
@@ -66,7 +68,7 @@ func AllArchiveOperations() []ArchiveOperation {
 }
 
 func AllWorkspaceStates() []WorkspaceState {
-	return []WorkspaceState{WorkspaceAbsent, WorkspaceCurrent, WorkspaceBehind, WorkspaceDamaged, WorkspaceArchiveMismatch, WorkspaceInvalidDestination}
+	return []WorkspaceState{WorkspaceAbsent, WorkspaceCurrent, WorkspaceBehind, WorkspaceDamaged, WorkspaceArchiveMismatch, WorkspaceInvalidDestination, WorkspaceUpgradeRequired}
 }
 
 func AllWorkspaceOperations() []WorkspaceOperation {
@@ -104,6 +106,8 @@ func ArchiveTransition(state ArchiveState, operation ArchiveOperation) Transitio
 			return allowed(state)
 		}
 		return rejected(state, "archive", "verify", "--deep")
+	case ArchiveUpgradeRequired:
+		return rejected(state, "version", "--json")
 	}
 	return rejected(state, "archive", "status")
 }
@@ -148,6 +152,8 @@ func WorkspaceTransition(state WorkspaceState, operation WorkspaceOperation) Tra
 		return rejected(state, "workspace", "status")
 	case WorkspaceInvalidDestination:
 		return rejected(state, "workspace", "status")
+	case WorkspaceUpgradeRequired:
+		return rejected(state, "version", "--json")
 	}
 	return rejected(state, "workspace", "status")
 }

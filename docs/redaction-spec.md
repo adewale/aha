@@ -63,7 +63,7 @@ in the first place.*
 
 In scope:
 1. A user `aha search`es and a secret appears in the result snippet.
-2. A coding agent calls the MCP `search`/`read` tool and a secret shows up in
+2. A coding agent calls the MCP `search`/`show` tool and a secret shows up in
    the tool result text content.
 3. A teammate pulls a shared depot and `aha show` shows a credential that
    was never meant to leave the original machine.
@@ -91,7 +91,7 @@ aha has two "tiers" of state. Redaction applies to *exactly one* of them.
 | Corpus index | `messages.text`, `messages.command`, `tool_invocations.command`, `tool_invocations.command_family`, `tool_invocations.error_signature`, `tool_invocations.outcome_text`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha show` consumer can observe. |
 
 `entries.raw_json` is included even though it is the "parsed source bytes."
-That's deliberate: `aha show --json` returns `raw_json`, and the MCP `read`
+That's deliberate: `aha show --json` returns `raw_json`, and the MCP `show`
 tool returns it via `corpus.ReadCanonical`. Leaving it raw would defeat the
 goal. The depot blob remains the unredacted source of truth.
 
@@ -178,8 +178,8 @@ Three changes to `internal/corpus/schema.go`:
   `redaction_level` values.
 - `aha show --json` returns already-redacted `raw_json` from the corpus
   projection; depot content remains raw.
-- `aha status --json` / MCP `doctor` include the same redaction counts and
-  level breakdown in the corpus diagnostics.
+- `aha status --json` / MCP `status` include redaction counts and level breakdowns
+  in Workspace diagnostics.
 - Dashboard integration is still follow-up UI work.
 
 ## Configuration
