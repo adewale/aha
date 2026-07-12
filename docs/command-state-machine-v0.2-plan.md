@@ -12,7 +12,7 @@ Aha has two managed resources and one external input:
 
 1. **Agent histories** — mutable files owned by Pi, Claude Code, Codex, and OpenCode. Aha reads them but never manages or modifies them.
 2. **Archive** — durable, private, aggregated history from one or many machines. An Archive may be a local directory or an R2 bucket. It is authoritative for recovery.
-3. **Workspace** — one local materialization of an Archive's selected latest snapshots, prepared for search and processing. It is rebuildable and never authoritative for raw archived history.
+3. **Workspace** — one local materialisation of an Archive's selected latest snapshots, prepared for search and processing. It is rebuildable and never authoritative for raw archived history.
 
 ```mermaid
 flowchart LR
@@ -33,8 +33,8 @@ flowchart LR
     W1[Workspace A<br/>local processing]
     W2[Workspace B<br/>local processing]
 
-    W1 --> P1[search · read · analyze · classify]
-    W2 --> P2[search · read · analyze · classify]
+    W1 --> P1[search · show · analyse · classify]
+    W2 --> P2[search · show · analyse · classify]
 ```
 
 The transfer direction is intentionally asymmetric:
@@ -43,7 +43,7 @@ The transfer direction is intentionally asymmetric:
 Agent histories → Archive → Workspace
 ```
 
-Workspace processing never flows back into the Archive implicitly. If processing outputs later need sharing, they must become a separately designed artifact type and explicit operation.
+Workspace processing never flows back into the Archive implicitly. If processing outputs later need sharing, they must become a separately designed artefact type and explicit operation.
 
 ## 2. Why Archive, not Depot
 
@@ -61,14 +61,14 @@ The implementation may retain `depot` package names temporarily during refactori
 
 ## 3. What a Workspace is
 
-A Workspace is not a byte-for-byte mirror of an Archive. It materializes a selected Archive view—by default, each machine's latest complete snapshot—plus derived local processing state:
+A Workspace is not a byte-for-byte mirror of an Archive. It materialises a selected Archive view—by default, each machine's latest complete snapshot—plus derived local processing state:
 
 ```text
 Archive latest vector
   machine-a → sha-A2
   machine-b → sha-B4
 
-Workspace materialized vector
+Workspace materialised vector
   machine-a → sha-A1
   machine-b → sha-B4
 ```
@@ -81,13 +81,13 @@ Formally:
 Workspace is current
 ⇔
 for every machine in Archive.latest,
-Workspace.materialized[machine] == Archive.latest[machine]
+Workspace.materialised[machine] == Archive.latest[machine]
 ```
 
 A Workspace persists:
 
 - Archive identity and address identity;
-- materialized machine/snapshot vector;
+- materialised machine/snapshot vector;
 - Workspace schema version;
 - raw content required for evidence reads;
 - SQLite/FTS and future derived processing state.
@@ -152,33 +152,33 @@ Removing `sync` avoids an atomicity fiction and the `UploadCommittedDownloadPend
 
 ```bash
 aha archive init [ARCHIVE]
-aha archive select ARCHIVE
+aha archive set-default ARCHIVE
 aha archive status [ARCHIVE]
 aha archive upload [ARCHIVE]
 aha archive download [ARCHIVE] --workspace PATH
 aha archive verify [ARCHIVE] [--deep]
-aha archive export [ARCHIVE] --machine ID --out FILE
 ```
 
-### Workspace lifecycle and processing
+### Workspace lifecycle and integrity
 
 ```bash
+aha workspace set-default PATH
 aha workspace status [PATH]
 aha workspace verify [PATH] [--repair-fts]
 aha workspace repair [PATH] --backup
-aha workspace import BUNDLE... [--workspace PATH]
+aha workspace conflicts [PATH]
 ```
 
-### Whole-system inspection and retrieval
+### Whole-system inspection and processing
 
 ```bash
 aha status [--archive ARCHIVE] [--workspace PATH]
 aha search [--workspace PATH] QUERY
-aha read [--workspace PATH] REF
-aha incidents [--workspace PATH]
-aha conflicts [--workspace PATH]
-aha serve [--workspace PATH]
-aha mcp [--workspace PATH]
+aha show [--workspace PATH] REF
+aha analyse failures [--workspace PATH]
+aha dashboard [--workspace PATH]
+aha mcp check [--workspace PATH]
+aha mcp serve [--workspace PATH]
 ```
 
 ### Initial local setup
@@ -187,7 +187,7 @@ aha mcp [--workspace PATH]
 aha init --acknowledge-raw-history
 ```
 
-`aha init` writes config, assigns a stable machine ID, configures agent-history roots, initializes the default local Archive, and prepares the default Workspace destination. The first Archive download creates the Workspace database/materialization.
+`aha init` writes config, assigns a stable machine ID, configures agent-history roots, initialises the default local Archive, and prepares the default Workspace destination. The first Archive download creates the Workspace database/materialisation.
 
 ## 6. Commands deliberately removed
 
@@ -196,18 +196,24 @@ aha init --acknowledge-raw-history
 | `snapshot` | `archive upload`; snapshot remains a domain noun |
 | `refresh` | no replacement; explicit upload then download |
 | no-path `ingest` | `archive download` |
-| bundle-taking `ingest` | `workspace import` |
+| bundle-taking `ingest`, `export`, portable bundles | deferred; direct Workspace import violates Archive authority |
 | `depot` | `archive` |
 | `corpus` | `workspace` |
 | `doctor` | unified read-only `status` |
+| `read` | `show`; displays contextual evidence for a reference |
+| `incidents` | `analyse failures`; names the processing job |
+| top-level `conflicts` | `workspace conflicts`; it is a Workspace integrity concern |
+| `serve` | `dashboard`; names the user-facing result |
+| bare `mcp` | explicit `mcp check` and `mcp serve` |
 | top-level `verify` | `archive verify` or `workspace verify` |
 | `sync` | removed to avoid hidden composition/partial completion |
 | `snapshots`/`ls` command | folded into `archive status` |
-| `optimize`/`vacuum` command | removed from public lifecycle; automatic/internal maintenance |
+| `optimise`/`vacuum` command | removed from public lifecycle; automatic/internal maintenance |
 | `rebuild` command name | `workspace repair --backup` |
 | `--depot` | `--archive` |
 | `--corpus`, `--repo` | `--workspace` |
 | `--accept-secrets` | `--acknowledge-raw-history` |
+| `archive select` | `archive set-default`; says exactly what local config changes |
 
 No compatibility aliases or deprecation period are planned.
 
@@ -215,31 +221,21 @@ No compatibility aliases or deprecation period are planned.
 
 ### `archive init` — retain
 
-Initialization is a real durable state transition:
+Initialisation is a real durable state transition:
 
 ```text
-reachable uninitialized location
+reachable uninitialised location
   → write Archive marker/index
-  → initialized empty Archive
+  → initialised empty Archive
 ```
 
-Upload/download must not auto-initialize. An uninitialized Archive returns one explicit next transition: `aha archive init ARCHIVE`.
+Upload/download must not auto-initialise. An uninitialised Archive returns one explicit next transition: `aha archive init ARCHIVE`.
 
 R2 bucket creation remains external. Ordinary object credentials do not imply bucket-administration authority.
 
-### `archive export` — retain
+### Portable import/export — defer
 
-Export serves a distinct offline portability job:
-
-```text
-one selected Archive snapshot → one portable bundle file
-```
-
-It is not the same as download:
-
-- download materializes a Workspace;
-- export creates a portable handoff artifact;
-- a future mirror operation would copy the complete Archive.
+Direct Workspace import would create history absent from the authoritative Archive and make Workspace repair lossy. A coherent portable flow would require paired `archive export`/`archive import`, including explicit same-machine latest-pointer semantics. That journey and state model are deferred beyond 0.2 rather than exposing an authority-breaking shortcut.
 
 ### `verify` — retain, resource-scoped
 
@@ -273,9 +269,9 @@ It is only shorthand for two valid commands and introduces a partial-completion 
 
 Archive status includes machine/latest rows and aggregate historical counts. Detailed historical browsing can be introduced later only when there is a concrete user journey.
 
-### `optimize` — remove
+### `optimise` — remove
 
-SQLite vacuum/optimization is implementation maintenance, not a primary product transition. It should be automatic, internal, or introduced later under an explicitly advanced maintenance surface if evidence demands it.
+SQLite vacuum/optimisation is implementation maintenance, not a primary product transition. It should be automatic, internal, or introduced later under an explicitly advanced maintenance surface if evidence demands it.
 
 ## 8. Archive operation contracts
 
@@ -286,8 +282,8 @@ Read-only. It answers:
 - address/config validity;
 - credential field/reason state without values;
 - reachability;
-- initialized/empty/populated/damaged state;
-- selected-default status;
+- initialised/empty/populated/damaged state;
+- default-Archive status;
 - machines and each latest snapshot;
 - aggregate historical manifest/blob counts when cheaply available;
 - optional Workspace relationship;
@@ -297,17 +293,17 @@ It replaces setup, doctor Archive diagnostics, list, and metadata-only verificat
 
 ### `archive init`
 
-Required state: reachable and uninitialized.
+Required state: reachable and uninitialised.
 
-Writes only marker/index initialization state. It neither uploads agent history nor changes the selected default unless `archive select` is run separately.
+Writes only marker/index initialisation state. It neither uploads agent history nor changes the default Archive; `archive set-default` is a separate local-config transition.
 
-Postcondition: initialized empty Archive.
+Postcondition: initialised empty Archive.
 
-### `archive select`
+### `archive set-default`
 
-Required state: initialized, healthy Archive.
+Required state: initialised, healthy Archive.
 
-Writes local config only. It never changes Archive contents.
+Writes local config only. The name states the exact effect; it never changes Archive contents. `workspace set-default` provides the symmetric local preference for processing commands.
 
 ### `archive upload`
 
@@ -344,7 +340,7 @@ read Archive marker/index/latest vector
   → compare Archive and Workspace vectors
   → fetch unknown blobs
   → parse/index into Workspace
-  → record materialized vector
+  → record materialised vector
 ```
 
 Default scope: every machine's latest complete snapshot. Historical snapshots remain Archive-only.
@@ -364,20 +360,16 @@ It never reads local agent histories and never writes the Archive.
 Postcondition:
 
 ```text
-Workspace.materialized == planned Archive.latest
+Workspace.materialised == planned Archive.latest
 ```
 
 ### `archive verify`
 
 Read-only. Quick status already checks marker/index/latest invariants. Explicit verify performs a stable audit; `--deep` downloads and hashes durable blob/history content.
 
-### `archive export`
-
-Read-only Archive operation plus one explicit output-file write. It resolves one machine/latest snapshot and materializes a portable bundle. It does not create/update a Workspace.
-
 ## 9. Archive lifecycle
 
-Selection is local configuration, not an Archive lifecycle state.
+The default Archive is local configuration, not an Archive lifecycle state.
 
 ```mermaid
 stateDiagram-v2
@@ -385,12 +377,12 @@ stateDiagram-v2
     RawArchiveInput --> InvalidAddress: parse fails
     RawArchiveInput --> InvalidConfiguration: missing/placeholder/conflicting field
     RawArchiveInput --> Unreachable: read probe fails
-    RawArchiveInput --> Uninitialized: reachable, marker absent
-    RawArchiveInput --> Empty: initialized, no latest snapshots
-    RawArchiveInput --> Populated: initialized, latest snapshots present
+    RawArchiveInput --> Uninitialised: reachable, marker absent
+    RawArchiveInput --> Empty: initialised, no latest snapshots
+    RawArchiveInput --> Populated: initialised, latest snapshots present
     RawArchiveInput --> Damaged: invariant fails
 
-    Uninitialized --> Empty: archive init
+    Uninitialised --> Empty: archive init
     Empty --> Populated: archive upload
     Populated --> Populated: archive upload
 
@@ -412,7 +404,7 @@ User-facing states:
 invalid_address
 invalid_configuration
 unreachable
-uninitialized
+uninitialised
 empty
 populated
 damaged
@@ -467,7 +459,7 @@ stateDiagram-v2
     ParseInputs --> LocalPreflight
     LocalPreflight --> RejectedNoEffects: invalid config/history/destination
     LocalPreflight --> RemoteInspection
-    RemoteInspection --> RejectedNoEffects: denied/unreachable/uninitialized/damaged
+    RemoteInspection --> RejectedNoEffects: denied/unreachable/uninitialised/damaged
     RemoteInspection --> Planned
     Planned --> DryRunComplete: --dry-run
     Planned --> Mutating: execute
@@ -499,7 +491,7 @@ type UploadPlan interface { /* sealed */ }
 type DownloadPlan interface { /* sealed */ }
 ```
 
-Zero values and externally manufactured implementations cannot authorize effects.
+Zero values and externally manufactured implementations cannot authorise effects.
 
 ## 12. Status model
 
@@ -572,7 +564,7 @@ aha archive status 'r2:team-history'
 aha archive upload 'r2:team-history'
 ```
 
-No init/select step is required when the Archive already exists and an explicit address is supplied.
+No init/set-default step is required when the Archive already exists and an explicit address is supplied.
 
 ### Aggregate every machine locally
 
@@ -583,16 +575,6 @@ aha archive download 'r2:team-history' \
 aha status \
   --archive 'r2:team-history' \
   --workspace "$HOME/aha-all-history"
-```
-
-### Portable handoff
-
-```bash
-aha archive export 'r2:team-history' \
-  --machine work-mac \
-  --out work-mac.tar.zst
-aha workspace import work-mac.tar.zst \
-  --workspace "$HOME/aha-work"
 ```
 
 ### Repair local processing state
@@ -610,7 +592,7 @@ Implementation starts only after this model is accepted.
 
 1. Add sealed Archive, Workspace, upload/download plan, and status variants.
 2. Replace internal `map[string]any` state assembly with typed views.
-3. Persist Archive identity and materialized snapshot vector in each Workspace.
+3. Persist Archive identity and materialised snapshot vector in each Workspace.
 4. Derive all next actions from one transition table.
 5. Add exhaustive state/command tests and zero-value capability model-gap tests.
 
@@ -637,7 +619,7 @@ Exit: only 0.2 vocabulary is reachable.
 
 ### Phase 4 — journey evidence
 
-1. Run local Archive, existing R2 upload, pull-only aggregation, repeated no-op download, portable handoff, denied credential, unsafe destination, Archive mismatch, cancellation, repair, and deep-verify journeys.
+1. Run local Archive, existing R2 upload, pull-only aggregation, repeated no-op download, denied credential, unsafe destination, Archive mismatch, cancellation, repair, and deep-verify journeys.
 2. Run fake-R2 model tests and the pinned live R2 smoke suite.
 3. Verify Linux/Darwin/Windows builds and MCP/HTTP status parity.
 
@@ -662,6 +644,7 @@ Exit: every documented command runs as written and every invalid transition prov
 - full byte-for-byte Archive mirroring;
 - historical-snapshot Workspace browsing;
 - Workspace-to-Archive processing-result publication;
+- portable bundle import/export until Archive-authoritative semantics are designed;
 - Archive deletion or garbage collection;
 - semantic/vector search;
 - automatic R2 bucket creation with ordinary object credentials;

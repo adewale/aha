@@ -38,7 +38,7 @@ func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src Bl
 	return PushV2WithOptions(ctx, v2, manifest, src, PushOptions{})
 }
 
-// PushV2WithOptions computes the snapshot identity, recognizes unchanged
+// PushV2WithOptions computes the snapshot identity, recognises unchanged
 // state from the parent pointer alone, uploads only blobs the parent does not
 // carry, then publishes the manifest and pointer through the typestate flow.
 func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {

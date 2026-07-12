@@ -19,7 +19,7 @@ This spec captures the follow-up work suggested by comparing `aha` with prior ar
 | Static analysis | Correctness debt must fail tests when it grows. | AST/static tests for time, FTS writes, append-only mutation, identity construction, network imports. |
 | Canonical bundle fixture | Archive drift needs a small deterministic golden beyond repeat equality. | `TestCanonicalBundleGoldenSHA`. |
 | End-to-end journeys | CLI workflows must cover search→read, bad refs, verify/repair, depot ingest, and JSON contracts. | CLI journey tests and generated `docs/commands.md`. |
-| Performance risk tracking | Integrity-heavy paths must have explicit hotspot documentation and benchmark plans before optimization. | `docs/performance-audit.md`. |
+| Performance risk tracking | Integrity-heavy paths must have explicit hotspot documentation and benchmark plans before optimisation. | `docs/performance-audit.md`. |
 
 ## Deliberate non-goals
 

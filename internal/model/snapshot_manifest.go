@@ -13,7 +13,7 @@ import (
 
 // SnapshotManifestSchema identifies the depot v2 snapshot manifest format
 // (docs/depot-v2-spec.md). A snapshot manifest is the logically-full
-// description of one machine's captured state: every session/artifact file
+// description of one machine's captured state: every session/artefact file
 // version, each addressed by the SHA-256 of its content. The manifest's own
 // SHA-256 over its canonical encoding is the snapshot identity.
 const SnapshotManifestSchema = "aha-snapshot-manifest/v2"
@@ -21,7 +21,7 @@ const SnapshotManifestSchema = "aha-snapshot-manifest/v2"
 // MaxSnapshotFiles caps the file list, mirroring the v1 bundle manifest cap.
 const MaxSnapshotFiles = 200000
 
-// SnapshotManifest is the depot v2 snapshot artifact. It reuses
+// SnapshotManifest is the depot v2 snapshot artefact. It reuses
 // ManifestFile so the corpus ingest path is shared with v1 bundle import;
 // the Entries hint is never set by v2 capture (entry counts are
 // ingest-derived corpus facts, not capture-time parses).
@@ -71,7 +71,7 @@ func (v BlobKey) Valid() bool           { return len(v.value) == 64 && isLowerHe
 // manifest: everything except when it was captured and by which build.
 // Two snapshots of an unchanged machine on different days have different
 // identities (provenance) but equal state digests, which is what lets a
-// push recognize "nothing changed" from the parent pointer alone.
+// push recognise "nothing changed" from the parent pointer alone.
 func SnapshotStateSHA256(m SnapshotManifest) (SHA256Hex, error) {
 	m.CapturedAt = "state"
 	m.CreatedBy = "state"
@@ -159,7 +159,7 @@ func validateSnapshotManifest(m SnapshotManifest) error {
 		case "artifact":
 			want := "sources/" + mf.Source + "/artifacts/"
 			if !strings.HasPrefix(mf.RelativePath, want) {
-				return fmt.Errorf("invalid snapshot manifest: artifact path %s must be under %s", mf.RelativePath, want)
+				return fmt.Errorf("invalid snapshot manifest: artefact path %s must be under %s", mf.RelativePath, want)
 			}
 		default:
 			return fmt.Errorf("invalid snapshot manifest: unsupported file kind %q", mf.Kind)

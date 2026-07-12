@@ -129,7 +129,7 @@ The S3 region should be `auto`.
 ### SDK checksums
 
 Nothing to configure: `aha` pins the AWS SDK's request/response checksum
-behavior to "when required", per Cloudflare's SDK guidance, because R2
+behaviour to "when required", per Cloudflare's SDK guidance, because R2
 implements the `x-amz-checksum-*` headers only partially. Integrity does not
 depend on those headers anyway — every blob and manifest is content-addressed
 and re-hashed on read.

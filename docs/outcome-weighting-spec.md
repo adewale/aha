@@ -62,7 +62,7 @@ popular wrong turns). Outcome without recurrence ⇒ "this one session ended ok,
 here's the skill" (mistakes an idiosyncratic local fix for a general
 technique). Together: *here is a pattern that recurred N times and resolved
 successfully ≥M times; the resolution path is evidence for a future
-intervention artifact.*
+intervention artefact.*
 
 ## The foundation already exists
 
@@ -236,7 +236,7 @@ aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [-
 ```
 
 `--state unresolved` is the unsolved-pain to-do list; `--state resolved` is the
-set of fixes worth harvesting into intervention artifacts: runbooks, skills,
+set of fixes worth harvesting into intervention artefacts: runbooks, skills,
 dynamic workflows, tool/platform fixes, or investigation items. A read-only
 command; no mutating surface. See `docs/patterns-and-interventions.md` for the
 manual classifier.

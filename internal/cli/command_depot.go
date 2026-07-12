@@ -154,7 +154,7 @@ func runDepotContext(ctx context.Context, args []string, stdout, stderr io.Write
 			return err
 		}
 		if depotUninitialized(report) {
-			return fmt.Errorf("depot %s:%s is reachable but not initialized; run `aha depot init %s` first", v2.Address().Type, v2.Address().Location, addr)
+			return fmt.Errorf("depot %s:%s is reachable but not initialised; run `aha depot init %s` first", v2.Address().Type, v2.Address().Location, addr)
 		}
 		if len(report.Problems) > 0 {
 			return fmt.Errorf("depot %s:%s has problems: %s; run `aha depot verify %s --deep`", v2.Address().Type, v2.Address().Location, strings.Join(report.Problems, "; "), addr)

@@ -586,7 +586,7 @@ func labelForRole(role string) string {
 	case "toolResult":
 		return "Tool output"
 	case "artifact":
-		return "File artifact"
+		return "File artefact"
 	default:
 		if role == "" {
 			return "Event"

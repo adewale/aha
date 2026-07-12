@@ -22,20 +22,20 @@ on-disk/object layout and per-command data flows see
 Keeping these two **independent** dimensions separate is the whole model:
 
 - **Provisioning lifecycle of a depot** — its backing store moves through
-  **Uninitialized → Initialized → Populated**. `aha` provisions it for you on the
+  **Uninitialized → Initialised → Populated**. `aha` provisions it for you on the
   first write, so you rarely run `aha depot init` by hand.
 - **Selection** — exactly one depot is the **default** at a time, recorded as a
   config pointer (`depot.type` / `depot.location`). Out of the box it points at a
   local depot (`~/.aha/depot`) that is not yet provisioned; nothing touches the
   network until you use a remote.
 
-A depot can be fully Initialized and Populated *without* being the default.
+A depot can be fully Initialised and Populated *without* being the default.
 *Configuring* a depot moves the pointer — `aha depot init <addr>` (provision and
-select) or `aha depot use <addr>` (switch to an already-initialized depot).
+select) or `aha depot use <addr>` (switch to an already-initialised depot).
 CLI addresses are always explicit: `r2:BUCKET` or `local:PATH`; bare values are
 rejected rather than guessed. A
 `--depot <addr>` flag is a one-off override: it targets a depot for a single
-command without moving the pointer (and may still auto-initialize that target).
+command without moving the pointer (and may still auto-initialise that target).
 
 ## State machine
 
@@ -72,7 +72,7 @@ Selection — which initialized depot is the default (a config pointer)
    hint, not as an error. A directory or bucket holding a **v1 depot**
    (`depot.json`) is refused outright: there is no migration; recover old
    bundles via `aha ingest <bundle>`.
-2. **Initialized** — the `aha-depot.json` marker is present
+2. **Initialised** — the `aha-depot.json` marker is present
    (`schema: aha-depot/v2`, `layout: v2`). Reached by `aha depot init` **or
    implicitly by the first `aha snapshot` / `aha refresh`**, which auto-create
    the dir/bucket and marker before writing.
@@ -80,7 +80,7 @@ Selection — which initialized depot is the default (a config pointer)
    `blobs/v2/`, a manifest under `machines/<id>/manifests/`, a
    `machines/<id>/latest` pointer, and the machine listed in
    `machines/index.json`.
-4. **Degraded** (a sub-state of Initialized/Populated) — snapshot evidence
+4. **Degraded** (a sub-state of Initialised/Populated) — snapshot evidence
    exists but the marker is missing, a pointer dangles, a manifest fails its
    identity check, or a referenced blob is absent. `aha depot verify` reports
    it (`--deep` also verifies blob content and historical manifests). Because
@@ -95,7 +95,7 @@ Selection — which initialized depot is the default (a config pointer)
 
 Selection is **not** a provisioning state — it is the config pointer naming the
 default depot. `aha depot init` and `aha depot use` move it (only ever to an
-Initialized depot); `--depot <addr>` overrides it for a single command. Switching
+Initialised depot); `--depot <addr>` overrides it for a single command. Switching
 the default leaves every depot's data untouched.
 
 ## Transitions (commands)
@@ -103,13 +103,13 @@ the default leaves every depot's data untouched.
 | Command | Provisioning | Selection | Net (r2) | Effect |
 |---|---|---|---|---|
 | `aha depot setup r2:<bucket>` | read-only preflight | unchanged | yes, after local validation | Rejects malformed/placeholders before networking, reports the depot state, and emits exactly one safe next command. |
-| `aha depot init <addr>` | Uninitialized → Initialized (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `aha-depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
-| `aha depot use <addr>` | requires Initialized | sets default = `<addr>` | yes | Switches the default to an already-initialized `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
-| `aha snapshot` | Uninitialized → Initialized (auto) → Populated | unchanged | yes | Auto-initializes the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognized from the pointer alone; it performs no blob/manifest/latest writes but repairs missing machine-index registration left by an interrupted first push. Does not touch the corpus and never reads another machine's namespace. |
+| `aha depot init <addr>` | Uninitialized → Initialised (idempotent) | sets default = `<addr>` | yes | Creates the dir/bucket if needed, writes the `aha-depot.json` marker, and for r2 persists the non-secret `depot.r2.account_id`. Re-running against an existing depot just connects. |
+| `aha depot use <addr>` | requires Initialised | sets default = `<addr>` | yes | Switches the default to an already-initialised `<addr>`; refuses a reachable-but-uninitialized target and points at `aha depot init`. Persists r2 `account_id`. Creates nothing. |
+| `aha snapshot` | Uninitialized → Initialised (auto) → Populated | unchanged | yes | Auto-initialises the target if needed, then pushes: uploads only blobs the parent snapshot does not carry, publishes the manifest, moves the pointer. Unchanged state is recognised from the pointer alone; it performs no blob/manifest/latest writes but repairs missing machine-index registration left by an interrupted first push. Does not touch the corpus and never reads another machine's namespace. |
 | `aha refresh` | same as `snapshot` → Populated | unchanged | yes | Push, then pull every machine's latest snapshot into the local corpus, fetching only unknown content. |
 | `aha ingest` | reads Populated (no provisioning) | unchanged | yes | Pull-only: anti-entropy the corpus against every machine's latest snapshot. |
 | `aha export` | reads Populated | unchanged | yes | Materializes a machine's latest snapshot as one portable v1 `bundle.tar.zst`. |
-| `aha depot ls` | reads Initialized/Populated | unchanged | yes | Lists each machine's latest snapshot (identity, capture time, file count). |
+| `aha depot ls` | reads Initialised/Populated | unchanged | yes | Lists each machine's latest snapshot (identity, capture time, file count). |
 | `aha depot verify [--deep]` | reads (reports Degraded) | unchanged | yes | Quick: marker, index, pointers resolve, manifest identities, blob presence. `--deep`: verifies blob content and audits historical manifests. |
 
 Latest-pointer publication carries the canonical machine namespace and expected
@@ -121,7 +121,7 @@ error. Shared machine-index updates retain bounded conditional-write retries.
 
 `--depot <addr>` on `snapshot` / `refresh` / `ingest` / `status` / `doctor` runs
 that one command against `<addr>` without moving the default pointer. Because the
-write commands auto-initialize their target, a one-off `snapshot --depot
+write commands auto-initialise their target, a one-off `snapshot --depot
 r2:other` can create/initialize `r2:other` as a side effect.
 
 ## What lives in a depot
@@ -135,7 +135,7 @@ r2:other` can create/initialize `r2:other` as a side effect.
   machines/<machine>/latest                     # pointer, conditional PUT
 ```
 
-- **`aha-depot.json`** lets `init` recognize an existing depot and lets
+- **`aha-depot.json`** lets `init` recognise an existing depot and lets
   `verify` check the layout version — the restic repo-config analog.
 - **Blobs** are content-addressed file versions, stored once ever; identical
   content across snapshots and machines is one object by construction.
@@ -184,7 +184,7 @@ reported backup path.
 
 ### Add another machine
 
-The bucket already exists and is initialized, so the second machine just selects
+The bucket already exists and is initialised, so the second machine just selects
 it (after exporting the two secret keys, plus the account id the first time):
 
 ```bash

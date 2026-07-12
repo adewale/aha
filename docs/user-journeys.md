@@ -1,6 +1,6 @@
 # User Journeys and Defaults
 
-`aha` is optimized for a local-first archive workflow: push private histories
+`aha` is optimised for a local-first archive workflow: push private histories
 to a content-addressed depot as immutable snapshots, pull them into a local
 corpus, then search it. The defaults come from the journeys below.
 
@@ -26,12 +26,12 @@ Rationale:
 
 - `init` makes defaults visible before data is copied.
 - `--accept-secrets` records that v1 preserves raw private data.
-- `refresh` pushes this machine's state to the depot (unchanged state is recognized from the depot pointer alone; only new file versions upload) and pulls every machine's latest snapshot into the local corpus, fetching only unknown content.
+- `refresh` pushes this machine's state to the depot (unchanged state is recognised from the depot pointer alone; only new file versions upload) and pulls every machine's latest snapshot into the local corpus, fetching only unknown content.
 - The user should not need to remember Pi/Claude/Codex paths for the standard layout.
 
 Defaults used:
 
-- machine ID: sanitized local hostname, written to config;
+- machine ID: sanitised local hostname, written to config;
 - sources: `~/.pi/agent/sessions`, `~/.claude/projects`, and `~/.codex/sessions`;
 - depot: local bundle store at `~/.aha/depot`; remote/R2 depot is opt-in;
 - corpus: `~/.aha`;
@@ -74,7 +74,7 @@ Rationale:
 
 - Search should default to the local corpus.
 - Results must be readable without knowing the source agent's file format.
-- Default indexing favors human conversation, summaries, and text artifacts; raw tool output is preserved but not indexed. Incidents store normalized command/error signatures for ranking, not raw tool output samples.
+- Default indexing favours human conversation, summaries, and text artefacts; raw tool output is preserved but not indexed. Incidents store normalized command/error signatures for ranking, not raw tool output samples.
 
 ## Journey 4: hand someone one file (export/import)
 
@@ -176,7 +176,7 @@ Rationale:
 - Loopback-only and read-only by default; the `Host` header is validated to blunt DNS-rebinding, and non-loopback binds require `--allow-remote`.
 - Result clicks deep-link the ref into the URL fragment so a view is reloadable and shareable.
 
-## Journey 8: turn recurring incidents into intervention artifacts
+## Journey 8: turn recurring incidents into intervention artefacts
 
 User goal: “What should I create so this failure pattern costs less next time?”
 
@@ -192,11 +192,11 @@ Rationale:
 - Incidents are evidence, not automatic prescriptions.
 - Resolved/partial incidents can become runbooks, skills, dynamic workflows, or tool/platform fixes depending on the pattern shape.
 - Unresolved high-pain incidents usually become investigation backlog items until a reliable fix path exists.
-- `docs/patterns-and-interventions.md` provides the manual classifier and artifact templates.
+- `docs/patterns-and-interventions.md` provides the manual classifier and artefact templates.
 
 ## Defaults chosen from the journeys
 
-| Command | No-flag behavior |
+| Command | No-flag behaviour |
 |---|---|
 | `aha init` | Write JSONC config with hostname-derived `machine_id`, default roots, default local depot/corpus dirs, and privacy acknowledgement set to false. |
 | `aha init --accept-secrets` | Same as `init`, but records one-time privacy acknowledgement. |
@@ -220,7 +220,7 @@ Rationale:
 | `status` | Explain corpus health and counts. |
 | `verify` | Check corpus invariants and optionally repair derived FTS rows. |
 | `conflicts` | Surface quarantined merge conflicts without cluttering normal search. |
-| `depot` | Initialize, list machine snapshots, and verify the durable content-addressed store. |
+| `depot` | Initialise, list machine snapshots, and verify the durable content-addressed store. |
 | `doctor` | Debug source discovery, config, corpus, depot, and adapter availability. |
 | `mcp` | Expose read tools to coding agents over stdio MCP without per-call subprocesses. |
 | `serve` | Read-only local dashboard over the same tool surface for human browsing. |

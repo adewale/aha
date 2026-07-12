@@ -24,7 +24,7 @@ The substrate is built, with a first deterministic pattern layer for recurring t
 - **Local dashboard** (`aha serve`) — a loopback web UI with a corpus overview, search/read, and a unified **incidents** view (recurring failures with their resolution status, sparklines, fix paths, trajectory drill-in, and a copy-fix-notes affordance). It is still a browser over local data, not an autonomous runbook/skill/workflow author.
 - **Read-only MCP server** (`aha mcp`) — coding agents can call `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools. An agent can ask your history "have I asked this before?", "which failures keep recurring unresolved?", or "show me the fix that worked" via read-only tools.
 - **Typed TypeScript client** (`clients/typescript/`) — code-mode agent runtimes (Cloudflare codemode, Anthropic code-execution-with-MCP) can run one code-mode program over a long-lived transport (`search → filter → Promise.all(read)`). That is still multiple MCP tool calls when the program fans out. See `clients/typescript/README.md` for examples.
-- **Incidents** (`aha incidents`) — recurring tool-call failures grouped by tool, command family, and normalized error signature, each carrying both its recurrence (episodes, distinct sessions/projects, first/last seen) and its resolution status: `unresolved` / `partial` / `resolved`, a tier, and the top **resolution paths that actually worked** (ranked by a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one). Filter `--state unresolved` for the unsolved-pain to-do list or `--state resolved` for fixes worth harvesting. Incidents are signals for humans/agents to choose a runbook, skill, dynamic workflow, tool/platform fix, or investigation item; `aha` does not generate or install those artifacts. See `docs/outcome-weighting-spec.md` and `docs/patterns-and-interventions.md`.
+- **Incidents** (`aha incidents`) — recurring tool-call failures grouped by tool, command family, and normalized error signature, each carrying both its recurrence (episodes, distinct sessions/projects, first/last seen) and its resolution status: `unresolved` / `partial` / `resolved`, a tier, and the top **resolution paths that actually worked** (ranked by a Wilson lower bound so a one-off fix never outranks a repeatedly-confirmed one). Filter `--state unresolved` for the unsolved-pain to-do list or `--state resolved` for fixes worth harvesting. Incidents are signals for humans/agents to choose a runbook, skill, dynamic workflow, tool/platform fix, or investigation item; `aha` does not generate or install those artefacts. See `docs/outcome-weighting-spec.md` and `docs/patterns-and-interventions.md`.
 
 The longer-term direction is tracked in `docs/research/agent-trace-tools.md`: broader incident-to-skill discovery, retried-prompt views, costly-loop detection, and cross-machine "what was I doing last Tuesday across all my agents".
 
@@ -62,9 +62,9 @@ Many users start with:
 
 ## Privacy warning
 
-By default, `aha` preserves today's `none-v1` behavior: depot snapshots and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
+By default, `aha` preserves today's `none-v1` behaviour: depot snapshots and corpora may contain prompts, source code, tool output, credentials pasted into chat, images, paths, and API responses. Treat them as private.
 
-Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `tool_invocations`, `entries.raw_json`, artifacts, and FTS) at ingest. Depot blobs remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
+Set `"redaction":"v1"` to redact known secret patterns from corpus projections (`messages`, `tool_invocations`, `entries.raw_json`, artefacts, and FTS) at ingest. Depot blobs remain raw provenance. See `docs/redaction-spec.md` and `docs/trust.md`.
 
 ## Install / build
 
@@ -129,7 +129,7 @@ REF=$(aha search "migration bug" --refs | awk 'NF { print $1; exit }')
 aha read "$REF" --json
 ```
 
-Expected result: `search` returns matching messages/artifacts as leads; `read` returns surrounding transcript entries or artifact text as evidence.
+Expected result: `search` returns matching messages/artefacts as leads; `read` returns surrounding transcript entries or artefact text as evidence.
 
 Pull every machine's latest complete snapshot from an existing R2 depot into
 one dedicated local corpus, without uploading this machine:
@@ -142,7 +142,7 @@ aha ingest \
 ```
 
 Explicit CLI depot values must start with `r2:` or `local:`. Pull preflight
-validates the initialized depot and dedicated corpus destination before any
+validates the initialised depot and dedicated corpus destination before any
 local corpus file or lifecycle lock is created.
 
 ## Long-running command progress
@@ -184,11 +184,11 @@ with `--progress=json`, stderr is valid NDJSON through the terminal error.
 
 ## Search functionality
 
-`aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artifacts while preserving raw source files for later reads.
+`aha search` is deterministic local full-text search backed by SQLite FTS5. It indexes user/assistant text, summaries, and text artefacts while preserving raw source files for later reads.
 
 Search supports:
 
-- full-text queries over messages and artifacts;
+- full-text queries over messages and artefacts;
 - filters: `--source`, `--machine`, `--role`, `--after`, `--before`, `--path`, `--limit`;
 - output modes: human text, `--json`, `--refs`, `--files`, `--md`;
 - stable result identity: structured `ref` plus copy-pastable `ref_text`;
@@ -199,7 +199,7 @@ What it does **not** do yet: semantic/vector search, ranking beyond SQLite FTS s
 
 ## From patterns to interventions
 
-`aha incidents` does not assume every recurring pattern should become a skill. Use incidents as evidence, then choose the right artifact:
+`aha incidents` does not assume every recurring pattern should become a skill. Use incidents as evidence, then choose the right artefact:
 
 | Pattern shape | Prefer |
 |---|---|
@@ -218,13 +218,13 @@ aha incidents --state unresolved --json
 aha read <sample_ref> --before 3 --after 10 --md
 ```
 
-See `docs/patterns-and-interventions.md` for the manual classifier and artifact templates.
+See `docs/patterns-and-interventions.md` for the manual classifier and artefact templates.
 
 ## Compared with Claude History Explorer and QMD
 
 | Tool | Search scope | Search engine | Retrieval style | Best fit |
 |---|---|---|---|---|
-| `aha` | Pi + Claude Code + Codex + OpenCode, across machines after ingest | SQLite FTS5 over a local corpus | Search returns refs; `read <ref>` expands to full context/artifact text | Private cross-agent archive and agent-friendly retrieval |
+| `aha` | Pi + Claude Code + Codex + OpenCode, across machines after ingest | SQLite FTS5 over a local corpus | Search returns refs; `read <ref>` expands to full context/artefact text | Private cross-agent archive and agent-friendly retrieval |
 | Claude History Explorer | Claude Code history only | On-demand parsing/regex-style local exploration | Browse/search Claude sessions directly | Lightweight Claude-only exploration |
 | QMD-style workflows | Usually document/session search with agent-oriented outputs | Depends on QMD setup | Treat snippets as leads, then retrieve cited context | Query/read discipline and citation-like workflows |
 
@@ -288,7 +288,7 @@ A source is read-only during snapshot. For JSONL sources, raw files are stored a
 
 ### Verifying an adapter against a real machine
 
-`scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` runs a safe end-to-end check (discovery → snapshot → ingest → search → read) against your real history. Every artifact it generates goes under a single `/tmp` directory — a throwaway corpus, depot, config, cache/build cache, and (for OpenCode) the JSONL export — so your real `~/.aha`/`~/.config/aha` are untouched and there is nothing to clean up. It fingerprints and content-hashes source files before and after (plus `integrity_check` of OpenCode databases) and fails if anything changed, giving a strong read-only regression check.
+`scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` runs a safe end-to-end check (discovery → snapshot → ingest → search → read) against your real history. Every artefact it generates goes under a single `/tmp` directory — a throwaway corpus, depot, config, cache/build cache, and (for OpenCode) the JSONL export — so your real `~/.aha`/`~/.config/aha` are untouched and there is nothing to clean up. It fingerprints and content-hashes source files before and after (plus `integrity_check` of OpenCode databases) and fails if anything changed, giving a strong read-only regression check.
 
 ```bash
 scripts/smoketest.sh opencode          # uses the default root
@@ -310,7 +310,7 @@ that test bucket.
 | Config | `~/.config/aha/config.jsonc` |
 | Corpus | `~/.aha` |
 | Depot | `~/.aha/depot` local content-addressed snapshot store |
-| Machine ID | sanitized local hostname |
+| Machine ID | sanitised local hostname |
 | Tool output indexing | off |
 | Redaction | `none-v1` (set `v1` to redact indexed projections at ingest) |
 
@@ -358,6 +358,8 @@ For coding agents using `aha`:
 
 - `CHANGELOG.md` — notable unreleased changes.
 - `docs/command-inventory.md` — human command inventory and common workflows.
+- `docs/command-state-machine-v0.2-plan.md` — accepted Archive/Workspace product model and implementation plan.
+- `docs/language-style.md` — British-English house style and required protocol exceptions.
 - `docs/commands.md` — generated command metadata, examples, and JSON contracts.
 - `docs/user-journeys.md` — journeys and defaults.
 - `docs/trust.md` — privacy/trust model and verification.
@@ -369,15 +371,15 @@ For coding agents using `aha`:
 - `docs/serve-ui-spec.md` — journey-oriented local dashboard spec for `aha serve`.
 - `docs/redaction-spec.md` — implemented v1.1 corpus-projection redaction plus deferred v1.2+ designs.
 - `docs/outcome-weighting-spec.md` — design for the incidents surface: ranking recurring failures by the fix that actually worked (resolution-path mining over `tool_invocations`).
-- `docs/patterns-and-interventions.md` — manual guide for turning incidents into the right artifact: runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog.
-- `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, claude-session-analyzer, agenttrace, skill-optimizer, Crune, retrospective-skill, claude-history, plus broader survey).
+- `docs/patterns-and-interventions.md` — manual guide for turning incidents into the right artefact: runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog.
+- `docs/research/agent-trace-tools.md` — neighbour-tool analysis (Tracebase, Self-Care, `claude-session-analyzer`, agenttrace, `skill-optimizer`, Crune, retrospective-skill, claude-history, plus broader survey).
 - `docs/research/openinference.md` — OpenInference semantic-convention reference.
 - `docs/research/openinference-impact-estimate.md` — data-size and performance estimate for adopting OpenInference's schema.
 - `docs/depot-v2-spec.md` — content-addressed snapshot depot (blobs + manifests): the current depot design.
 - `docs/agent-history-aggregator-spec.md` — full v1 spec (historical; the depot portions are superseded by `docs/depot-v2-spec.md`).
 - `docs/correctness-by-construction-spec.md` — refactor spec for correctness by construction (PBT, state-machine, and fuzz strategy).
 - `docs/cbc-prior-art-improvements-spec.md` — prior-art-derived hardening requirements and implementation hooks.
-- `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimization guardrails.
+- `docs/performance-audit.md` — current performance hotspots, benchmark plan, and optimisation guardrails.
 - `docs/performance-scalability-plan.md` — pathological benchmark results, profiling lessons, and scalability/longevity roadmap.
 - `docs/performance-results.md` — latest benchmark capture, success metrics, regressions, and deferred performance work.
 - `docs/refactor-metrics-and-go-audit.md` — before/after metrics, profiling, regression verification, and Go best-practices audit for the duplication-refactor pass.
@@ -390,6 +392,6 @@ For coding agents using `aha`:
 - `docs/lessons-learned.md` — rollback/reimplementation lessons.
 - `docs/comparisons/claude-history-explorer.md` — what `aha` adopted from Claude History Explorer.
 
-## License
+## Licence
 
 MIT; see `LICENSE`.

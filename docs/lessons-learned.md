@@ -2,7 +2,7 @@
 
 This document captures the implementation lessons from the Agent History Aggregator (`aha`) rollback/reimplementation cycles. It is intentionally blunt: these are the things that changed the product, tests, architecture, or process.
 
-*The cycle-1 to cycle-10 sections predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)); bundle/catalog depot mechanics they reference were replaced by content-addressed snapshots in June 2026, and those lessons stand as recorded. The "Depot v2 lessons" section records that conversion.*
+*The cycle-1 to cycle-10 sections predate depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)); bundle/catalogue depot mechanics they reference were replaced by content-addressed snapshots in June 2026, and those lessons stand as recorded. The "Depot v2 lessons" section records that conversion.*
 
 ## Cycle ledger summary
 
@@ -11,8 +11,8 @@ This document captures the implementation lessons from the Agent History Aggrega
 | 1 | A monolithic CLI can prove feasibility but is not a v1 architecture. | Rolled back and replaced with packages. |
 | 2 | Package boundaries make review and hardening possible. | `cmd/aha` plus `internal/*` architecture established. |
 | 3 | Archive/ingest/blob lifecycle safety is core, not polish. | Streaming validation, staged promotion, atomic blob writes. |
-| 4 | Docs, tests, and implementation must agree exactly. | Fixed post-query flags, summary indexing, full artifact FTS, image artifacts, Claude subagent fixture. |
-| 5 | Every search result must be readable, and CLI escaping must preserve literal queries. | Full artifact read body and `--` terminator semantics. |
+| 4 | Docs, tests, and implementation must agree exactly. | Fixed post-query flags, summary indexing, full artefact FTS, image artefacts, Claude subagent fixture. |
+| 5 | Every search result must be readable, and CLI escaping must preserve literal queries. | Full artefact read body and `--` terminator semantics. |
 | 6 | Schema evolution needs migrations from the first release. | Added idempotent migration and old-schema test. |
 | 7 | Spec hygiene is part of correctness. | Cleaned stale remaining issues and added cycle accounting. |
 | 8 | Ingest must be bundle-pure. | Pi identity now comes from bundled bytes, not mutable live paths. |
@@ -39,7 +39,7 @@ Current counts after cycle 10:
 
 ## Depot v2 lessons (June 2026)
 
-The eleventh cycle replaced the bundle/catalog depot with content-addressed
+The eleventh cycle replaced the bundle/catalogue depot with content-addressed
 snapshots (spec, phases, and invariants in
 [docs/depot-v2-spec.md](depot-v2-spec.md)). These are the lessons that cycle
 earned.
@@ -62,9 +62,9 @@ earned.
   flipped the usual verdicts: many small objects are fine, re-downloads cost
   time not money, and "never LIST on steady-state paths" was worth promoting
   from guideline to invariant carried by the interface shape.
-- The no-users window is a license to delete, and deletion compounds: most
+- The no-users window is a licence to delete, and deletion compounds: most
   v1 machinery existed to manage problems monolithic bundles created
-  (budgets, state signatures, catalog merge/repair/compaction, duplicate
+  (budgets, state signatures, catalogue merge/repair/compaction, duplicate
   detection, corpus bundle hoarding). The conversion ended net-negative in
   code while gaining a storage engine. Keep exactly one format bridge
   (`export`/`import`) instead of dual-format drivers.
@@ -169,10 +169,10 @@ earned.
 
 - The bundle is the durable evidence; the corpus is the query index. Ingest must trust bundled bytes over mutable live paths.
 - V1 should preserve raw source data even when normalization is incomplete.
-- Artifact data is part of agent history, not ancillary output. Text artifacts need full indexing; image artifacts need blob preservation; unlinked artifacts need readable identities.
+- Artefact data is part of agent history, not ancillary output. Text artefacts need full indexing; image artefacts need blob preservation; unlinked artefacts need readable identities.
 - Search/read coherence is a product invariant: every hit must be passable to `aha read`.
-- Depot behavior is clearest as set and round-trip properties: `Fetch(Put(x)) == x`, duplicate `Put(x)` is not new work, pending ingest is `catalog - corpus`, and catalog merge preserves one ref per bundle SHA.
-- Sidecar metadata is a product surface. Removing local receipt sidecars simplified the depot model: bundle bytes, embedded manifests, catalog refs, and command JSON are enough.
+- Depot behaviour is clearest as set and round-trip properties: `Fetch(Put(x)) == x`, duplicate `Put(x)` is not new work, pending ingest is `catalog - corpus`, and catalogue merge preserves one ref per bundle SHA.
+- Sidecar metadata is a product surface. Removing local receipt sidecars simplified the depot model: bundle bytes, embedded manifests, catalogue refs, and command JSON are enough.
 - Tool output is preserved but not indexed in v1. This must be enforced in ingest, not left as documentation.
 - Image prompt reconstruction needs occurrence metadata: content index, prompt order, raw reference, mime type, and blob hash.
 - Windows support is a v2 concern; keeping Windows-shaped fixtures is still useful to avoid v1 assumptions that would block v2.
@@ -181,7 +181,7 @@ earned.
 
 - Start with a small architecture skeleton before command breadth: model, adapters, archive, corpus, search, CLI, tests.
 - Keep source-specific logic inside adapters. Archive, ingest, search, and read should be source-agnostic.
-- SQLite is the right v1 corpus engine. Use FTS5, uniqueness, indexes, transactions, constraints, and migrations rather than reimplementing database behavior in Go.
+- SQLite is the right v1 corpus engine. Use FTS5, uniqueness, indexes, transactions, constraints, and migrations rather than reimplementing database behaviour in Go.
 - Determinism requires deliberate design: stable discovery order, canonical manifest output, normalized tar metadata, deterministic compression, and pinned test metadata.
 - Content-addressed blobs must be written with temp-file plus atomic rename and never overwritten in place.
 - Rejected or corrupt bundles must not be promoted into the corpus store.
@@ -189,9 +189,9 @@ earned.
 
 ## Post-audit hardening lessons
 
-- `--help` is behavior, not incidental flag-parser output; every subcommand help path should exit successfully.
-- Privacy flags must affect all image preservation paths, including file artifacts, not only embedded prompt images or the `images` table.
-- Skipped data still needs integrity validation. If an image artifact is ignored because `include_images=false`, ingest must still hash/read the tar entry before accepting the bundle.
+- `--help` is behaviour, not incidental flag-parser output; every subcommand help path should exit successfully.
+- Privacy flags must affect all image preservation paths, including file artefacts, not only embedded prompt images or the `images` table.
+- Skipped data still needs integrity validation. If an image artefact is ignored because `include_images=false`, ingest must still hash/read the tar entry before accepting the bundle.
 - Symlink safety needs defense in depth: discovery skips symlinks, snapshot copy rejects non-regular files, and output/repo paths are checked both lexically and through existing symlink resolution.
 - Archive validation must bound compressed size, manifest size, file count, per-entry size, and total declared uncompressed bytes before spooling untrusted bundle content.
 - Trust-doc commands are contracts; test names and docs must stay synchronized.
@@ -221,8 +221,8 @@ earned.
 - Dashboard security is defense-in-depth and fail-closed. Loopback bind by default; non-loopback refused at `Listen` time unless `--allow-remote` and a bearer token are both set; Host-header allowlist with numeric-port enforcement (blunts DNS-rebinding); JSON content-type enforcement on POST; strict CSP. Each layer landed with a hostile-input regression test (IMDS hostnames, IDN homographs, malformed IPv6 brackets).
 - Position honestly: substrate versus product. The README originally promised pattern detection ("spot patterns, turn them into skills"). This branch ships the substrate that makes that cheap, not the detection itself. Walking the claim back to "examine your behaviour today; pattern detection is the next layer" keeps the front door truthful.
 - CI is a contract, and a silent shell bug makes it a lie. A global bash `RETURN` trap referencing a function-local `$tmpdir` re-fired when an outer function returned and tripped `set -u`, so `verify.sh ci` had been failing since the conformance suite landed while `verify.sh mcp` passed. Mode-specific green is not whole-suite green; run the exact mode CI runs before claiming the build is fixed.
-- A dashboard is a product surface, not a database table with nicer CSS. `aha serve` became clearer only after the first screen was organized around user journeys (`Search`, `Failures`, `Sources`) and stable domain objects (`Trace`, `Event`, `Evidence`) instead of implementation nouns (`corpus`, `read`, `incidents`, `conflicts`, `clusters`).
-- Search results need recognizable provenance. Raw FTS rows are not a result design; server-enriched trace cards grouped by session, titled from prompts, and carrying counts/timelines/commands/files make a user able to recognize old work before opening it.
+- A dashboard is a product surface, not a database table with nicer CSS. `aha serve` became clearer only after the first screen was organised around user journeys (`Search`, `Failures`, `Sources`) and stable domain objects (`Trace`, `Event`, `Evidence`) instead of implementation nouns (`corpus`, `read`, `incidents`, `conflicts`, `clusters`).
+- Search results need recognisable provenance. Raw FTS rows are not a result design; server-enriched trace cards grouped by session, titled from prompts, and carrying counts/timelines/commands/files make a user able to recognise old work before opening it.
 - Evidence is a selected-detail pane, not another primary journey. The selected trace must be mirrored in the reader with a stable ref, `aria-current` state, copy-ref/widen-context actions, and highlighted transcript entry so Search → Trace → Event → Evidence remains legible.
 - Frontend-design guidance is useful only when the aesthetic direction is explicit. For `aha`, the durable direction is a restrained technical ledger: dense, aligned, rule-based, quiet. “Bold” meant committing to evidence clarity, not adding gradients, glass, novelty icons, hero bloat, or decorative motion.
 - Ordinal badges were fake structure. Numbering tabs and cards implied ranking/indexing that the product did not actually support, so it added ambiguity rather than hierarchy. Prefer literal labels and selected state over decorative counting.
@@ -236,7 +236,7 @@ Invariant tests should come before feature breadth. The non-negotiable invariant
 - immutable ingest identity;
 - deterministic archive bytes;
 - search/read coherence;
-- artifact preservation and unlinked artifact reads;
+- artefact preservation and unlinked artefact reads;
 - schema migration from older shapes;
 - no default tool-output indexing;
 - conflict quarantine/no overwrite;
@@ -244,7 +244,7 @@ Invariant tests should come before feature breadth. The non-negotiable invariant
 
 Additional testing lessons:
 
-- Use real temp files, tar/zstd archives, and SQLite databases; avoid mocks for core storage behavior.
+- Use real temp files, tar/zstd archives, and SQLite databases; avoid mocks for core storage behaviour.
 - Every review-discovered bug should get a regression test before the fix is considered done.
 - Synthetic fixtures are useful but insufficient. Add anonymized real-world-shaped Pi and Claude Code fixtures early.
 - Real-history smoke tests are necessary before release: they caught that real Pi entries use top-level `type:"message"` plus nested `message.role`, while early fixtures had top-level roles.
@@ -253,18 +253,18 @@ Additional testing lessons:
 
 ## Performance testing lessons
 
-- Pathological does not always mean large. Years of trivial bundles, duplicate catalog refs, or repeated no-op refreshes can be a worse scalability shape than one huge archive.
+- Pathological does not always mean large. Years of trivial bundles, duplicate catalogue refs, or repeated no-op refreshes can be a worse scalability shape than one huge archive.
 - Test performance claims at the cheapest layer that can falsify them: pure/model PBT for cardinality and idempotence, fake-driver counters for network/fetch/byte-read claims, tiny SQLite query-plan tests for indexing claims, package benchmarks for constants, and CLI pprof only for end-to-end confirmation.
 - Prefer deterministic performance invariants over wall-clock assertions in unit tests. Assert unique work units, fetch counts, bytes read, output cardinality, query plans, and idempotent state transitions.
-- Benchmarks and pprof answer different questions than PBT. Benchmarks show cost; profiles show where cost lands; PBT says what must not grow with duplicates, stale refs, old trivial bundles, or catalog ordering.
-- Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimize from the smallest benchmark that reproduces the issue.
-- Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalog rows. Distinguish metadata scanned from work performed.
+- Benchmarks and pprof answer different questions than PBT. Benchmarks show cost; profiles show where cost lands; PBT says what must not grow with duplicates, stale refs, old trivial bundles, or catalogue ordering.
+- Package-level profiling is usually cheaper and clearer than command-level profiling. Keep CLI pprof opt-in for real command journeys, but optimise from the smallest benchmark that reproduces the issue.
+- Be precise in docs about complexity: deduping output by unique SHA does not mean the implementation avoids scanning raw catalogue rows. Distinguish metadata scanned from work performed.
 - A performance plan is incomplete without user-journey metrics. Each abstraction change needs a baseline, a scenario that should become measurably better, and a counter/benchmark/profile that proves the improvement happened.
 - Profile enough iterations to separate setup from the target path. The latest ingest/search/verify profiles were useful because ingest ran one ~1s operation, search ran 20 broad queries, and verify ran 100 checks; the allocation profiles still exposed benchmark setup, pprof startup, and package init noise that should not be mistaken for product hot paths.
-- When CPU lands mostly in SQLite and syscalls, prefer semantic changes over Go micro-optimizations. The latest ingest profile put nearly all CPU under SQLite statement execution and `pwrite`, so true multi-row inserts remain a possible constant-factor change, not an obvious correctness-preserving rewrite to do without stronger evidence.
+- When CPU lands mostly in SQLite and syscalls, prefer semantic changes over Go micro-optimisations. The latest ingest profile put nearly all CPU under SQLite statement execution and `pwrite`, so true multi-row inserts remain a possible constant-factor change, not an obvious correctness-preserving rewrite to do without stronger evidence.
 - Search profiles and query-plan tests answer different questions. Query-plan tests prove the indexed project/path-token filters are used; pprof showed broad common-term searches are still SQLite/FTS candidate work, so output caps reduce memory/user cost without promising broad-term ranking speedups.
 - Verify profiles can validate that a repaired algorithmic cliff stays repaired. Rowid-backed FTS verification now profiles as small SQLite count work rather than the former seconds-scale join path; extra stats counters are acceptable only because the benchmark remains millisecond-scale.
-- Refactor-only work still needs before/after metrics and a behavior audit. The duplication pass found that moving shared FTS predicates was not enough; schema triggers and migrations had to use the same expression or existing corpora would keep stale behavior.
+- Refactor-only work still needs before/after metrics and a behaviour audit. The duplication pass found that moving shared FTS predicates was not enough; schema triggers and migrations had to use the same expression or existing corpora would keep stale behaviour.
 - Atomic write helpers must state their race semantics. “Existing OK” is not the same as no-replace unless the final publish step is atomic; returning whether this process actually created the file prevents misleading depot reports.
 
 ## Documentation lessons
@@ -272,7 +272,7 @@ Additional testing lessons:
 - The README is the front door: answer what it is, why it matters, and how to use it within the first screen.
 - Show the shortest real path first; move flags and edge cases to journey docs.
 - Keep prose specific. Avoid generic AI-doc filler such as “powerful,” “seamless,” “robust,” and “unlock.”
-- Put rationale near defaults so users can predict behavior instead of memorizing flags.
+- Put rationale near defaults so users can predict behaviour instead of memorizing flags.
 - Link to deep docs; do not duplicate the full spec in the README.
 
 ## Process lessons
@@ -281,7 +281,7 @@ Additional testing lessons:
 - Do not claim v1 completion from passing tests alone; require fresh adversarial review.
 - Keep cycle accounting from day one: implementation attempts, rollbacks, lesson commits, and stop reasons.
 - Add doc-sync tests for process/accounting invariants once the spec depends on them.
-- Add static trust tests for claims users are asked to rely on, especially no source-history mutation and no network behavior.
+- Add static trust tests for claims users are asked to rely on, especially no source-history mutation and no network behaviour.
 - Avoid commits that mix unrelated docs/spec/code changes.
 - Open questions must be classified as locked decisions, explicit v2/post-v1 items, or true blockers.
 - Treat “remaining issues” as release-blocking unless explicitly marked as v2/post-v1/non-goal.
@@ -290,15 +290,15 @@ Additional testing lessons:
 
 - Monolithic first implementation.
 - Filename-derived Pi session identity.
-- Missing unlinked artifact read path.
-- Preview-only artifact indexing.
-- Artifact hits that could not be read coherently.
+- Missing unlinked artefact read path.
+- Preview-only artefact indexing.
+- Artefact hits that could not be read coherently.
 - Tool output policy stated but not enforced.
 - Non-atomic blob writes.
 - Whole-bundle memory assumptions.
 - Corrupt bundle promotion risk.
 - Missing generic summary indexing.
-- Missing non-embedded image artifact blobs.
+- Missing non-embedded image artefact blobs.
 - Missing Claude `agent-*.jsonl` fixture.
 - Documented CLI forms that did not work.
 - Broken `--` literal query semantics.

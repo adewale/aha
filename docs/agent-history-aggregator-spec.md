@@ -25,7 +25,7 @@ aliases:
 
 # Agent History Aggregator Spec
 
-*Historical: this is the original v1 spec and predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalog snapshot mechanics described here were replaced by content-addressed snapshots (write-once blobs + per-machine manifests) in June 2026; the v1 `tar.zst` bundle format survives only behind `aha export` / `aha ingest <bundle.tar.zst>`. The product boundary, adapters, corpus, and trust posture remain.*
+*Historical: this is the original v1 spec and predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The bundle/catalogue snapshot mechanics described here were replaced by content-addressed snapshots (write-once blobs + per-machine manifests) in June 2026; the v1 `tar.zst` bundle format survives only behind `aha export` / `aha ingest <bundle.tar.zst>`. The product boundary, adapters, corpus, and trust posture remain.*
 
 ## Product boundary
 
@@ -135,8 +135,8 @@ Adapters in v1:
 
 | Adapter | Scope |
 |---|---|
-| `pi` | Pi JSONL sessions and related subagent artifacts. |
-| `claude-code` | Claude Code sessions and related subagent/image artifacts. |
+| `pi` | Pi JSONL sessions and related subagent artefacts. |
+| `claude-code` | Claude Code sessions and related subagent/image artefacts. |
 
 Preserve native source files in the bundle. Normalize into database tables during ingest.
 
@@ -336,7 +336,7 @@ linux-box
 cloud-devbox-01
 ```
 
-Default `machine_id` is a sanitized local hostname, written visibly by `aha init`. Users can override it in config or with a flag when they need stable naming across host renames:
+Default `machine_id` is a sanitised local hostname, written visibly by `aha init`. Users can override it in config or with a flag when they need stable naming across host renames:
 
 ```bash
 aha snapshot --machine ade-mbp
@@ -360,7 +360,7 @@ Responsibilities:
 
 1. Read config and CLI flags.
 2. Resolve source directories.
-3. Discover sessions, subagent artifacts, and images through source adapters.
+3. Discover sessions, subagent artefacts, and images through source adapters.
 4. Copy live files safely without modifying them.
 5. Compute SHA-256 for every file.
 6. Parse enough metadata to build the manifest.
@@ -394,19 +394,19 @@ Manifest field:
 }
 ```
 
-## Subagents and artifacts
+## Subagents and artefacts
 
-V1 includes subagent artifacts.
+V1 includes subagent artefacts.
 
-Artifact handling rules:
+Artefact handling rules:
 
-- include adapter-recognized subagent sidecar files;
-- preserve raw artifact files;
+- include adapter-recognised subagent sidecar files;
+- preserve raw artefact files;
 - compute content hashes;
-- link artifacts to parent sessions when inferable;
-- keep unlinked artifacts with `parent_session_id = null`;
-- index text artifacts as documents;
-- do not throw away artifacts just because linkage is uncertain.
+- link artefacts to parent sessions when inferable;
+- keep unlinked artefacts with `parent_session_id = null`;
+- index text artefacts as documents;
+- do not throw away artefacts just because linkage is uncertain.
 
 Pi examples observed locally:
 
@@ -463,7 +463,7 @@ Responsibilities:
    - parse entries;
    - upsert entry rows;
    - quarantine conflicting entry IDs.
-6. Store artifacts and images by content hash.
+6. Store artefacts and images by content hash.
 7. Update FTS index.
 8. Write ingest report.
 
@@ -482,7 +482,7 @@ A later bundle from the same machine may contain a longer version of a session a
 
 Merge cases:
 
-| Case | Behavior |
+| Case | Behaviour |
 |---|---|
 | Same bundle seen again | Skip; record duplicate ingest attempt. |
 | Same file hash seen again | Reuse stored blob; link it to the new bundle. |
@@ -511,7 +511,7 @@ Directory layout:
     images/{image_sha256}.{ext}
 ```
 
-Artifact bytes are stored as ordinary file blobs under `blobs/files/`; artifact
+Artefact bytes are stored as ordinary file blobs under `blobs/files/`; artefact
 text and provenance live in the SQLite `artifacts` table. Ingest reports are
 returned to the caller and emitted to stdout/JSON, not persisted to disk.
 
@@ -578,7 +578,7 @@ Minimum search features:
 | JSON output | `--json` |
 | Session read | bounded context around matching entries |
 
-Default search indexes user and assistant text, summaries, text artifacts, and selected source metadata. V1 preserves raw tool output inside the stored source files but does not index tool output for search.
+Default search indexes user and assistant text, summaries, text artefacts, and selected source metadata. V1 preserves raw tool output inside the stored source files but does not index tool output for search.
 
 Default result fields:
 
@@ -707,9 +707,9 @@ The first useful implementation should avoid embeddings, sync, redaction, and GU
 ### Processing
 
 - create one `.tar.zst` bundle with `manifest.json`;
-- include sessions, subagent artifacts, and images;
+- include sessions, subagent artefacts, and images;
 - ingest into local SQLite;
-- build FTS over user/assistant text, summaries, text artifacts, and selected metadata;
+- build FTS over user/assistant text, summaries, text artefacts, and selected metadata;
 - search one known phrase;
 - read bounded context around a hit;
 - ingest the same bundle again and prove no duplicate rows.
@@ -734,12 +734,12 @@ read output with surrounding entries
 - `search` returns matches across Pi and Claude Code sessions from multiple machines.
 - `read` shows bounded context around a result.
 - Conflicting same-entry IDs with different hashes are quarantined, not overwritten.
-- `status` reports machines, bundles, sources, sessions, entries, artifacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--depot` is explicit.
+- `status` reports machines, bundles, sources, sessions, entries, artefacts, images, path-token/FTS counts, index size, conflicts, and metadata-only depot-behind counts when `--depot` is explicit.
 - `corpus size|vacuum|prune-orphans` exposes explicit local maintenance; `prune-orphans` is dry-run unless `--force`.
-- `depot verify` is quick by default, `--deep`/`--repair` are explicit byte-reading integrity operations, and `depot compact` deduplicates catalog metadata without touching bundle bytes.
+- `depot verify` is quick by default, `--deep`/`--repair` are explicit byte-reading integrity operations, and `depot compact` deduplicates catalogue metadata without touching bundle bytes.
 - README states that `none-v1` does not redact, `redaction:"v1"` redacts corpus projections, and bundles remain raw.
 - Test suite includes realistic Pi and Claude Code fixtures, including `agent-*.jsonl` and image-bearing prompts.
-- Test suite proves snapshot read-only behavior, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, search/read coherence, FTS verifier query shape, indexed search filters, depot operation budgets, and maintenance dry-run safety.
+- Test suite proves snapshot read-only behaviour, ingest idempotence, deterministic manifests and compressed bundles, conflict quarantine, parser robustness/fuzz safety, prompt image reconstruction including dimensions when available, search/read coherence, FTS verifier query shape, indexed search filters, depot operation budgets, and maintenance dry-run safety.
 - CI/local verification runs `go test ./...`, `go test -race ./...`, `go vet ./...`, bounded fuzz/property tests, deterministic archive tests, documentation-code sync checks, and build verification through `scripts/verify.sh full`.
 
 ## Testing strategy
@@ -781,19 +781,19 @@ Use Go's standard testing stack first:
 | Unit | Path discovery, JSONL parsing, manifest validation, hash calculation, dedupe keys, FTS query construction. |
 | Golden files | Deterministic `manifest.json`, ingest reports, search output, `read` output, conflict reports. |
 | Property/fuzz | Parsers and normalizers never panic on arbitrary input; archive write/read roundtrips; ingest is idempotent; deterministic snapshot output is stable for stable inputs. |
-| Characterization | Realistic anonymized Pi and Claude Code JSONL fixtures capture current source behavior before parser refactors. |
+| Characterization | Realistic anonymized Pi and Claude Code JSONL fixtures capture current source behaviour before parser refactors. |
 | Regression | Every bug gets a named test first; record the Windows Claude project discovery issue from `claude-history-explorer#8` as a v2 fixture, not a v1 support promise. |
 | Documentation sync | README command list, flags, config keys, and privacy warning stay in sync with the actual CLI registry/config structs. |
-| Race/concurrency | Active-file copy retry behavior and parallel ingest/search safety pass `go test -race`. |
-| Performance | Pathological package benchmarks plus cheap invariants/query-plan tests catch obvious O(n²), extra network fetch/downloads, unindexed FTS/path plans, duplicate catalog work, and repeated blob recompression. |
+| Race/concurrency | Active-file copy retry behaviour and parallel ingest/search safety pass `go test -race`. |
+| Performance | Pathological package benchmarks plus cheap invariants/query-plan tests catch obvious O(n²), extra network fetch/downloads, unindexed FTS/path plans, duplicate catalogue work, and repeated blob recompression. |
 
 ### Core properties to test
 
 - **Read-only snapshot:** snapshot never modifies source session files; source mtimes and hashes remain unchanged in stable tests.
 - **Archive roundtrip:** decompressing a bundle yields the same manifest and file hashes that snapshot reported.
-- **Manifest honesty:** every manifest file entry exists in the archive and every archived session/artifact appears in the manifest.
+- **Manifest honesty:** every manifest file entry exists in the archive and every archived session/artefact appears in the manifest.
 - **Determinism:** with pinned capture time, bundle ID, file mtimes, and input order, manifest bytes, tar entry ordering, tar metadata, and compressed bundle bytes are stable.
-- **Idempotent ingest:** ingesting the same bundle twice does not duplicate logical bundles, files, sessions, entries, messages, artifacts, or images.
+- **Idempotent ingest:** ingesting the same bundle twice does not duplicate logical bundles, files, sessions, entries, messages, artefacts, or images.
 - **Append-only merge:** ingesting a later session version adds new entries and never deletes old entries.
 - **Conflict safety:** same session/entry ID with different entry hash creates a conflict row and never overwrites the existing entry.
 - **Parser robustness:** malformed JSONL lines, unknown roles, unknown block types, invalid timestamps, huge tool outputs, and Unicode text do not crash parsing.
@@ -803,7 +803,7 @@ Use Go's standard testing stack first:
 
 ### Test quality rules
 
-- Avoid mocks for filesystem, tar/zstd, and SQLite behavior; use real temp dirs, real archives, and real databases.
+- Avoid mocks for filesystem, tar/zstd, and SQLite behaviour; use real temp dirs, real archives, and real databases.
 - Do not accept tests that only assert “not empty” for manifests, search results, or reports; assert specific fields and negative cases.
 - No unconditional skipped tests without a tracking issue or build tag rationale.
 - No `t.Log`/`t.Logf` in assertion position; use `t.Error`, `t.Errorf`, or `t.Fatal`.
@@ -830,7 +830,7 @@ A first thin implementation validated the core direction but exposed gaps. V1 sh
 | SQLite driver | Use `modernc.org/sqlite` for CGO-free SQLite with FTS5; verify FTS5 in tests. |
 | Config parser | Use JSONC via `github.com/tailscale/hujson` or equivalent. |
 | Manifest encoding | Use a canonical/stable manifest encoder; do not rely on incidental map iteration order. Struct encoding is acceptable only if all manifest shapes avoid maps or sort map keys explicitly. |
-| Schema evolution | Include schema initialization in code and leave room for migrations/versioning from the first implementation. |
+| Schema evolution | Include schema initialisation in code and leave room for migrations/versioning from the first implementation. |
 | Image dimensions | Extract dimensions for common image types when bytes are available, using cheap standard-library paths where possible. Keep zero/unknown only when extraction fails. |
 | README sync | Test documented commands and privacy warning against the actual command registry, not a hand-maintained list in tests. |
 
@@ -856,7 +856,7 @@ V1 implementation should satisfy these engineering constraints:
 - Do not claim image dimension support unless dimensions are actually extracted.
 - Do not add JSON metadata columns without tests that prove they round-trip and remain queryable when needed.
 - Do not merge heterogeneous search result sets without a deterministic global order.
-- Do not leave artifact parent linkage completely opaque when source metadata can provide hints.
+- Do not leave artefact parent linkage completely opaque when source metadata can provide hints.
 - Do not rely on docs and tests manually listing commands in separate places.
 
 ### Required implementation loop
@@ -876,11 +876,11 @@ A loop is not complete until spec and implementation agree. If implementation ma
 ### Second-pass implementation lessons
 
 - Pi session identity must come from the Pi session header `id` when present, not from the filename. Filename-derived IDs are only a fallback.
-- Pi artifacts must be preserved even when parent linkage is uncertain. Link only when inferable; otherwise store as unlinked and keep it searchable.
-- Unlinked text artifacts need a read path. Search emits canonical `artifact:v1:<sha256>` refs for unlinked artifact results.
+- Pi artefacts must be preserved even when parent linkage is uncertain. Link only when inferable; otherwise store as unlinked and keep it searchable.
+- Unlinked text artefacts need a read path. Search emits canonical `artifact:v1:<sha256>` refs for unlinked artefact results.
 - Tool output indexing must be enforced at ingest, not just stated as policy. Only user/assistant/summaries are indexed by default; `toolResult` and `bashExecution` text require explicit opt-in.
 - Bundle duplicate semantics must distinguish exact duplicates from same `bundle_id` with different content. Same ID with different SHA is an error/quarantine condition, not a silent duplicate.
-- Search/read coherence applies to artifact hits too. Every search result must include enough identity to be readable.
+- Search/read coherence applies to artefact hits too. Every search result must include enough identity to be readable.
 - Archive writing should stream to disk instead of buffering the whole compressed bundle. Ingest should likewise avoid whole-bundle memory loading for large histories.
 - Parser robustness should use line reading that records diagnostics instead of failing an entire session on malformed lines or scanner size limits.
 - Content-addressed blobs must never be overwritten in place. File and image blobs are written to temporary files and atomically renamed only if the final blob path does not already exist.
@@ -891,9 +891,9 @@ A loop is not complete until spec and implementation agree. If implementation ma
 | Area | Decision |
 |---|---|
 | Pi session identity | Use header `id` as `source_session_id` when present. |
-| Artifact identity | Store artifact occurrences/provenance separately enough that identical bytes from different paths/bundles are not lost. |
-| Unlinked artifact read | Search returns canonical `artifact:v1:<sha256>` refs for unlinked artifact hits; `read` accepts them. |
-| Artifact parent linkage | Link only with evidence; preserve and index unlinked artifacts. |
+| Artefact identity | Store artefact occurrences/provenance separately enough that identical bytes from different paths/bundles are not lost. |
+| Unlinked artefact read | Search returns canonical `artifact:v1:<sha256>` refs for unlinked artefact hits; `read` accepts them. |
+| Artefact parent linkage | Link only with evidence; preserve and index unlinked artefacts. |
 | Tool output indexing | Enforce in ingest based on role and `index_tool_output`. |
 | Bundle duplicate conflict | Same `bundle_id` with different SHA is an error/conflict, not a no-op. |
 | Archive memory use | Avoid all-in-memory archive write/read paths for normal snapshot and ingest. |
@@ -908,7 +908,7 @@ A further loop clarified process and remaining quality gates:
 - “V1 done” should not be claimed from passing tests alone. It requires a clean adversarial review focused on spec compliance, data loss, determinism, and search/read coherence.
 - Raw preservation, queryable provenance, and safe blob lifecycle are distinct requirements. Satisfying one does not imply the others.
 - Streaming and atomic writes are core v1 design requirements, not performance polish.
-- Every result class returned by search must be readable, including unlinked artifacts.
+- Every result class returned by search must be readable, including unlinked artefacts.
 - Review-discovered issues should become durable spec text and regression tests before continuing.
 
 ### Final v1 success condition
@@ -924,31 +924,31 @@ V1 is complete only when all of these are true:
 ### Fourth-pass implementation lessons
 
 - CLI examples must be executable as written. If docs show flags after positional query text, the CLI must support that form or the docs must change.
-- Text artifacts are documents, not previews. Previews are for display only; FTS must index the full text artifact body when it is valid text.
-- Summary indexing must recognize source-native summary types beyond Pi-specific `branchSummary`/`compactionSummary` when a `summary` or text field is present.
-- V1 image handling includes both embedded image payloads and image files discovered as artifacts. Non-embedded image references without bytes can be recorded as references, but image files available on disk must be content-addressed as image blobs.
-- Claude Code subagent behavior requires at least one `agent-*.jsonl` fixture and assertion that it is discovered/ingested as a subagent.
+- Text artefacts are documents, not previews. Previews are for display only; FTS must index the full text artefact body when it is valid text.
+- Summary indexing must recognise source-native summary types beyond Pi-specific `branchSummary`/`compactionSummary` when a `summary` or text field is present.
+- V1 image handling includes both embedded image payloads and image files discovered as artefacts. Non-embedded image references without bytes can be recorded as references, but image files available on disk must be content-addressed as image blobs.
+- Claude Code subagent behaviour requires at least one `agent-*.jsonl` fixture and assertion that it is discovered/ingested as a subagent.
 
 ### Additional locked decisions from fourth pass
 
 | Area | Decision |
 |---|---|
 | CLI flags | Commands with positional query/session arguments must accept flags before or after the positional argument when documented examples show that style. |
-| Artifact FTS | Index full valid UTF-8 artifact text; keep previews separately for status/display. |
+| Artefact FTS | Index full valid UTF-8 artefact text; keep previews separately for status/display. |
 | Summary FTS | Index entries with `branchSummary`, `compactionSummary`, or generic `summary` type when summary/text content is present. |
-| Image files | Recognized image files included as artifacts are also stored in `images` as content-addressed blobs with dimensions when possible. |
+| Image files | Recognised image files included as artefacts are also stored in `images` as content-addressed blobs with dimensions when possible. |
 | Claude subagent fixture | V1 tests include `agent-*.jsonl` and assert subagent ingestion. |
 
 ### Fifth-pass implementation lessons
 
-- Full-text artifact indexing implies artifact reads must retrieve full artifact text or a matched context, not only a display preview.
+- Full-text artefact indexing implies artefact reads must retrieve full artefact text or a matched context, not only a display preview.
 - Supporting flags after query text must not break standard `--` terminator semantics. Users need to search for flag-looking strings such as `--json` and `--path` from historical command transcripts.
 
 ### Additional locked decisions from fifth pass
 
 | Area | Decision |
 |---|---|
-| Artifact read body | `read` for artifact hits returns full text when the artifact is valid UTF-8, with preview remaining only a display/status field. |
+| Artefact read body | `read` for artefact hits returns full text when the artefact is valid UTF-8, with preview remaining only a display/status field. |
 | Search query terminator | `aha search -- --literal-flag` treats terms after `--` as query text, not CLI flags. |
 
 ### Sixth-pass implementation lessons
@@ -989,8 +989,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | 1 | `dc227ff` monolithic `aha v1` CLI | Proved core shape, exposed maintainability/spec gaps. | Yes: `ffbc899` | Spec gained implementation lessons; monolith rejected. |
 | 2 | `39b3205` maintainable package-based v1 | Better package boundaries; review found hardening gaps. | No immediate rollback | Established current architecture. |
 | 3 | `0d78c2a` archive/ingest/blob hardening | Streaming validation and atomic blob lifecycle addressed P1 risks. | No immediate rollback | Hardened implementation baseline. |
-| 4 | Final-loop reimplementation after `c43f6d2` rollback | Review found executable-doc, artifact FTS, summary, image-file, and Claude subagent fixture gaps. | Yes: `c43f6d2` before redo | Spec fourth-pass lessons and regression fixes. |
-| 5 | Fourth/fifth-pass fixes | Review found artifact search/read incoherence and `--` terminator regression. | No | Full artifact read body and literal flag-query semantics. |
+| 4 | Final-loop reimplementation after `c43f6d2` rollback | Review found executable-doc, artefact FTS, summary, image-file, and Claude subagent fixture gaps. | Yes: `c43f6d2` before redo | Spec fourth-pass lessons and regression fixes. |
+| 5 | Fourth/fifth-pass fixes | Review found artefact search/read incoherence and `--` terminator regression. | No | Full artefact read body and literal flag-query semantics. |
 | 6 | Sixth-pass migration fix | Review found existing-corpus schema migration gap. | No | Migration path/test added; reviewers reported clean enough for v1. |
 | 7 | Audit/spec-hygiene rollback and redo | Fresh review found a P1: Pi ingest could reopen mutable `raw_path` for header identity instead of using the immutable bundled reader. | Yes: `d857a47` before redo; redo committed as `b5eeff5` but rejected by review | Lesson recorded; must roll back and redo with immutable bundle-derived identity. |
 | 8 | Immutable-ingest provenance redo | Fresh review found no P0/P1 after Pi identity-from-bundle fix and regression test. | Yes: `5768b51` before redo | Implementation `9a46ca6`; clean enough until next requested cycles. |
@@ -1001,7 +1001,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 - Ingest must be a pure function of the immutable bundle plus corpus state. It must not reopen `raw_path` live source files while parsing a bundled session.
 - Adapter discovery may inspect live files while creating a snapshot, but adapter parsing during ingest must derive source identity and metadata from the `io.Reader` containing bundled bytes.
-- Pi header identity is especially sensitive: a changed live session file at the same path can corrupt `source_session_id`, dedupe keys, parent linkage, and conflict behavior if parse-time code rereads the live path.
+- Pi header identity is especially sensitive: a changed live session file at the same path can corrupt `source_session_id`, dedupe keys, parent linkage, and conflict behaviour if parse-time code rereads the live path.
 
 ### Additional locked decisions from eighth cycle
 
@@ -1015,8 +1015,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 | Area | Decision |
 |---|---|
-| Help behavior | `aha <command> --help` exits successfully for all subcommands. |
-| Image exclusion | `include_images=false` suppresses normalized embedded-image assets and image artifact rows/blobs; raw session files and promoted bundle bytes remain preserved in v1 and may still contain embedded image bytes. Skipped image tar entries are still hash/size validated before bundle acceptance. |
+| Help behaviour | `aha <command> --help` exits successfully for all subcommands. |
+| Image exclusion | `include_images=false` suppresses normalized embedded-image assets and image artefact rows/blobs; raw session files and promoted bundle bytes remain preserved in v1 and may still contain embedded image bytes. Skipped image tar entries are still hash/size validated before bundle acceptance. |
 | Symlink safety | Source discovery skips symlinks; snapshot copy rejects symlinks/non-regular files; output and repo paths must not resolve inside configured source roots. |
 | Ingest budgets | Bundle ingest uses bounded compressed staging plus manifest, file-count, per-entry, and total-uncompressed limits before spooling/promoting content. |
 | Trust verification | Docs must name executable tests that actually verify read-only/no-network/privacy claims. |
@@ -1052,21 +1052,21 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 | Area | Decision |
 |---|---|
-| Lessons artifact | Maintain `docs/lessons-learned.md` as the durable cycle-learning document. |
-| Schema documentation | Keep the spec schema sketch synchronized with implemented v1 columns that affect compatibility or behavior. |
+| Lessons artefact | Maintain `docs/lessons-learned.md` as the durable cycle-learning document. |
+| Schema documentation | Keep the spec schema sketch synchronized with implemented v1 columns that affect compatibility or behaviour. |
 | CI | Add a CI workflow for `go test`, `go vet`, race tests, fuzz smoke, build, and whitespace checks. |
 | Limitation docs | README must describe accepted v1 limitations, not only features. |
-| User journeys | `docs/user-journeys.md` defines the no-flag defaults optimized for local first use, routine refresh, search/read, and imported bundles. |
+| User journeys | `docs/user-journeys.md` defines the no-flag defaults optimised for local first use, routine refresh, search/read, and imported bundles. |
 | Refresh command | `aha refresh` is the default local aggregation command: snapshot configured sources or reuse unchanged depot state, then ingest pending/new depot bundles into the configured corpus. It supports `--session` and `--max-sessions` for one-to-all local-session scope. |
 | Repo alias | Corpus path flags also accept `--repo` where users are thinking in terms of an aggregation repo. |
 
 ### Performance/scalability implementation lessons
 
-- Performance claims need executable guardrails at the cheapest layer: query-plan tests for SQLite shape, fake-driver counters for R2/network cost, property tests for duplicate/catalog cardinality, and benchmarks for magnitude.
+- Performance claims need executable guardrails at the cheapest layer: query-plan tests for SQLite shape, fake-driver counters for R2/network cost, property tests for duplicate/catalogue cardinality, and benchmarks for magnitude.
 - Routine commands should avoid historical-byte work. Deep integrity remains available, but `status`, no-op `refresh`, quick depot verify, and ordinary search should scale with metadata, indexed rows, or bounded output.
-- Search output is an agent cost center, not only a latency concern. High `--limit` values produce large JSON/ref payloads, so v1 caps requested limits at 200 and asks users/agents to refine with `--source`, `--machine`, `--project`, or `--path-token`.
+- Search output is an agent cost centre, not only a latency concern. High `--limit` values produce large JSON/ref payloads, so v1 caps requested limits at 200 and asks users/agents to refine with `--source`, `--machine`, `--project`, or `--path-token`.
 - Exact project and path-segment workflows need indexed filters. Arbitrary contains matching remains useful but must be documented as a convenience slow path.
-- Disk growth is a product behavior. Because raw preservation is the trust default, deletion is explicit: show size, allow SQLite vacuum, dry-run orphan pruning by default, and leave broader retention/export policies as future product choices.
+- Disk growth is a product behaviour. Because raw preservation is the trust default, deletion is explicit: show size, allow SQLite vacuum, dry-run orphan pruning by default, and leave broader retention/export policies as future product choices.
 - Remote/R2 operation cost is part of correctness. Quick verification and status must not download bundles; deep/repair paths must be explicit and report bytes read/downloaded.
 
 ### Additional locked decisions from performance/scalability work
@@ -1078,11 +1078,11 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 | Known blobs | If a content-addressed file blob row/path already exists, ingest must not recompress or rewrite that blob. |
 | Search filters | `--project` is exact/indexed; `--path-token` is exact/indexed over derived path-token tables; `--path` is contains/non-indexed. |
 | Search limit | Requested search limits above 200 are capped with a user-visible warning. |
-| Depot catalog merge | Repair and compaction use map-backed dedupe by `bundle_sha256`, preserving first non-empty metadata. |
+| Depot catalogue merge | Repair and compaction use map-backed dedupe by `bundle_sha256`, preserving first non-empty metadata. |
 | Depot verification cost | Quick/default verify uses metadata/head/existence checks; `--deep` and `--repair` are the byte-reading modes and report byte counters. |
 | Corpus maintenance | `aha corpus size`, `vacuum`, and dry-run/forced `prune-orphans` are the v1 local maintenance surface. |
-| Depot maintenance | `aha depot compact` deduplicates catalog refs without reading bundle bytes. |
-| License | The project is MIT-licensed. |
+| Depot maintenance | `aha depot compact` deduplicates catalogue refs without reading bundle bytes. |
+| Licence | The project is MIT-licensed. |
 
 ## Validation plan
 
@@ -1094,7 +1094,7 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 2. **Scoped local refresh/snapshot**
    - Input: local Pi and Claude Code directories plus `--session MATCH` or `--max-sessions 1`.
-   - Expected: bundle/corpus contains only selected local sessions and their linked artifacts.
+   - Expected: bundle/corpus contains only selected local sessions and their linked artefacts.
 
 3. **Same bundle ingested twice**
    - Input: identical archive.
@@ -1113,8 +1113,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
    - Expected: `aha search --project KEY` and `aha search --path-token TOKEN` return readable refs and query-plan tests show the intended indexes are available to the actual SQL.
 
 7. **Depot cost modes**
-   - Input: fake-R2 depot with catalog refs and bundle objects.
-   - Expected: `depot verify` quick uses list/head metadata and downloads zero bundle bytes; `--deep`/`--repair` download bundle bytes and report that cost; `depot compact` rewrites catalog metadata without touching bundle bytes.
+   - Input: fake-R2 depot with catalogue refs and bundle objects.
+   - Expected: `depot verify` quick uses list/head metadata and downloads zero bundle bytes; `--deep`/`--repair` download bundle bytes and report that cost; `depot compact` rewrites catalogue metadata without touching bundle bytes.
 
 8. **Local maintenance**
    - Input: corpus with database, blobs, and an orphan blob file.
@@ -1131,8 +1131,8 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 3. **Large tool output / image content**
    - Expected: preserve raw entry, do not index tool output, avoid base64 snippets.
 
-4. **Unlinked subagent artifact**
-   - Expected: preserve and index as artifact with `parent_session_id = null`.
+4. **Unlinked subagent artefact**
+   - Expected: preserve and index as artefact with `parent_session_id = null`.
 
 5. **Image-bearing prompt recreation**
    - Input: session entries containing text plus embedded or referenced images.
@@ -1152,9 +1152,9 @@ A Git-history plus Pi-session audit clarified progress and process accounting:
 
 ## Open question and limitation ledger
 
-This section contains no hidden v1 blockers. Each item is classified as a locked v1 behavior, post-v1 release-hardening task, or v2/non-goal.
+This section contains no hidden v1 blockers. Each item is classified as a locked v1 behaviour, post-v1 release-hardening task, or v2/non-goal.
 
-### Locked v1 behaviors, not open blockers
+### Locked v1 behaviours, not open blockers
 
 - Claude Code default root is `~/.claude/projects/` unless configured.
 - Claude Code entry IDs use source-native IDs when present and stable derived IDs otherwise.
@@ -1181,7 +1181,7 @@ This section contains no hidden v1 blockers. Each item is classified as a locked
 - Source-native branch/thread reconstruction in `read`.
 - Conflict display/search policy refinements.
 - True multi-row ingest insert batching if benchmarks show SQLite step overhead dominates after prepared statements/prefetching.
-- Depot catalog summary files or local stale status caches if raw catalog scans become a real bottleneck after compaction.
+- Depot catalogue summary files or local stale status caches if raw catalogue scans become a real bottleneck after compaction.
 - Retention/export/delete policies beyond explicit orphan pruning.
 - OCR/captioning for image content.
 

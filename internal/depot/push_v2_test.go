@@ -47,7 +47,7 @@ func (s *mapBlobSource) BlobPath(key model.BlobKey) (string, error) {
 
 // TestPushV2UnchangedStateIsReusedWithoutWritesOrReads pins acceptance
 // property 1 end to end at the push layer: identical state re-pushed is
-// recognized from the parent pointer alone — no blob source reads, no
+// recognised from the parent pointer alone — no blob source reads, no
 // PUTs, no LISTs.
 func TestPushV2ProgressUsesActualUniqueBlobWork(t *testing.T) {
 	ctx := context.Background()

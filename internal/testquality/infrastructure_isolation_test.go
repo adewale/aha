@@ -22,7 +22,7 @@ func TestVerifyUsesPrivateRunWorkspaceAndNeverInstallsDependencies(t *testing.T)
 	body := readProjectFile(t, "scripts", "verify.sh")
 	for _, forbidden := range []string{"/tmp/aha", "/tmp/aha-ref-mcp", "npm ci", "npm install"} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("verify.sh contains unsafe shared/mutating behavior %q", forbidden)
+			t.Fatalf("verify.sh contains unsafe shared/mutating behaviour %q", forbidden)
 		}
 	}
 	for _, required := range []string{"mktemp -d", "AHA_MCP_CONFORMANCE_ROOT", "AHA_MCP_CONFORMANCE_TOKEN", "cross_compile"} {

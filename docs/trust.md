@@ -12,7 +12,7 @@ How this is enforced:
 
 - JSONL source adapters are read-only by design;
 - OpenCode discovery reads a private copied/exported database snapshot and never opens the source database for writing;
-- tests verify snapshot/read-only behavior with source hashes/mtimes and OpenCode DB content hashes;
+- tests verify snapshot/read-only behaviour with source hashes/mtimes and OpenCode DB content hashes;
 - static tests reject write/delete/rename calls inside source adapters; OpenCode's generated JSONL cache is isolated in `internal/opencodeexport` and documented below.
 
 Verify locally:
@@ -81,13 +81,13 @@ credentials, paths, and SQL.
 
 ## Guarantee 6: projection redaction is explicit and observable
 
-By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `tool_invocations`, `entries.raw_json`, artifact text, or FTS. Raw depot blobs remain unredacted provenance.
+By default, `redaction` is `none-v1` for backwards compatibility. When configured as `v1`, ingest redacts known secret patterns from derived corpus projections before they reach `messages`, `tool_invocations`, `entries.raw_json`, artefact text, or FTS. Raw depot blobs remain unredacted provenance.
 
 How this is enforced:
 
 - CLI `ingest` and `refresh` both construct their ingestor from config, including extra redaction patterns;
 - sessions are stamped with `sessions.redaction_level` only when first inserted, so existing raw projections are not silently mislabeled;
-- per-entry counts are append-only in `redactions`; session/artifact redaction events are recorded in `redaction_events`;
+- per-entry counts are append-only in `redactions`; session/artefact redaction events are recorded in `redaction_events`;
 - `aha status --json`, `aha verify --json`, and `aha doctor --json` surface redaction counts/levels.
 
 Implication:
@@ -106,7 +106,7 @@ Depending on command/configuration, `aha` may write:
 - a private OpenCode JSONL export cache during OpenCode `Discover` (including `doctor`, `snapshot`, and `refresh`): by default under the user cache directory at `aha/opencode-export/<db-hash>/`, or under `AHA_OPENCODE_EXPORT_DIR` when set; directories are forced to `0700` and JSONL/lock files to `0600`; stale JSONL files are pruned after each serialized export;
 - optional local pprof files when `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, or `AHA_MEM_PROFILE` is explicitly set.
 
-It should not write inside Pi, Claude Code, Codex, or OpenCode source-history roots. Treat the OpenCode export cache, profiles, depots, and corpora as local private artifacts; do not attach them to public issues without review because they can reveal prompts, source snippets, filesystem paths, and workload shape.
+It should not write inside Pi, Claude Code, Codex, or OpenCode source-history roots. Treat the OpenCode export cache, profiles, depots, and corpora as local private artefacts; do not attach them to public issues without review because they can reveal prompts, source snippets, filesystem paths, and workload shape.
 
 ## Quick verification checklist
 

@@ -27,7 +27,7 @@ import (
 //     manifest whose blobs are all present (publish ordering, I2);
 //   - every object, once written, never changes bytes again (write-once,
 //     I1/I5 — checked against a shadow copy of the object tree);
-//   - re-pushing a previously seen state is recognized as reuse with the
+//   - re-pushing a previously seen state is recognised as reuse with the
 //     original identity (state-based reuse);
 //   - Verify reports no problems at any point.
 func TestV2DepotStateMachine(t *testing.T) {
@@ -211,7 +211,7 @@ func (s *stateBlobSource) BlobPath(key model.BlobKey) (string, error) {
 // conditional-write retry under real contention: many machines pushing
 // their first snapshot concurrently must all end up registered, with no
 // lost updates. It exercises both drivers because the retry is depot
-// behavior, not a local-filesystem locking accident.
+// behaviour, not a local-filesystem locking accident.
 func TestV2ConcurrentFirstPushesAllLandInIndex(t *testing.T) {
 	stores := []struct {
 		name string

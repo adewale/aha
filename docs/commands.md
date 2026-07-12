@@ -4,7 +4,7 @@ This file is generated from CLI command metadata. Update command metadata, then 
 
 ## Global profiling
 
-Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.
+Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artefacts and are not written unless explicitly requested.
 
 Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.
 
@@ -80,7 +80,7 @@ aha corpus <size|vacuum|prune-orphans|rebuild> [--repo DIR] [--progress MODE] [-
 
 ## aha depot
 
-preflight R2 with one safe next action, initialize a depot, switch the default, list snapshots, or verify content
+preflight R2 with one safe next action, initialise a depot, switch the default, list snapshots, or verify content
 
 ```txt
 aha depot <setup|init|use|ls|verify> [DEPOT] [--progress MODE] [--json] [--deep]
@@ -275,7 +275,7 @@ aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N]
 
 ## aha refresh
 
-push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus
+push this machine's state to the depot (unchanged state is recognised without re-uploading), then pull every machine's latest snapshot into the corpus
 
 ```txt
 aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--progress MODE] [--json]
@@ -306,7 +306,7 @@ aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT
 
 ## aha search
 
-find relevant messages/artifacts; use read on returned refs before answering
+find relevant messages/artefacts; use read on returned refs before answering
 
 ```txt
 aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]

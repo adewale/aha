@@ -40,7 +40,7 @@ This spec defines a refactor that moves those invariants toward construction:
 - where Go/SQLite cannot make it impossible, the residual risk is explicitly
   tested and documented.
 
-This is not a rewrite. It is a staged hardening plan that preserves behavior
+This is not a rewrite. It is a staged hardening plan that preserves behaviour
 until the identity-format migration phase.
 
 ## Non-goals
@@ -74,7 +74,7 @@ The plan below is grounded in the current code shape:
   `rapid` is now available for shrinkable PBT/stateful testing.
 
 When this spec says “target,” it means proposed construction, not current
-behavior.
+behaviour.
 
 ## Principles
 
@@ -120,15 +120,15 @@ behavior.
 | Bundle determinism | repeat/shuffle byte equality tests | canonical archive/manifest encoder with sorted input and pinned metadata | PBT shuffle invariance + committed golden fixture |
 | Bundle honesty | archive validation/budgets | manifest/data/checksum validation in one typed reader | fuzz corruptions + Type B malformed bundle tests |
 | Bundle identity | content SHA | `BundleRef` always content-addressed; key validates SHA | depot contract + fuzz key/address tests |
-| Depot object truth | bundle object SHA + catalog refs | bundle objects are durable truth; catalog shards are repairable indexes | local/fake-R2 contract + repair state machine |
-| Catalog merge laws | merge helper + property tests | shard merge is idempotent, commutative, deterministic | rapid/quick algebra tests + concurrent fake-R2 tests |
+| Depot object truth | bundle object SHA + catalogue refs | bundle objects are durable truth; catalogue shards are repairable indexes | local/fake-R2 contract + repair state machine |
+| Catalogue merge laws | merge helper + property tests | shard merge is idempotent, commutative, deterministic | rapid/quick algebra tests + concurrent fake-R2 tests |
 | Corpus ingest idempotent | bundle PK/unique + explicit skip + `insert or ignore` | bundle identity and row identity encoded as uniqueness; attempt log append-only | state-machine `ingest∘ingest = ingest` |
 | Entries append-only | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | `BEFORE UPDATE/DELETE` triggers reject mutation on append-only tables | Type B direct SQL update/delete tests |
 | Same `(session,entry)` diff hash quarantined | select-then-branch in Go | `BEFORE INSERT` trigger or writable-view trigger writes `conflicts` and ignores overwrite | Type B conflict insertion + state machine |
 | Cross-machine conflicts preserved | Go query/branch | unique source tuple + conflict relation; no overwrite path | multi-machine model tests |
 | Message rows belong to entries | FK plus `messages_require_entry` trigger | FK `messages(session_key,entry_id) → entries` | Type B orphan insert rejected |
 | Asset rows belong to entries/images | FK from `entry_assets` to `entries`; image hash is optional for raw refs | FKs from `entry_assets` to `entries`; image hash relation checked where possible | Type B orphan asset tests |
-| Artifact rows are searchable/readable | artifact row + FTS trigger/reconciler; artifact ref codec | artifact row + FTS trigger/reconciler; artifact ref codec | search/read property includes artifacts |
+| Artefact rows are searchable/readable | artefact row + FTS trigger/reconciler; artefact ref codec | artefact row + FTS trigger/reconciler; artefact ref codec | search/read property includes artefacts |
 | FTS cannot drift through normal writes | trigger-maintained FTS rows | trigger-maintained FTS rows plus verifier/reconciler; raw tables remain truth | state machine + reconciliation query |
 | FTS direct writes are contained | not structurally blocked | repository encapsulation + static guard banning direct FTS writes outside schema/reconciler | static guard + Type B reconciliation test |
 | Blob rows match files | staging + hashes + rollback tests | blob publisher owns atomic write; corpus verifier checks row↔blob↔hash | failure-injection tests + `doctor`/verify tests |
@@ -139,7 +139,7 @@ behavior.
 | Onboarding sequence is valid | doctor/setup derive one action from depot/corpus/config state; structured argv preserves config overrides | invalid transitions are absent from the closed action mapping | state-table tests + exact-one-next JSON contract |
 | Progress cannot corrupt output or leak identity | closed phase/kind/unit enums and aggregate-only events; renderers receive no paths, IDs, endpoints, keys, errors, or credentials | core operations cannot put sensitive strings into progress events; stdout is never a progress sink | renderer concurrency/privacy tests + final-JSON/NDJSON contracts + race detector |
 | Causal errors cannot become public output | opaque `usererror.View` and `Action` values are created only by typed normalization; raw causes remain behind `Unwrap` | CLI, MCP, HTTP, and smoke-test boundaries render one safe message and one constructed action; verbose diagnostics are allowlisted fields, never `err.Error()` | every-command JSON contract + boundary static test + secret/path/SQL canaries + `errors.Is` preservation |
-| Smoke tests cannot inherit production capabilities or destinations | R2 integration accepts opaque credentials through `ResolveR2ConfigExplicit`, which never reads environment; wrapper recognizes only `AHA_R2_SMOKETEST_*` plus a pinned dedicated target or explicit override flags | production credential names are rejected as fallback, matching test/production keys fail locally, and the child environment has production providers removed; local smoke workspaces come only from fresh `mktemp -d` roots | production-only/matching-key/fake-child environment tests + static integration-source guard + live namespaced cleanup test |
+| Smoke tests cannot inherit production capabilities or destinations | R2 integration accepts opaque credentials through `ResolveR2ConfigExplicit`, which never reads environment; wrapper recognises only `AHA_R2_SMOKETEST_*` plus a pinned dedicated target or explicit override flags | production credential names are rejected as fallback, matching test/production keys fail locally, and the child environment has production providers removed; local smoke workspaces come only from fresh `mktemp -d` roots | production-only/matching-key/fake-child environment tests + static integration-source guard + live namespaced cleanup test |
 | No new correctness debt | code review convention | debt inventory tests fail if raw identity/time/FTS patterns spread | `internal/testquality` static inventory |
 
 ## Construction design
@@ -264,7 +264,7 @@ Option 1 is simpler and should be tried first.
 Trigger-maintained FTS rows are the target for normal writes:
 
 - `messages_ai` insert trigger adds message text;
-- `artifacts_ai` insert trigger adds artifact text/body;
+- `artifacts_ai` insert trigger adds artefact text/body;
 - append-only update/delete triggers reject mutation.
 
 But SQLite virtual tables remain directly writable and cannot carry ordinary
@@ -321,7 +321,7 @@ Depot invariants are part of correctness by construction, not an add-on
 - credentials never appear in config/manifests/logs/JSON.
 
 Keep fake-S3 contract tests and add state-machine sequences that interleave
-`Put`, duplicate `Put`, stale catalog refs, `Verify`, and `Repair`.
+`Put`, duplicate `Put`, stale catalogue refs, `Verify`, and `Repair`.
 
 ### 9. Deterministic time and retry seams
 
@@ -358,15 +358,15 @@ attempt a dangerous operation.
 
 | Layer | Tooling | Purpose |
 |---|---|---|
-| Example/contract tests | Go `testing`, temp dirs, real SQLite, fake-S3 | lock public behavior and sad paths |
+| Example/contract tests | Go `testing`, temp dirs, real SQLite, fake-S3 | lock public behaviour and sad paths |
 | Golden tests | committed expected output/bundles where reviewable | detect renderer/canonical byte drift |
 | Property tests | `pgregory.net/rapid` for shrinkable PBT; existing `testing/quick` where sufficient | laws over arbitrary inputs |
 | Stateful tests | `rapid.T.Repeat` / state-machine model | operation sequences and interleavings |
 | Fuzz tests | Go native fuzzing | hostile parser/ref/archive/depot bytes |
 | Exhaustive tests | table/enumeration/permutations | small finite spaces like enum × flag |
 | Type B invalid-state tests | direct constructor/SQL attempts | prove the claimed rejecting mechanism exists |
-| CLI journey contracts | future `testscript`/real CLI invocations | prove command behavior, exit codes, JSON contracts, and filesystem effects |
-| Differential tests | old path vs new path during migrations | prove refactors preserve behavior or document intentional changes |
+| CLI journey contracts | future `testscript`/real CLI invocations | prove command behaviour, exit codes, JSON contracts, and filesystem effects |
+| Differential tests | old path vs new path during migrations | prove refactors preserve behaviour or document intentional changes |
 | Schema contract tests | SQLite introspection helpers + direct SQL attempts | prove constraints/triggers/FKs exist and reject bad states |
 | Static guards | `internal/testquality`, `go vet`, future forbidigo/custom `go/analysis` | stop convention debt from spreading |
 | Mutation testing | `gremlins` on critical packages | prove tests kill likely bugs |
@@ -389,7 +389,7 @@ Shared shrinkable generators should live in `internal/testutil`:
 - refs and ref components;
 - parsed sessions/entries/assets;
 - manifest files and bundles;
-- depot bundle refs/catalog shards;
+- depot bundle refs/catalogue shards;
 - operation sequences for corpus/depot state machines.
 
 Generators should produce realistic values by default and expose knobs for
@@ -427,7 +427,7 @@ Commands:
 After every command:
 
 - row counts match the model;
-- entries/messages/artifacts are monotone unless operation is explicit repair;
+- entries/messages/artefacts are monotone unless operation is explicit repair;
 - every search hit ref is readable;
 - no DB row points at a missing committed blob;
 - FTS reconciliation query is clean;
@@ -451,17 +451,17 @@ Commands:
 - put duplicate;
 - list;
 - fetch;
-- introduce stale catalog ref;
-- delete catalog shard;
+- introduce stale catalogue ref;
+- delete catalogue shard;
 - verify;
 - repair;
-- concurrent same-machine catalog update.
+- concurrent same-machine catalogue update.
 
 Properties:
 
 - object keys match bytes;
 - list is deterministic sorted union;
-- repair recreates catalog from objects;
+- repair recreates catalogue from objects;
 - stale refs are removed or reported;
 - local and fake-R2 drivers satisfy the same contract.
 
@@ -531,16 +531,16 @@ phase definition of done.
 
 ### Phase 0 — Prep and guardrails
 
-No behavior change. Phase 0 exists to make later behavior-changing refactors smaller, more mechanical, and safer.
+No behaviour change. Phase 0 exists to make later behaviour-changing refactors smaller, more mechanical, and safer.
 
 Required guardrails before production refactors:
 
 1. **Keep expanding static debt inventories before refactors.** Freeze known raw identity construction, ambient time/sleep, manual FTS writes, broad path authority, direct SQL mutation of append-only tables, network imports outside depot, and weak-test patterns. Start with allowlisted known debt; shrink the allowlists as each phase removes debt.
-2. **Add state-machine skeletons for corpus and depot before changing storage.** The first skeleton may characterize current behavior and skip unimplemented commands, but it must define the model state, commands, invariant checks, and replay format before schema/identity changes begin.
-3. **Add adapter conformance fixtures before parser rewrites.** Current Pi, Claude Code, Codex, and OpenCode normalization behavior must be captured as data-driven raw-input → normalized-entry/diagnostic fixtures before replacing parser internals.
+2. **Add state-machine skeletons for corpus and depot before changing storage.** The first skeleton may characterize current behaviour and skip unimplemented commands, but it must define the model state, commands, invariant checks, and replay format before schema/identity changes begin.
+3. **Add adapter conformance fixtures before parser rewrites.** Current Pi, Claude Code, Codex, and OpenCode normalization behaviour must be captured as data-driven raw-input → normalized-entry/diagnostic fixtures before replacing parser internals.
 4. **Add schema introspection helpers before FK/trigger migrations.** Tests should be able to assert “table has FK/check/trigger/index X” and run direct-SQL Type B attempts without hand-parsing all schema text in each test.
-5. **Introduce seams by name first.** Add behavior-preserving wrappers/interfaces named `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read capability before changing their internals. Names first, behavior second.
-6. **Add corpus/depot verifier queries before enforcing stricter constraints.** A verifier should detect current drift/missing blobs/stale catalog refs before migrations make those states impossible or repairable.
+5. **Introduce seams by name first.** Add behaviour-preserving wrappers/interfaces named `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, and source read capability before changing their internals. Names first, behaviour second.
+6. **Add corpus/depot verifier queries before enforcing stricter constraints.** A verifier should detect current drift/missing blobs/stale catalogue refs before migrations make those states impossible or repairable.
 7. **Run mutation dry-runs periodically before relying on tests.** `scripts/verify.sh mutation-dry` should be run after adding major invariants and before deleting duplicate runtime checks; use its uncovered/surviving areas to strengthen tests.
 
 Supporting guardrails:
@@ -570,7 +570,7 @@ Exit criteria:
 
 Exit criteria:
 
-- documented behavior unchanged except intentional pre-release cleanup;
+- documented behaviour unchanged except intentional pre-release cleanup;
 - no new string concatenation for keys;
 - constructors carry the invariant; downstream duplicate validation removed only
   when it defends the same non-adversarial failure mode.
@@ -625,7 +625,7 @@ Exit criteria:
 
 - unsupported bundles fail with clear errors;
 - new bundles use v2 identity only;
-- fixture bundles and state-machine sequences cover the cutoff behavior.
+- fixture bundles and state-machine sequences cover the cutoff behaviour.
 
 ## What to do in advance to make implementation simpler and safer
 
@@ -633,16 +633,16 @@ These are Phase 0 tasks and can be done before production refactors. They are in
 
 1. **Keep expanding static debt inventories before refactors.** Static tests should fail if new raw identity construction, ambient time/sleep, direct FTS writes, raw SQL mutations of append-only tables, network imports outside depot, path writes outside corpus/depot roots, or weak-test patterns appear. Begin with explicit allowlists of current debt; every refactor that removes debt must shrink the allowlist in the same commit. If a category reaches zero, convert the inventory into a hard ban.
 2. **Add state-machine skeletons for corpus and depot before changing storage.** Create minimal `rapid` state-machine tests with model state, commands, invariant checks, and replay traces before schema changes. The first version may only execute `ingest duplicate`, `read`, `search`, `status`, `depot put/list/fetch/verify`, and seeded failure cases, but the structure must be present before adding FK/trigger/identity migrations.
-3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, Codex, and OpenCode behavior as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
+3. **Add adapter conformance fixtures before parser rewrites.** Capture current Pi, Claude Code, Codex, and OpenCode behaviour as JSON fixtures: raw input/file metadata → normalized `ParsedEntry`/asset/diagnostic expectations. Run all adapters through one shared harness. This makes parser refactors differential and prevents “typed parser” work from silently changing importer semantics.
 4. **Add schema introspection helpers before FK/trigger migrations.** Provide test helpers for `HasTable`, `HasColumn`, `HasIndex`, `HasForeignKey`, `HasCheck`, `HasTrigger`, and direct-SQL Type B attempts. Migration tests should assert both the structural object exists and the invalid operation is rejected.
-5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add narrow wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behavior, and storage changes in one diff.
-6. **Add corpus/depot verifier queries before enforcing stricter constraints.** Implement lightweight queries that find orphan messages/assets/artifacts, FTS drift, missing blobs, wrong blob hashes where cheap, stale depot catalog refs, malformed depot keys, and missing catalog shards. The verifier should run against current stores and produce actionable diagnostics before migrations start rejecting these states.
+5. **Introduce seams by name first: `ReadCanonical`, `ResolveHuman`, `Clock`, `Sleeper`, source read capability.** Add narrow wrappers before semantic changes. This lets call sites move mechanically, lets tests target the future API early, and avoids mixing naming, behaviour, and storage changes in one diff.
+6. **Add corpus/depot verifier queries before enforcing stricter constraints.** Implement lightweight queries that find orphan messages/assets/artefacts, FTS drift, missing blobs, wrong blob hashes where cheap, stale depot catalogue refs, malformed depot keys, and missing catalogue shards. The verifier should run against current stores and produce actionable diagnostics before migrations start rejecting these states.
 7. **Run mutation dry-runs periodically to find weak tests before relying on them.** Run `scripts/verify.sh mutation-dry` after each major guardrail and before deleting duplicate runtime checks. Track uncovered critical mutants as work items; do not use a new constructor/schema trigger as justification for deleting old checks until mutation dry-run and targeted Type A/Type B tests show the invariant is covered.
 
 Additional advance work:
 
 8. **Use one verification entrypoint.** `scripts/verify.sh` and Make targets define quick/full/fuzz/mutation profiles so every phase runs the same checks locally and in CI.
-9. **Add shrinkable generators now.** Even small `rapid` generators for refs, catalog refs, manifests, sessions, and operation traces reduce bespoke property-test setup later.
+9. **Add shrinkable generators now.** Even small `rapid` generators for refs, catalogue refs, manifests, sessions, and operation traces reduce bespoke property-test setup later.
 10. **Use side-by-side paths only for active formats.** Differential tests compare old and new implementations when both are intentionally supported; pre-release legacy refs/bundles should be deleted and covered by rejection tests instead of compatibility shims.
 
 ## Additional verification upgrades
@@ -656,7 +656,7 @@ Add `testscript`-style CLI contracts for full user journeys:
 - `init --accept-secrets → refresh → search --refs → read <ref>`;
 - explicit bundle-path ingest into alternate `--repo`;
 - depot publish/list/fetch/verify/repair;
-- JSON error envelope behavior for bad flags, bad refs, missing config, and bad depot credentials;
+- JSON error envelope behaviour for bad flags, bad refs, missing config, and bad depot credentials;
 - no network for local-only commands.
 
 These tests should assert stdout/stderr, exit code, filesystem effects, and JSON shape. They complement Go unit tests because `aha` is primarily a CLI contract.
@@ -699,7 +699,7 @@ Keep extending hooks/fakes that can stop execution between durable steps:
 - after staging bundle, before DB transaction;
 - after rows inserted, before blob promotion;
 - after blob promotion, before commit;
-- during catalog shard conditional write conflicts;
+- during catalogue shard conditional write conflicts;
 - during verify/repair partial failure.
 
 The oracle is not “no leftovers ever.” The oracle is “no committed row points at missing/wrong bytes; leftover staging/orphan blobs are detectable and repairable.”
@@ -732,7 +732,7 @@ State-machine tests should print enough to replay failures deterministically:
 
 - random seed;
 - minimized operation list;
-- generated bundle/ref/catalog summaries;
+- generated bundle/ref/catalogue summaries;
 - temp corpus/depot preservation hint when `AHA_KEEP_FAILED_TESTDATA=1` is set.
 
 A minimized operation trace should be easy to convert into a named regression test.
@@ -741,7 +741,7 @@ A minimized operation trace should be easy to convert into a named regression te
 
 Keep two fixture classes separate:
 
-- **realish fixtures** from observed Pi/Claude/Codex formats, sanitized only where necessary;
+- **realish fixtures** from observed Pi/Claude/Codex formats, sanitised only where necessary;
 - **minimal fixtures** for focused invariants.
 
 Realish fixtures catch drift; minimal fixtures make failures easy to understand. Do not let generated fixtures replace realish adapter examples.
@@ -773,6 +773,6 @@ As corpus/depot verifier queries mature, tests should call the same verifier cod
 2. Ref sum type + canonical/human read split.
 3. Typed `EntryID`/`SessionKey` constructors with v2-only storage.
 4. Schema constraints/triggers for append-only, conflict quarantine, and FKs.
-5. FTS trigger/reconciler work for messages and artifacts.
+5. FTS trigger/reconciler work for messages and artefacts.
 6. Clock/backoff/source capability seams.
 7. Identity v2 cutoff with explicit unsupported-schema/ref rejection tests.

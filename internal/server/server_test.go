@@ -111,12 +111,12 @@ func TestDashboardIsSearchFirstTraceBrowser(t *testing.T) {
 	js := w.Body.String()
 	for _, want := range []string{"/api/search_traces", "search matching history", "copy fix notes", "Fix notes", "renderTraceCards", "trace-card", "trace-timeline", "trace-fact", "renderReadEntry", "renderFailureSummary", "Most frequent", "updateReaderContext", "widen-context", "example-search", "sources-tab-status", "setActiveTab", "incident-summary-status", "overview-summary-status", "conflicts-summary-status", "setSearchFeedback", "updateScopeSummary", "runSearchIfQuery", `role: $("role").value.trim()`} {
 		if !strings.Contains(js, want) {
-			t.Fatalf("dashboard behavior copy missing %q:\n%s", want, js)
+			t.Fatalf("dashboard behaviour copy missing %q:\n%s", want, js)
 		}
 	}
 	for _, stale := range []string{"copy skill draft", "applyJourney", "journey", "# ", "cluster"} {
 		if strings.Contains(js, stale) {
-			t.Fatalf("dashboard behavior copy still contains stale term %q", stale)
+			t.Fatalf("dashboard behaviour copy still contains stale term %q", stale)
 		}
 	}
 

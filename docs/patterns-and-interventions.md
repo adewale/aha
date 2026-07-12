@@ -1,8 +1,8 @@
 # Patterns and interventions
 
-`aha` finds recurring patterns in local coding-agent history. The right response is not always a skill. Sometimes the best artifact is a runbook, a dynamic workflow, a tool/platform fix, or an investigation backlog item.
+`aha` finds recurring patterns in local coding-agent history. The right response is not always a skill. Sometimes the best artefact is a runbook, a dynamic workflow, a tool/platform fix, or an investigation backlog item.
 
-Use this guide to manually turn `aha` incidents and evidence refs into the right artifact.
+Use this guide to manually turn `aha` incidents and evidence refs into the right artefact.
 
 ## What `aha` gives you today
 
@@ -13,9 +13,9 @@ Use this guide to manually turn `aha` incidents and evidence refs into the right
 - MCP: `incidents`, `incident_trajectory`, `search`, `read`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`.
 - TypeScript client: `clients/typescript/` wrappers for MCP/HTTP/code-mode runtimes.
 
-`aha` does **not** currently choose or write the final artifact for you. It gives you ranked incidents, normalized fix paths, and stable evidence refs so a human or agent can decide what to create.
+`aha` does **not** currently choose or write the final artefact for you. It gives you ranked incidents, normalized fix paths, and stable evidence refs so a human or agent can decide what to create.
 
-## Artifact taxonomy
+## Artefact taxonomy
 
 | Pattern shape | Prefer | Why | Example |
 |---|---|---|---|
@@ -159,7 +159,7 @@ For agents using MCP, call:
 
 The trajectory is the fail→fix arc: the failing invocation, intermediate command families, and the resolving success.
 
-### 6. Decide the artifact
+### 6. Decide the artefact
 
 Use this quick classifier:
 
@@ -181,7 +181,7 @@ Can the system make the bad state impossible or obvious?
   no  → investigation backlog
 ```
 
-## Artifact templates
+## Artefact templates
 
 ### Runbook
 

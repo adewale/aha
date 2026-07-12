@@ -36,7 +36,7 @@ func TestLocalAndR2DriversAreObservationallyEquivalent(t *testing.T) {
 		pushState(t, ctx, v2, "diff-a", map[string]string{"a.jsonl": "alpha content"})
 		pushState(t, ctx, v2, "diff-a", map[string]string{"a.jsonl": "alpha content", "b.jsonl": "beta content"})
 		pushState(t, ctx, v2, "diff-b", map[string]string{"c.jsonl": "gamma content"})
-		// Unchanged re-push: must be recognized on both drivers alike.
+		// Unchanged re-push: must be recognised on both drivers alike.
 		pushState(t, ctx, v2, "diff-b", map[string]string{"c.jsonl": "gamma content"})
 	}
 	scenario(local)

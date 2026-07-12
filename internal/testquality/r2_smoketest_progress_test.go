@@ -174,7 +174,7 @@ func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
 	if err := cmd.Run(); err == nil {
-		t.Fatal("production-only credentials unexpectedly authorized the smoketest")
+		t.Fatal("production-only credentials unexpectedly authorised the smoketest")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("go ran despite absent smoketest credentials: %v", err)
@@ -276,7 +276,7 @@ exit "${FAKE_GO_EXIT:-0}"
 	if err == nil {
 		t.Fatal("forbidden smoke test unexpectedly succeeded")
 	}
-	for _, want := range []string{"R2 authorization denied during HeadBucket", "before any smoke objects were written", "explicit test credential", "Object Read & Write", "AHA_R2_SMOKETEST_*", "next:"} {
+	for _, want := range []string{"R2 authorisation denied during HeadBucket", "before any smoke objects were written", "explicit test credential", "Object Read & Write", "AHA_R2_SMOKETEST_*", "next:"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("forbidden stderr=%q missing %q", stderr, want)
 		}

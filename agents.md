@@ -8,7 +8,7 @@ so they cannot silently disappear.
 
 Every change follows the red-green-refactor cycle:
 
-1. **Red** — Write a failing test that pins down the desired behavior. Run it
+1. **Red** — Write a failing test that pins down the desired behaviour. Run it
    and confirm it fails for the right reason before writing any implementation.
 2. **Green** — Write the simplest code that makes the test pass.
 3. **Refactor** — Clean up the implementation and tests while keeping the suite
@@ -32,3 +32,10 @@ runtime. Concretely (see `docs/correctness-by-construction-spec.md`):
 
 When a choice exists between a runtime check and a construction-time guarantee,
 choose the construction-time guarantee.
+
+## 3. We use British English
+
+Use British English in first-party prose, human-facing interfaces, comments, and
+new domain identifiers. Preserve mandatory external spellings only at protocol,
+standard, proper-name, legacy-schema, and source-quotation boundaries. See
+`docs/language-style.md`; static language tests keep active prose aligned.

@@ -29,5 +29,5 @@ Use this rubric to confirm `aha` is still on track as an agent-history aggregato
 
 ## Guidance from Claude History Explorer and qmd
 
-- From Claude History Explorer: keep trust claims verifiable, preserve read-only behavior, and optimize the browsing/search/read loop.
+- From Claude History Explorer: keep trust claims verifiable, preserve read-only behaviour, and optimise the browsing/search/read loop.
 - From qmd: snippets are leads, not evidence; search results should include round-trippable refs; status and doctor should provide next actions; agent-facing docs/skills should teach `search -> retrieve -> answer`.

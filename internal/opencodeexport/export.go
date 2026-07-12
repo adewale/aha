@@ -533,7 +533,7 @@ func pruneStale(destDir string, keep []Session) error {
 }
 
 func uniqueFileName(sid string, used map[string]bool) string {
-	base := sanitize(sid)
+	base := sanitise(sid)
 	if base == "" {
 		base = "session"
 	}
@@ -545,7 +545,7 @@ func uniqueFileName(sid string, used map[string]bool) string {
 	return name
 }
 
-func sanitize(s string) string {
+func sanitise(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {

@@ -94,7 +94,7 @@ Default corpus: `~/.aha`.
   images/...
 ```
 
-SQLite tables store machines, sources, snapshots (keyed by `manifest_sha256`), files, sessions, entries, messages, artifacts, images, and conflicts. FTS5 virtual tables index message text and text artifacts. Blob files preserve raw file content needed for reads. Pre-v2 corpora are rejected at open with an instruction to rebuild (delete and re-pull); the corpus is always rebuildable from the depot.
+SQLite tables store machines, sources, snapshots (keyed by `manifest_sha256`), files, sessions, entries, messages, artefacts, images, and conflicts. FTS5 virtual tables index message text and text artefacts. Blob files preserve raw file content needed for reads. Pre-v2 corpora are rejected at open with an instruction to rebuild (delete and re-pull); the corpus is always rebuildable from the depot.
 
 ## Command flows and walkthrough
 
@@ -182,7 +182,7 @@ resolve every machine pointer to a well-formed manifest
 --deep: fetch every referenced blob and verify its hash
 ```
 
-Quick verify is pointer/manifest resolution; `--deep` is the byte-level audit (many small GETs — slower than streaming one tar, accepted as the explicit audit path; it is the only path allowed to LIST). Blobs and manifests are write-once durable truth, so there is no `--repair` mode: there is no derived catalog to rebuild.
+Quick verify is pointer/manifest resolution; `--deep` is the byte-level audit (many small GETs — slower than streaming one tar, accepted as the explicit audit path; it is the only path allowed to LIST). Blobs and manifests are write-once durable truth, so there is no `--repair` mode: there is no derived catalogue to rebuild.
 
 ## Multiple snapshots, aggregation, deduplication, and efficiency
 
@@ -224,7 +224,7 @@ If two machines observe the same file version, the blob key is identical and onl
 ### How efficiency is preserved
 
 - **Content-addressed writes:** a blob key *is* the SHA-256 of its contents; the local driver and R2 both treat an existing key as already-done (`ExistingOK`), and the pointer/index use conditional writes.
-- **Per-machine namespaces:** a machine writes only its own manifests and pointer; there is no shared catalog to merge or repair.
+- **Per-machine namespaces:** a machine writes only its own manifests and pointer; there is no shared catalogue to merge or repair.
 - **Delta push:** the parent manifest is the diff baseline, so push is O(day's delta), not O(history). The advisory capture cache makes the scan itself O(changed files).
 - **Delta pull:** anti-entropy — fetch only blobs the corpus doesn't know, parse each file version once.
 - **No LIST on steady-state paths:** push/pull/refresh/status learn remote state from pointer + manifest GETs; only `depot verify` may LIST.
@@ -260,7 +260,7 @@ If two machines observe the same file version, the blob key is identical and onl
 | `internal/server` | Read-only HTTP dashboard: routes the MCP tool surface plus a `go:embed` UI, with loopback/Host/Content-Type/CSP hardening. |
 | `internal/model` | Shared config, manifest, parsed-session, result/ref types. |
 | `internal/safety` | Path and source-root safety checks. |
-| `internal/media` | Image/artifact classification helpers. |
+| `internal/media` | Image/artefact classification helpers. |
 
 The CLI, the MCP server, and the HTTP dashboard share one JSON contract for
 read-side tool execution: `internal/mcp.CallTool` is the dispatch point the

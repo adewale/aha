@@ -29,15 +29,15 @@
 - Use `docs/performance-scalability-plan.md` as the implementation order for performance work, including Phase-0 abstraction-readiness characterization, measurable scenario metrics, PBT performance invariants for many trivial bundles/duplicate refs, and package-level pprof before CLI-level profiling.
 - Continue tracking `aha verify` with pathological benchmarks; the rowid/query-plan fix removed the first superlinear cliff, but future FTS changes must keep the cheap query-plan guard green.
 - Continue tracking byte/call counters for archive/depot/ingest known-SHA handoffs; depot verify/status/ingest counters, verify/FTS repair counters, and known-blob tests now exist. Add SQL row-insert counters only if agent workflows need them.
-- Expand `state_sha256` refresh PBT only if duplicate/many-machine catalog shapes regress; zero-fetch state metadata coverage exists.
+- Expand `state_sha256` refresh PBT only if duplicate/many-machine catalogue shapes regress; zero-fetch state metadata coverage exists.
 - Consider true multi-row ingest inserts if benchmarks show SQLite step overhead dominating after prepared statements/prefetch/zstd pooling.
 - Prefer indexed `--project`/`--path-token`; keep `--path` contains as convenience and monitor broad-term FTS costs.
-- Add catalog summaries/local stale status cache only if raw catalog scans become a real depot bottleneck; `depot compact` and map-backed repair exist.
+- Add catalogue summaries/local stale status cache only if raw catalogue scans become a real depot bottleneck; `depot compact` and map-backed repair exist.
 
 ## Code health and duplication watch list
 
 - Use `docs/audits/code-duplication-audit.md` and `docs/refactor-metrics-and-go-audit.md` as the current duplication/refactor baseline.
-- Completed the first duplication-refactor pass: depot known-ref prep, quick catalog verification, compact/repair shard rewriting, R2 marker helpers, snapshot/refresh flag registration, search predicate building, FTS verify/repair predicates, and atomic temp-write/copy helpers are shared.
+- Completed the first duplication-refactor pass: depot known-ref prep, quick catalogue verification, compact/repair shard rewriting, R2 marker helpers, snapshot/refresh flag registration, search predicate building, FTS verify/repair predicates, and atomic temp-write/copy helpers are shared.
 - Future code-health work should be evidence-driven: add another duplication audit only when changing depot/R2 integrity flows, search filters, FTS repair semantics, or blob-publish durability.
 
 ## Future adapters

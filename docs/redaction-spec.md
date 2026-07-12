@@ -28,7 +28,7 @@ in the first place.*
 ## Goals
 
 - **Indexed text is safe to surface.** Anywhere aha projects text into the
-  corpus (messages.text, messages.command, tool_invocations.*, artifacts.text_*, FTS rows) is
+  corpus (messages.text, messages.command, tool_invocations.*, artefacts.text_*, FTS rows) is
   redacted before it lands.
 - **Redactions are observable.** Per-session and per-entry hit counts,
   grouped by pattern, are persisted and surfaced via `aha status` and the
@@ -162,7 +162,7 @@ Three changes to `internal/corpus/schema.go`:
    );
    ```
    `redactions` stores per-entry aggregate counts. `redaction_events` covers
-   session metadata and artifact surfaces that do not have an entry id.
+   session metadata and artefact surfaces that do not have an entry id.
    Triggers reject updates/deletes so duplicate ingest cannot inflate counts.
 
 3. **Schema migrations track redaction support** via `schema_migrations` versions
@@ -338,8 +338,8 @@ it.
 
 The env-file list is glob-expanded against the session's `cwd` (which is
 already in `sessions.raw_cwd`). If a bundle preserves the env file as a
-captured artifact (it currently does not — see open questions below),
-the literal-match table is built from that artifact. Otherwise the
+captured artefact (it currently does not — see open questions below),
+the literal-match table is built from that artefact. Otherwise the
 table is empty and v1.2 collapses to v1.1 behaviour for that session.
 
 ### Schema

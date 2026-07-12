@@ -223,7 +223,7 @@ export interface SearchArgs {
    */
   before?: string;
   /**
-   * Substring filter against session/artifact paths
+   * Substring filter against session/artefact paths
    */
   path?: string;
   /**

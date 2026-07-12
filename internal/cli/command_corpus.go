@@ -62,7 +62,7 @@ func runCorpusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 			return err
 		}
 		if depotUninitialized(depotReport) {
-			return errors.New("default depot is not initialized; initialize it before rebuilding the corpus")
+			return errors.New("default depot is not initialised; initialise it before rebuilding the corpus")
 		}
 		if len(depotReport.Problems) > 0 {
 			return fmt.Errorf("default depot has problems: %s", strings.Join(depotReport.Problems, "; "))

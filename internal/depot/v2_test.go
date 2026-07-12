@@ -157,7 +157,7 @@ func TestV2LocalPushPullRoundTrip(t *testing.T) {
 	}
 }
 
-// TestV2LatestForUnknownMachine pins absent-pointer behavior.
+// TestV2LatestForUnknownMachine pins absent-pointer behaviour.
 func TestV2LatestForUnknownMachine(t *testing.T) {
 	v2 := newLocalV2(t)
 	if _, ok, err := v2.Latest(context.Background(), "nobody"); err != nil || ok {
@@ -592,7 +592,7 @@ func TestPreparePullRequiresInitializedValidatedDepot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v2.PreparePull(ctx); err == nil || !strings.Contains(err.Error(), "not initialized") {
+	if _, err := v2.PreparePull(ctx); err == nil || !strings.Contains(err.Error(), "not initialised") {
 		t.Fatalf("uninitialized PreparePull error=%v", err)
 	}
 	if err := v2.Init(ctx); err != nil {
@@ -604,7 +604,7 @@ func TestPreparePullRequiresInitializedValidatedDepot(t *testing.T) {
 	}
 	machines, err := prepared.Machines()
 	if err != nil || len(machines) != 0 {
-		t.Fatalf("machines=%v err=%v want empty initialized pull plan", machines, err)
+		t.Fatalf("machines=%v err=%v want empty initialised pull plan", machines, err)
 	}
 	var zero depot.PreparedPull
 	if _, err := zero.Machines(); err == nil {

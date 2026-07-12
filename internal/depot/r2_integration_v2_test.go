@@ -135,10 +135,10 @@ func TestDecodeR2SmoketestAttestationBindsTargetIdentity(t *testing.T) {
 
 func TestR2CleanupAbsenceRequiresTypedNotFound(t *testing.T) {
 	if !isR2TestNotFound(&smithy.GenericAPIError{Code: "NoSuchKey", Message: "missing"}) {
-		t.Fatal("NoSuchKey was not recognized")
+		t.Fatal("NoSuchKey was not recognised")
 	}
 	if isR2TestNotFound(&smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}) {
-		t.Fatal("authorization failure was mistaken for absence")
+		t.Fatal("authorisation failure was mistaken for absence")
 	}
 }
 
@@ -211,7 +211,7 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 		t.Fatalf("delta push: %+v", second)
 	}
 
-	// Unchanged state on a new day: recognized from the pointer alone.
+	// Unchanged state on a new day: recognised from the pointer alone.
 	// The empty blob source proves no content is read or uploaded.
 	unchanged := snapshotManifestFor(machine, sessionFile(contentA, "a.jsonl"), sessionFile(contentB, "b.jsonl"))
 	unchanged.CapturedAt = "2099-01-01T00:00:00Z"

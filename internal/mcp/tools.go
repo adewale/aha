@@ -107,7 +107,7 @@ type SearchInput struct {
 	Role      string `json:"role,omitempty" jsonschema:"Filter by message role (user, assistant, ...)"`
 	After     string `json:"after,omitempty" jsonschema:"RFC3339 lower bound on timestamps"`
 	Before    string `json:"before,omitempty" jsonschema:"RFC3339 upper bound on timestamps"`
-	Path      string `json:"path,omitempty" jsonschema:"Substring filter against session/artifact paths"`
+	Path      string `json:"path,omitempty" jsonschema:"Substring filter against session/artefact paths"`
 	PathToken string `json:"path_token,omitempty" jsonschema:"Indexed path-segment filter"`
 	Project   string `json:"project,omitempty" jsonschema:"Indexed project filter"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Cap on returned hits (default 20, max 200)"`

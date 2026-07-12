@@ -155,7 +155,7 @@ REF=$(aha search "migration" --refs | awk 'NF { print $1; exit }')
 aha read "$REF" --md
 ```
 
-Passes if `read` returns surrounding transcript context or artifact text. Search results are leads; `read` is the evidence step.
+Passes if `read` returns surrounding transcript context or artefact text. Search results are leads; `read` is the evidence step.
 
 Agent/script-friendly form:
 
@@ -272,7 +272,7 @@ network request and returns exactly one next command:
 aha depot setup r2:aha-depot --json
 ```
 
-For a new, reachable bucket its next command is `aha depot init`. Initialization
+For a new, reachable bucket its next command is `aha depot init`. Initialisation
 writes the marker, **sets R2 as the default depot**, and persists only the
 non-secret account ID:
 
@@ -349,7 +349,7 @@ aha depot use local:~/.aha/depot   # back to local
 aha depot use r2:aha-depot         # back to R2
 ```
 
-`aha depot use` only switches to a depot that is already initialized. If an
+`aha depot use` only switches to a depot that is already initialised. If an
 empty bucket has no depot marker yet, it points you at `aha depot init`; if a
 depot has problems, it points you at `aha depot verify --deep` to diagnose.
 Note that `aha depot init` refuses a bucket holding a v1 (`bundles/v1` +
@@ -359,7 +359,7 @@ its bundle files with `aha ingest <bundle.tar.zst>` and pushing fresh.
 ### Add another machine
 
 On a second machine, export the same two secret keys (plus `AHA_R2_ACCOUNT_ID`
-the first time), then connect to the existing, already-initialized bucket:
+the first time), then connect to the existing, already-initialised bucket:
 
 ```bash
 aha depot use r2:aha-depot   # switch the default to the shared R2 depot
@@ -383,7 +383,7 @@ aha ingest \
 ```
 
 Before creating `corpus.db` or a lifecycle lock, `ingest` validates the depot
-address and R2 fields, reads the initialized depot marker and machine index,
+address and R2 fields, reads the initialised depot marker and machine index,
 and constructs a safe corpus destination. A failed local or remote preflight
 therefore leaves both destinations unchanged. The resulting directory contains
 one searchable SQLite corpus plus content-addressed blobs from each machine's
@@ -433,7 +433,7 @@ aha-depot` or the dashboard), then rerun `aha depot init r2:aha-depot`.
 No depot mutation occurred. `aha` automatically tries a bounded
 `ListObjectsV2` read when `HeadBucket` is forbidden. If listing succeeds, it
 accepts the bucket and continues; if both supported read checks return 403, the
-loaded S3 key pair does not authorize the bucket/account endpoint.
+loaded S3 key pair does not authorise the bucket/account endpoint.
 
 The usual causes are a token scoped to another bucket, an access key and secret
 copied from different tokens, or conflicting `AHA_R2_*`/`R2_*` aliases. Alias

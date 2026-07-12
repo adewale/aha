@@ -399,7 +399,7 @@ omission is a decision rather than an oversight:
 
 - **Mid-call context cancellation.** The MCP server does not thread a
   `context.Context` into `search.Query`/`corpus.Read*`/etc., and does not
-  honor `notifications/cancelled`. Those functions take a `*sql.DB` and run
+  honour `notifications/cancelled`. Those functions take a `*sql.DB` and run
   fast local SQLite queries; plumbing cancellation through stable, well-tested
   query code buys little for the local workload and is not worth the churn
   until a real long-running tool exists.

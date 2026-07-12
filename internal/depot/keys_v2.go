@@ -45,7 +45,7 @@ func LatestPointerKey(machine string) string {
 }
 
 // machinePrefix is the only place v2 machine namespaces are constructed.
-// Machine IDs are sanitized with the same component rules as the v1
+// Machine IDs are sanitised with the same component rules as the v1
 // catalog, so a hostile machine ID cannot escape machines/<id>/.
 func machinePrefix(machine string) string {
 	return "machines/" + safeCatalogComponent(machine) + "/"

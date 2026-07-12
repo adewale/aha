@@ -140,7 +140,7 @@ func (v *V2) Init(ctx context.Context) error {
 	return nil
 }
 
-// PreparedPull is a read capability for an initialized depot whose marker and
+// PreparedPull is a read capability for an initialised depot whose marker and
 // machine index were validated before any local corpus mutation. Its fields are
 // private so pull code cannot manufacture the capability from an unchecked V2.
 type PreparedPull struct {
@@ -153,7 +153,7 @@ type PreparedPull struct {
 func (v *V2) PreparePull(ctx context.Context) (PreparedPull, error) {
 	marker, _, err := v.store.get(ctx, MarkerObjectKey)
 	if errors.Is(err, errObjectNotExist) {
-		return PreparedPull{}, errors.New("depot is not initialized")
+		return PreparedPull{}, errors.New("depot is not initialised")
 	}
 	if err != nil {
 		return PreparedPull{}, err

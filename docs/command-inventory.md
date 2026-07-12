@@ -7,7 +7,7 @@ This is the human command inventory for the current implementation: what each co
 | Command | Use when | Notes |
 |---|---|---|
 | `aha refresh` | Keep the local corpus current. | Common update path: snapshot configured sources or reuse an unchanged depot bundle, then ingest pending/new bundles. |
-| `aha search` | Find leads in messages and artifacts. | Use `--json` or `--refs` for agents/scripts. Search snippets are leads, not evidence. |
+| `aha search` | Find leads in messages and artefacts. | Use `--json` or `--refs` for agents/scripts. Search snippets are leads, not evidence. |
 | `aha read` | Retrieve evidence for a ref. | Pass a canonical `ref_text` from search or incidents. Use `--before`/`--after` to widen context. |
 | `aha incidents` | Find recurring tool-call failure patterns and observed fix paths. | Use `--state unresolved` for pain/backlog and `--state resolved` for fixes worth harvesting into interventions. |
 | `aha serve` | Browse the corpus locally. | Loopback dashboard with Search, Failures, and Sources journeys. |
@@ -31,7 +31,7 @@ This is the human command inventory for the current implementation: what each co
 | `aha conflicts` | Inspect quarantined merge conflicts. | Keeps conflict/trust issues out of normal search/read paths. |
 | `aha doctor` | Diagnose config, source discovery, corpus, depot, and next actions. | May create/update the private OpenCode JSONL export cache while counting OpenCode sessions. |
 | `aha corpus` | Inspect or maintain corpus storage. | Subcommands: `size`, `vacuum`, `prune-orphans`; destructive prune requires `--force`. |
-| `aha depot` | Initialize, switch, list machine snapshots, or verify the durable store. | `depot verify` is quick by default; `--deep` verifies blob contents and historical manifests. |
+| `aha depot` | Initialise, switch, list machine snapshots, or verify the durable store. | `depot verify` is quick by default; `--deep` verifies blob contents and historical manifests. |
 
 ## Typical workflows
 

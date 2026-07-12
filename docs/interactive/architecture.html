@@ -2108,7 +2108,7 @@ footer a:hover { color: var(--ink-2); }
       Capture diffs local histories against the last snapshot, push uploads
       only the blobs the parent snapshot doesn't carry plus one manifest and
       a pointer move, pull anti-entropies every machine's latest snapshot
-      into a corpus, which search and read query. Each labeled stage owns one
+      into a corpus, which search and read query. Each labelled stage owns one
       thing; the package names are printed directly, and hover/click only
       reveals secondary notes.
     </p>
@@ -2132,7 +2132,7 @@ footer a:hover { color: var(--ink-2); }
       </g>
 
       <!-- Stage 1: sources -->
-      <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery/parse and OpenCode SQLite discovery via private JSONL export. Source-specific behavior stays here; everything downstream is source-agnostic.">
+      <g class="grp" data-pkg="internal/adapters" data-info="Pi, Claude Code, Codex JSONL discovery/parse and OpenCode SQLite discovery via private JSONL export. Source-specific behaviour stays here; everything downstream is source-agnostic.">
         <text x="115" y="40" class="title" text-anchor="middle">local sources</text>
         <text x="115" y="62" text-anchor="middle" class="lbl">~/.pi/agent/sessions</text>
         <text x="115" y="80" text-anchor="middle" class="lbl">~/.claude/projects</text>
@@ -2154,7 +2154,7 @@ footer a:hover { color: var(--ink-2); }
       </g>
 
       <!-- Stage 3: depot -->
-      <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Content-addressed blobs are write-once and stored once ever; per-machine manifests + a latest pointer (conditional PUT) replace catalog shards. The depot never deletes, and steady-state paths never LIST.">
+      <g class="grp" data-pkg="internal/depot" data-info="local: filesystem. r2: S3-compatible (Cloudflare). Content-addressed blobs are write-once and stored once ever; per-machine manifests + a latest pointer (conditional PUT) replace catalogue shards. The depot never deletes, and steady-state paths never LIST.">
         <text x="640" y="40" class="title" text-anchor="middle">depot</text>
         <text x="640" y="62" text-anchor="middle" class="lbl">blobs/v2/&lt;sha&gt;.zst</text>
         <text x="640" y="80" text-anchor="middle" class="lbl">machines/&lt;id&gt;/manifests + latest</text>
@@ -2270,7 +2270,7 @@ footer a:hover { color: var(--ink-2); }
       <div class="noun-tier-h">evidence  ·  immutable</div>
       <div class="noun" data-id="blob"
            data-def="One zstd-compressed file version, addressed by the SHA-256 of its uncompressed bytes. Write-once: identical content across snapshots and machines is one object by construction, ever. Reads re-verify the hash before bytes are trusted."
-           data-example="blobs/v2/e5f60123….zst  (one session/artifact file version)"
+           data-example="blobs/v2/e5f60123….zst  (one session/artefact file version)"
            data-rel="adapter,manifest,depot">
         <div class="noun-name">Blob</div>
         <div class="noun-tag">content-addressed · write-once</div>
@@ -2296,7 +2296,7 @@ footer a:hover { color: var(--ink-2); }
         <div class="noun-tag">local · r2</div>
       </div>
       <div class="noun" data-id="pointer"
-           data-def="machines/&lt;id&gt;/latest: a tiny JSON object naming the machine's latest manifest_sha256. Moved by conditional PUT (retry on conflict). Reading it alone is enough to recognize unchanged state — push writes nothing when the parent's state digest matches."
+           data-def="machines/&lt;id&gt;/latest: a tiny JSON object naming the machine's latest manifest_sha256. Moved by conditional PUT (retry on conflict). Reading it alone is enough to recognise unchanged state — push writes nothing when the parent's state digest matches."
            data-example="machines/ade-mbp/latest  →  {manifest_sha256:&quot;b5ce6c…&quot;}"
            data-rel="depot,manifest">
         <div class="noun-name">Latest pointer</div>
@@ -2344,10 +2344,10 @@ footer a:hover { color: var(--ink-2); }
         <div class="noun-tag">FTS-indexed</div>
       </div>
       <div class="noun" data-id="artifact"
-           data-def="A text or image file produced during a session. May link to a parent entry, or stand alone (unlinked but still searchable). Text artifacts get FTS-indexed; images get blob preservation when include_images=true."
+           data-def="A text or image file produced during a session. May link to a parent entry, or stand alone (unlinked but still searchable). Text artefacts get FTS-indexed; images get blob preservation when include_images=true."
            data-example="(artifact_sha256, kind, parent_session_key?, parent_entry_id?)"
            data-rel="entry,corpus">
-        <div class="noun-name">Artifact</div>
+        <div class="noun-name">Artefact</div>
         <div class="noun-tag">linked OR unlinked</div>
       </div>
       <div class="noun" data-id="asset"
@@ -2459,7 +2459,7 @@ footer a:hover { color: var(--ink-2); }
         <span class="tar-path">blobs/v2/04ff5678….zst</span>
         <span class="tar-size">12 KB</span>
       </div>
-      <div class="tar-row" data-info="Tool/agent output artifacts (text and images) are blobs too. Preserved verbatim; text artifacts are FTS-indexed at ingest, image artifacts kept when include_images=true.">
+      <div class="tar-row" data-info="Tool/agent output artefacts (text and images) are blobs too. Preserved verbatim; text artefacts are FTS-indexed at ingest, image artefacts kept when include_images=true.">
         <span class="tar-sha">deadbeef…</span>
         <span class="tar-path">blobs/v2/deadbeef….zst</span>
         <span class="tar-size">2.1 KB</span>
@@ -2580,7 +2580,7 @@ footer a:hover { color: var(--ink-2); }
         </div>
         <div class="er-table" data-cols="redaction_id PK, session_key, subject_kind, subject_id, entry_id, artifact_id, surface, pattern, count, created_at">
           <div class="er-name">redaction_events</div>
-          <div class="er-note">append-only session/artifact redaction events for observability</div>
+          <div class="er-note">append-only session/artefact redaction events for observability</div>
         </div>
       </div>
     </div>
@@ -2670,7 +2670,7 @@ footer a:hover { color: var(--ink-2); }
       </tr>
       <tr>
         <td class="row-name"><code>UPDATE entries SET role=…</code></td>
-        <td>Same: <code>entries_no_update</code> aborts. Entries, messages, artifacts, and conflicts are all append-only.</td>
+        <td>Same: <code>entries_no_update</code> aborts. Entries, messages, artefacts, and conflicts are all append-only.</td>
         <td class="col-right">If two snapshots disagree, the second goes into <code>conflicts</code> automatically. Inspect with <code>aha conflicts</code>.</td>
       </tr>
       <tr class="topical">
@@ -2781,13 +2781,13 @@ func NewSessionKey(source, machine, sourceSession string) (SessionKey, error) {
             <input id="ref-sess" type="text" value="sk1_a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"/>
             <label style="margin-top: var(--s-3)">entry_id</label>
             <input id="ref-entry" type="text" value="evt-42"/>
-            <label style="margin-top: var(--s-3)">artifact sha256 (64 hex)</label>
+            <label style="margin-top: var(--s-3)">artefact sha256 (64 hex)</label>
             <input id="ref-sha" type="text" value="deadbeef0000000000000000000000000000000000000000000000000000beef"/>
           </div>
           <div class="out" style="align-self: start">
             <div><span class="k">message ref   </span> <span class="v" id="ref-msg"></span> <button class="copy-btn" data-copy="#ref-msg">copy</button></div>
             <div><span class="k">session ref   </span> <span class="v" id="ref-ses"></span></div>
-            <div><span class="k">artifact ref  </span> <span class="v" id="ref-art"></span></div>
+            <div><span class="k">artefact ref  </span> <span class="v" id="ref-art"></span></div>
             <div style="margin-top: var(--s-2)"><span class="k">parse(msg) returns:</span></div>
             <div><span class="v" id="ref-parsed"></span></div>
           </div>
@@ -2888,7 +2888,7 @@ func FormatRef(r Ref) string {
             <code class="ss-hash-value" id="ss-state-sha">computing...</code>
             <div class="ss-hash-bar"><div id="ss-state-bar"></div></div>
           </div>
-          <p class="ss-hint">Edit any field. Volatile-only edits move the identity but leave the state digest <b>unchanged</b> – that's the property <code>push</code> relies on to recognize an unchanged machine from the parent pointer alone and write nothing.</p>
+          <p class="ss-hint">Edit any field. Volatile-only edits move the identity but leave the state digest <b>unchanged</b> – that's the property <code>push</code> relies on to recognise an unchanged machine from the parent pointer alone and write nothing.</p>
           <div style="display:flex; gap:var(--s-2); flex-wrap:wrap;">
             <button class="copy-btn" data-copy-cmd="manifest-full">copy as manifest JSON</button>
             <button class="copy-btn" data-copy-cmd="manifest-state">copy as state struct JSON</button>
@@ -3094,7 +3094,7 @@ create trigger messages_ai after insert on messages
 --   * ReconcileFTS         (which rows to re-insert)
 -- verify and repair can never disagree on what counts as indexable.</code></pre>
       <p>
-        The cleanup that made this honest: until migration v7 the artifact
+        The cleanup that made this honest: until migration v7 the artefact
         trigger used a slightly different predicate from the verifier, so
         <code>verify</code> would flag missing FTS rows that
         <code><span>-</span><span>-</span>repair-fts</code> wouldn't repair. The duplication-refactor
@@ -3141,7 +3141,7 @@ rep, _ := corpus.IngestBundleWithExpectedSHA(store, registry, bundlePath, info.B
     </div>
     <div class="body">
       <p>
-        Messages and artifacts live in two separate FTS5 tables. A single
+        Messages and artefacts live in two separate FTS5 tables. A single
         search runs both with the same filters, each capped at the limit,
         then merges and re-sorts in Go by <code>bm25</code> score (lower is
         better) with deterministic tiebreakers down to <code>entry_id</code>,
@@ -3209,7 +3209,7 @@ create index idx_session_path_tokens_token_session
         <code>EXPLAIN QUERY PLAN</code> test that fails CI if the plan stops
         using it. So the algorithmic claim ("path-token search is sublinear in
         sessions") is encoded as a test, not a comment.
-        <code>artifact_path_tokens</code> mirrors this for artifact raw paths.
+        <code>artifact_path_tokens</code> mirrors this for artefact raw paths.
       </p>
       <p>
         The result is a hand-rolled inverted index inside a relational
@@ -3272,7 +3272,7 @@ create index idx_session_path_tokens_token_session
         <li>PrepareStatements (transaction-scoped)</li>
         <li>InsertMachineAndSources</li>
         <li>per-session entry-hash prefetch</li>
-        <li>insert entries, messages, artifacts, images</li>
+        <li>insert entries, messages, artefacts, images</li>
       </ol>
       <div class="end good">on failure: tx rolls back; the corpus never stores bundle objects</div>
     </div>
@@ -3282,7 +3282,7 @@ create index idx_session_path_tokens_token_session
     <h4>Failure-injection hooks (test only)</h4>
     <div class="pair"><code>afterManifestFiles</code><span>simulate a crash before commit</span></div>
     <p>
-      Tests assert: corpus rows roll back, no bundle-shaped artifacts are
+      Tests assert: corpus rows roll back, no bundle-shaped artefacts are
       left behind, <code>ingest_attempts</code> records the duplicate. On
       <code>SQLITE_BUSY</code> the ingestor retries up to 20 times with a
       pluggable <code>clock.Sleeper</code> / <code>clock.Backoff</code>, so
@@ -3391,7 +3391,7 @@ create index idx_session_path_tokens_token_session
 
   <div class="hot-intro">
     <p class="cli-note" style="margin:0;max-width:62ch">
-      Severity is printed directly on every row as <code>doubt</code>, <code>warn</code>, or <code>solid</code>; color only echoes that text as a secondary cue.
+      Severity is printed directly on every row as <code>doubt</code>, <code>warn</code>, or <code>solid</code>; colour only echoes that text as a secondary cue.
     </p>
     <aside class="sidenote">
       <b>Ranking rule.</b> The table is sorted by attention score: <code>stakes × (1 − grounded)</code>. That puts risky unvalidated assumptions above safe known limits.
@@ -3468,7 +3468,7 @@ create index idx_session_path_tokens_token_session
     <li><code>cmd/aha/main.go</code> &middot; 11 lines. It just calls <code>cli.Run</code>.</li>
     <li><code>internal/model/ref.go</code> and <code>identity.go</code> &middot; the sealed types every other package consumes.</li>
     <li><code>internal/archive/archive.go</code> &middot; capture, manifest, tar.zst, plus the state signature.</li>
-    <li><code>internal/depot/depot.go</code> + <code>local.go</code> / <code>r2.go</code> &middot; bundle store, catalog merge.</li>
+    <li><code>internal/depot/depot.go</code> + <code>local.go</code> / <code>r2.go</code> &middot; bundle store, catalogue merge.</li>
     <li><code>internal/corpus/schema.go</code> &middot; the most opinionated 270 lines: triggers do the heavy lifting.</li>
     <li><code>internal/corpus/ingest.go</code> &middot; planner, writer, publisher.</li>
     <li><code>internal/search/search.go</code> &middot; FTS5 query construction. Tiny on purpose.</li>
@@ -3480,7 +3480,7 @@ create index idx_session_path_tokens_token_session
     <p class="cli-note">The Tufte gate used for this file. Run the drift test, then read the page with interaction disabled in your head: the claims should still stand.</p>
     <ol>
       <li>Every diagram has direct labels; hover only adds secondary explanation.</li>
-      <li>Color is semantic: sage = grounded/canonical, clay = risk, sand = accepted limit.</li>
+      <li>Colour is semantic: sage = grounded/canonical, clay = risk, sand = accepted limit.</li>
       <li>Facts are sorted by reader decision: attention, dependency, or reading order.</li>
       <li>No chart border, shadow, gradient, legend detour, or decorative data mark survived.</li>
       <li>Each risky claim names a falsifier or a next measurement.</li>
@@ -3920,7 +3920,7 @@ const HOTSPOTS = [
     severity:'warn', stakes:0.55, grounded:0.55,
     where:'internal/search/search.go · contains-style filter',
     state:'Indexed alternatives exist (`--project`, `--path-token`) and are documented, but `--path` is still the obvious flag, and contains-LIKE has no useful query plan on large corpora.',
-    needs:'Either deprecate `--path` in favor of indexed forms, or rewrite the filter to a token search with explicit "contains" escape. Behavior is correct; cost is the question.' },
+    needs:'Either deprecate `--path` in favour of indexed forms, or rewrite the filter to a token search with explicit "contains" escape. Behaviour is correct; cost is the question.' },
 
   { id:'toolout', name:'tool output preserved but not indexed',
     severity:'warn', stakes:0.4, grounded:0.7,
@@ -3979,7 +3979,7 @@ const HOTSPOTS = [
   { id:'windows', name:'Windows path / FS support',
     severity:'warn', stakes:0.3, grounded:0.5,
     where:'all of internal/*',
-    state:'v2 explicit non-goal. Path helpers are mostly portable; tar/zstd are; SQLite via modernc.org/sqlite is. Symlink-and-NOFOLLOW behavior in `archive.openRegularNoFollow` is unix syscalls.',
+    state:'v2 explicit non-goal. Path helpers are mostly portable; tar/zstd are; SQLite via modernc.org/sqlite is. Symlink-and-NOFOLLOW behaviour in `archive.openRegularNoFollow` is unix syscalls.',
     needs:'Pick when to do it. The longer we wait, the more drift seeps in.' },
 
   { id:'append-only-static', name:'append-only is triggers + static guards',
@@ -4121,7 +4121,7 @@ const PACKAGES = [
   { name: 'internal/config',  lines: '~250',  why: 'JSONC config load and write, defaults, redaction-free.', read: ['config.go'] },
   { name: 'internal/hash',    lines: '~30',   why: 'SHA-256 helpers (bytes and streaming).', read: ['hash.go'] },
   { name: 'internal/paths',   lines: '~35',   why: 'Tilde expansion and one or two stable helpers.', read: ['paths.go'] },
-  { name: 'internal/media',   lines: '~80',   why: 'Image and text artifact classification.', read: ['media.go'] },
+  { name: 'internal/media',   lines: '~80',   why: 'Image and text artefact classification.', read: ['media.go'] },
   { name: 'internal/testquality', lines: '~270', why: 'Static debt inventory. Fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.', read: ['cbc_debt_test.go', 'static_test.go'] },
 ];
 
@@ -4222,7 +4222,7 @@ function renderPackageMatrix() {
 
 /* ============================================================
    Copy buttons. The Anthropic article calls this out as the link
-   between explorables and real workflows: an HTML artifact ends in
+   between explorables and real workflows: an HTML artefact ends in
    an "export" that you can paste back into Claude Code, into Go
    source, or into a shell command.
    ============================================================ */
@@ -4371,7 +4371,7 @@ const PKG_GRAPH = {
   'clock':       { deps: [],                              role: 'Clock / Sleeper / Backoff seams so ingest busy-retry is deterministic in tests.' },
   'progress':    { deps: [],                              role: 'typed privacy-safe progress events with honest known/unknown totals and injected-clock elapsed time.' },
   'fileutil':    { deps: [],                              role: 'atomic temp create + rename, ExistingOK no-replace semantics. Used by depot publish and corpus blob writes.' },
-  'media':       { deps: [],                              role: 'image and text artifact classification.' },
+  'media':       { deps: [],                              role: 'image and text artefact classification.' },
   'testquality': { deps: [],                              role: 'static debt inventory; fails CI if production code reintroduces ambient time, network outside depot, manual FTS writes, append-only mutation, raw identity concat.' },
   'opencodeexport': { deps: [],                           role: 'converts the OpenCode SQLite database into deterministic, lossless JSONL session files in a private locked cache (DB/WAL/SHM copied before query; source never mutated). Kept out of adapters so source adapters stay free of filesystem-mutation calls.' },
 
