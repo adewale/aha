@@ -48,8 +48,8 @@ type UploadPlanSummary struct {
 }
 
 func (p PreparedUpload) PlanUpload(ctx context.Context, manifest model.SnapshotManifest, source BlobSource) (UploadPlan, error) {
-	if p.depot == nil || !p.binding.Valid() {
-		return UploadPlan{}, fmt.Errorf("invalid prepared Archive writer capability")
+	if _, err := p.ArchiveState(); err != nil {
+		return UploadPlan{}, err
 	}
 	if source == nil {
 		return UploadPlan{}, fmt.Errorf("Archive upload source is required")
@@ -96,14 +96,14 @@ func (p PreparedUpload) PlanUpload(ctx context.Context, manifest model.SnapshotM
 }
 
 func (p UploadPlan) Summary() (UploadPlanSummary, error) {
-	if p.writer.depot == nil || !p.writer.binding.Valid() || p.source == nil {
+	if _, err := p.writer.ArchiveState(); err != nil || p.source == nil {
 		return UploadPlanSummary{}, fmt.Errorf("invalid Archive upload plan")
 	}
 	return p.summary, nil
 }
 
 func (p UploadPlan) Execute(ctx context.Context, opts PushOptions) (PushResult, error) {
-	if p.writer.depot == nil || !p.writer.binding.Valid() || p.source == nil {
+	if _, err := p.writer.ArchiveState(); err != nil || p.source == nil {
 		return PushResult{}, fmt.Errorf("invalid Archive upload plan")
 	}
 	return PushV2WithOptions(ctx, p.writer.depot, p.manifest, p.source, opts)
@@ -112,8 +112,8 @@ func (p UploadPlan) Execute(ctx context.Context, opts PushOptions) (PushResult, 
 // Push publishes through a capability constructed only after Archive marker
 // validation. Upload commands use this method rather than accepting a raw V2.
 func (p PreparedUpload) Push(ctx context.Context, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {
-	if p.depot == nil || !p.binding.Valid() {
-		return PushResult{}, fmt.Errorf("invalid prepared Archive writer capability")
+	if _, err := p.ArchiveState(); err != nil {
+		return PushResult{}, err
 	}
 	plan, err := p.PlanUpload(ctx, manifest, src)
 	if err != nil {

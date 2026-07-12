@@ -1,5 +1,25 @@
 # Performance, scalability, and longevity plan
 
+## 0.2 transfer complexity contract
+
+Let `M` be indexed machines, `C` machines whose latest identity changed, and
+`F(C)` the files named by those changed machines' logically full latest
+manifests.
+
+- A repeated current `archive download` is `O(M)`: one marker/index inspection,
+  one latest-pointer read per machine, and indexed Workspace-vector comparison.
+  It fetches no manifests or blobs and creates no Workspace lock or write.
+- A behind download is `O(M + F(C))`, not proportional to all historical
+  manifests. Planning skips unchanged-machine manifests, uses indexed point
+  lookups for blob presence, and caches each changed manifest for execution.
+- Snapshot manifests are logically full, so a changed machine still incurs an
+  `O(files on that machine)` metadata walk. Eliminating that residual requires a
+  versioned delta-manifest/checkpoint design rather than another local cache.
+- Upload avoids re-reading and re-uploading carried content, but source
+  discovery and full-manifest construction remain `O(discovered files)`.
+- Status and explicit verification intentionally inspect broader invariants;
+  deep verification is proportional to retained durable content.
+
 Date: 2026-05-25
 
 This plan combines the algorithmic audit in `docs/performance-audit.md`, pathological benchmarks, property-based performance invariants, and pprof observations. The goal is to keep `aha` usable as local histories grow from a few thousand messages to years of multi-agent, multi-machine history without weakening deterministic content-addressed snapshots, append-only ingest, or repairability. Latest captured benchmark results live in `docs/performance-results.md`.

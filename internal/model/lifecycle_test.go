@@ -7,9 +7,22 @@ import (
 )
 
 func TestArchiveTransitionTableIsExhaustive(t *testing.T) {
+	allowed := map[ArchiveState]map[ArchiveOperation]ArchiveState{
+		ArchiveInvalidAddress:       {ArchiveStatus: ArchiveInvalidAddress},
+		ArchiveInvalidConfiguration: {ArchiveStatus: ArchiveInvalidConfiguration},
+		ArchiveUnreachable:          {ArchiveStatus: ArchiveUnreachable},
+		ArchiveUninitialised:        {ArchiveStatus: ArchiveUninitialised, ArchiveInit: ArchiveEmpty},
+		ArchiveEmpty:                {ArchiveStatus: ArchiveEmpty, ArchiveSetDefault: ArchiveEmpty, ArchiveUpload: ArchivePopulated, ArchiveDownload: ArchiveEmpty, ArchiveVerify: ArchiveEmpty},
+		ArchivePopulated:            {ArchiveStatus: ArchivePopulated, ArchiveSetDefault: ArchivePopulated, ArchiveUpload: ArchivePopulated, ArchiveDownload: ArchivePopulated, ArchiveVerify: ArchivePopulated},
+		ArchiveDamaged:              {ArchiveStatus: ArchiveDamaged, ArchiveVerify: ArchiveDamaged},
+	}
 	for _, state := range AllArchiveStates() {
 		for _, operation := range AllArchiveOperations() {
 			result := ArchiveTransition(state, operation)
+			wantNext, wantAllowed := allowed[state][operation]
+			if result.Allowed != wantAllowed || (wantAllowed && result.NextState != wantNext) {
+				t.Fatalf("state=%s operation=%s result=%+v want allowed=%v next=%s", state, operation, result, wantAllowed, wantNext)
+			}
 			if !result.Allowed && result.NextAction.Command == "" {
 				t.Fatalf("state=%s operation=%s rejection has no next action", state, operation)
 			}
@@ -18,9 +31,21 @@ func TestArchiveTransitionTableIsExhaustive(t *testing.T) {
 }
 
 func TestWorkspaceTransitionTableIsExhaustive(t *testing.T) {
+	allowed := map[WorkspaceState]map[WorkspaceOperation]WorkspaceState{
+		WorkspaceAbsent:             {WorkspaceStatus: WorkspaceAbsent, WorkspaceSetDefault: WorkspaceAbsent, WorkspaceDownload: WorkspaceCurrent},
+		WorkspaceCurrent:            {WorkspaceStatus: WorkspaceCurrent, WorkspaceSetDefault: WorkspaceCurrent, WorkspaceDownload: WorkspaceCurrent, WorkspaceVerify: WorkspaceCurrent, WorkspaceConflicts: WorkspaceCurrent},
+		WorkspaceBehind:             {WorkspaceStatus: WorkspaceBehind, WorkspaceSetDefault: WorkspaceBehind, WorkspaceDownload: WorkspaceCurrent, WorkspaceVerify: WorkspaceBehind, WorkspaceConflicts: WorkspaceBehind},
+		WorkspaceDamaged:            {WorkspaceStatus: WorkspaceDamaged, WorkspaceSetDefault: WorkspaceDamaged, WorkspaceVerify: WorkspaceDamaged, WorkspaceRepair: WorkspaceCurrent, WorkspaceConflicts: WorkspaceDamaged},
+		WorkspaceArchiveMismatch:    {WorkspaceStatus: WorkspaceArchiveMismatch},
+		WorkspaceInvalidDestination: {WorkspaceStatus: WorkspaceInvalidDestination},
+	}
 	for _, state := range AllWorkspaceStates() {
 		for _, operation := range AllWorkspaceOperations() {
 			result := WorkspaceTransition(state, operation)
+			wantNext, wantAllowed := allowed[state][operation]
+			if result.Allowed != wantAllowed || (wantAllowed && result.NextState != wantNext) {
+				t.Fatalf("state=%s operation=%s result=%+v want allowed=%v next=%s", state, operation, result, wantAllowed, wantNext)
+			}
 			if !result.Allowed && result.NextAction.Command == "" {
 				t.Fatalf("state=%s operation=%s rejection has no next action", state, operation)
 			}

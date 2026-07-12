@@ -159,6 +159,22 @@ func TestWaitForConditionalRetryHonorsCancellation(t *testing.T) {
 	}
 }
 
+type countingGetStore struct {
+	objectStore
+	gets        map[string]int
+	existsCalls int
+}
+
+func (s *countingGetStore) get(ctx context.Context, key string) ([]byte, string, error) {
+	s.gets[key]++
+	return s.objectStore.get(ctx, key)
+}
+
+func (s *countingGetStore) exists(ctx context.Context, key string) (bool, error) {
+	s.existsCalls++
+	return s.objectStore.exists(ctx, key)
+}
+
 type internalBlobSource struct {
 	path  string
 	calls int
@@ -191,6 +207,79 @@ func writeInternalBlob(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestArchiveMetadataInspectionDoesNotHeadEveryBlob(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := singleFileManifest("a", "alpha")
+	if _, err := PushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, "alpha")}); err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingGetStore{objectStore: v2.store, gets: map[string]int{}}
+	v2.store = counter
+	report, err := v2.InspectMetadata(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Initialised || len(report.Latest) != 1 || counter.existsCalls != 0 {
+		t.Fatalf("report=%+v blob HEADs=%d", report, counter.existsCalls)
+	}
+}
+
+func TestDownloadSummaryExaminesOnlyChangedMachineSnapshots(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	baseline := map[string]string{}
+	for _, tc := range []struct{ machine, content string }{{"a", "alpha"}, {"b", "bravo"}} {
+		manifest, _ := singleFileManifest(tc.machine, tc.content)
+		source := &internalBlobSource{path: writeInternalBlob(t, tc.content)}
+		result, err := PushV2(t.Context(), v2, manifest, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.machine == "a" {
+			baseline[tc.machine] = result.ManifestSHA256().String()
+		}
+	}
+	counter := &countingGetStore{objectStore: v2.store, gets: map[string]int{}}
+	v2.store = counter
+	reader, err := v2.PreparePull(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := reader.PlanDownload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookups := 0
+	summary, err := plan.SummaryDelta(t.Context(), baseline, func(model.BlobKey) (bool, error) {
+		lookups++
+		return false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 1 || summary.UnknownBlobs != 1 || summary.Machines != 2 {
+		t.Fatalf("lookups=%d summary=%+v want only machine b delta", lookups, summary)
+	}
+	if _, err := plan.Manifest(t.Context(), "b", plan.latest["b"]); err != nil {
+		t.Fatal(err)
+	}
+	manifestKey := ManifestObjectKey("b", plan.latest["b"])
+	if got := counter.gets[manifestKey]; got != 1 {
+		t.Fatalf("manifest GETs=%d want 1 across summary and execution", got)
+	}
 }
 
 func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T) {

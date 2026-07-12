@@ -166,6 +166,10 @@ func Normalize(err error, command string) View {
 	if errors.As(err, &ambiguous) {
 		return view(CodeAmbiguous, fmt.Sprintf("The requested %s matches more than one result.", safeKind(ambiguous.Kind)), command, helpAction(command), "ambiguous_reference", false)
 	}
+	var legacyArchive *depot.LegacyArchiveError
+	if errors.As(err, &legacyArchive) {
+		return view(CodeUnsupportedSchema, "This location contains a v1 Archive; aha 0.2 will not modify or migrate it in place.", command, action("aha", "archive", "init", "local:~/.aha/archive-v2"), "legacy_archive", false)
+	}
 	var unsupportedSchema archive.UnsupportedSchemaError
 	if errors.As(err, &unsupportedSchema) {
 		return view(CodeUnsupportedSchema, "The input uses an unsupported archive schema.", command, helpAction(command), "unsupported_schema", false)

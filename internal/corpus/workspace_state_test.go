@@ -66,6 +66,43 @@ func TestWorkspaceRejectsArchiveMismatchBeforeChangingState(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBlobLookupUsesPointQueriesAndCarriesMaterialisedVector(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	store, err := corpus.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id) values(?,?)`, sha, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB.Exec(`insert into files(file_sha256,kind,bytes,first_seen_manifest_sha256) values(?,?,?,?)`, sha, "session", 1, sha); err != nil {
+		t.Fatal(err)
+	}
+	if err := corpus.RecordMaterialisedVector(store.DB, map[string]string{"a": sha}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lookup, err := corpus.OpenWorkspaceBlobLookup(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lookup.Close()
+	known, _ := model.NewBlobKey(sha)
+	missing, _ := model.NewBlobKey("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if ok, err := lookup.Has(known); err != nil || !ok {
+		t.Fatalf("known blob=(%v,%v)", ok, err)
+	}
+	if ok, err := lookup.Has(missing); err != nil || ok {
+		t.Fatalf("missing blob=(%v,%v)", ok, err)
+	}
+	if vector, err := lookup.MaterialisedVector(); err != nil || !reflect.DeepEqual(vector, map[string]string{"a": sha}) {
+		t.Fatalf("vector=%v err=%v", vector, err)
+	}
+}
+
 func TestWorkspaceStateComparesExactLatestVector(t *testing.T) {
 	store, err := corpus.Open(filepath.Join(t.TempDir(), "workspace"))
 	if err != nil {

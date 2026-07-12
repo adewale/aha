@@ -200,6 +200,14 @@ func runWorkspaceContext(ctx context.Context, args []string, stdout, stderr io.W
 		if state == model.WorkspaceAbsent {
 			return errors.New("Workspace is absent; run `aha archive download` first")
 		}
+		healthStore, healthErr := corpus.OpenExistingReadOnly(cfg.WorkspaceDir)
+		if healthErr == nil {
+			healthReport, verifyErr := corpus.VerifyContext(ctx, healthStore)
+			_ = healthStore.Close()
+			if verifyErr != nil || len(healthReport.Problems) > 0 {
+				state = model.WorkspaceDamaged
+			}
+		}
 		if state != model.WorkspaceDamaged {
 			return fmt.Errorf("Workspace repair requires damaged state; current state is %s", state)
 		}

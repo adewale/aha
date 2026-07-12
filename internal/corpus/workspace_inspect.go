@@ -1,7 +1,6 @@
 package corpus
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -25,7 +24,7 @@ func InspectWorkspaceState(root string, binding model.ArchiveBinding, latest map
 	} else if err != nil {
 		return model.WorkspaceInvalidDestination, err
 	}
-	dsn := "file:" + filepath.ToSlash(dbPath) + "?mode=ro&immutable=1"
+	dsn := "file:" + filepath.ToSlash(dbPath) + "?mode=ro"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return model.WorkspaceDamaged, err
@@ -33,10 +32,6 @@ func InspectWorkspaceState(root string, binding model.ArchiveBinding, latest map
 	defer db.Close()
 	if err := db.Ping(); err != nil {
 		return model.WorkspaceDamaged, fmt.Errorf("open Workspace read-only: %w", err)
-	}
-	report, err := VerifyContext(context.Background(), &Store{DB: db, Root: expanded})
-	if err != nil || len(report.Problems) > 0 {
-		return model.WorkspaceDamaged, err
 	}
 	return WorkspaceState(db, binding, latest)
 }

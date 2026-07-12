@@ -46,7 +46,7 @@ func OpenExistingReadOnly(dir string) (*Store, error) {
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro&immutable=1")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro")
 	if err != nil {
 		return nil, err
 	}

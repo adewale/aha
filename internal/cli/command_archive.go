@@ -93,6 +93,9 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	case "init":
 		before := inspectArchive(ctx, cfg, address)
 		if before.State != model.ArchiveUninitialised {
+			if archiveHasProblem(before, "unsupported v1 Archive layout") {
+				return &depot.LegacyArchiveError{}
+			}
 			if before.State == model.ArchiveEmpty || before.State == model.ArchivePopulated {
 				return errors.New("Archive is already initialised")
 			}
@@ -213,16 +216,28 @@ func runArchiveContext(ctx context.Context, args []string, stdout, stderr io.Wri
 		if state == model.WorkspaceDamaged {
 			return errors.New("Workspace is damaged; run `aha workspace repair --backup`")
 		}
-		knownBlobs, err := corpus.KnownWorkspaceBlobs(cfg.WorkspaceDir)
+		if state == model.WorkspaceCurrent {
+			return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": *dryRun, "no_op": true, "machines": len(vector), "latest_snapshots": len(vector), "unknown_blobs": 0, "unknown_bytes": 0, "historical_manifests_excluded": true})
+		}
+		blobLookup, err := corpus.OpenWorkspaceBlobLookup(cfg.WorkspaceDir)
 		if err != nil {
 			return err
 		}
-		summary, err := plan.Summary(ctx, func(key model.BlobKey) (bool, error) { return knownBlobs[key.String()], nil })
+		materialised, err := blobLookup.MaterialisedVector()
+		if err != nil {
+			_ = blobLookup.Close()
+			return err
+		}
+		summary, err := plan.SummaryDelta(ctx, materialised, blobLookup.Has)
+		closeErr := blobLookup.Close()
 		if err != nil {
 			return err
 		}
-		if state == model.WorkspaceCurrent || *dryRun {
-			return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": *dryRun, "no_op": state == model.WorkspaceCurrent, "machines": summary.Machines, "latest_snapshots": summary.LatestSnapshots, "unknown_blobs": summary.UnknownBlobs, "unknown_bytes": summary.UnknownBytes, "historical_manifests_excluded": true})
+		if closeErr != nil {
+			return closeErr
+		}
+		if *dryRun {
+			return writeArchiveMutation(stdout, *jsonOut, map[string]any{"state": state, "planned_state": model.WorkspaceCurrent, "dry_run": true, "no_op": false, "machines": summary.Machines, "latest_snapshots": summary.LatestSnapshots, "unknown_blobs": summary.UnknownBlobs, "unknown_bytes": summary.UnknownBytes, "historical_manifests_excluded": true})
 		}
 		store, err := openPreparedCorpus(destination)
 		if err != nil {
@@ -278,46 +293,45 @@ func inspectArchive(ctx context.Context, cfg model.Config, address string) archi
 	if configured, err := depotV2ForConfig(cfg, ""); err == nil {
 		view.Selected = configured.Address() == v2.Address()
 	}
-	report, err := v2.Verify(ctx, false)
+	report, err := v2.InspectMetadata(ctx)
 	if err != nil {
 		view.State = model.ArchiveUnreachable
 		view.NextAction = archiveNext(view.State)
 		return view
 	}
 	view.Machines = report.Machines
-	view.LatestSnapshots = report.Manifests
+	view.LatestSnapshots = len(report.Latest)
 	view.Problems = report.Problems
+	if report.Binding.Valid() {
+		view.Identity = report.Binding.Identity()
+	}
+	for _, latest := range report.Latest {
+		view.Latest = append(view.Latest, archiveLatestView{Machine: latest.Machine, ManifestSHA256: latest.ManifestSHA256.String(), CapturedAt: latest.Manifest.CapturedAt, Files: len(latest.Manifest.Files)})
+	}
 	switch {
-	case depotUninitialized(report):
-		view.State = model.ArchiveUninitialised
 	case len(report.Problems) > 0:
 		view.State = model.ArchiveDamaged
+	case !report.Initialised:
+		view.State = model.ArchiveUninitialised
 	case report.Machines == 0:
 		view.State = model.ArchiveEmpty
 	default:
 		view.State = model.ArchivePopulated
 	}
-	if view.State == model.ArchiveEmpty || view.State == model.ArchivePopulated {
-		if reader, err := v2.PreparePull(ctx); err == nil {
-			if binding, err := reader.ArchiveBinding(); err == nil {
-				view.Identity = binding.Identity()
-			}
-			if machines, err := reader.Machines(); err == nil {
-				for _, machine := range machines {
-					sha, ok, err := reader.Latest(ctx, machine)
-					if err != nil || !ok {
-						continue
-					}
-					manifest, err := reader.Manifest(ctx, machine, sha)
-					if err == nil {
-						view.Latest = append(view.Latest, archiveLatestView{Machine: machine, ManifestSHA256: sha.String(), CapturedAt: manifest.CapturedAt, Files: len(manifest.Files)})
-					}
-				}
-			}
+	view.NextAction = archiveNext(view.State)
+	if archiveHasProblem(view, "unsupported v1 Archive layout") {
+		view.NextAction = &nextAction{Command: "aha", Args: []string{"archive", "init", "local:~/.aha/archive-v2"}}
+	}
+	return view
+}
+
+func archiveHasProblem(view archiveStatusView, problem string) bool {
+	for _, candidate := range view.Problems {
+		if candidate == problem {
+			return true
 		}
 	}
-	view.NextAction = archiveNext(view.State)
-	return view
+	return false
 }
 
 func archiveNext(state model.ArchiveState) *nextAction {

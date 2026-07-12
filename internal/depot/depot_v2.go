@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/adewale/aha/internal/cas"
@@ -53,6 +54,12 @@ const (
 // ContentionError means a conditional object update kept losing races after
 // the bounded retry policy. It is typed so callers can distinguish contention
 // from corruption, credentials, and transport failures.
+type LegacyArchiveError struct{}
+
+func (*LegacyArchiveError) Error() string {
+	return "Archive uses the unsupported v1 layout"
+}
+
 type ContentionError struct {
 	Key      string
 	Attempts int
@@ -107,9 +114,7 @@ func (v *V2) Address() Address { return v.addr }
 // layout: the two layouts never silently mix, and there is no migration
 // (pre-release decision; v1 bundles remain importable via `aha ingest`).
 func (v *V2) Init(ctx context.Context) error {
-	if _, _, err := v.store.get(ctx, "depot.json"); err == nil {
-		return fmt.Errorf("Archive at %s uses the unsupported v1 bundle layout; 0.2 requires a freshly initialised Archive", v.addr.Location)
-	} else if !errors.Is(err, errObjectNotExist) {
+	if err := v.rejectLegacyArchive(ctx); err != nil {
 		return err
 	}
 	b, _, err := v.store.get(ctx, MarkerObjectKey)
@@ -150,6 +155,7 @@ type PreparedPull struct {
 type PreparedUpload struct {
 	depot   *V2
 	binding model.ArchiveBinding
+	state   model.ArchiveState
 }
 
 // DownloadPlan freezes the Archive latest vector before any Workspace is
@@ -157,11 +163,25 @@ type PreparedUpload struct {
 type DownloadPlan struct {
 	reader PreparedPull
 	latest map[string]model.ManifestSHA256
+	cache  *downloadManifestCache
+}
+
+type downloadManifestCacheKey struct {
+	machine string
+	sha     model.ManifestSHA256
+}
+
+type downloadManifestCache struct {
+	mu        sync.Mutex
+	manifests map[downloadManifestCacheKey]model.SnapshotManifest
 }
 
 // PreparePull performs the complete metadata preflight required before a
 // caller creates or opens a writable corpus.
 func (v *V2) PreparePull(ctx context.Context) (PreparedPull, error) {
+	if err := v.rejectLegacyArchive(ctx); err != nil {
+		return PreparedPull{}, err
+	}
 	marker, _, err := v.store.get(ctx, MarkerObjectKey)
 	if errors.Is(err, errObjectNotExist) {
 		return PreparedPull{}, errors.New("Archive is not initialised")
@@ -181,6 +201,9 @@ func (v *V2) PreparePull(ctx context.Context) (PreparedPull, error) {
 }
 
 func (v *V2) PrepareUpload(ctx context.Context) (PreparedUpload, error) {
+	if err := v.rejectLegacyArchive(ctx); err != nil {
+		return PreparedUpload{}, err
+	}
 	markerBytes, _, err := v.store.get(ctx, MarkerObjectKey)
 	if errors.Is(err, errObjectNotExist) {
 		return PreparedUpload{}, errors.New("archive is not initialised")
@@ -192,7 +215,28 @@ func (v *V2) PrepareUpload(ctx context.Context) (PreparedUpload, error) {
 	if err != nil {
 		return PreparedUpload{}, err
 	}
-	return PreparedUpload{depot: v, binding: binding}, nil
+	machines, err := v.Machines(ctx)
+	if err != nil {
+		return PreparedUpload{}, err
+	}
+	state := model.ArchiveEmpty
+	if len(machines) > 0 {
+		state = model.ArchivePopulated
+	}
+	transition := model.ArchiveTransition(state, model.ArchiveUpload)
+	if !transition.Allowed {
+		return PreparedUpload{}, fmt.Errorf("Archive state %s does not allow upload", state)
+	}
+	return PreparedUpload{depot: v, binding: binding, state: state}, nil
+}
+
+func (v *V2) rejectLegacyArchive(ctx context.Context) error {
+	if _, _, err := v.store.get(ctx, "depot.json"); err == nil {
+		return &LegacyArchiveError{}
+	} else if !errors.Is(err, errObjectNotExist) {
+		return err
+	}
+	return nil
 }
 
 func archiveBindingFromMarker(data []byte, addr Address) (model.ArchiveBinding, error) {
@@ -220,6 +264,13 @@ func (p PreparedUpload) ArchiveBinding() (model.ArchiveBinding, error) {
 	return p.binding, nil
 }
 
+func (p PreparedUpload) ArchiveState() (model.ArchiveState, error) {
+	if p.depot == nil || !p.binding.Valid() || (p.state != model.ArchiveEmpty && p.state != model.ArchivePopulated) {
+		return "", errors.New("invalid prepared Archive writer capability")
+	}
+	return p.state, nil
+}
+
 func (p PreparedPull) PlanDownload(ctx context.Context) (DownloadPlan, error) {
 	if p.depot == nil || !p.binding.Valid() {
 		return DownloadPlan{}, errors.New("invalid prepared Archive reader capability")
@@ -235,7 +286,7 @@ func (p PreparedPull) PlanDownload(ctx context.Context) (DownloadPlan, error) {
 		}
 		latest[machine] = sha
 	}
-	return DownloadPlan{reader: p, latest: latest}, nil
+	return DownloadPlan{reader: p, latest: latest, cache: &downloadManifestCache{manifests: map[downloadManifestCacheKey]model.SnapshotManifest{}}}, nil
 }
 
 func (p DownloadPlan) ArchiveBinding() (model.ArchiveBinding, error) {
@@ -274,7 +325,24 @@ func (p DownloadPlan) Latest(machine string) (model.ManifestSHA256, bool, error)
 }
 
 func (p DownloadPlan) Manifest(ctx context.Context, machine string, sha model.ManifestSHA256) (model.SnapshotManifest, error) {
-	return p.reader.Manifest(ctx, machine, sha)
+	if p.cache == nil {
+		return model.SnapshotManifest{}, errors.New("invalid Archive download plan")
+	}
+	key := downloadManifestCacheKey{machine: machine, sha: sha}
+	p.cache.mu.Lock()
+	manifest, ok := p.cache.manifests[key]
+	p.cache.mu.Unlock()
+	if ok {
+		return manifest, nil
+	}
+	manifest, err := p.reader.Manifest(ctx, machine, sha)
+	if err != nil {
+		return model.SnapshotManifest{}, err
+	}
+	p.cache.mu.Lock()
+	p.cache.manifests[key] = manifest
+	p.cache.mu.Unlock()
+	return manifest, nil
 }
 
 func (p DownloadPlan) OpenBlob(ctx context.Context, key model.BlobKey) (io.ReadCloser, error) {
@@ -289,6 +357,12 @@ type DownloadPlanSummary struct {
 }
 
 func (p DownloadPlan) Summary(ctx context.Context, known func(model.BlobKey) (bool, error)) (DownloadPlanSummary, error) {
+	return p.SummaryDelta(ctx, nil, known)
+}
+
+// SummaryDelta examines manifests only for machines whose planned latest
+// identity differs from the Workspace materialised vector.
+func (p DownloadPlan) SummaryDelta(ctx context.Context, materialised map[string]string, known func(model.BlobKey) (bool, error)) (DownloadPlanSummary, error) {
 	machines, err := p.Machines()
 	if err != nil {
 		return DownloadPlanSummary{}, err
@@ -300,6 +374,9 @@ func (p DownloadPlan) Summary(ctx context.Context, known func(model.BlobKey) (bo
 	seen := map[string]bool{}
 	for _, machine := range machines {
 		sha := p.latest[machine]
+		if materialised[machine] == sha.String() {
+			continue
+		}
 		manifest, err := p.Manifest(ctx, machine, sha)
 		if err != nil {
 			return DownloadPlanSummary{}, err
@@ -711,6 +788,71 @@ func (m *MachineDepot) ensureInMachinesIndex(ctx context.Context) error {
 	return &ContentionError{Key: MachinesIndexKey, Attempts: conditionalRetryAttempts}
 }
 
+type ArchiveLatestMetadata struct {
+	Machine        string
+	ManifestSHA256 model.ManifestSHA256
+	Manifest       model.SnapshotManifest
+}
+
+type ArchiveMetadataReport struct {
+	Initialised bool
+	Binding     model.ArchiveBinding
+	Machines    int
+	Latest      []ArchiveLatestMetadata
+	Problems    []string
+}
+
+// InspectMetadata validates marker, machine index, latest pointers, and latest
+// manifests without probing every blob. It is the bounded status path; Verify
+// owns full blob existence/content auditing.
+func (v *V2) InspectMetadata(ctx context.Context) (ArchiveMetadataReport, error) {
+	report := ArchiveMetadataReport{}
+	if err := v.rejectLegacyArchive(ctx); err != nil {
+		var legacy *LegacyArchiveError
+		if errors.As(err, &legacy) {
+			report.Problems = append(report.Problems, "unsupported v1 Archive layout")
+			return report, nil
+		}
+		return report, err
+	}
+	markerBytes, _, err := v.store.get(ctx, MarkerObjectKey)
+	if errors.Is(err, errObjectNotExist) {
+		return report, nil
+	}
+	if err != nil {
+		return report, err
+	}
+	report.Initialised = true
+	report.Binding, err = archiveBindingFromMarker(markerBytes, v.addr)
+	if err != nil {
+		report.Problems = append(report.Problems, "invalid Archive marker")
+		return report, nil
+	}
+	machines, err := v.Machines(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Machines = len(machines)
+	for _, machine := range machines {
+		sha, ok, err := v.Latest(ctx, machine)
+		if err != nil {
+			report.Problems = append(report.Problems, fmt.Sprintf("machine %s has an unreadable latest pointer", machine))
+			continue
+		}
+		if !ok {
+			report.Problems = append(report.Problems, fmt.Sprintf("machine %s is indexed but has no latest pointer", machine))
+			continue
+		}
+		manifest, err := v.Manifest(ctx, machine, sha)
+		if err != nil {
+			report.Problems = append(report.Problems, fmt.Sprintf("machine %s has an unreadable manifest", machine))
+			continue
+		}
+		report.Latest = append(report.Latest, ArchiveLatestMetadata{Machine: machine, ManifestSHA256: sha, Manifest: manifest})
+	}
+	return report, nil
+}
+
 type VerifyOptions struct {
 	Progress *ahaprogress.Tracker
 }
@@ -724,6 +866,14 @@ func (v *V2) Verify(ctx context.Context, deep bool) (VerifyReport, error) {
 // Deep mode additionally reads and hashes blob bytes and historical manifests.
 func (v *V2) VerifyWithOptions(ctx context.Context, deep bool, opts VerifyOptions) (VerifyReport, error) {
 	report := VerifyReport{Deep: deep}
+	if err := v.rejectLegacyArchive(ctx); err != nil {
+		var legacy *LegacyArchiveError
+		if errors.As(err, &legacy) {
+			report.Problems = append(report.Problems, "unsupported v1 Archive layout")
+			return report, nil
+		}
+		return report, err
+	}
 	if b, _, err := v.store.get(ctx, MarkerObjectKey); err == nil {
 		if err := validateMarkerV2Bytes(b); err != nil {
 			report.Problems = append(report.Problems, "invalid Archive marker")

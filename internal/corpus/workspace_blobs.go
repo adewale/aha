@@ -7,31 +7,50 @@ import (
 	"github.com/adewale/aha/internal/model"
 )
 
-// KnownWorkspaceBlobs inspects durable file identities without creating a
-// Workspace lock or SQLite sidecar. An absent Workspace has an empty set.
-func KnownWorkspaceBlobs(root string) (map[string]bool, error) {
+// WorkspaceBlobLookup provides indexed point lookups without loading every
+// historical file identity into memory. An absent Workspace behaves as empty.
+type WorkspaceBlobLookup struct {
+	store *Store
+}
+
+func OpenWorkspaceBlobLookup(root string) (*WorkspaceBlobLookup, error) {
 	store, err := OpenExistingReadOnly(root)
 	if errors.Is(err, os.ErrNotExist) {
-		return map[string]bool{}, nil
+		return &WorkspaceBlobLookup{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
-	rows, err := store.DB.Query(`select file_sha256 from files`)
-	if err != nil {
-		return nil, err
+	return &WorkspaceBlobLookup{store: store}, nil
+}
+
+func (l *WorkspaceBlobLookup) Has(key model.BlobKey) (bool, error) {
+	if l == nil || !key.Valid() {
+		return false, errors.New("invalid Workspace blob lookup")
 	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
-			return nil, err
-		}
-		if key, err := model.NewBlobKey(sha); err == nil {
-			out[key.String()] = true
-		}
+	if l.store == nil {
+		return false, nil
 	}
-	return out, rows.Err()
+	var exists bool
+	if err := l.store.DB.QueryRow(`select exists(select 1 from files where file_sha256=?)`, key.String()).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (l *WorkspaceBlobLookup) MaterialisedVector() (map[string]string, error) {
+	if l == nil {
+		return nil, errors.New("invalid Workspace blob lookup")
+	}
+	if l.store == nil {
+		return map[string]string{}, nil
+	}
+	return MaterialisedVector(l.store.DB)
+}
+
+func (l *WorkspaceBlobLookup) Close() error {
+	if l == nil || l.store == nil {
+		return nil
+	}
+	return l.store.Close()
 }

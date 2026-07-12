@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adewale/aha/internal/cli"
@@ -130,10 +131,19 @@ func TestV02StatusCreatesNoWorkspaceLifecycleLock(t *testing.T) {
 }
 
 func TestV02RepeatedDownloadIsAnExplicitNoOp(t *testing.T) {
-	configPath, _, _ := writeV02JourneyConfig(t)
+	configPath, _, workspacePath := writeV02JourneyConfig(t)
 	runV02(t, "archive", "init", "--config", configPath)
 	runV02(t, "archive", "upload", "--config", configPath)
 	runV02(t, "archive", "download", "--config", configPath)
+	dbPath := filepath.Join(workspacePath, "corpus.db")
+	before, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(filepath.Dir(workspacePath), "."+filepath.Base(workspacePath)+".lifecycle.lock")
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 	output := runV02(t, "archive", "download", "--config", configPath, "--json")
 	var got struct {
 		State string `json:"state"`
@@ -141,6 +151,16 @@ func TestV02RepeatedDownloadIsAnExplicitNoOp(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(output), &got); err != nil || got.State != "current" || !got.NoOp {
 		t.Fatalf("download no-op=%s err=%v", output, err)
+	}
+	after, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("no-op download modified Workspace database: before=%s after=%s", before.ModTime(), after.ModTime())
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("no-op download created lifecycle lock: %v", err)
 	}
 }
 
@@ -222,6 +242,30 @@ func TestV02WorkspaceRepairPreservesBackup(t *testing.T) {
 		t.Fatalf("backup=%q info=%v err=%v", got.Backup, info, err)
 	}
 	runV02(t, "workspace", "verify", workspacePath, "--config", configPath, "--json")
+}
+
+func TestV02V1ArchiveIsExplicitlyUnsupportedAndUntouched(t *testing.T) {
+	configPath, archivePath, _ := writeV02JourneyConfig(t)
+	if err := os.MkdirAll(archivePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacyMarker := filepath.Join(archivePath, "depot.json")
+	if err := os.WriteFile(legacyMarker, []byte(`{"schema":"legacy/v1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := runV02(t, "archive", "status", "--config", configPath, "--json")
+	if !strings.Contains(output, `"state": "damaged"`) || !strings.Contains(output, "unsupported v1 Archive layout") || !strings.Contains(output, "archive-v2") {
+		t.Fatalf("v1 Archive status=%s", output)
+	}
+	if err := cli.Run([]string{"archive", "init", "--config", configPath}, io.Discard, io.Discard); err == nil {
+		t.Fatal("v1 Archive was initialised in place")
+	}
+	if body, err := os.ReadFile(legacyMarker); err != nil || string(body) != `{"schema":"legacy/v1"}` {
+		t.Fatalf("v1 marker changed: body=%q err=%v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(archivePath, "aha-depot.json")); !os.IsNotExist(err) {
+		t.Fatalf("v2 marker created over v1 Archive: %v", err)
+	}
 }
 
 func TestV02ArchiveInitRejectsAlreadyInitialisedArchive(t *testing.T) {

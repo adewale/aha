@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/adewale/aha/internal/depot"
+	"github.com/adewale/aha/internal/model"
 )
 
 func TestArchiveCapabilitiesRequireInitialisedMarker(t *testing.T) {
@@ -29,8 +30,12 @@ func TestArchiveCapabilitiesRequireInitialisedMarker(t *testing.T) {
 	if !binding.Valid() || binding.Identity() == "" || binding.Address() == "" {
 		t.Fatalf("binding=%+v", binding)
 	}
-	if _, err := archive.PrepareUpload(t.Context()); err != nil {
+	writer, err := archive.PrepareUpload(t.Context())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if state, err := writer.ArchiveState(); err != nil || state != model.ArchiveEmpty {
+		t.Fatalf("writer state=%s err=%v", state, err)
 	}
 }
 

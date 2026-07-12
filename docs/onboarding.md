@@ -99,6 +99,7 @@ Repair is backup-preserving and supported only where aha can provide atomic dire
 | `invalid_configuration` | R2 field is missing, conflicting, or a placeholder | correct the named safe field |
 | `unreachable` | Archive cannot be inspected | restore access, then rerun `archive status` |
 | `uninitialised` | Reachable location has no Archive marker | `aha archive init ARCHIVE` |
+| v1 Archive layout | Pre-0.2 storage is preserved but cannot be migrated in place | initialise a fresh Archive such as `local:~/.aha/archive-v2` |
 | `damaged` Archive | Marker/index/pointer/manifest/blob invariant failed | `aha archive verify ARCHIVE --deep` |
 | `absent` Workspace | No Workspace database exists | `aha archive download` |
 | `behind` Workspace | Archive latest vector has advanced | `aha archive download` |
