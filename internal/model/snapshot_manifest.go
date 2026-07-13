@@ -13,19 +13,46 @@ import (
 
 // SnapshotManifestSchema identifies the depot v2 snapshot manifest format
 // (docs/depot-v2-spec.md). A snapshot manifest is the logically-full
-// description of one machine's captured state: every session/artifact file
+// description of one machine's captured state: every session/artefact file
 // version, each addressed by the SHA-256 of its content. The manifest's own
 // SHA-256 over its canonical encoding is the snapshot identity.
-const SnapshotManifestSchema = "aha-snapshot-manifest/v2"
+const (
+	SnapshotManifestSchema   = "aha-snapshot-manifest/v3"
+	SnapshotManifestSchemaV2 = "aha-snapshot-manifest/v2"
+)
+
+var supportedRequiredSnapshotFeatures = map[string]struct{}{
+	"closed-copy-state-v1": {},
+	"closed-policy-v1":     {},
+	"full-manifest-v2":     {},
+}
+
+// RequiredSnapshotFeatures returns a fresh, canonical declaration for every
+// publication. Older readers that do not understand one of these semantics
+// must refuse the snapshot rather than silently interpreting it.
+func RequiredSnapshotFeatures() []string {
+	features := make([]string, 0, len(supportedRequiredSnapshotFeatures))
+	for feature := range supportedRequiredSnapshotFeatures {
+		features = append(features, feature)
+	}
+	sort.Strings(features)
+	return features
+}
+
+type UnsupportedSnapshotFeatureError struct{ Feature string }
+
+func (e *UnsupportedSnapshotFeatureError) Error() string {
+	return fmt.Sprintf("snapshot requires unsupported feature %q; upgrade aha before using this Archive", e.Feature)
+}
 
 // MaxSnapshotFiles caps the file list, mirroring the v1 bundle manifest cap.
 const MaxSnapshotFiles = 200000
 
-// SnapshotManifest is the depot v2 snapshot artifact. It reuses
+// SnapshotManifest is the depot v2 snapshot artefact. It reuses
 // ManifestFile so the corpus ingest path is shared with v1 bundle import;
 // the Entries hint is never set by v2 capture (entry counts are
 // ingest-derived corpus facts, not capture-time parses).
-type SnapshotManifest struct {
+type legacySnapshotManifestV2 struct {
 	Schema       string          `json:"schema"`
 	MachineID    string          `json:"machine_id"`
 	MachineLabel string          `json:"machine_label,omitempty"`
@@ -35,6 +62,20 @@ type SnapshotManifest struct {
 	Policy       ManifestPolicy  `json:"policy"`
 	Adapters     []ManifestAdapt `json:"adapters"`
 	Files        []ManifestFile  `json:"files"`
+}
+
+type SnapshotManifest struct {
+	Schema           string          `json:"schema"`
+	RequiredFeatures []string        `json:"required_features"`
+	OptionalFeatures []string        `json:"optional_features,omitempty"`
+	MachineID        string          `json:"machine_id"`
+	MachineLabel     string          `json:"machine_label,omitempty"`
+	CapturedAt       string          `json:"captured_at"`
+	CreatedBy        string          `json:"created_by"`
+	Source           ManifestSource  `json:"source"`
+	Policy           ManifestPolicy  `json:"policy"`
+	Adapters         []ManifestAdapt `json:"adapters"`
+	Files            []ManifestFile  `json:"files"`
 }
 
 // ManifestSHA256 is the identity of a snapshot manifest: the SHA-256 of its
@@ -47,6 +88,36 @@ type ManifestSHA256 struct{ value string }
 // the uncompressed file bytes. Distinct from ManifestSHA256 so the two
 // address spaces cannot be confused at compile time.
 type BlobKey struct{ value string }
+
+// PreparedSnapshot couples validated canonical bytes, identity, and decoded
+// content so transfer and ingest stages cannot accidentally re-canonicalise a
+// maximum-size manifest several times.
+type PreparedSnapshot struct {
+	manifest  SnapshotManifest
+	canonical []byte
+	sha       ManifestSHA256
+}
+
+func PrepareSnapshot(m SnapshotManifest) (PreparedSnapshot, error) {
+	canonical, sha, err := EncodeSnapshotManifest(m)
+	if err != nil {
+		return PreparedSnapshot{}, err
+	}
+	return PreparedSnapshot{manifest: m, canonical: canonical, sha: sha}, nil
+}
+
+func DecodePreparedSnapshot(b []byte) (PreparedSnapshot, error) {
+	manifest, sha, err := DecodeSnapshotManifest(b)
+	if err != nil {
+		return PreparedSnapshot{}, err
+	}
+	return PreparedSnapshot{manifest: manifest, canonical: append([]byte(nil), b...), sha: sha}, nil
+}
+
+func (p PreparedSnapshot) Manifest() SnapshotManifest { return p.manifest }
+func (p PreparedSnapshot) SHA() ManifestSHA256        { return p.sha }
+func (p PreparedSnapshot) Canonical() []byte          { return append([]byte(nil), p.canonical...) }
+func (p PreparedSnapshot) Valid() bool                { return p.sha.Valid() && len(p.canonical) > 0 }
 
 func NewManifestSHA256(s string) (ManifestSHA256, error) {
 	if _, err := ParseSHA256Hex(s); err != nil {
@@ -71,7 +142,7 @@ func (v BlobKey) Valid() bool           { return len(v.value) == 64 && isLowerHe
 // manifest: everything except when it was captured and by which build.
 // Two snapshots of an unchanged machine on different days have different
 // identities (provenance) but equal state digests, which is what lets a
-// push recognize "nothing changed" from the parent pointer alone.
+// push recognise "nothing changed" from the parent pointer alone.
 func SnapshotStateSHA256(m SnapshotManifest) (SHA256Hex, error) {
 	m.CapturedAt = "state"
 	m.CreatedBy = "state"
@@ -89,11 +160,19 @@ func SnapshotStateSHA256(m SnapshotManifest) (SHA256Hex, error) {
 // an identity or reach a depot.
 func EncodeSnapshotManifest(m SnapshotManifest) ([]byte, ManifestSHA256, error) {
 	m.Files = append([]ManifestFile(nil), m.Files...)
+	m.RequiredFeatures = append([]string(nil), m.RequiredFeatures...)
+	m.OptionalFeatures = append([]string(nil), m.OptionalFeatures...)
 	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].RelativePath < m.Files[j].RelativePath })
+	sort.Strings(m.RequiredFeatures)
+	sort.Strings(m.OptionalFeatures)
 	if err := validateSnapshotManifest(m); err != nil {
 		return nil, ManifestSHA256{}, err
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	var value any = m
+	if m.Schema == SnapshotManifestSchemaV2 {
+		value = legacySnapshotManifestV2{Schema: m.Schema, MachineID: m.MachineID, MachineLabel: m.MachineLabel, CapturedAt: m.CapturedAt, CreatedBy: m.CreatedBy, Source: m.Source, Policy: m.Policy, Adapters: m.Adapters, Files: m.Files}
+	}
+	b, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return nil, ManifestSHA256{}, err
 	}
@@ -126,8 +205,17 @@ func DecodeSnapshotManifest(b []byte) (SnapshotManifest, ManifestSHA256, error) 
 }
 
 func validateSnapshotManifest(m SnapshotManifest) error {
-	if m.Schema != SnapshotManifestSchema {
-		return fmt.Errorf("invalid snapshot manifest: schema %q, want %q", m.Schema, SnapshotManifestSchema)
+	switch m.Schema {
+	case SnapshotManifestSchema:
+		if err := validateSnapshotFeatures(m.RequiredFeatures, m.OptionalFeatures); err != nil {
+			return err
+		}
+	case SnapshotManifestSchemaV2:
+		if len(m.RequiredFeatures) != 0 || len(m.OptionalFeatures) != 0 {
+			return fmt.Errorf("invalid v2 snapshot manifest: feature declarations are not part of its canonical format")
+		}
+	default:
+		return fmt.Errorf("invalid snapshot manifest: unsupported schema %q", m.Schema)
 	}
 	if strings.TrimSpace(m.MachineID) == "" {
 		return fmt.Errorf("invalid snapshot manifest: machine_id required")
@@ -135,8 +223,24 @@ func validateSnapshotManifest(m SnapshotManifest) error {
 	if strings.TrimSpace(m.CapturedAt) == "" {
 		return fmt.Errorf("invalid snapshot manifest: captured_at required")
 	}
+	if m.Policy.PathMode != "raw" {
+		return fmt.Errorf("invalid snapshot manifest: unsupported path mode %q", m.Policy.PathMode)
+	}
+	if m.Policy.Redaction != "none-v1" && m.Policy.Redaction != "v1" {
+		return fmt.Errorf("invalid snapshot manifest: unsupported redaction policy %q", m.Policy.Redaction)
+	}
 	if len(m.Files) > MaxSnapshotFiles {
 		return fmt.Errorf("invalid snapshot manifest: too many files: %d", len(m.Files))
+	}
+	adapterVersions := make(map[string]string, len(m.Adapters))
+	for _, adapter := range m.Adapters {
+		if strings.TrimSpace(adapter.Name) == "" || strings.TrimSpace(adapter.Version) == "" {
+			return fmt.Errorf("invalid snapshot manifest: adapter name and version are required")
+		}
+		if _, duplicate := adapterVersions[adapter.Name]; duplicate {
+			return fmt.Errorf("invalid snapshot manifest: duplicate adapter %q", adapter.Name)
+		}
+		adapterVersions[adapter.Name] = adapter.Version
 	}
 	prev := ""
 	for i, mf := range m.Files {
@@ -150,6 +254,9 @@ func validateSnapshotManifest(m SnapshotManifest) error {
 		if strings.TrimSpace(mf.Source) == "" {
 			return fmt.Errorf("invalid snapshot manifest: file source required for %s", mf.RelativePath)
 		}
+		if _, declared := adapterVersions[mf.Source]; !declared {
+			return fmt.Errorf("invalid snapshot manifest: file source %q has no versioned adapter declaration", mf.Source)
+		}
 		switch mf.Kind {
 		case "session":
 			want := "sources/" + mf.Source + "/sessions/"
@@ -159,7 +266,7 @@ func validateSnapshotManifest(m SnapshotManifest) error {
 		case "artifact":
 			want := "sources/" + mf.Source + "/artifacts/"
 			if !strings.HasPrefix(mf.RelativePath, want) {
-				return fmt.Errorf("invalid snapshot manifest: artifact path %s must be under %s", mf.RelativePath, want)
+				return fmt.Errorf("invalid snapshot manifest: artefact path %s must be under %s", mf.RelativePath, want)
 			}
 		default:
 			return fmt.Errorf("invalid snapshot manifest: unsupported file kind %q", mf.Kind)
@@ -170,6 +277,40 @@ func validateSnapshotManifest(m SnapshotManifest) error {
 		if mf.Bytes < 0 {
 			return fmt.Errorf("invalid snapshot manifest: negative size for %s", mf.RelativePath)
 		}
+		if mf.CopyState != "stable" && mf.CopyState != "unstable" {
+			return fmt.Errorf("invalid snapshot manifest: unsupported copy state %q", mf.CopyState)
+		}
+	}
+	return nil
+}
+
+func validateSnapshotFeatures(required, optional []string) error {
+	seen := make(map[string]bool, len(required)+len(optional))
+	for _, feature := range required {
+		if strings.TrimSpace(feature) == "" || strings.TrimSpace(feature) != feature {
+			return fmt.Errorf("invalid snapshot feature %q", feature)
+		}
+		if seen[feature] {
+			return fmt.Errorf("snapshot feature %q is declared more than once", feature)
+		}
+		seen[feature] = true
+		if _, supported := supportedRequiredSnapshotFeatures[feature]; !supported {
+			return &UnsupportedSnapshotFeatureError{Feature: feature}
+		}
+	}
+	for feature := range supportedRequiredSnapshotFeatures {
+		if !seen[feature] {
+			return fmt.Errorf("snapshot is missing required baseline feature %q", feature)
+		}
+	}
+	for _, feature := range optional {
+		if strings.TrimSpace(feature) == "" || strings.TrimSpace(feature) != feature {
+			return fmt.Errorf("invalid optional snapshot feature %q", feature)
+		}
+		if seen[feature] {
+			return fmt.Errorf("snapshot feature %q is declared more than once", feature)
+		}
+		seen[feature] = true
 	}
 	return nil
 }

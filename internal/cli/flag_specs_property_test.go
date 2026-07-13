@@ -8,11 +8,11 @@ import (
 )
 
 func TestPostPositionalFlagReorderProperty(t *testing.T) {
-	prop := func(queryRaw, repoRaw string, limitRaw uint8, jsonOut bool) bool {
+	prop := func(queryRaw, workspaceRaw string, limitRaw uint8, jsonOut bool) bool {
 		query := safeCLIAtom(queryRaw, "query")
-		repo := safeCLIAtom(repoRaw, "repo")
+		workspace := safeCLIAtom(workspaceRaw, "workspace")
 		limit := int(limitRaw%50 + 1)
-		args := []string{query, "--repo", repo, "--limit", strconv.Itoa(limit)}
+		args := []string{query, "--workspace", workspace, "--limit", strconv.Itoa(limit)}
 		if jsonOut {
 			args = append(args, "--json")
 		}
@@ -20,7 +20,7 @@ func TestPostPositionalFlagReorderProperty(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return pf.NArg() == 1 && pf.Arg(0) == query && pf.String("repo") == repo && pf.Int("limit") == limit && pf.Bool("json") == jsonOut
+		return pf.NArg() == 1 && pf.Arg(0) == query && pf.String("workspace") == workspace && pf.Int("limit") == limit && pf.Bool("json") == jsonOut
 	}
 	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
 		t.Fatal(err)

@@ -67,7 +67,7 @@ func TestSchemaMigratesOldArtifactTable(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, model.WorkspaceDatabaseFilename))
 	if err != nil {
 		t.Fatal(err)
 	}

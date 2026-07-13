@@ -2,6 +2,8 @@ package corpus
 
 import "database/sql"
 
+const CurrentWorkspaceSchemaVersion = 16
+
 var artifactFTSTriggerSQL = `create trigger artifacts_ai after insert on artifacts when ` + ftsArtifactTextPredicate("new") + ` begin insert into fts_artifacts(rowid,artifact_id,text) values(new.artifact_id,new.artifact_id,` + ftsArtifactTextExpr("new") + `); end`
 
 func Init(db *sql.DB) error {
@@ -11,6 +13,8 @@ func Init(db *sql.DB) error {
 		`pragma journal_mode=wal`,
 		`create table if not exists schema_migrations(version integer primary key, applied_at text default current_timestamp)`,
 		`insert or ignore into schema_migrations(version) values(1)`,
+		`create table if not exists workspace_binding(singleton integer primary key check(singleton=1),archive_identity text not null check(archive_identity<>''),archive_address text not null check(archive_address<>''),schema_version integer not null check(schema_version>0))`,
+		`create table if not exists workspace_materialised(machine_id text primary key check(machine_id<>''),manifest_sha256 text not null check(length(manifest_sha256)=64 and manifest_sha256 not glob '*[^0-9a-f]*'))`,
 		`create table if not exists snapshots(manifest_sha256 text primary key check(length(manifest_sha256)=64),machine_id text,captured_at text,ingested_at text,manifest_json text)`,
 		`create table if not exists ingest_attempts(attempt_id integer primary key,manifest_sha256 text,ingested_at text,duplicate integer)`,
 		`create table if not exists machines(machine_id text primary key check(machine_id<>''),first_seen_at text,last_seen_at text,labels_json text)`,
@@ -208,6 +212,17 @@ var migrations = []migration{
 	{version: 13, apply: migrateToolInvocations},
 	{version: 14, apply: migrateFailureEpisodes},
 	{version: 15, apply: migrateFailureEpisodeResolveOrdinals},
+	{version: 16, apply: func(db *sql.DB) error {
+		for _, statement := range []string{
+			`create table if not exists workspace_binding(singleton integer primary key check(singleton=1),archive_identity text not null check(archive_identity<>''),archive_address text not null check(archive_address<>''),schema_version integer not null check(schema_version>0))`,
+			`create table if not exists workspace_materialised(machine_id text primary key check(machine_id<>''),manifest_sha256 text not null check(length(manifest_sha256)=64 and manifest_sha256 not glob '*[^0-9a-f]*'))`,
+		} {
+			if _, err := db.Exec(statement); err != nil {
+				return err
+			}
+		}
+		return nil
+	}},
 }
 
 func migrateRedactionEvents(db *sql.DB) error {

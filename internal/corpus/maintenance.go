@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/adewale/aha/internal/model"
 )
 
 type SizeReport struct {
@@ -52,7 +54,7 @@ func Size(store *Store) (SizeReport, error) {
 		rel, _ := filepath.Rel(store.Root, path)
 		rel = filepath.ToSlash(rel)
 		switch {
-		case rel == "corpus.db" || strings.HasPrefix(rel, "corpus.db-"):
+		case rel == model.WorkspaceDatabaseFilename || strings.HasPrefix(rel, model.WorkspaceDatabaseFilename+"-"):
 			report.DatabaseBytes += size
 		case strings.HasPrefix(rel, "blobs/files/"):
 			report.FileBlobBytes += size

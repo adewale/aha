@@ -44,7 +44,7 @@ func TestNoNetworkImportsOutsideDepot(t *testing.T) {
 			for _, imp := range f.Imports {
 				p := strings.Trim(imp.Path.Value, `"`)
 				if p == "net" || strings.HasPrefix(p, "net/") {
-					t.Fatalf("%s imports network API %q outside allowed paths; update docs/trust.md and networkAllowedPaths if core network behavior changes", path, p)
+					t.Fatalf("%s imports network API %q outside allowed paths; update docs/trust.md and networkAllowedPaths if core network behaviour changes", path, p)
 				}
 			}
 			return nil

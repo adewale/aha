@@ -1,12 +1,12 @@
-# `aha serve` UI spec
+# `aha dashboard` UI spec
 
 Status: implemented in `internal/server/ui/` as the search-first dashboard direction.
 
 ## Product stance
 
-`aha serve` is a read-only local trace browser for coding-agent history.
+`aha dashboard` is a read-only local trace browser for coding-agent history.
 
-The first useful object is not a corpus, task rail, hero headline, or collection of tools. The first useful object is a large search box. A user should be able to type a remembered prompt, file, command, error, or decision and immediately see recognizable slices of real agent work.
+The first useful object is not a corpus, task rail, hero headline, or collection of tools. The first useful object is a large search box. A user should be able to type a remembered prompt, file, command, error, or decision and immediately see recognisable slices of real agent work.
 
 Design principle:
 
@@ -32,11 +32,11 @@ Top-level tabs:
 
 The redesign borrows from existing search and trace products:
 
-- Spotlight, Alfred, and Raycast: large input, keyboard-first recall, compact recognizable result cards with metadata and actions.
-- Gmail, Slack, Discord, and Notion: broad search first; snippets preserve the original artifact context; filters refine after intent is expressed.
-- Chrome History: recent/history search works because results look like visited artifacts, not records.
+- Spotlight, Alfred, and Raycast: large input, keyboard-first recall, compact recognisable result cards with metadata and actions.
+- Gmail, Slack, Discord, and Notion: broad search first; snippets preserve the original artefact context; filters refine after intent is expressed.
+- Chrome History: recent/history search works because results look like visited artefacts, not records.
 - Elastic Discover, Datadog, Jaeger, Zipkin, Sentry: trace/log search results carry status, time, facets, and drilldown, not just text matches.
-- GitHub Actions logs: run/job/step hierarchy and persistent status make logs recognizable.
+- GitHub Actions logs: run/job/step hierarchy and persistent status make logs recognisable.
 - Cursor, VS Code Copilot/agent mode, and structured tool-use APIs: agent work naturally has trace grammar: prompt, assistant turn, tool call, tool result, files, tests, final response.
 
 ## Main jobs
@@ -50,7 +50,7 @@ Flow:
 1. User lands on a compact search surface labelled **Search agent history** with a large input for prompts, files, commands, errors, and decisions.
 2. User types remembered words.
 3. Results render as trace cards grouped by session, not isolated message rows.
-4. Each card shows recognizable provenance and matched events.
+4. Each card shows recognisable provenance and matched events.
 5. Selecting a card opens **Evidence** at the exact ref.
 
 Success criteria:
@@ -59,7 +59,7 @@ Success criteria:
 - A first-time user does not need to choose a preliminary task before searching.
 - Results look like actual agent-session slices, with server-enriched counts, command chips, file chips, status, and matched events.
 
-### 2. Recognize the right session before opening it
+### 2. Recognise the right session before opening it
 
 User question: “Is this the one where the agent ran tests and edited the migration?”
 
@@ -72,7 +72,7 @@ Trace-card anatomy:
 - session counts for messages, tool calls, failures, and files;
 - command and file chips when available;
 - mini event timeline from the actual session shape;
-- matched-event snippets with labels: Prompt, Assistant, Tool output, File artifact.
+- matched-event snippets with labels: Prompt, Assistant, Tool output, File artefact.
 
 Success criteria:
 
@@ -112,7 +112,7 @@ User question: “Show me what happened around this match.”
 Flow:
 
 1. User selects a trace card.
-2. The app calls `read` for the selected canonical ref.
+2. The app calls `show` for the selected canonical ref.
 3. **Evidence** shows structured transcript entries, not one raw preformatted blob.
 4. Evidence exposes actions to copy the canonical ref and widen transcript context.
 5. URL hash stores the selected ref for reloadable context.
@@ -203,17 +203,17 @@ Success criteria:
 
 | UI concept | API/tool backing | Notes |
 |---|---|---|
-| Search field | `POST /api/search_traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
+| Search field | `POST /api/v2/search/traces` | Uses `query` plus optional role/project/source/machine/path, then enriches grouped hits into trace cards. |
 | Search in: Prompts | `role = "user"` | Default search mode; prompt recall comes first. |
-| Search in: All history | omit `role` | Search messages and artifacts. |
+| Search in: All history | omit `role` | Search messages and artefacts. |
 | Search in: Assistant replies | `role = "assistant"` | Searches assistant-authored messages. |
 | Search in: Tool output | `role = "toolResult"` | Searches indexed tool-result messages. |
 | Trace cards | grouped enriched search hits | Server groups hits by `session_key`, adds counts, timeline, command chips, file chips, status, and matched events. |
-| Evidence | `POST /api/read` | Uses the clicked card's `ref_text`. |
-| Recurring failures | `POST /api/incidents` | State labels map to corpus states. |
-| Trace fix | `POST /api/incident_trajectory` | Requires sample ref and ordinal. |
-| Sources & scope | `GET /api/overview` | Counts and scope chips. |
-| Trust checks | `GET /api/conflicts` | Quarantined rows. |
+| Evidence | `POST /api/v2/show` | Uses the clicked card's `ref_text`. |
+| Recurring failures | `POST /api/v2/analyse/failures` | State labels map to corpus states. |
+| Trace fix | `POST /api/v2/analyse/failure-trajectory` | Requires sample ref and ordinal. |
+| Sources & scope | `GET /api/v2/overview` | Counts and scope chips. |
+| Trust checks | `GET /api/v2/workspace/conflicts` | Quarantined rows. |
 
 ## Interaction rules
 
@@ -271,7 +271,7 @@ Technical terms may remain in code/API docs, not in the main user-facing dashboa
 - No task rail that points at other UI. The interface itself should make the task obvious.
 - No oversized explanatory hero copy above search. Put explanation in empty states and feedback.
 - No side-tab card accents, gradient text, glass effects, nested card stacks, or generic hero metrics.
-- Use tinted OKLCH neutrals and restrained semantic color. Text colors must not use pure black or pure white.
+- Use tinted OKLCH neutrals and restrained semantic colour. Text colours must not use pure black or pure white.
 - Every clickable control has visible effect: active state, live feedback, changed results, changed scope, or opened context.
 - Prefer spacing, grouping, and labels over extra instructional cards.
 
@@ -309,10 +309,10 @@ Mobile/narrow:
 ## Privacy and trust boundaries
 
 - The UI is read-only.
-- It uses only same-origin local endpoints served by `aha serve`.
+- It uses only same-origin local endpoints served by `aha dashboard`.
 - It does not fetch remote assets.
 - It does not snapshot, ingest, repair, edit source histories, write skills, or install anything.
-- Search/read output remains governed by the corpus projection and existing redaction behavior.
+- Search/read output remains governed by the corpus projection and existing redaction behaviour.
 - Bundles/depots remain raw provenance outside this dashboard surface.
 
 ## Regression coverage

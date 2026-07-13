@@ -9,10 +9,21 @@ import (
 	"github.com/adewale/aha/internal/corpus"
 )
 
-func cmdIncidents(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("incidents", flag.ContinueOnError)
+func cmdAnalyse(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+		fmt.Fprintln(stdout, "Usage: aha analyse failures [--workspace PATH] [--json]")
+		return nil
+	}
+	if len(args) == 0 || args[0] != "failures" {
+		return fmt.Errorf("analyse requires subcommand: failures")
+	}
+	return runAnalyseFailures(args[1:], stdout, stderr)
+}
+
+func runAnalyseFailures(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("analyse failures", flag.ContinueOnError)
 	fs.SetOutput(flagOutput(args, stderr))
-	cf := registerCorpusFlags(fs)
+	cf := registerWorkspaceFlags(fs)
 	jsonOut := fs.Bool("json", false, "JSON output")
 	limit := fs.Int("limit", 50, "maximum incidents to return (default 50, max 200)")
 	state := fs.String("state", "", "filter by state: unresolved | partial | resolved")
@@ -49,7 +60,7 @@ func cmdIncidents(args []string, stdout, stderr io.Writer) error {
 		return writeJSON(stdout, incidents)
 	}
 	if len(incidents) == 0 {
-		fmt.Fprintln(stdout, "no incidents found")
+		fmt.Fprintln(stdout, "no recurring failures found")
 		return nil
 	}
 	for _, in := range incidents {

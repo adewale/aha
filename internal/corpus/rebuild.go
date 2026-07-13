@@ -10,15 +10,16 @@ import (
 	"time"
 
 	ahaclock "github.com/adewale/aha/internal/clock"
+	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 )
 
 var (
-	ErrLegacyCorpus       = errors.New("pre-v2 corpus")
-	ErrNotLegacyCorpus    = errors.New("corpus is not a pre-v2 corpus")
-	ErrRebuildFailed      = errors.New("corpus rebuild failed")
-	ErrRebuildUnsupported = errors.New("safe corpus rebuild is unsupported on this platform")
+	ErrLegacyCorpus       = errors.New("pre-0.2 Workspace")
+	ErrNotLegacyCorpus    = errors.New("Workspace is not pre-0.2")
+	ErrRebuildFailed      = errors.New("Workspace repair failed")
+	ErrRebuildUnsupported = errors.New("safe Workspace repair is unsupported on this platform")
 )
 
 type RebuildReport struct {
@@ -32,7 +33,7 @@ func IsLegacyCorpus(root string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	dbPath := filepath.Join(expanded, "corpus.db")
+	dbPath := filepath.Join(expanded, model.WorkspaceDatabaseFilename)
 	if _, err := os.Stat(dbPath); err != nil {
 		return false, err
 	}
@@ -222,5 +223,5 @@ func unusedBackupPath(root string, now time.Time) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("cannot allocate unique corpus backup path")
+	return "", fmt.Errorf("cannot allocate unique Workspace backup path")
 }

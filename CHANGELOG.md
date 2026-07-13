@@ -4,6 +4,19 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Command/state model 0.2 (July 2026)
+
+#### Changed
+
+- Bumped the product and TypeScript client version to `0.2.0`.
+- Implemented [`docs/command-state-machine-v0.2-plan.md`](docs/command-state-machine-v0.2-plan.md): replaced the pre-launch command/config vocabulary with the explicit `Agent histories → Archive → Workspace` model, `archive upload`/`archive download`, `archive set-default`/`workspace set-default`, resource-scoped verification/repair, unified status, `show`, `analyse failures`, `dashboard`, explicit MCP subcommands, and closed state variants. `sync`, standalone snapshot listing, portable import/export, and public optimise/rebuild commands are intentionally omitted; no compatibility aliases remain.
+- Added opaque initialised-Archive reader/writer and upload/download plan capabilities, durable Workspace Archive binding and materialised vectors, exact current/behind/mismatch states, side-effect-free read-only inspection, no-op downloads, and backup-preserving Workspace repair.
+- Made upload authorisation derive from the closed Archive transition table, made v1 Archives explicitly unsupported without mutation, and kept read-only Workspace inspection coherent with committed WAL rows.
+- Bounded repeated download work: current downloads compare only machine vectors, behind downloads inspect only changed-machine manifests, blob checks are indexed point lookups, and planned manifests are reused during execution.
+- Added independent forward-compatibility boundaries: `aha.config.v1` with comment-preserving namespaced extensions, Archive required/optional features and format majors, checksummed external Workspace identity plus newer-schema rejection, `aha.http.v2` routes, and discoverable `aha.mcp.v2` capabilities. Unsupported adapters and required features fail before Workspace mutation.
+- Added `aha version --json` build identity with linker-injected commit/time/dirty metadata.
+- Adopted British English for first-party prose and human-facing interfaces, with required protocol/schema/proper-name spellings isolated as documented exceptions in [`docs/language-style.md`](docs/language-style.md). A static test prevents American-English prose from returning to active first-party Markdown and visible architecture copy.
+
 ### R2 onboarding (June–July 2026)
 
 #### Added
@@ -12,9 +25,9 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   per-variable guidance, then runs the live-bucket integration tests
   (push, delta push, unchanged-state reuse, pull, deep verify, and concurrent
   first pushes contending on the shared machine index) against a real bucket.
-- `aha depot setup r2:BUCKET`: read-only R2 onboarding preflight that reports a
+- `aha archive status r2:BUCKET`: read-only R2 onboarding preflight that reports a
   closed state and exactly one safe next command.
-- `aha corpus rebuild --backup`: builds and verifies a sibling v2 corpus,
+- `aha workspace repair --backup`: builds and verifies a sibling v2 corpus,
   atomically preserves the pre-v2 corpus, promotes the replacement, and reports
   the retained backup path. There is no unsafe no-backup mode.
 - Typed progress events and stderr renderers for long-running capture, upload,
@@ -40,7 +53,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   depot init` — because a token can only be scoped to a bucket that exists,
   and a bucket-scoped token cannot create buckets. Credential prompts work in
   both zsh and bash and do not put the secret in shell history.
-- `aha doctor` now reports the effective config path and exactly one
+- `aha status` now reports the effective config path and exactly one
   state-derived next action, preserving `--config` overrides as structured
   command arguments.
 
@@ -56,7 +69,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   (`missing`, `placeholder`, or `invalid`) without retaining its value, so
   public errors and doctor hints identify the exact environment variable to
   correct without disclosing credentials.
-- `aha depot init` against a missing bucket with the recommended
+- `aha archive init` against a missing bucket with the recommended
   bucket-scoped token now says the token cannot create buckets and to
   pre-create it, instead of hinting "check Object Read & Write permissions"
   at a token whose permissions are already correct.
@@ -75,7 +88,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
   an explicit `--config` path.
 - R2 access preflight now falls back from a forbidden `HeadBucket` to a bounded
   `ListObjectsV2` probe. If both fail, the error proves the loaded key pair does
-  not authorize the bucket endpoint before any mutation. Conflicting
+  not authorise the bucket endpoint before any mutation. Conflicting
   `AHA_R2_*`/`R2_*` aliases fail locally without exposing either value.
 - All `aha` CLI, MCP, and dashboard error boundaries now use opaque safe views:
   one concise message, exactly one structured next action, stable
@@ -93,7 +106,7 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ### Depot v2 — content-addressed snapshots (June 2026)
 
-The bundle/catalog depot first described below was replaced wholesale before
+The bundle/catalogue depot first described below was replaced wholesale before
 any release ([docs/depot-v2-spec.md](docs/depot-v2-spec.md)); there is no
 migration, by decision. Later sections of this Unreleased entry that mention
 `bundles/v1`, `catalog/v1`, `depot compact`, `depot verify --repair`,
@@ -113,7 +126,7 @@ migration, by decision. Later sections of this Unreleased entry that mention
   dangling references unrepresentable and ordering crash-safe (pinned by a
   fault-injection sweep that fails every primitive operation once).
 - Capture-as-diff push: `snapshot`/`refresh` upload only file versions the
-  parent snapshot does not carry; unchanged state is recognized from the
+  parent snapshot does not carry; unchanged state is recognised from the
   pointer alone (zero writes, zero content reads, across differing capture
   timestamps via a capture-time-invariant state digest). An advisory scan
   cache (size/mtime/inode, git-style racy-mtime rule anchored at cache-open
@@ -125,8 +138,8 @@ migration, by decision. Later sections of this Unreleased entry that mention
   without fetching or parsing. Corpus re-keyed to
   `snapshots(manifest_sha256)`; pre-v2 corpora are rejected at open with a
   rebuild instruction.
-- `aha export`: materialize a machine's latest snapshot as one portable v1
-  `bundle.tar.zst` — with `aha ingest <file>`, the only surviving use of the
+- `aha archive status`: materialize a machine's latest snapshot as one portable v1
+  `bundle.tar.zst` — with `aha archive download <file>`, the only surviving use of the
   v1 bundle format (and the recovery path for old v1 depots, which `depot
   init` refuses).
 - `internal/cas`: shared content-addressed blob store (corpus + depot),
@@ -155,14 +168,14 @@ migration, by decision. Later sections of this Unreleased entry that mention
   marker, index, pointers, manifest identities, and blob presence, with
   `--deep` verifying blob content and historical manifests (the only path
   allowed to LIST).
-- `status --depot` reports `depot_behind_snapshots` / `depot_machines_listed`
+- `status --archive` reports `depot_behind_snapshots` / `depot_machines_listed`
   via per-machine point lookups.
 - `corpus size` no longer reports `bundle_blob_bytes`; the corpus stores no
   bundle objects.
 
 #### Removed
 
-- The v1 depot: `bundles/v1` + `catalog/v1` layout, catalog shards and their
+- The v1 depot: `bundles/v1` + `catalog/v1` layout, catalogue shards and their
   merge/repair/compaction (`depot compact`, `depot verify --repair`),
   `bundle_id` identity and the `--bundle-id` flag, `state_sha256` signatures,
   corpus bundle-blob promotion, and the 2 GiB bundle budget cliff. The
@@ -187,13 +200,13 @@ migration, by decision. Later sections of this Unreleased entry that mention
 
 ### Fixed
 
-- Codex adapter now parses the current (enveloped) rollout format. Modern Codex CLI wraps every line as `{timestamp, type, payload}` — the conversation lives inside `response_item` payloads (`payload.type:"message"`, `payload.role`, `payload.content[]` of `input_text`/`output_text`), `session_meta` carries the session id/cwd, and `turn_context` carries the model. The generic JSONL parser looked for top-level `role`/`message.content`, so it ingested every line as an entry but recognized **zero messages** and indexed nothing for search (confirmed on a real install: 8,693 entries, 0 messages). The adapter now detects the enveloped format and unwraps `payload` — mapping user/assistant messages, tool calls (`function_call` name/arguments/command), tool output, and reasoning — while delegating older flat rollouts to the generic parser unchanged. Verified by new conformance + committed-fixture coverage and by re-running the smoketest against a modern rollout (messages and FTS rows now populate and search/read succeed).
+- Codex adapter now parses the current (enveloped) rollout format. Modern Codex CLI wraps every line as `{timestamp, type, payload}` — the conversation lives inside `response_item` payloads (`payload.type:"message"`, `payload.role`, `payload.content[]` of `input_text`/`output_text`), `session_meta` carries the session id/cwd, and `turn_context` carries the model. The generic JSONL parser looked for top-level `role`/`message.content`, so it ingested every line as an entry but recognised **zero messages** and indexed nothing for search (confirmed on a real install: 8,693 entries, 0 messages). The adapter now detects the enveloped format and unwraps `payload` — mapping user/assistant messages, tool calls (`function_call` name/arguments/command), tool output, and reasoning — while delegating older flat rollouts to the generic parser unchanged. Verified by new conformance + committed-fixture coverage and by re-running the smoketest against a modern rollout (messages and FTS rows now populate and search/read succeed).
 
 ### Added
 
-- **Incidents** — the "sessions → skills" surface: one row per recurring tool-call failure carrying both its recurrence and the fixes that resolved it. Single-session failure→fix arcs are mined into a `failure_episodes` table (migration 14, projected from the `tool_invocations` *successes* already stored; migration 15 adds `resolve_ordinal` so multi-tool-call entries can be traced exactly); each cluster of episodes becomes an incident with a `state` (`unresolved`/`partial`/`resolved`), resolution rate, `tentative`/`established` tier, an occurrence sparkline, and the top resolution paths that worked. Path confidence is a Wilson lower bound over the cluster's resolved-episode count, so a one-off fix (1/1) never outranks a repeatedly-confirmed one (3/4); confounded clusters surface their top-K competing paths rather than one confidently-wrong recommendation. `failure_episodes` is a recomputable derived view (not append-only): each session's episodes are rebuilt — delete + reinsert — from its stored (already-redacted) invocations on every ingest, so a session resumed after its fix arrives correctly flips its abandoned episode to resolved instead of keeping a stale row. No new ingest, no new redaction boundary; identities and paths are normalized command families / error signatures, never raw tool output. v1 is single-session and hard-signal-only (`is_error`/`exit_code`); a fix is only credited when the *same* command family that failed later succeeds. Surfaced uniformly across every read-only entry point: `aha incidents` (CLI, with `--state` and project/source/machine/tool facets), an `incidents` MCP tool plus `incident_trajectory` (the full fail→fix arc behind a resolving ref and `sample_ordinal`) and `overview` (corpus orientation), the matching HTTP routes, the generated TypeScript client, and a redesigned dashboard — a corpus overview panel and one unified incidents view with a state filter, facets, inline-SVG sparklines, click-to-read drill-in, trajectory expansion, and an inspect-only "copy skill draft" button. New `internal/corpus` units: `assembleEpisodes` (`episodes.go`), `wilsonLowerBound`/`spread`/`pathScore` (`scoring.go`), `failure_episodes` migration/backfill, the resolution-path helpers (`outcomes.go`), and `Incidents`/`IncidentTrajectory`/`CorpusOverview` (`incidents.go`, `overview.go`). See `docs/outcome-weighting-spec.md`.
+- **Incidents** — the "sessions → skills" surface: one row per recurring tool-call failure carrying both its recurrence and the fixes that resolved it. Single-session failure→fix arcs are mined into a `failure_episodes` table (migration 14, projected from the `tool_invocations` *successes* already stored; migration 15 adds `resolve_ordinal` so multi-tool-call entries can be traced exactly); each cluster of episodes becomes an incident with a `state` (`unresolved`/`partial`/`resolved`), resolution rate, `tentative`/`established` tier, an occurrence sparkline, and the top resolution paths that worked. Path confidence is a Wilson lower bound over the cluster's resolved-episode count, so a one-off fix (1/1) never outranks a repeatedly-confirmed one (3/4); confounded clusters surface their top-K competing paths rather than one confidently-wrong recommendation. `failure_episodes` is a recomputable derived view (not append-only): each session's episodes are rebuilt — delete + reinsert — from its stored (already-redacted) invocations on every ingest, so a session resumed after its fix arrives correctly flips its abandoned episode to resolved instead of keeping a stale row. No new ingest, no new redaction boundary; identities and paths are normalized command families / error signatures, never raw tool output. v1 is single-session and hard-signal-only (`is_error`/`exit_code`); a fix is only credited when the *same* command family that failed later succeeds. Surfaced uniformly across every read-only entry point: `aha analyse failures` (CLI, with `--state` and project/source/machine/tool facets), an `incidents` MCP tool plus `incident_trajectory` (the full fail→fix arc behind a resolving ref and `sample_ordinal`) and `overview` (corpus orientation), the matching HTTP routes, the generated TypeScript client, and a redesigned dashboard — a corpus overview panel and one unified incidents view with a state filter, facets, inline-SVG sparklines, click-to-read drill-in, trajectory expansion, and an inspect-only "copy skill draft" button. New `internal/corpus` units: `assembleEpisodes` (`episodes.go`), `wilsonLowerBound`/`spread`/`pathScore` (`scoring.go`), `failure_episodes` migration/backfill, the resolution-path helpers (`outcomes.go`), and `Incidents`/`IncidentTrajectory`/`CorpusOverview` (`incidents.go`, `overview.go`). See `docs/outcome-weighting-spec.md`.
 - Unified fake-source fixtures for every supported coding agent and an all-sources end-to-end test. `testutil.WriteAgentFixtures` now also seeds a fake OpenCode SQLite database (`opencode.db`, matching the `session`/`message`/`part` schema) alongside the existing Pi/Claude/Codex trees, with `FixtureRoots.OpenCodeRoot`. `TestEndToEndAllSources` (`internal/corpus`) drives all four agents through the full pipeline — discovery → snapshot → bundle → ingest → search → read — and asserts each source's distinctive needle is searchable and reads back to real context. Separate regression coverage verifies OpenCode model/token/tool metadata persistence, duplicate session IDs across release-channel DBs, and modern Codex tool-call metadata rows. The fixture databases are seeded deterministically from committed SQL (kept readable/reviewable) rather than committed as opaque binaries.
-- `scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` — a safe, read-only smoketest that verifies an adapter against a real machine. Portable to macOS's default bash 3.2: uses parallel indexed arrays instead of associative arrays; checks table existence via sqlite3 `.tables` (bare names) rather than grepping quoted DDL, so it matches backtick/bracket/double-quote quoting; and counts the JSONL export with `wc` instead of piping `find` into `grep -q` (which under `pipefail` reported a spurious failure when `grep` closed the pipe early). It reports ingestion depth (sessions/entries/messages/FTS rows from `status`) and hard-fails when an adapter discovers session files but ingests zero messages or indexes zero searchable text, so a real-format extraction gap surfaces as a failure. It builds/uses the checkout binary against a throwaway config and writes every artifact (corpus, depot, config, cache/build cache, and the OpenCode JSONL export) under a single `/tmp` directory. It runs discovery → snapshot → ingest → search → read end-to-end, and checks the source was not modified by comparing before/after content fingerprints (plus, for OpenCode, database/sidecar content hashes and `integrity_check`). `AHA_OPENCODE_EXPORT_DIR` is what lets the script keep the generated JSONL export under `/tmp` cross-platform instead of the user cache directory.
+- `scripts/smoketest.sh <opencode|codex|claude|pi> [SOURCE_ROOT]` — a safe, read-only smoketest that verifies an adapter against a real machine. Portable to macOS's default bash 3.2: uses parallel indexed arrays instead of associative arrays; checks table existence via sqlite3 `.tables` (bare names) rather than grepping quoted DDL, so it matches backtick/bracket/double-quote quoting; and counts the JSONL export with `wc` instead of piping `find` into `grep -q` (which under `pipefail` reported a spurious failure when `grep` closed the pipe early). It reports ingestion depth (sessions/entries/messages/FTS rows from `status`) and hard-fails when an adapter discovers session files but ingests zero messages or indexes zero searchable text, so a real-format extraction gap surfaces as a failure. It builds/uses the checkout binary against a throwaway config and writes every artefact (corpus, depot, config, cache/build cache, and the OpenCode JSONL export) under a single `/tmp` directory. It runs discovery → snapshot → ingest → search → read end-to-end, and checks the source was not modified by comparing before/after content fingerprints (plus, for OpenCode, database/sidecar content hashes and `integrity_check`). `AHA_OPENCODE_EXPORT_DIR` is what lets the script keep the generated JSONL export under `/tmp` cross-platform instead of the user cache directory.
 - OpenCode source adapter (`opencode`). OpenCode stores history in a SQLite database (`$XDG_DATA_HOME/opencode/opencode.db` when XDG is set, otherwise `~/.local/share/opencode/opencode.db`; `$OPENCODE_DB` is an exclusive DB-file override; release-channel `opencode-*.db` files are included when no override is set) rather than JSONL, so the adapter converts the database into deterministic, lossless JSONL session files during `Discover` and then parses them like any other JSONL source. The full `data` JSON of every `session`/`message`/`part` row is preserved verbatim (lossless reserialization, not a lossy projection); message text, tool calls, model/token/cost metadata, and image file parts are extracted where the known part shapes are present. The DB and any currently present `-wal`/`-shm` sidecars are copied into a private, locked, per-database export directory under the user cache before reading; the source database is never written to. The conversion lives in a separate `internal/opencodeexport` package so the source adapters keep their textual read-only invariant (no filesystem-mutation calls in `internal/adapters`). Output is byte-stable for identical database contents, so the snapshot unchanged-state fingerprint (which includes each captured file's path and hash) still detects "nothing changed" and avoids re-uploading.
 
 ### Changed
@@ -218,24 +231,24 @@ migration, by decision. Later sections of this Unreleased entry that mention
 
 - README repositioning: walked back the "spot patterns and turn them into skills" promise to "examine your behaviour today; pattern detection is the next layer, tracked in `docs/research/agent-trace-tools.md`". The substrate is what ships; the product on top is honestly named as not built.
 - `clients/typescript/README.md`: added concrete integration examples for Cloudflare codemode (`createCodeTool` + `ToolProvider`) and Anthropic code-execution-with-MCP (`callMCPTool` filesystem layout), plus an ASCII architecture diagram showing the host/sandbox vs aha boundary and a "What aha provides and what the host provides" matrix. The implicit "host brings the sandbox" assumption is now explicit.
-- `docs/mcp-spec.md` moved its "Open questions" section to "Decided" with rationale: `doctor` will not accept `--depot` (CLI covers it); `read` will not gain a `format: "md"` arg (the typed `[]ReadEntry` surface is what callers actually need).
+- `docs/mcp-spec.md` moved its "Open questions" section to "Decided" with rationale: `doctor` will not accept `--archive` (CLI covers it); `read` will not gain a `format: "md"` arg (the typed `[]ReadEntry` surface is what callers actually need).
 
 ### Added
 
 - `aha mcp`: a read-only stdio MCP (Model Context Protocol) server exposing `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor` as JSON-RPC tools over the same `internal/corpus`/`internal/search` functions the CLI uses. Strict argument validation; write tools are intentionally not exposed. See `docs/mcp-spec.md`.
-- `aha incidents`: ranks recurring tool-call failures by tool, command family, and privacy-preserving error signature, then annotates each incident with its resolution state and top fix paths. Incident rows use normalized/redacted display text only and include sample refs for failure drill-in and fail→fix trajectory reconstruction.
+- `aha analyse failures`: ranks recurring tool-call failures by tool, command family, and privacy-preserving error signature, then annotates each incident with its resolution state and top fix paths. Incident rows use normalized/redacted display text only and include sample refs for failure drill-in and fail→fix trajectory reconstruction.
 - `aha mcp --dry-run`: opens the corpus, registers every tool, prints a one-line summary to stderr, then exits 0 without serving stdio. Pre-flight check for hosts wiring `aha mcp` into their MCP config — proves the binary can find its corpus and confirms the advertised tool set.
-- `aha serve`: a read-only local dashboard serving the same tool surface as HTTP/JSON plus a minimal embedded UI (`go:embed`, no Node runtime on the host). Loopback-only by default; non-loopback binds require `--allow-remote`/`AHA_ALLOW_REMOTE=1`. Hardened with Host-header allowlisting (anti-DNS-rebinding), JSON Content-Type enforcement on POST routes, a strict Content-Security-Policy, and a per-request timeout.
+- `aha dashboard`: a read-only local dashboard serving the same tool surface as HTTP/JSON plus a minimal embedded UI (`go:embed`, no Node runtime on the host). Loopback-only by default; non-loopback binds require `--allow-remote`/`AHA_ALLOW_REMOTE=1`. Hardened with Host-header allowlisting (anti-DNS-rebinding), JSON Content-Type enforcement on POST routes, a strict Content-Security-Policy, and a per-request timeout.
 - Typed TypeScript client at `clients/typescript/` for code-mode runtimes (Cloudflare `@cloudflare/codemode`, Anthropic code-execution-with-MCP): generated typed surface (`aha-mcp.ts`) plus hand-written stdio and HTTP transports, a `tsconfig`, and runtime tests. Generated by `cmd/aha-gen-ts`; a Go drift test keeps the checked-in file in sync.
 - `scripts/verify.sh ts` (and `make verify-ts`): typecheck and runtime-test the TypeScript client; skips gracefully when no TypeScript toolchain is present. `make gen-ts` regenerates the surface.
 - `scripts/verify.sh mcp`: bidirectional cross-SDK conformance suite against the official Python, TypeScript, and Go MCP SDKs (three server legs + three client legs + a Code Mode workflow test + an in-process HTTP↔MCP consistency test). Skips gracefully when an SDK toolchain isn't installed.
 
 - R2/local depot model for durable bundle storage.
-- `aha depot init|ls|verify`, including `depot verify --repair`.
-- `--depot` for `snapshot`, `refresh`, `ingest`, `status`, and `doctor`.
+- `aha archive init|ls|verify`, including `depot verify --repair`.
+- `--archive` for `snapshot`, `refresh`, `ingest`, `status`, and `doctor`.
 - Local depot default at `~/.aha/depot`.
 - Content-addressed bundle layout: `bundles/v1/<bundle_sha256>.tar.zst`.
-- Per-machine repairable catalog shards: `catalog/v1/<machine>.json`.
+- Per-machine repairable catalogue shards: `catalog/v1/<machine>.json`.
 - R2 support through the AWS SDK S3 client with Cloudflare endpoint/region handling.
 - Fake-S3 R2 tests plus a real-R2 integration test behind the `integration` build tag.
 - Depot-specific fuzz targets for address parsing and bundle-key validation.
@@ -243,22 +256,22 @@ migration, by decision. Later sections of this Unreleased entry that mention
 - `rapid` property-based testing dependency plus shared test generators for shrinkable invariant tests.
 - Static correctness-debt inventory tests for ambient time, raw identity concatenation, manual FTS writes, and direct append-only table mutations.
 - Correctness-by-construction guardrails and implementation hardening: typed identity/ref primitives, sealed canonical-only ref variants/parsing/formatting, corpus/depot state-machine skeletons, adapter conformance fixtures, schema introspection helpers, exact canonical read/human resolution split, clock/sleeper/backoff/source-capability seams, corpus verifier/reconciler queries, v2-only bundle schema validation, v2-only session-key construction, targeted SQLite foreign keys/checks, append-only/quarantine triggers, and trigger-maintained FTS rows.
-- `status --depot` behind-bundle reporting.
-- `doctor --depot` depot diagnostics, including common R2/S3 configuration mistake warnings.
+- `status --archive` behind-bundle reporting.
+- `doctor --archive` depot diagnostics, including common R2/S3 configuration mistake warnings.
 - Refresh idempotency for unchanged source state.
-- Property-based coverage for depot contracts, catalog merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
-- `aha verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
-- Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimization guardrails.
+- Property-based coverage for depot contracts, catalogue merges, pending-ingest sets, archive path safety, config round trips, source path safety, and search/read coherence.
+- `aha workspace verify` for corpus invariant checks, with `--repair-fts` for derived FTS row repair.
+- Prior-art improvement and performance audit specs documenting hardening requirements, hotspots, benchmark plans, and optimisation guardrails.
 - Optional command-level Go pprof output via `--cpuprofile`, `--memprofile`, `AHA_CPU_PROFILE`, and `AHA_MEM_PROFILE`.
-- Pathological performance benchmarks for many tiny archive files, large ingest/verify/search/status corpora, and large local depot catalogs.
-- Performance scalability/longevity plan tying benchmark/profiling findings to concrete optimization phases.
+- Pathological performance benchmarks for many tiny archive files, large ingest/verify/search/status corpora, and large local depot catalogues.
+- Performance scalability/longevity plan tying benchmark/profiling findings to concrete optimisation phases.
 - Rowid-based FTS verification with query-plan guard, reducing pathological 5k-message verify from seconds to milliseconds.
-- Known bundle identity handoffs: `archive.WriteWithInfo`, catalog `state_sha256`/`manifest_sha256`, depot known-SHA publish, and expected-SHA ingest staging.
+- Known bundle identity handoffs: `archive.WriteWithInfo`, catalogue `state_sha256`/`manifest_sha256`, depot known-SHA publish, and expected-SHA ingest staging.
 - Quick/default depot verification with `--deep` for byte/manifests checks; fake-R2 coverage ensures quick verify does not download bundles.
 - Ingest performance contracts: prepared statement lifecycle, session-local duplicate/conflict prefetch, covering conflict-query index, known file-blob no-recompression, duplicate-bundle parse-skip guard, and file-blob zstd encoder pooling.
-- Indexed search filters: `--project` exact filter, `--path-token` path-segment filter for sessions/artifacts, actual query-plan guards, artifact coverage, and high-limit capping/warnings.
-- Corpus maintenance commands: `aha corpus size`, `aha corpus vacuum`, and dry-run/forced `aha corpus prune-orphans`.
-- Depot catalog compaction via `aha depot compact`, plus map-backed `MergeBundleRefs` properties and local/R2 compaction tests.
+- Indexed search filters: `--project` exact filter, `--path-token` path-segment filter for sessions/artefacts, actual query-plan guards, artefact coverage, and high-limit capping/warnings.
+- Corpus maintenance commands: `aha workspace status`, `aha workspace status`, and dry-run/forced `aha workspace status`.
+- Depot catalogue compaction via internal Archive compaction (no public command), plus map-backed `MergeBundleRefs` properties and local/R2 compaction tests.
 - Verify/status/depot-ingest cost counters for depot bytes read/downloaded, listed/unique depot refs, fetched pending bundles, corpus verify row counts, and FTS repair rows.
 - Duplication-refactor pass sharing depot local/R2 integrity helpers, snapshot flag registration, search predicates, FTS predicates, and atomic file-write helpers, with before/after metrics and Go best-practices audit.
 
@@ -266,22 +279,22 @@ migration, by decision. Later sections of this Unreleased entry that mention
 
 - `snapshot` and `refresh` write to the configured depot instead of an output directory.
 - No-argument `ingest` pulls pending depot bundles (`catalog - corpus`) instead of globbing an output directory.
-- Trust docs now distinguish local-by-default behavior from explicit remote/R2 upload behavior.
+- Trust docs now distinguish local-by-default behaviour from explicit remote/R2 upload behaviour.
 - Generated command docs now include depot commands, depot-aware flags, corpus verification/maintenance, indexed search filters, global profiling guidance, depot quick/deep verification flags, and depot compaction.
 
 ### Removed
 
 - Removed pre-release `--out` support.
 - Removed pre-release `bundle_out_dir` config support.
-- Removed local `.receipt.json` sidecars; bundle path/key and SHA are reported through command output/JSON, while durable metadata lives in the manifest and depot catalog.
+- Removed local `.receipt.json` sidecars; bundle path/key and SHA are reported through command output/JSON, while durable metadata lives in the manifest and depot catalogue.
 
 ### Security / correctness
 
-- Depot ingest verifies catalog SHA/key against actual bundle bytes before corpus ingest.
-- Local depot catalog updates use locking plus atomic writes.
-- R2 catalog updates use conditional writes and retry-on-conflict behavior.
-- `depot verify` is quick by default and validates marker/catalog/object-existence metadata; `depot verify --deep` validates bundle bytes/manifests and catalog/object agreement.
-- Local depot paths and catalog-derived bundle keys are validated against traversal and malformed-key attacks.
+- Depot ingest verifies catalogue SHA/key against actual bundle bytes before corpus ingest.
+- Local depot catalogue updates use locking plus atomic writes.
+- R2 catalogue updates use conditional writes and retry-on-conflict behaviour.
+- `depot verify` is quick by default and validates marker/catalogue/object-existence metadata; `depot verify --deep` validates bundle bytes/manifests and catalogue/object agreement.
+- Local depot paths and catalogue-derived bundle keys are validated against traversal and malformed-key attacks.
 - Network imports are restricted to `internal/depot` by static tests.
 
 ### Documentation

@@ -6,7 +6,7 @@ Use this rubric to confirm `aha` is still on track as an agent-history aggregato
 
 | Area | What to evaluate | Score guide |
 |---|---|---|
-| First-run journey | A new user can run `init --accept-secrets`, `refresh`, `search`, then `read` without understanding internals. | 0 broken; 1 works with hidden caveats; 2 documented and tested. |
+| First-run journey | A new user can run `init --acknowledge-raw-history`, `refresh`, `search`, then `read` without understanding internals. | 0 broken; 1 works with hidden caveats; 2 documented and tested. |
 | Privacy honesty | Docs and CLI accurately state that bundles stay raw, default `none-v1` does not redact, and `redaction:"v1"` redacts corpus projections. | 0 misleading; 1 caveats buried; 2 explicit and verified. |
 | Immutable provenance | Snapshot/ingest identity and raw data come from bundled bytes, not mutable live paths. | 0 mutable; 1 mixed; 2 regression-tested. |
 | Deterministic snapshots | Same inputs/pinned metadata produce identical bundles. | 0 not deterministic; 1 mostly; 2 tested. |
@@ -29,5 +29,5 @@ Use this rubric to confirm `aha` is still on track as an agent-history aggregato
 
 ## Guidance from Claude History Explorer and qmd
 
-- From Claude History Explorer: keep trust claims verifiable, preserve read-only behavior, and optimize the browsing/search/read loop.
+- From Claude History Explorer: keep trust claims verifiable, preserve read-only behaviour, and optimise the browsing/search/read loop.
 - From qmd: snippets are leads, not evidence; search results should include round-trippable refs; status and doctor should provide next actions; agent-facing docs/skills should teach `search -> retrieve -> answer`.

@@ -40,7 +40,7 @@ func TestLocalSmoketestDepotIsAlwaysUnderFreshWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{`WORK="$(mktemp -d`, `DEPOT="$WORK/depot"`, `"depot": { "type": "local", "location": "$DEPOT" }`} {
+	for _, required := range []string{`WORK="$(mktemp -d`, `DEPOT="$WORK/depot"`, `"archive": { "type": "local", "location": "$DEPOT" }`} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("local smoketest lacks fresh-workspace invariant %q", required)
 		}
@@ -64,7 +64,7 @@ func TestR2IntegrationTestUsesOnlyExplicitSmoketestCapability(t *testing.T) {
 			t.Fatalf("integration test missing explicit capability component %s", required)
 		}
 	}
-	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2DepotConfig{})`, `os.Getenv("AHA_R2_SMOKETEST_BUCKET")`, `os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")`, `os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")`, `os.Getenv("AHA_R2_SMOKETEST_TARGET_ID")`} {
+	for _, forbidden := range []string{`firstTestEnv("AHA_R2_ACCESS_KEY_ID"`, `ResolveR2Config(model.R2ArchiveConfig{})`, `os.Getenv("AHA_R2_SMOKETEST_BUCKET")`, `os.Getenv("AHA_R2_SMOKETEST_ACCOUNT_ID")`, `os.Getenv("AHA_R2_SMOKETEST_ENDPOINT")`, `os.Getenv("AHA_R2_SMOKETEST_TARGET_ID")`} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("integration test can consult production credential source %s", forbidden)
 		}
@@ -174,7 +174,7 @@ func TestR2SmoketestNeverFallsBackToProductionCredentials(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
 	if err := cmd.Run(); err == nil {
-		t.Fatal("production-only credentials unexpectedly authorized the smoketest")
+		t.Fatal("production-only credentials unexpectedly authorised the smoketest")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("go ran despite absent smoketest credentials: %v", err)
@@ -276,7 +276,7 @@ exit "${FAKE_GO_EXIT:-0}"
 	if err == nil {
 		t.Fatal("forbidden smoke test unexpectedly succeeded")
 	}
-	for _, want := range []string{"R2 authorization denied during HeadBucket", "before any smoke objects were written", "explicit test credential", "Object Read & Write", "AHA_R2_SMOKETEST_*", "next:"} {
+	for _, want := range []string{"R2 authorisation denied during HeadBucket", "before any smoke objects were written", "explicit test credential", "Object Read & Write", "AHA_R2_SMOKETEST_*", "next:"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("forbidden stderr=%q missing %q", stderr, want)
 		}

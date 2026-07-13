@@ -62,8 +62,8 @@ When a refactor removes a debt item, update the static allowlist in the same com
 Use the CLI verifier against a real corpus when diagnosing local drift:
 
 ```bash
-aha verify --json
-aha verify --repair-fts --json
+aha workspace verify --json
+aha workspace verify --repair-fts --json
 ```
 
 `verify` is read-only by default and JSON output includes corpus/FTS row-count stats so humans and agents can see what was checked. `--repair-fts` rebuilds derived FTS rows from `messages` and `artifacts` and reports deleted/inserted FTS row counters; depot blobs and base corpus rows remain the source of truth.
@@ -73,8 +73,8 @@ aha verify --repair-fts --json
 For performance investigations, opt in to local Go pprof profiles on any command:
 
 ```bash
-aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --repo ~/.aha/corpus
-AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha refresh
+aha --cpuprofile cpu.pprof --memprofile heap.pprof verify --workspace ~/.aha/corpus
+AHA_CPU_PROFILE=cpu.pprof AHA_MEM_PROFILE=heap.pprof aha archive upload && aha archive download
 ```
 
 Profiles are never written by default. Inspect them with `go tool pprof`. Captured package-level benchmark profile summaries live in `docs/performance-results.md`; prefer those small reproductions before command-level profiling.

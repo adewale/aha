@@ -60,22 +60,15 @@ type errorPayload struct {
 
 func Registry() map[string]Command {
 	return map[string]Command{
-		"refresh":   {Name: "refresh", Usage: "aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--progress MODE] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--corpus", "--depot", "--force", "--machine", "--max-sessions", "--progress", "--repo", "--session", "--source", "--json"}, Examples: []string{"aha refresh", "aha refresh --session abc --max-sessions 1"}, JSONSchema: "object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried},report,reports}", Docs: "push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus", Run: cmdRefresh, RunContext: runRefreshContext},
-		"snapshot":  {Name: "snapshot", Usage: "aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--progress MODE] [--json]", Flags: []string{"--accept-secrets", "--captured-at", "--config", "--depot", "--force", "--machine", "--max-sessions", "--progress", "--session", "--source", "--json"}, Examples: []string{"aha snapshot --accept-secrets --depot local:~/.aha/depot"}, JSONSchema: "object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried}", Docs: "push this machine's state to the depot: upload only new file versions, publish a snapshot manifest, move the pointer (no corpus needed; never downloads other machines' data)", Run: cmdSnapshot, RunContext: runSnapshotContext},
-		"ingest":    {Name: "ingest", Usage: "aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]", Flags: []string{"--config", "--corpus", "--depot", "--progress", "--repo", "--json"}, Examples: []string{"aha ingest ./bundle.tar.zst", "aha ingest --repo ./aha-repo", "aha ingest --depot local:~/.aha/depot"}, JSONSchema: "array<object{machine?,manifest_sha256?,bundle?,sessions,entries,messages,images,artifacts,duplicate}>", Docs: "pull every machine's latest depot snapshot into a dedicated corpus after side-effect-free depot/destination preflight (explicit r2:BUCKET or local:PATH), or import explicit v1 bundle files", Run: cmdIngest, RunContext: runIngestContext},
-		"search":    {Name: "search", Usage: "aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages/artifacts; use read on returned refs before answering", Run: cmdSearch},
-		"read":      {Name: "read", Usage: "aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]", Flags: flagNames(readFlagSpecs), FlagSpecs: readFlagSpecs, Examples: []string{"aha read <ref_text> --json", "aha read --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "retrieve source context for a search result", Run: cmdRead},
-		"status":    {Name: "status", Usage: "aha status [--repo DIR] [--depot DEPOT] [--json]", Flags: []string{"--config", "--corpus", "--depot", "--json", "--repo"}, Examples: []string{"aha status --json", "aha status --depot local:~/.aha/depot --json"}, JSONSchema: "object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,snapshots,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_snapshots?,depot_machines_listed?,depot_fetches?,next}", Docs: "summarize corpus health", Run: cmdStatus},
-		"verify":    {Name: "verify", Usage: "aha verify [--repo DIR] [--repair-fts] [--progress MODE] [--json]", Flags: []string{"--config", "--corpus", "--json", "--progress", "--repair-fts", "--repo"}, Examples: []string{"aha verify --json", "aha verify --repair-fts"}, JSONSchema: "object{root,stats,problems,repaired_fts,fts_repair?}", Docs: "verify corpus invariants and optionally repair derived FTS rows", Run: cmdVerify, RunContext: runVerifyContext},
-		"conflicts": {Name: "conflicts", Usage: "aha conflicts [--repo DIR] [--json]", Flags: []string{"--config", "--corpus", "--json", "--repo"}, Examples: []string{"aha conflicts --json"}, JSONSchema: "array<object{id,session_key,entry_id,first,second,created_at}>", Docs: "list quarantined merge conflicts", Run: cmdConflicts},
-		"incidents": {Name: "incidents", Usage: "aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]", Flags: []string{"--config", "--corpus", "--json", "--limit", "--machine", "--project", "--repo", "--source", "--state", "--tool"}, Examples: []string{"aha incidents --json", "aha incidents --state unresolved", "aha incidents --state resolved --project myrepo"}, JSONSchema: "array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref,sample_ordinal}>,sample_ref,score}>", Docs: "rank recurring tool-call failures with their resolution status (unresolved/partial/resolved) and the fix paths that worked", Run: cmdIncidents},
-		"corpus":    {Name: "corpus", Usage: "aha corpus <size|vacuum|prune-orphans|rebuild> [--repo DIR] [--progress MODE] [--json] [--force|--backup]", Flags: []string{"--backup", "--config", "--corpus", "--force", "--json", "--progress", "--repo"}, Examples: []string{"aha corpus size --json", "aha corpus vacuum", "aha corpus prune-orphans --json", "aha corpus rebuild --backup --json"}, JSONSchema: "object{root,total_bytes,database_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}|object{root,backup,next,next_action}", Docs: "inspect corpus disk usage, vacuum SQLite, explicitly prune unreferenced blobs, or atomically rebuild a pre-v2 corpus while preserving a backup", Run: cmdCorpus, RunContext: runCorpusContext},
-		"export":    {Name: "export", Usage: "aha export [--machine ID] [--depot DEPOT] [--out FILE] [--json]", Flags: []string{"--config", "--depot", "--json", "--machine", "--out"}, Examples: []string{"aha export", "aha export --machine work-mac --out work.tar.zst"}, JSONSchema: "object{bundle,sha256,manifest_sha256,machine,files,bytes}", Docs: "materialize a machine's latest depot snapshot as a portable v1 bundle.tar.zst (the single-file hand-off format; re-import with aha ingest)", Run: cmdExport},
-		"doctor":    {Name: "doctor", Usage: "aha doctor [--depot DEPOT] [--json]", Flags: []string{"--config", "--depot", "--json"}, Examples: []string{"aha doctor", "aha doctor --depot local:~/.aha/depot --json"}, JSONSchema: "object{version,config,adapters,sources,corpus,depot,next,next_action}", Docs: "show diagnostics and exactly one state-aware next action", Run: cmdDoctor},
-		"depot":     {Name: "depot", Usage: "aha depot <setup|init|use|ls|verify> [DEPOT] [--progress MODE] [--json] [--deep]", Flags: []string{"--config", "--deep", "--json", "--progress"}, Examples: []string{"aha depot setup r2:aha-depot --json", "aha depot init local:~/.aha/depot", "aha depot init r2:aha-depot", "aha depot use r2:aha-depot", "aha depot ls --json", "aha depot verify --deep"}, JSONSchema: "object|array", Docs: "preflight R2 with one safe next action, initialize a depot, switch the default, list snapshots, or verify content", Run: cmdDepot, RunContext: runDepotContext},
-		"init":      {Name: "init", Usage: "aha init [--config PATH] [--accept-secrets] [--json]", Flags: []string{"--accept-secrets", "--config", "--json"}, Examples: []string{"aha init --accept-secrets"}, JSONSchema: "object{config,accepted_secrets}", Docs: "write starter JSONC config", Run: cmdInit},
-		"mcp":       {Name: "mcp", Usage: "aha mcp [--config PATH] [--repo DIR] [--dry-run]", Flags: []string{"--config", "--corpus", "--dry-run", "--repo"}, Examples: []string{"aha mcp", "aha mcp --dry-run"}, JSONSchema: "jsonrpc:tools/list|tools/call (stdio MCP)", Docs: "run a read-only stdio MCP server over the corpus", Run: cmdMcp},
-		"serve":     {Name: "serve", Usage: "aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]", Flags: []string{"--addr", "--allow-remote", "--allowed-hosts", "--config", "--corpus", "--repo", "--timeout", "--token"}, Examples: []string{"aha serve", "aha serve --addr 127.0.0.1:18428", "aha serve --allow-remote --token $(openssl rand -hex 32)"}, JSONSchema: "http://HOST:PORT/api/{search,read,incidents,incident_trajectory,overview,status,verify,conflicts,corpus_size,doctor}", Docs: "run a read-only local dashboard over the corpus on loopback", Run: cmdServe},
+		"analyse":   {Name: "analyse", Usage: "aha analyse failures [--workspace PATH] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]", Flags: []string{"--config", "--json", "--limit", "--machine", "--project", "--source", "--state", "--tool", "--workspace"}, Examples: []string{"aha analyse failures --json", "aha analyse failures --state unresolved"}, JSONSchema: "array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths,sample_ref,score}>", Docs: "rank recurring tool-call failures and the resolution paths that worked", Run: cmdAnalyse},
+		"archive":   {Name: "archive", Usage: "aha archive <init|set-default|status|upload|download|verify> [ARCHIVE] [--workspace PATH] [--deep] [--dry-run] [--progress MODE] [--json]", Flags: []string{"--config", "--deep", "--dry-run", "--force", "--json", "--progress", "--workspace"}, Examples: []string{"aha archive init", "aha archive upload", "aha archive download", "aha archive status r2:team-history --json", "aha archive verify --deep"}, JSONSchema: "aha.archive.status.v2|object{state,...}", Docs: "manage durable aggregated history and explicit upload/download transitions", Run: cmdArchive, RunContext: runArchiveContext},
+		"dashboard": {Name: "dashboard", Usage: "aha dashboard [--workspace PATH] [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN]", Flags: []string{"--addr", "--allow-remote", "--allowed-hosts", "--config", "--timeout", "--token", "--workspace"}, Examples: []string{"aha dashboard", "aha dashboard --addr 127.0.0.1:18428"}, JSONSchema: "http://HOST:PORT/api/v2/{search,show,analyse,overview,status,workspace}", Docs: "run the read-only local dashboard over a Workspace", Run: cmdDashboard},
+		"init":      {Name: "init", Usage: "aha init --acknowledge-raw-history [--config PATH] [--dry-run] [--json]", Flags: []string{"--acknowledge-raw-history", "--config", "--dry-run", "--json"}, Examples: []string{"aha init --acknowledge-raw-history"}, JSONSchema: "object{config,acknowledged_raw_history,archive,workspace}", Docs: "write config, assign the machine, initialise the default local Archive, and prepare the default Workspace destination", Run: cmdInit},
+		"mcp":       {Name: "mcp", Usage: "aha mcp <check|serve> [--workspace PATH] [--config PATH]", Flags: []string{"--config", "--workspace"}, Examples: []string{"aha mcp check", "aha mcp serve"}, JSONSchema: "check diagnostic|jsonrpc:tools/list|tools/call", Docs: "check or serve the read-only stdio MCP interface over a Workspace", Run: cmdMcp},
+		"search":    {Name: "search", Usage: "aha search [--workspace PATH] QUERY [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]", Flags: flagNames(searchFlagSpecs), FlagSpecs: searchFlagSpecs, Examples: []string{"aha search needle --json", "aha search needle --refs"}, JSONSchema: "array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>", Docs: "find relevant messages and artefacts; use show on returned refs before answering", Run: cmdSearch},
+		"show":      {Name: "show", Usage: "aha show [--workspace PATH] REF [--session ID] [--entry ID] [--before N] [--after N] [--json|--md]", Flags: flagNames(showFlagSpecs), FlagSpecs: showFlagSpecs, Examples: []string{"aha show <ref_text> --json", "aha show --session <session> --entry <entry> --json"}, JSONSchema: "array<object{line_no,entry_id,timestamp,role,text,raw_json}>", Docs: "display contextual evidence for a search result", Run: cmdShow},
+		"status":    {Name: "status", Usage: "aha status [--archive ARCHIVE] [--workspace PATH] [--json]", Flags: []string{"--archive", "--config", "--json", "--workspace"}, Examples: []string{"aha status --json", "aha status --archive r2:team-history --workspace ~/.aha/workspace --json"}, JSONSchema: "aha.status.v2", Docs: "inspect agent-history, Archive, and Workspace state with one next transition", Run: cmdStatus, RunContext: runStatusContext},
+		"workspace": {Name: "workspace", Usage: "aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--limit N] [--offset N] [--dry-run] [--progress MODE] [--json]", Flags: []string{"--backup", "--config", "--dry-run", "--json", "--limit", "--offset", "--progress", "--repair-fts"}, Examples: []string{"aha workspace status", "aha workspace verify --repair-fts", "aha workspace repair --backup", "aha workspace conflicts --json"}, JSONSchema: "aha.workspace.status.v2|object|array", Docs: "select, inspect, verify, repair, or inspect conflicts in a local Workspace", Run: cmdWorkspace, RunContext: runWorkspaceContext},
 	}
 }
 
@@ -89,6 +82,12 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return nil
 	}
 	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
+		if len(args) == 2 && args[1] == "--json" {
+			return writeJSON(stdout, model.RunningBuild())
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("version accepts only --json")
+		}
 		fmt.Fprintln(stdout, "aha", model.Version)
 		return nil
 	}
@@ -213,12 +212,12 @@ func GenerateCommandsMarkdown() string {
 	b.WriteString("# aha commands\n\n")
 	b.WriteString("This file is generated from CLI command metadata. Update command metadata, then regenerate this file.\n\n")
 	b.WriteString("## Global profiling\n\n")
-	b.WriteString("Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.\n\n")
-	b.WriteString("Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.\n\n")
+	b.WriteString("Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artefacts and are not written unless explicitly requested.\n\n")
+	b.WriteString("Examples: `aha --cpuprofile cpu.pprof search needle`, `aha workspace verify --memprofile heap.pprof`.\n\n")
 	b.WriteString("## Error contract\n\n")
 	b.WriteString("Every failed command prints one concise, credential-safe error and exactly one `next:` action. Raw dependency, SQL, SDK, and filesystem errors are not public output. Add global `--verbose-errors` for allowlisted diagnostics (failure kind, operation, retryability), never raw causes.\n\n")
 	b.WriteString("When a command is invoked with `--json`, failures are written to stderr using the stable `aha.error.v1` envelope:\n\n")
-	b.WriteString("```json\n{\n  \"schema\": \"aha.error.v1\",\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"safe human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha doctor --json\"],\n    \"next_action\": {\"command\": \"aha\", \"args\": [\"doctor\", \"--json\"]},\n    \"diagnostics\": []\n  }\n}\n```\n\n")
+	b.WriteString("```json\n{\n  \"schema\": \"aha.error.v1\",\n  \"error\": {\n    \"code\": \"machine_readable_code\",\n    \"message\": \"safe human-readable message\",\n    \"command\": \"command-name\",\n    \"next\": [\"aha status --json\"],\n    \"next_action\": {\"command\": \"aha\", \"args\": [\"status\", \"--json\"]},\n    \"diagnostics\": []\n  }\n}\n```\n\n")
 	b.WriteString("With `--progress=json`, stderr remains valid NDJSON: progress events are followed by one terminal `aha.error.v1` object on failure.\n\n")
 	for _, name := range CommandNames() {
 		cmd := Registry()[name]
@@ -247,43 +246,36 @@ func CommandNames() []string {
 	return names
 }
 
-type corpusFlags struct {
-	corpusDir *string
-	repoDir   *string
-	config    *string
+type workspaceFlags struct {
+	workspaceDir *string
+	config       *string
 }
 
-func registerCorpusFlags(fs *flag.FlagSet) corpusFlags {
-	return corpusFlags{corpusDir: fs.String("corpus", "", "corpus dir"), repoDir: fs.String("repo", "", "repo/corpus dir"), config: fs.String("config", "", "config path")}
+func registerWorkspaceFlags(fs *flag.FlagSet) workspaceFlags {
+	return workspaceFlags{workspaceDir: fs.String("workspace", "", "Workspace directory"), config: fs.String("config", "", "config path")}
 }
 
-func (f corpusFlags) loadConfig() (model.Config, error) {
+func (f workspaceFlags) loadConfig() (model.Config, error) {
 	cfg, err := config.Load(*f.config)
 	if err != nil {
 		return cfg, err
 	}
-	applyCorpusOverride(&cfg, *f.repoDir, *f.corpusDir)
+	applyWorkspaceOverride(&cfg, *f.workspaceDir)
 	return cfg, nil
 }
 
-func applyCorpusOverride(cfg *model.Config, repoDir, corpusDir string) {
-	if repoDir != "" {
-		cfg.CorpusDir = repoDir
-	} else if corpusDir != "" {
-		cfg.CorpusDir = corpusDir
+func applyWorkspaceOverride(cfg *model.Config, workspaceDir string) {
+	if workspaceDir != "" {
+		cfg.WorkspaceDir = workspaceDir
 	}
 }
 
-func prepareWritableCorpus(cfg model.Config) (safety.CorpusDestination, error) {
-	return safety.PrepareCorpusDestination(cfg, cfg.CorpusDir)
+func prepareWritableCorpus(cfg model.Config) (safety.WorkspaceDestination, error) {
+	return safety.PrepareWorkspaceDestination(cfg, cfg.WorkspaceDir)
 }
 
-func openPreparedCorpus(destination safety.CorpusDestination) (*corpus.Store, error) {
-	path, err := destination.Path()
-	if err != nil {
-		return nil, err
-	}
-	return corpus.Open(path)
+func openPreparedCorpus(destination safety.WorkspaceDestination) (*corpus.Store, error) {
+	return corpus.OpenPreparedDestination(destination)
 }
 
 func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) {
@@ -294,10 +286,10 @@ func openCorpusForCommand(cfg model.Config, create bool) (*corpus.Store, error) 
 		}
 		return openPreparedCorpus(destination)
 	}
-	if err := safety.ValidateWriteOutsideSources(cfg, cfg.CorpusDir, "corpus"); err != nil {
+	if err := safety.ValidateWriteOutsideSources(cfg, cfg.WorkspaceDir, "Workspace"); err != nil {
 		return nil, err
 	}
-	return corpus.OpenExisting(cfg.CorpusDir)
+	return corpus.OpenExistingReadOnly(cfg.WorkspaceDir)
 }
 
 func reorderSearchArgs(args []string) []string {

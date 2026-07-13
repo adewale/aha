@@ -1,28 +1,28 @@
 # Patterns and interventions
 
-`aha` finds recurring patterns in local coding-agent history. The right response is not always a skill. Sometimes the best artifact is a runbook, a dynamic workflow, a tool/platform fix, or an investigation backlog item.
+`aha` finds recurring patterns in local coding-agent history. The right response is not always a skill. Sometimes the best artefact is a runbook, a dynamic workflow, a tool/platform fix, or an investigation backlog item.
 
-Use this guide to manually turn `aha` incidents and evidence refs into the right artifact.
+Use this guide to manually turn `aha` incidents and evidence refs into the right artefact.
 
 ## What `aha` gives you today
 
 `aha` exposes the pattern substrate through several read-only surfaces:
 
-- CLI: `aha incidents`, `aha search`, `aha read`.
-- Dashboard: `aha serve` → **Failures** for recurring failures, **Search** for trace/evidence review, **Sources** for scope/trust.
-- MCP: `incidents`, `incident_trajectory`, `search`, `read`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, `doctor`.
+- CLI: `aha analyse failures`, `aha search`, `aha show`.
+- Dashboard: `aha dashboard` → **Failures** for recurring failures, **Search** for trace/evidence review, **Sources** for scope/trust.
+- MCP: `analyse_failures`, `analyse_failure_trajectory`, `search`, `show`, `overview`, `status`, `workspace_verify`, `workspace_conflicts`, `workspace_size`, `aha_capabilities`.
 - TypeScript client: `clients/typescript/` wrappers for MCP/HTTP/code-mode runtimes.
 
-`aha` does **not** currently choose or write the final artifact for you. It gives you ranked incidents, normalized fix paths, and stable evidence refs so a human or agent can decide what to create.
+`aha` does **not** currently choose or write the final artefact for you. It gives you ranked incidents, normalized fix paths, and stable evidence refs so a human or agent can decide what to create.
 
-## Artifact taxonomy
+## Artefact taxonomy
 
 | Pattern shape | Prefer | Why | Example |
 |---|---|---|---|
 | Deterministic operational sequence | Runbook | The answer is a repeatable checklist or command order. | GitHub CI triage: list runs → inspect logs → fix → rerun/check → merge. |
 | Reusable judgment, habit, or review lens | Skill | The answer is when/how to think, inspect, or critique. | Exact edit hygiene; testing quality review; frontend slop avoidance. |
 | Broad, parallel, high-uncertainty work | Dynamic workflow | The answer needs fan-out, independent attempts, synthesis, or adversarial review. | Large codebase audit; multi-angle PR review; dead-code discovery. |
-| Repeated tool friction with narrow fixability | Tool/platform fix | The answer should remove the failure mode from the system. | Better `read` bounds, safer edit previews, card layout containment tests. |
+| Repeated tool friction with narrow fixability | Tool/platform fix | The answer should remove the failure mode from the system. | Better `show` bounds, safer edit previews, card layout containment tests. |
 | High-pain pattern with weak or missing fix evidence | Investigation backlog | The pattern is real, but the remedy is not proven yet. | Repeated unresolved browser flake or merge conflict with no reliable path. |
 
 ## Decision rules
@@ -81,7 +81,7 @@ Dynamic workflows are usually too expensive for simple command loops. Prefer a r
 
 Common signals:
 
-- `read` offset errors;
+- `show` offset errors;
 - `edit oldText` mismatch patterns;
 - shell quoting failures that a wrapper could avoid;
 - dashboard cards overflowing or overlaying neighbors;
@@ -102,17 +102,17 @@ Backlog items should include hypotheses and evidence refs, not a premature fix.
 
 ```bash
 aha status --json
-aha verify --json
+aha workspace verify --json
 ```
 
-Use `status` to see corpus size, sources, redaction levels, and whether the data is large enough to trust. Use `verify` before drawing conclusions from an old corpus.
+Use `status` to see Workspace size, sources, redaction levels, and whether the data is large enough to trust. Use `aha workspace verify` before drawing conclusions from an old Workspace.
 
 ### 2. Find high-pain patterns
 
 ```bash
-aha incidents --limit 50 --json
-aha incidents --state unresolved --limit 25 --json
-aha incidents --state resolved --limit 25 --json
+aha analyse failures --limit 50 --json
+aha analyse failures --state unresolved --limit 25 --json
+aha analyse failures --state resolved --limit 25 --json
 ```
 
 Interpret states as:
@@ -124,9 +124,9 @@ Interpret states as:
 ### 3. Scope to a project/source/tool
 
 ```bash
-aha incidents --project myrepo --json
-aha incidents --tool bash --json
-aha incidents --source claude-code --json
+aha analyse failures --project myrepo --json
+aha analyse failures --tool bash --json
+aha analyse failures --source claude-code --json
 ```
 
 Scope when a pattern looks too broad. A generic `edit` or `rg` incident may become meaningful once scoped to a project or workflow.
@@ -136,14 +136,14 @@ Scope when a pattern looks too broad. A generic `edit` or `rg` incident may beco
 Every incident carries a `sample_ref`. Resolved incidents may also include path refs.
 
 ```bash
-aha read 'msg:v1:...' --before 3 --after 10 --md
+aha show 'msg:v1:...' --before 3 --after 10 --md
 ```
 
-Treat search snippets and incident summaries as leads. Treat `read` output as evidence.
+Treat search snippets and incident summaries as leads. Treat `show` output as evidence.
 
 ### 5. Inspect the fix trajectory
 
-For a resolved path, use `sample_ref` plus `sample_ordinal` with the MCP/HTTP `incident_trajectory` surface. From the dashboard, click **trace** on a fix path.
+For a resolved path, use `sample_ref` plus `sample_ordinal` with the MCP/HTTP `analyse_failure_trajectory` surface. From the dashboard, click **trace** on a fix path.
 
 For agents using MCP, call:
 
@@ -159,7 +159,7 @@ For agents using MCP, call:
 
 The trajectory is the fail→fix arc: the failing invocation, intermediate command families, and the resolving success.
 
-### 6. Decide the artifact
+### 6. Decide the artefact
 
 Use this quick classifier:
 
@@ -181,7 +181,7 @@ Can the system make the bad state impossible or obvious?
   no  → investigation backlog
 ```
 
-## Artifact templates
+## Artefact templates
 
 ### Runbook
 
@@ -326,7 +326,7 @@ For Pi dynamic workflows, this maps naturally to `phase(...)`, `agent(...)`, `pa
 When asking an agent to do this manually today, use:
 
 ```text
-Use aha read-only surfaces only. Inspect `aha incidents --json`, sample evidence with `aha read`, and classify the top patterns into runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog. Do not write or install artifacts yet. For each recommendation include stats, why this artifact type fits, and evidence refs.
+Use aha show-only surfaces only. Inspect `aha analyse failures --json`, sample evidence with `aha show`, and classify the top patterns into runbook, skill, dynamic workflow, tool/platform fix, or investigation backlog. Do not write or install artifacts yet. For each recommendation include stats, why this artifact type fits, and evidence refs.
 ```
 
 ## Current limits

@@ -47,7 +47,7 @@ func (s *mapBlobSource) BlobPath(key model.BlobKey) (string, error) {
 
 // TestPushV2UnchangedStateIsReusedWithoutWritesOrReads pins acceptance
 // property 1 end to end at the push layer: identical state re-pushed is
-// recognized from the parent pointer alone — no blob source reads, no
+// recognised from the parent pointer alone — no blob source reads, no
 // PUTs, no LISTs.
 func TestPushV2ProgressUsesActualUniqueBlobWork(t *testing.T) {
 	ctx := context.Background()
@@ -62,7 +62,7 @@ func TestPushV2ProgressUsesActualUniqueBlobWork(t *testing.T) {
 		events = append(events, event)
 	}), fixedProgressClock{})
 	manifest := snapshotManifestFor("m", sessionFile("same", "a.jsonl"), sessionFile("same", "duplicate.jsonl"), sessionFile("different", "b.jsonl"))
-	_, err := depot.PushV2WithOptions(ctx, v2, manifest, newMapBlobSource(t, map[string]string{"a": "same", "b": "different"}), depot.PushOptions{Progress: tracker})
+	_, err := pushPreparedOptions(ctx, v2, manifest, newMapBlobSource(t, map[string]string{"a": "same", "b": "different"}), depot.PushOptions{Progress: tracker})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestPushV2UnchangedStateIsReusedWithoutWritesOrReads(t *testing.T) {
 	}
 	state := map[string]string{"a.jsonl": "steady bytes"}
 	manifest := snapshotManifestFor("mach-a", sessionFile("steady bytes", "a.jsonl"))
-	first, err := depot.PushV2(ctx, v2, manifest, newMapBlobSource(t, state))
+	first, err := pushPrepared(ctx, v2, manifest, newMapBlobSource(t, state))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestPushV2UnchangedStateIsReusedWithoutWritesOrReads(t *testing.T) {
 	}
 	f.resetCounts()
 	src := newMapBlobSource(t, state)
-	second, err := depot.PushV2(ctx, v2, manifest, src)
+	second, err := pushPrepared(ctx, v2, manifest, src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +117,9 @@ func TestPushV2UnchangedStateIsReusedWithoutWritesOrReads(t *testing.T) {
 		t.Fatalf("unchanged push read blob content: %v", src.requests)
 	}
 	for op := range f.opsSnapshot() {
+		if strings.HasPrefix(op, "HEAD aha-v3/blobs/") {
+			t.Fatalf("unchanged push probed carried blob: %q", op)
+		}
 		if strings.HasPrefix(op, "PUT ") || strings.HasPrefix(op, "LIST") {
 			t.Fatalf("unchanged push performed %q", op)
 		}
@@ -134,18 +137,24 @@ func TestPushV2DeltaReadsAndUploadsOnlyNewContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldState := map[string]string{"a.jsonl": "old content"}
-	if _, err := depot.PushV2(ctx, v2, snapshotManifestFor("mach-a", sessionFile("old content", "a.jsonl")), newMapBlobSource(t, oldState)); err != nil {
+	if _, err := pushPrepared(ctx, v2, snapshotManifestFor("mach-a", sessionFile("old content", "a.jsonl")), newMapBlobSource(t, oldState)); err != nil {
 		t.Fatal(err)
 	}
 	f.resetCounts()
 	grown := map[string]string{"a.jsonl": "old content", "b.jsonl": "new content"}
 	src := newMapBlobSource(t, grown)
-	res, err := depot.PushV2(ctx, v2, snapshotManifestFor("mach-a", sessionFile("old content", "a.jsonl"), sessionFile("new content", "b.jsonl")), src)
+	res, err := pushPrepared(ctx, v2, snapshotManifestFor("mach-a", sessionFile("old content", "a.jsonl"), sessionFile("new content", "b.jsonl")), src)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Reused || res.BlobsUploaded != 1 || res.BlobsCarried != 1 {
 		t.Fatalf("delta push: %+v", res)
+	}
+	oldKey := hash.SHA256Bytes([]byte("old content"))
+	for op := range f.opsSnapshot() {
+		if strings.Contains(op, oldKey) {
+			t.Fatalf("delta push probed carried blob: %q", op)
+		}
 	}
 	newKey := hash.SHA256Bytes([]byte("new content"))
 	if len(src.requests) != 1 || src.requests[0] != newKey {
@@ -154,11 +163,31 @@ func TestPushV2DeltaReadsAndUploadsOnlyNewContent(t *testing.T) {
 }
 
 // TestPushV2FirstPushUploadsEverything pins the cold-start path.
+func TestDeepVerifyDetectsOutOfBandMissingImmutableBlob(t *testing.T) {
+	ctx := t.Context()
+	v2 := newLocalV2(t)
+	old := sessionFile("old content", "a.jsonl")
+	if _, err := pushPrepared(ctx, v2, snapshotManifestFor("mach-a", old), newMapBlobSource(t, map[string]string{"a.jsonl": "old content"})); err != nil {
+		t.Fatal(err)
+	}
+	oldKey, _ := model.NewBlobKey(old.SHA256)
+	if err := os.Remove(filepath.Join(v2.Address().Location, "aha-v3", filepath.FromSlash(depot.BlobObjectKey(oldKey)))); err != nil {
+		t.Fatal(err)
+	}
+	report, err := v2.Verify(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Problems) == 0 {
+		t.Fatal("deep verify did not detect out-of-band deletion")
+	}
+}
+
 func TestPushV2FirstPushUploadsEverything(t *testing.T) {
 	ctx := context.Background()
 	v2 := newLocalV2(t)
 	state := map[string]string{"a.jsonl": "content a", "b.jsonl": "content b"}
-	res, err := depot.PushV2(ctx, v2, snapshotManifestFor("mach-a", sessionFile("content a", "a.jsonl"), sessionFile("content b", "b.jsonl")), newMapBlobSource(t, state))
+	res, err := pushPrepared(ctx, v2, snapshotManifestFor("mach-a", sessionFile("content a", "a.jsonl"), sessionFile("content b", "b.jsonl")), newMapBlobSource(t, state))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +214,7 @@ func TestPushV2UnchangedStateWithNewTimestampIsReused(t *testing.T) {
 	}
 	state := map[string]string{"a.jsonl": "same bytes"}
 	m1 := snapshotManifestFor("mach-a", sessionFile("same bytes", "a.jsonl"))
-	first, err := depot.PushV2(ctx, v2, m1, newMapBlobSource(t, state))
+	first, err := pushPrepared(ctx, v2, m1, newMapBlobSource(t, state))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +222,7 @@ func TestPushV2UnchangedStateWithNewTimestampIsReused(t *testing.T) {
 	m2.CapturedAt = "2026-06-10T00:00:00Z"
 	f.resetCounts()
 	src := newMapBlobSource(t, state)
-	second, err := depot.PushV2(ctx, v2, m2, src)
+	second, err := pushPrepared(ctx, v2, m2, src)
 	if err != nil {
 		t.Fatal(err)
 	}

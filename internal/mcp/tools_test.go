@@ -49,26 +49,28 @@ func buildCorpus(t *testing.T) (*corpus.Store, model.Config) {
 			{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true},
 			{"type":"claude-code","root":"` + filepath.ToSlash(fx.ClaudeRoot) + `","enabled":true}
 		],
-		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
-		"depot":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
+		"workspace_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"archive":{"type":"local","location":"` + filepath.ToSlash(outDir) + `"},
 		"include_subagents":true,
 		"include_images":true,
 		"index_tool_output":false,
 		"redaction":"none-v1",
-		"accept_secrets_warning":true
+		"acknowledged_raw_history":true
 	}`
 	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, io.Discard, io.Discard); err != nil {
-		t.Fatalf("refresh: %v", err)
+	for _, args := range [][]string{{"archive", "init", "--config", configPath}, {"archive", "upload", "--config", configPath}, {"archive", "download", "--config", configPath}} {
+		if err := cli.Run(args, io.Discard, io.Discard); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
 	}
 	store, err := corpus.OpenExisting(corpusDir)
 	if err != nil {
 		t.Fatalf("OpenExisting: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return store, model.Config{CorpusDir: corpusDir, MachineID: "mcp-test"}
+	return store, model.Config{WorkspaceDir: corpusDir, MachineID: "mcp-test"}
 }
 
 // connectPair sets up an in-process Client↔Server pair against a populated
@@ -142,7 +144,7 @@ func TestToolsCallStatusReturnsCorpusShape(t *testing.T) {
 		t.Fatalf("status returned isError: %s", contentText(t, res))
 	}
 	body := contentText(t, res)
-	for _, key := range []string{`"corpus_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
+	for _, key := range []string{`"workspace_dir"`, `"sessions"`, `"entries"`, `"fts_messages"`} {
 		if !strings.Contains(body, key) {
 			t.Fatalf("status missing %q: %s", key, body)
 		}
@@ -173,7 +175,7 @@ func TestToolsCallSearchReturnsResultsAndChainsToRead(t *testing.T) {
 		t.Fatalf("first hit lacks ref_text: %v", hits[0])
 	}
 	readRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "read",
+		Name:      "show",
 		Arguments: map[string]any{"ref": refText, "before": 1, "after": 3},
 	})
 	if err != nil {
@@ -209,7 +211,7 @@ func TestEmptySearchReturnsList(t *testing.T) {
 func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	session, ctx, _ := connectPair(t)
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "incidents",
+		Name:      "analyse_failures",
 		Arguments: map[string]any{"limit": 1, "state": "unresolved"},
 	})
 	if err != nil {
@@ -227,20 +229,17 @@ func TestToolsCallIncidentsReturnsList(t *testing.T) {
 	}
 }
 
-func TestToolsCallDoctorReturnsLocalDiagnostics(t *testing.T) {
+func TestToolsCallCapabilitiesReturnsExplicitContract(t *testing.T) {
 	session, ctx, _ := connectPair(t)
-	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "doctor"})
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "aha_capabilities"})
 	if err != nil {
-		t.Fatalf("CallTool(doctor): %v", err)
+		t.Fatalf("CallTool(aha_capabilities): %v", err)
 	}
 	body := contentText(t, res)
-	for _, want := range []string{`"version"`, `"adapters"`, `"sources"`, `"corpus"`} {
+	for _, want := range []string{`"schema":"aha.mcp.v2"`, `"required_features"`, `"tools"`, `"show"`} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("doctor missing %q: %s", want, body)
+			t.Fatalf("capabilities missing %q: %s", want, body)
 		}
-	}
-	if strings.Contains(body, `"depot"`) {
-		t.Fatalf("MCP doctor must not include depot probe: %s", body)
 	}
 }
 
@@ -343,6 +342,24 @@ func TestCallToolEmptySearchReturnsList(t *testing.T) {
 // two paths produce equivalent text today, but a future refactor on one
 // side without the other would silently break consumers that mix MCP
 // and HTTP. This test fails loudly on any such drift.
+func TestWorkspaceConflictsRejectsUnboundedPage(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "workspace_conflicts", json.RawMessage(`{"limit":201,"offset":0}`))
+	if err == nil || !strings.Contains(err.Error(), "between 1 and 200") {
+		t.Fatalf("workspace_conflicts error=%v, want bounded page rejection", err)
+	}
+}
+
+func TestShowRejectsAmbiguousRefAndSession(t *testing.T) {
+	store, cfg := buildCorpus(t)
+	backend := mcp.NewCorpusBackend(store, cfg)
+	_, err := mcp.CallTool(backend, "show", json.RawMessage(`{"ref":"session:v1:pi:pi-session","session":"pi-session"}`))
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("show error=%v, want exact-one invariant", err)
+	}
+}
+
 func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 	// Build a single corpus + backend and use it for BOTH paths so the
 	// comparison is over production code, not over test fixture setup.
@@ -367,14 +384,14 @@ func TestHTTPAndMCPPathsAreConsistent(t *testing.T) {
 		args map[string]any
 	}{
 		{"status", nil},
-		{"verify", nil},
-		{"conflicts", nil},
-		{"corpus_size", nil},
-		{"doctor", nil},
+		{"workspace_verify", nil},
+		{"workspace_conflicts", nil},
+		{"workspace_size", nil},
+		{"aha_capabilities", nil},
 		{"search", map[string]any{"query": "needle", "limit": 5}},
 		{"search", map[string]any{"query": "definitelynotinthecorpus"}},
-		{"read", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
-		{"incidents", map[string]any{"limit": 5}},
+		{"show", map[string]any{"session": "pi-session", "before": 1, "after": 1}},
+		{"analyse_failures", map[string]any{"limit": 5}},
 		{"overview", nil},
 	}
 
@@ -466,6 +483,18 @@ func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
 // in sorted order so cross-language reflections (Python sorted() in the
 // conformance scripts, TS .sort() in client_against_aha.ts) compare against
 // the same sequence. A drift elsewhere should be the loud failure.
+func TestMCPV2ToolContractUsesCurrentVocabulary(t *testing.T) {
+	want := []string{"aha_capabilities", "analyse_failure_trajectory", "analyse_failures", "overview", "search", "show", "status", "workspace_conflicts", "workspace_size", "workspace_verify"}
+	if !reflect.DeepEqual(mcp.ToolNames, want) {
+		t.Fatalf("MCP v2 tools=%v want %v", mcp.ToolNames, want)
+	}
+	for _, removed := range []string{"read", "incidents", "incident_trajectory", "doctor", "verify", "conflicts", "corpus_size"} {
+		if sort.SearchStrings(mcp.ToolNames, removed) < len(mcp.ToolNames) && mcp.ToolNames[sort.SearchStrings(mcp.ToolNames, removed)] == removed {
+			t.Fatalf("removed MCP tool %q returned", removed)
+		}
+	}
+}
+
 func TestCanonicalToolListIsSorted(t *testing.T) {
 	names := append([]string(nil), mcp.ToolNames...)
 	sort.Strings(names)

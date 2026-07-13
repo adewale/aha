@@ -17,12 +17,12 @@ import (
 	"github.com/adewale/aha/internal/usererror"
 )
 
-// cmdServe runs the local dashboard. Read-only by design and bound to
+// cmdDashboard runs the local dashboard. Read-only by design and bound to
 // loopback unless --allow-remote is set. See docs/mcp-spec.md (phase 3).
-func cmdServe(args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+func cmdDashboard(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
 	fs.SetOutput(flagOutput(args, stderr))
-	cf := registerCorpusFlags(fs)
+	cf := registerWorkspaceFlags(fs)
 	addr := fs.String("addr", "127.0.0.1:18428", "listen address (loopback only unless --allow-remote)")
 	allowRemote := fs.Bool("allow-remote", false, "allow non-loopback bind (off by default)")
 	allowedHosts := fs.String("allowed-hosts", "", "comma-separated Host header values to accept in addition to loopback (use with --allow-remote)")

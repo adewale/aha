@@ -135,10 +135,10 @@ func TestDecodeR2SmoketestAttestationBindsTargetIdentity(t *testing.T) {
 
 func TestR2CleanupAbsenceRequiresTypedNotFound(t *testing.T) {
 	if !isR2TestNotFound(&smithy.GenericAPIError{Code: "NoSuchKey", Message: "missing"}) {
-		t.Fatal("NoSuchKey was not recognized")
+		t.Fatal("NoSuchKey was not recognised")
 	}
 	if isR2TestNotFound(&smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}) {
-		t.Fatal("authorization failure was mistaken for absence")
+		t.Fatal("authorisation failure was mistaken for absence")
 	}
 }
 
@@ -187,7 +187,7 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 	cleanup.trackBlob(contentA)
 
 	// First push: everything uploads.
-	first, err := depot.PushV2(ctx, v2, firstManifest, newMapBlobSource(t, map[string]string{"a.jsonl": contentA}))
+	first, err := pushPrepared(ctx, v2, firstManifest, newMapBlobSource(t, map[string]string{"a.jsonl": contentA}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 	}
 	cleanup.trackSnapshot(secondSHA)
 	cleanup.trackBlob(contentB)
-	second, err := depot.PushV2(ctx, v2, secondManifest, newMapBlobSource(t, map[string]string{"b.jsonl": contentB}))
+	second, err := pushPrepared(ctx, v2, secondManifest, newMapBlobSource(t, map[string]string{"b.jsonl": contentB}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,11 +211,11 @@ func TestR2IntegrationV2PushPullVerify(t *testing.T) {
 		t.Fatalf("delta push: %+v", second)
 	}
 
-	// Unchanged state on a new day: recognized from the pointer alone.
+	// Unchanged state on a new day: recognised from the pointer alone.
 	// The empty blob source proves no content is read or uploaded.
 	unchanged := snapshotManifestFor(machine, sessionFile(contentA, "a.jsonl"), sessionFile(contentB, "b.jsonl"))
 	unchanged.CapturedAt = "2099-01-01T00:00:00Z"
-	reused, err := depot.PushV2(ctx, v2, unchanged, newMapBlobSource(t, nil))
+	reused, err := pushPrepared(ctx, v2, unchanged, newMapBlobSource(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestR2IntegrationV2ConcurrentFirstPushes(t *testing.T) {
 		go func(i int, manifest model.SnapshotManifest, source *mapBlobSource) {
 			defer wg.Done()
 			<-start
-			_, errs[i] = depot.PushV2(ctx, v2, manifest, source)
+			_, errs[i] = pushPrepared(ctx, v2, manifest, source)
 		}(i, manifest, source)
 	}
 	t.Cleanup(func() {
@@ -385,7 +385,7 @@ func resolveLiveR2Config(t *testing.T) depot.R2Config {
 	if err != nil {
 		t.Fatalf("invalid smoketest R2 credentials: %v", err)
 	}
-	cfg := model.R2DepotConfig{AccountID: pinnedR2SmoketestAccountID, Region: "auto"}
+	cfg := model.R2ArchiveConfig{AccountID: pinnedR2SmoketestAccountID, Region: "auto"}
 	resolved, err := depot.ResolveR2ConfigExplicit(cfg, credentials)
 	if err != nil {
 		t.Fatalf("invalid explicit smoketest R2 configuration: %v", err)

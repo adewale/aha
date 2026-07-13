@@ -71,7 +71,7 @@ func (r SessionRef) MarshalJSON() ([]byte, error) {
 
 func (r ArtifactRef) MarshalJSON() ([]byte, error) {
 	if !r.Valid() {
-		return nil, fmt.Errorf("invalid artifact ref")
+		return nil, fmt.Errorf("invalid artefact ref")
 	}
 	return json.Marshal(struct {
 		Kind        RefKind `json:"kind"`

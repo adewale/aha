@@ -17,12 +17,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/adewale/aha/internal/adapters"
-	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/search"
@@ -62,17 +59,19 @@ var serverInfo = &mcp.Implementation{Name: "aha", Version: model.Version}
 // rather than each hard-coding the same list. Update it alongside the
 // AddTool calls in registerTools and a test in tools_test.go will fail
 // loudly if the registered set drifts.
+const ContractSchema = "aha.mcp.v2"
+
 var ToolNames = []string{
-	"conflicts",
-	"corpus_size",
-	"doctor",
-	"incident_trajectory",
-	"incidents",
+	"aha_capabilities",
+	"analyse_failure_trajectory",
+	"analyse_failures",
 	"overview",
-	"read",
 	"search",
+	"show",
 	"status",
-	"verify",
+	"workspace_conflicts",
+	"workspace_size",
+	"workspace_verify",
 }
 
 // ToolDescriptions is the canonical per-tool description text. The
@@ -82,16 +81,16 @@ var ToolNames = []string{
 // code-mode LLM reading the surface gets the same descriptions it would
 // get over tools/list. Update here and both surfaces move together.
 var ToolDescriptions = map[string]string{
-	"search":              "Search the corpus over messages and artifacts. Returns ref-bearing results suitable for chaining into read.",
-	"read":                "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
-	"status":              "Return corpus health summary: counts and disk usage.",
-	"verify":              "Run read-only corpus invariant checks (no repair).",
-	"conflicts":           "List quarantined merge conflicts.",
-	"corpus_size":         "Return corpus on-disk size breakdown.",
-	"doctor":              "Return local environment, config, source, and corpus diagnostics. Depot probing is omitted to keep this tool local-only.",
-	"incidents":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
-	"incident_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
-	"overview":            "Corpus orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this corpus and is it healthy?'.",
+	"aha_capabilities":           "Return the MCP contract schema, required client features, and exact tool set.",
+	"search":                     "Search the Workspace over messages and artefacts. Returns ref-bearing results suitable for chaining into show.",
+	"show":                       "Retrieve full surrounding context for a search hit. Accepts either a canonical ref text or session+entry coordinates. mode='branch' walks the Pi parent_id tree from the entry leaf to the root; mode='live' adds compaction collapse and filters non-participating entries.",
+	"status":                     "Return Workspace health summary: counts and disk usage.",
+	"workspace_verify":           "Run read-only Workspace invariant checks (no repair).",
+	"workspace_conflicts":        "List quarantined merge conflicts.",
+	"workspace_size":             "Return Workspace on-disk size breakdown.",
+	"analyse_failures":           "The failure-and-fix view: one row per recurring tool-call failure carrying both its recurrence (episodes, distinct sessions/projects, first/last seen, an occurrence sparkline) and its resolution status (state unresolved/partial/resolved, rate, tentative/established tier, and top resolution paths ranked by Wilson-lower-bound confidence x spread, each with a ref into a sample resolving success). Optional project/source/machine/tool facets. The single surface for 'what keeps breaking, and do we know how to fix it?'; filter state=unresolved for the unsolved-pain to-do list, or state=resolved for skills worth harvesting. Identities and paths are normalized command families / error signatures — never raw tool output.",
+	"analyse_failure_trajectory": "Reconstruct the full fail->fix arc behind a resolving-success ref (the sample_ref carried by an incident resolution path) and, for multi-call entries, that path's sample_ordinal: every tool call from the failing opener through the resolving success, in order, each with a ref to read it.",
+	"overview":                   "Workspace orientation summary: session/entry/message/tool-call counts, source/machine/top-project breakdowns, the session time span, and on-disk index size. Answers 'what is in this Workspace and is it healthy?'.",
 }
 
 // ---------- Input structs (jsonschema tags drive the SDK schema generator) ----------
@@ -101,13 +100,13 @@ var ToolDescriptions = map[string]string{
 // AddTool's strict-input behaviour, so MCP clients sending unknown fields
 // are rejected before the handler runs.
 type SearchInput struct {
-	Query     string `json:"query" jsonschema:"Full-text query passed to the corpus FTS index"`
+	Query     string `json:"query" jsonschema:"Full-text query passed to the Workspace FTS index"`
 	Source    string `json:"source,omitempty" jsonschema:"Filter by source adapter name (pi, claude-code, codex)"`
 	Machine   string `json:"machine,omitempty" jsonschema:"Filter by machine id"`
 	Role      string `json:"role,omitempty" jsonschema:"Filter by message role (user, assistant, ...)"`
 	After     string `json:"after,omitempty" jsonschema:"RFC3339 lower bound on timestamps"`
 	Before    string `json:"before,omitempty" jsonschema:"RFC3339 upper bound on timestamps"`
-	Path      string `json:"path,omitempty" jsonschema:"Substring filter against session/artifact paths"`
+	Path      string `json:"path,omitempty" jsonschema:"Substring filter against session/artefact paths"`
 	PathToken string `json:"path_token,omitempty" jsonschema:"Indexed path-segment filter"`
 	Project   string `json:"project,omitempty" jsonschema:"Indexed project filter"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Cap on returned hits (default 20, max 200)"`
@@ -147,6 +146,11 @@ type IncidentTrajectoryInput struct {
 // reject extraneous arguments at the SDK boundary.
 type EmptyInput struct{}
 
+type ConflictsInput struct {
+	Limit  int `json:"limit,omitempty" jsonschema:"Page size (default 100, max 200)"`
+	Offset int `json:"offset,omitempty" jsonschema:"Zero-based page offset"`
+}
+
 // ---------- Pure business logic (used by both the SDK handlers and CallTool) ----------
 
 func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
@@ -183,6 +187,9 @@ func doSearch(b Backend, in SearchInput) ([]search.Result, error) {
 const MaxReadContextEntries = 200
 
 func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
+	if (in.Ref == "") == (in.Session == "") {
+		return nil, fmt.Errorf("show requires exactly one of ref or session")
+	}
 	var (
 		entries []corpus.ReadEntry
 		err     error
@@ -204,9 +211,6 @@ func doRead(b Backend, in ReadInput) ([]corpus.ReadEntry, error) {
 			}
 			entries, err = corpus.ReadCanonical(b.DB(), ref, before, after)
 		} else {
-			if in.Session == "" {
-				return nil, fmt.Errorf("read requires either ref or session")
-			}
 			entries, err = corpus.ReadContext(b.DB(), in.Session, in.Entry, before, after)
 		}
 	case "branch", "live":
@@ -241,8 +245,12 @@ func doVerify(b Backend) (corpus.VerifyReport, error) {
 	return corpus.Verify(b.Store())
 }
 
-func doConflicts(b Backend) ([]corpus.Conflict, error) {
-	rows, err := corpus.Conflicts(b.DB())
+func doConflicts(b Backend, in ConflictsInput) ([]corpus.Conflict, error) {
+	limit := in.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	rows, err := corpus.ConflictsPage(b.DB(), limit, in.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -292,50 +300,6 @@ func doIncidentTrajectory(b Backend, in IncidentTrajectoryInput) ([]corpus.Traje
 
 func doOverview(b Backend) (corpus.Overview, error) {
 	return corpus.CorpusOverview(b.DB())
-}
-
-func doDoctor(b Backend) (map[string]any, error) {
-	cfg := b.Config()
-	names := make([]string, 0, len(adapters.Builtins()))
-	for n := range adapters.Builtins() {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	var ads []map[string]any
-	for _, name := range names {
-		ad := adapters.Builtins()[name]
-		ads = append(ads, map[string]any{
-			"name":          name,
-			"version":       ad.Version(),
-			"capabilities":  ad.Capabilities(),
-			"default_roots": ad.DefaultRoots(),
-		})
-	}
-	var sources []map[string]any
-	for _, sc := range cfg.Sources {
-		sources = append(sources, map[string]any{
-			"type":    sc.Type,
-			"root":    sc.Root,
-			"enabled": sc.Enabled,
-		})
-	}
-	corpusBlock := map[string]any{
-		"path": b.Root(),
-		"ok":   true,
-	}
-	if st, err := corpus.Status(b.DB(), b.Root()); err == nil {
-		corpusBlock["entries"] = st["entries"]
-		corpusBlock["sessions"] = st["sessions"]
-		corpusBlock["index_size_bytes"] = st["index_size_bytes"]
-	}
-	return map[string]any{
-		"version":  model.Version,
-		"config":   config.DefaultPath(),
-		"adapters": ads,
-		"sources":  sources,
-		"corpus":   corpusBlock,
-		"next":     []string{"aha search <query>", "aha read <ref>"},
-	}, nil
 }
 
 // ---------- SDK registration ----------
@@ -396,6 +360,14 @@ func NewServer(backend Backend) *mcp.Server {
 
 func registerTools(server *mcp.Server, b Backend) {
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "aha_capabilities",
+		Description: ToolDescriptions["aha_capabilities"],
+		Annotations: readOnlyAnnotations,
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
+		return nil, capabilities(), nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search",
 		Description: ToolDescriptions["search"],
 		Annotations: readOnlyAnnotations,
@@ -408,8 +380,8 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "read",
-		Description: ToolDescriptions["read"],
+		Name:        "show",
+		Description: ToolDescriptions["show"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		out, err := doRead(b, in)
@@ -432,8 +404,8 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "verify",
-		Description: ToolDescriptions["verify"],
+		Name:        "workspace_verify",
+		Description: ToolDescriptions["workspace_verify"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.VerifyReport, error) {
 		out, err := doVerify(b)
@@ -444,11 +416,11 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "conflicts",
-		Description: ToolDescriptions["conflicts"],
+		Name:        "workspace_conflicts",
+		Description: ToolDescriptions["workspace_conflicts"],
 		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, any, error) {
-		out, err := doConflicts(b)
+	}, func(_ context.Context, _ *mcp.CallToolRequest, in ConflictsInput) (*mcp.CallToolResult, any, error) {
+		out, err := doConflicts(b, in)
 		if err != nil {
 			return errorResult(err), nil, nil
 		}
@@ -456,8 +428,8 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "corpus_size",
-		Description: ToolDescriptions["corpus_size"],
+		Name:        "workspace_size",
+		Description: ToolDescriptions["workspace_size"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, corpus.SizeReport, error) {
 		out, err := doCorpusSize(b)
@@ -468,20 +440,8 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "doctor",
-		Description: ToolDescriptions["doctor"],
-		Annotations: readOnlyAnnotations,
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, map[string]any, error) {
-		out, err := doDoctor(b)
-		if err != nil {
-			return errorResult(err), nil, nil
-		}
-		return nil, out, nil
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "incidents",
-		Description: ToolDescriptions["incidents"],
+		Name:        "analyse_failures",
+		Description: ToolDescriptions["analyse_failures"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentsInput) (*mcp.CallToolResult, any, error) {
 		out, err := doIncidents(b, in)
@@ -492,8 +452,8 @@ func registerTools(server *mcp.Server, b Backend) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "incident_trajectory",
-		Description: ToolDescriptions["incident_trajectory"],
+		Name:        "analyse_failure_trajectory",
+		Description: ToolDescriptions["analyse_failure_trajectory"],
 		Annotations: readOnlyAnnotations,
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in IncidentTrajectoryInput) (*mcp.CallToolResult, any, error) {
 		out, err := doIncidentTrajectory(b, in)
@@ -554,13 +514,18 @@ func errorResult(err error) *mcp.CallToolResult {
 // keeps `aha serve` independent of the MCP transport stack.
 func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 	switch name {
+	case "aha_capabilities":
+		if err := rejectArgsIfPresent(raw, name); err != nil {
+			return nil, err
+		}
+		return capabilities(), nil
 	case "search":
 		in, err := decodeInput[SearchInput](raw, name)
 		if err != nil {
 			return nil, err
 		}
 		return doSearch(b, in)
-	case "read":
+	case "show":
 		in, err := decodeInput[ReadInput](raw, name)
 		if err != nil {
 			return nil, err
@@ -571,33 +536,29 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return doStatus(b)
-	case "verify":
+	case "workspace_verify":
 		if err := rejectArgsIfPresent(raw, name); err != nil {
 			return nil, err
 		}
 		return doVerify(b)
-	case "conflicts":
-		if err := rejectArgsIfPresent(raw, name); err != nil {
+	case "workspace_conflicts":
+		in, err := decodeInput[ConflictsInput](raw, name)
+		if err != nil {
 			return nil, err
 		}
-		return doConflicts(b)
-	case "corpus_size":
+		return doConflicts(b, in)
+	case "workspace_size":
 		if err := rejectArgsIfPresent(raw, name); err != nil {
 			return nil, err
 		}
 		return doCorpusSize(b)
-	case "doctor":
-		if err := rejectArgsIfPresent(raw, name); err != nil {
-			return nil, err
-		}
-		return doDoctor(b)
-	case "incidents":
+	case "analyse_failures":
 		in, err := decodeInput[IncidentsInput](raw, name)
 		if err != nil {
 			return nil, err
 		}
 		return doIncidents(b, in)
-	case "incident_trajectory":
+	case "analyse_failure_trajectory":
 		in, err := decodeInput[IncidentTrajectoryInput](raw, name)
 		if err != nil {
 			return nil, err
@@ -610,6 +571,15 @@ func CallTool(b Backend, name string, raw json.RawMessage) (any, error) {
 		return doOverview(b)
 	}
 	return nil, fmt.Errorf("unknown tool: %s", name)
+}
+
+func capabilities() map[string]any {
+	return map[string]any{
+		"schema":            ContractSchema,
+		"http_schema":       "aha.http.v2",
+		"required_features": []string{"read-only-v1", "strict-input-v1", "structured-errors-v1"},
+		"tools":             append([]string(nil), ToolNames...),
+	}
 }
 
 // decodeInput strict-parses raw into a typed Input struct. Unknown fields

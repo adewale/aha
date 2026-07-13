@@ -49,7 +49,16 @@ func seedResolvedIncidentCorpus(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = corpus.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	return dir
 }
 
@@ -57,8 +66,8 @@ func TestIncidentsCLIJSON(t *testing.T) {
 	dir := seedResolvedIncidentCorpus(t)
 
 	var out bytes.Buffer
-	if err := cli.Run([]string{"incidents", "--repo", dir, "--json"}, &out, io.Discard); err != nil {
-		t.Fatalf("incidents --json: %v", err)
+	if err := cli.Run([]string{"analyse", "failures", "--workspace", dir, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--json"}, &out, io.Discard); err != nil {
+		t.Fatalf("analyse failures --json: %v", err)
 	}
 	var incidents []corpus.Incident
 	if err := json.Unmarshal(out.Bytes(), &incidents); err != nil {
@@ -77,8 +86,8 @@ func TestIncidentsCLIHumanOutput(t *testing.T) {
 	dir := seedResolvedIncidentCorpus(t)
 
 	var out bytes.Buffer
-	if err := cli.Run([]string{"incidents", "--repo", dir}, &out, io.Discard); err != nil {
-		t.Fatalf("incidents (human): %v", err)
+	if err := cli.Run([]string{"analyse", "failures", "--workspace", dir, "--config", filepath.Join(t.TempDir(), "missing.jsonc")}, &out, io.Discard); err != nil {
+		t.Fatalf("analyse failures (human): %v", err)
 	}
 	got := out.String()
 	for _, want := range []string{"resolved", "confluent topic describe", "fix conf=", "ref=msg:"} {
@@ -93,10 +102,10 @@ func TestIncidentsCLIStateFilter(t *testing.T) {
 
 	// The only incident is resolved; filtering to unresolved yields nothing.
 	var out bytes.Buffer
-	if err := cli.Run([]string{"incidents", "--repo", dir, "--state", "unresolved"}, &out, io.Discard); err != nil {
-		t.Fatalf("incidents --state unresolved: %v", err)
+	if err := cli.Run([]string{"analyse", "failures", "--workspace", dir, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--state", "unresolved"}, &out, io.Discard); err != nil {
+		t.Fatalf("analyse failures --state unresolved: %v", err)
 	}
-	if !strings.Contains(out.String(), "no incidents found") {
+	if !strings.Contains(out.String(), "no recurring failures found") {
 		t.Fatalf("unresolved filter should be empty here, got: %q", out.String())
 	}
 }
@@ -110,10 +119,10 @@ func TestIncidentsCLIEmptyCorpus(t *testing.T) {
 	store.Close()
 
 	var out bytes.Buffer
-	if err := cli.Run([]string{"incidents", "--repo", dir}, &out, io.Discard); err != nil {
-		t.Fatalf("incidents on empty corpus: %v", err)
+	if err := cli.Run([]string{"analyse", "failures", "--workspace", dir, "--config", filepath.Join(t.TempDir(), "missing.jsonc")}, &out, io.Discard); err != nil {
+		t.Fatalf("analyse failures on empty Workspace: %v", err)
 	}
-	if !strings.Contains(out.String(), "no incidents found") {
+	if !strings.Contains(out.String(), "no recurring failures found") {
 		t.Fatalf("expected empty message, got: %q", out.String())
 	}
 }

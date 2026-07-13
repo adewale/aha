@@ -2,7 +2,7 @@
 
 Date: 2026-05-21
 
-*Historical: predates depot v2 ([../depot-v2-spec.md](../depot-v2-spec.md)). Bundle/catalog depot mechanics referenced below were replaced by content-addressed snapshots in June 2026.*
+*Historical: predates depot v2 ([../depot-v2-spec.md](../depot-v2-spec.md)). Bundle/catalogue depot mechanics referenced below were replaced by content-addressed snapshots in June 2026.*
 
 Inputs:
 
@@ -18,11 +18,11 @@ Inputs:
 - Added public canonical ref parse/format round-trip tests and fuzzing.
 - Added archive walk/write property tests and unsafe archive path rejection.
 - Added status schema error reporting instead of silently returning zero counts.
-- Added direct `internal/search` tests for filters, artifacts, and FTS query escaping.
+- Added direct `internal/search` tests for filters, artefacts, and FTS query escaping.
 - Added Codex discovery tests to reject non-session JSONL files.
 - Fixed `refresh --json` to use stable lower-case report keys via JSON tags.
 - Fixed `search --json` to preserve structured `ref` and add copy-pastable `ref_text`.
-- Fixed artifact discovery so disabling subagent sessions does not suppress normal-session artifacts.
+- Fixed artefact discovery so disabling subagent sessions does not suppress normal-session artefacts.
 - Added static test-quality guards against `t.Log` as assertion substitute and focused/sleep-based tests.
 - Added ingest failure-injection hooks/tests for rollback after file blobs and cleanup after bundle promotion.
 - Split ingest setup into `ingestPlan`, metadata insertion, and bundle promotion helpers.
@@ -31,7 +31,7 @@ Inputs:
 - Added CLI flag metadata/FlagSet sync coverage.
 - Added resolver tests for exact-vs-prefix precedence and literal `%`/`_` handling.
 - Added search path-filter wildcard escaping coverage.
-- Routed `aha read <ref>` through typed `corpus.ReadRef` and added artifact search-ref round-trip coverage.
+- Routed `aha show <ref>` through typed `corpus.ReadRef` and added artefact search-ref round-trip coverage.
 
 ## TDD misses found
 
@@ -55,18 +55,18 @@ Inputs:
    - Miss: code comment claimed non-session JSONL would be avoided, but implementation included it.
    - Fix: failing discovery test first; now only `rollout-*.jsonl` and `history.jsonl` are accepted.
 
-6. **IncludeSubagents flag behavior**
-   - Miss: artifact capture was accidentally tied to subagent-session inclusion.
-   - Fix: failing flag-matrix test first; artifact discovery now runs for retained normal sessions regardless of `IncludeSubagents`.
+6. **IncludeSubagents flag behaviour**
+   - Miss: artefact capture was accidentally tied to subagent-session inclusion.
+   - Fix: failing flag-matrix test first; artefact discovery now runs for retained normal sessions regardless of `IncludeSubagents`.
 
 ## Second audit results
 
 A fresh reviewer pass after the fixes found no P0/P1 blockers after these follow-ups:
 
 - Bundle staging now uses `os.CreateTemp` rather than timestamp-only names, removing concurrent staging collisions.
-- Search path filters now escape SQL LIKE wildcards for message cwd and artifact raw paths.
+- Search path filters now escape SQL LIKE wildcards for message cwd and artefact raw paths.
 - Concurrent duplicate ingest is covered with two independently opened stores and `-race -count=5` validation.
-- Ingest failure tests assert full rollback across bundle/session/message/artifact/FTS tables plus staging cleanup.
+- Ingest failure tests assert full rollback across bundle/session/message/artefact/FTS tables plus staging cleanup.
 
 ## Third audit results
 
@@ -76,7 +76,7 @@ A later TDD pass addressed additional reviewer findings:
 - Archive writing is deterministic independent of caller file ordering; `Write` sorts a copy of manifest and captured files.
 - Archive read/write/stream/walk now validate semantic manifest fields: schema, bundle ID, machine ID, capture timestamp, file source, supported kind, and source/kind path consistency.
 - `search` and `read` now reject mutually exclusive output mode combinations instead of silently picking one.
-- Artifact `ref_text` now formats as canonical `artifact:v1:<sha>` so parsing preserves artifact kind.
+- Artefact `ref_text` now formats as canonical `artifact:v1:<sha>` so parsing preserves artefact kind.
 
 A fresh reviewer pass found no P0/P1 regressions after these changes.
 

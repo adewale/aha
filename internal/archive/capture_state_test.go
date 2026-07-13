@@ -2,6 +2,7 @@ package archive_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,6 +138,40 @@ func TestCaptureCacheCorruptFileSelfHeals(t *testing.T) {
 	}
 	if _, ok := c.Lookup(p, st); ok {
 		t.Fatal("corrupt cache produced a hit")
+	}
+}
+
+func TestMetadataOnlyCaptureRefusesCacheMissWithoutSourceRead(t *testing.T) {
+	root := t.TempDir()
+	fixture := testutil.WriteAgentFixtures(t, root)
+	cfg := config.Default()
+	cfg.MachineID = "metadata-only"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fixture.PiRoot, Enabled: true}}
+	cache := archive.LoadCaptureCache(filepath.Join(root, "missing-cache.json"), ahaclock.RealClock{})
+	capture, err := archive.CaptureState(t.Context(), cfg, adapters.Builtins(), archive.StateOptions{Clock: ahaclock.RealClock{}, Cache: cache, MetadataOnly: true})
+	if capture != nil {
+		_ = capture.Close()
+		t.Fatal("metadata-only cache miss returned a capture")
+	}
+	var unknown *archive.CaptureStateUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("CaptureState error=%T %v, want CaptureStateUnknownError", err, err)
+	}
+}
+
+func TestCaptureStateDeclaresOnlyAdaptersUsedByFiles(t *testing.T) {
+	root := t.TempDir()
+	fixture := testutil.WriteAgentFixtures(t, root)
+	cfg := config.Default()
+	cfg.MachineID = "used-adapters"
+	cfg.Sources = []model.SourceConfig{{Type: "pi", Root: fixture.PiRoot, Enabled: true}}
+	capture, err := archive.CaptureState(t.Context(), cfg, adapters.Builtins(), archive.StateOptions{Clock: ahaclock.RealClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer capture.Close()
+	if len(capture.Manifest.Adapters) != 1 || capture.Manifest.Adapters[0].Name != "pi" {
+		t.Fatalf("adapter declarations=%+v, want only used pi adapter", capture.Manifest.Adapters)
 	}
 }
 

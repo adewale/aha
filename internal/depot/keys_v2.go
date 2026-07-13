@@ -18,12 +18,14 @@ import (
 //	machines/<machine>/manifests/<sha256>.json    one snapshot manifest, write-once
 //	machines/<machine>/latest                     pointer, conditional PUT
 const (
-	MarkerSchemaV2      = "aha-depot/v2"
-	LayoutVersionV2     = "v2"
-	LatestPointerSchema = "aha-depot-latest/v2"
-	MachinesIndexSchema = "aha-depot-machines/v2"
-	MachinesIndexKey    = "machines/index.json"
-	MarkerObjectKey     = "aha-depot.json"
+	MarkerSchemaV2       = "aha-depot/v2" // readable pre-fence Archive
+	LayoutVersionV2      = "v2"
+	MarkerSchemaCurrent  = "aha-depot/v3"
+	LayoutVersionCurrent = "v3"
+	LatestPointerSchema  = "aha-depot-latest/v2"
+	MachinesIndexSchema  = "aha-depot-machines/v2"
+	MachinesIndexKey     = "machines/index.json"
+	MarkerObjectKey      = "aha-depot.json"
 )
 
 // BlobObjectKey is the object key for a stored file version. The key is
@@ -45,7 +47,7 @@ func LatestPointerKey(machine string) string {
 }
 
 // machinePrefix is the only place v2 machine namespaces are constructed.
-// Machine IDs are sanitized with the same component rules as the v1
+// Machine IDs are sanitised with the same component rules as the v1
 // catalog, so a hostile machine ID cannot escape machines/<id>/.
 func machinePrefix(machine string) string {
 	return "machines/" + safeCatalogComponent(machine) + "/"

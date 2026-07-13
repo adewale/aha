@@ -9,19 +9,27 @@ import (
 	"github.com/adewale/aha/internal/mcp"
 )
 
-// cmdMcp runs the read-only stdio MCP server. The MCP wire format (JSON-RPC
-// 2.0 over NDJSON-framed stdio) is owned by the SDK; stdin/stdout carry
-// the protocol, stderr carries any human-facing diagnostics. See
-// docs/mcp-spec.md.
-func cmdMcp(args []string, _, stderr io.Writer) error {
-	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+// cmdMcp exposes explicit check and serve operations. Stdio protocol output
+// remains isolated on stdout; human diagnostics use stderr.
+func cmdMcp(args []string, stdout io.Writer, stderr io.Writer) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+		fmt.Fprintln(stdout, "Usage: aha mcp <check|serve> [--workspace PATH]")
+		return nil
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("mcp requires subcommand: check or serve")
+	}
+	sub := args[0]
+	if sub != "check" && sub != "serve" {
+		return fmt.Errorf("unknown mcp subcommand %q", sub)
+	}
+	fs := flag.NewFlagSet("mcp "+sub, flag.ContinueOnError)
 	fs.SetOutput(flagOutput(args, stderr))
-	cf := registerCorpusFlags(fs)
-	dryRun := fs.Bool("dry-run", false, "open the corpus, register tools, print a one-line summary to stderr, then exit without serving stdio")
-	if err := fs.Parse(args); err != nil {
+	wf := registerWorkspaceFlags(fs)
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	cfg, err := cf.loadConfig()
+	cfg, err := wf.loadConfig()
 	if err != nil {
 		return err
 	}
@@ -30,13 +38,9 @@ func cmdMcp(args []string, _, stderr io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	if *dryRun {
-		// Build the server (which registers every tool) and exit
-		// without reading stdin. Hosts use this to smoke-test that
-		// `aha mcp` can open its corpus and that the registered tool
-		// set is what they expect.
+	if sub == "check" {
 		_ = mcp.NewServer(mcp.NewCorpusBackend(store, cfg))
-		fmt.Fprintf(stderr, "aha mcp dry-run ok: %d tools (%s)\n", len(mcp.ToolNames), strings.Join(mcp.ToolNames, ", "))
+		fmt.Fprintf(stderr, "aha mcp check ok: %d tools (%s)\n", len(mcp.ToolNames), strings.Join(mcp.ToolNames, ", "))
 		return nil
 	}
 	return mcp.Serve(mcp.NewCorpusBackend(store, cfg))

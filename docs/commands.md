@@ -4,9 +4,9 @@ This file is generated from CLI command metadata. Update command metadata, then 
 
 ## Global profiling
 
-Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artifacts and are not written unless explicitly requested.
+Any command may write Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags can appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`. Profiles are local debugging artefacts and are not written unless explicitly requested.
 
-Examples: `aha --cpuprofile cpu.pprof search needle`, `aha verify --memprofile heap.pprof`.
+Examples: `aha --cpuprofile cpu.pprof search needle`, `aha workspace verify --memprofile heap.pprof`.
 
 ## Error contract
 
@@ -21,8 +21,8 @@ When a command is invoked with `--json`, failures are written to stderr using th
     "code": "machine_readable_code",
     "message": "safe human-readable message",
     "command": "command-name",
-    "next": ["aha doctor --json"],
-    "next_action": {"command": "aha", "args": ["doctor", "--json"]},
+    "next": ["aha status --json"],
+    "next_action": {"command": "aha", "args": ["status", "--json"]},
     "diagnostics": []
   }
 }
@@ -30,286 +30,133 @@ When a command is invoked with `--json`, failures are written to stderr using th
 
 With `--progress=json`, stderr remains valid NDJSON: progress events are followed by one terminal `aha.error.v1` object on failure.
 
-## aha conflicts
+## aha analyse
 
-list quarantined merge conflicts
+rank recurring tool-call failures and the resolution paths that worked
 
 ```txt
-aha conflicts [--repo DIR] [--json]
+aha analyse failures [--workspace PATH] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
 ```
 
 **Flags:**
 
 - `--config`
-- `--corpus`
 - `--json`
-- `--repo`
+- `--limit`
+- `--machine`
+- `--project`
+- `--source`
+- `--state`
+- `--tool`
+- `--workspace`
 
 **Examples:**
 
-- `aha conflicts --json`
+- `aha analyse failures --json`
+- `aha analyse failures --state unresolved`
 
-**JSON contract:** `array<object{id,session_key,entry_id,first,second,created_at}>`
+**JSON contract:** `array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths,sample_ref,score}>`
 
-## aha corpus
+## aha archive
 
-inspect corpus disk usage, vacuum SQLite, explicitly prune unreferenced blobs, or atomically rebuild a pre-v2 corpus while preserving a backup
-
-```txt
-aha corpus <size|vacuum|prune-orphans|rebuild> [--repo DIR] [--progress MODE] [--json] [--force|--backup]
-```
-
-**Flags:**
-
-- `--backup`
-- `--config`
-- `--corpus`
-- `--force`
-- `--json`
-- `--progress`
-- `--repo`
-
-**Examples:**
-
-- `aha corpus size --json`
-- `aha corpus vacuum`
-- `aha corpus prune-orphans --json`
-- `aha corpus rebuild --backup --json`
-
-**JSON contract:** `object{root,total_bytes,database_bytes,file_blob_bytes,image_blob_bytes,other_bytes,files}|object{before_bytes,after_bytes,reclaimed_bytes}|object{root,dry_run,orphan_bytes,deleted_files,deleted_bytes,orphans}|object{root,backup,next,next_action}`
-
-## aha depot
-
-preflight R2 with one safe next action, initialize a depot, switch the default, list snapshots, or verify content
+manage durable aggregated history and explicit upload/download transitions
 
 ```txt
-aha depot <setup|init|use|ls|verify> [DEPOT] [--progress MODE] [--json] [--deep]
+aha archive <init|set-default|status|upload|download|verify> [ARCHIVE] [--workspace PATH] [--deep] [--dry-run] [--progress MODE] [--json]
 ```
 
 **Flags:**
 
 - `--config`
 - `--deep`
+- `--dry-run`
+- `--force`
 - `--json`
 - `--progress`
+- `--workspace`
 
 **Examples:**
 
-- `aha depot setup r2:aha-depot --json`
-- `aha depot init local:~/.aha/depot`
-- `aha depot init r2:aha-depot`
-- `aha depot use r2:aha-depot`
-- `aha depot ls --json`
-- `aha depot verify --deep`
+- `aha archive init`
+- `aha archive upload`
+- `aha archive download`
+- `aha archive status r2:team-history --json`
+- `aha archive verify --deep`
 
-**JSON contract:** `object|array`
+**JSON contract:** `aha.archive.status.v2|object{state,...}`
 
-## aha doctor
+## aha dashboard
 
-show diagnostics and exactly one state-aware next action
+run the read-only local dashboard over a Workspace
 
 ```txt
-aha doctor [--depot DEPOT] [--json]
+aha dashboard [--workspace PATH] [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN]
 ```
 
 **Flags:**
 
+- `--addr`
+- `--allow-remote`
+- `--allowed-hosts`
 - `--config`
-- `--depot`
-- `--json`
+- `--timeout`
+- `--token`
+- `--workspace`
 
 **Examples:**
 
-- `aha doctor`
-- `aha doctor --depot local:~/.aha/depot --json`
+- `aha dashboard`
+- `aha dashboard --addr 127.0.0.1:18428`
 
-**JSON contract:** `object{version,config,adapters,sources,corpus,depot,next,next_action}`
-
-## aha export
-
-materialize a machine's latest depot snapshot as a portable v1 bundle.tar.zst (the single-file hand-off format; re-import with aha ingest)
-
-```txt
-aha export [--machine ID] [--depot DEPOT] [--out FILE] [--json]
-```
-
-**Flags:**
-
-- `--config`
-- `--depot`
-- `--json`
-- `--machine`
-- `--out`
-
-**Examples:**
-
-- `aha export`
-- `aha export --machine work-mac --out work.tar.zst`
-
-**JSON contract:** `object{bundle,sha256,manifest_sha256,machine,files,bytes}`
-
-## aha incidents
-
-rank recurring tool-call failures with their resolution status (unresolved/partial/resolved) and the fix paths that worked
-
-```txt
-aha incidents [--repo DIR] [--limit N] [--state S] [--project P] [--source S] [--machine M] [--tool T] [--json]
-```
-
-**Flags:**
-
-- `--config`
-- `--corpus`
-- `--json`
-- `--limit`
-- `--machine`
-- `--project`
-- `--repo`
-- `--source`
-- `--state`
-- `--tool`
-
-**Examples:**
-
-- `aha incidents --json`
-- `aha incidents --state unresolved`
-- `aha incidents --state resolved --project myrepo`
-
-**JSON contract:** `array<object{tool_name,command_family,error_signature,episodes,distinct_sessions,distinct_projects,resolved,resolution_rate,state,tier,first_seen,last_seen,spark,paths:array<object{families,support,distinct_sessions,distinct_projects,confidence,sample_ref,sample_ordinal}>,sample_ref,score}>`
-
-## aha ingest
-
-pull every machine's latest depot snapshot into a dedicated corpus after side-effect-free depot/destination preflight (explicit r2:BUCKET or local:PATH), or import explicit v1 bundle files
-
-```txt
-aha ingest [--repo DIR] [--depot DEPOT] [--progress MODE] [--json] [bundle.tar.zst ...]
-```
-
-**Flags:**
-
-- `--config`
-- `--corpus`
-- `--depot`
-- `--progress`
-- `--repo`
-- `--json`
-
-**Examples:**
-
-- `aha ingest ./bundle.tar.zst`
-- `aha ingest --repo ./aha-repo`
-- `aha ingest --depot local:~/.aha/depot`
-
-**JSON contract:** `array<object{machine?,manifest_sha256?,bundle?,sessions,entries,messages,images,artifacts,duplicate}>`
+**JSON contract:** `http://HOST:PORT/api/v2/{search,show,analyse,overview,status,workspace}`
 
 ## aha init
 
-write starter JSONC config
+write config, assign the machine, initialise the default local Archive, and prepare the default Workspace destination
 
 ```txt
-aha init [--config PATH] [--accept-secrets] [--json]
+aha init --acknowledge-raw-history [--config PATH] [--dry-run] [--json]
 ```
 
 **Flags:**
 
-- `--accept-secrets`
+- `--acknowledge-raw-history`
 - `--config`
+- `--dry-run`
 - `--json`
 
 **Examples:**
 
-- `aha init --accept-secrets`
+- `aha init --acknowledge-raw-history`
 
-**JSON contract:** `object{config,accepted_secrets}`
+**JSON contract:** `object{config,acknowledged_raw_history,archive,workspace}`
 
 ## aha mcp
 
-run a read-only stdio MCP server over the corpus
+check or serve the read-only stdio MCP interface over a Workspace
 
 ```txt
-aha mcp [--config PATH] [--repo DIR] [--dry-run]
+aha mcp <check|serve> [--workspace PATH] [--config PATH]
 ```
 
 **Flags:**
 
 - `--config`
-- `--corpus`
-- `--dry-run`
-- `--repo`
+- `--workspace`
 
 **Examples:**
 
-- `aha mcp`
-- `aha mcp --dry-run`
+- `aha mcp check`
+- `aha mcp serve`
 
-**JSON contract:** `jsonrpc:tools/list|tools/call (stdio MCP)`
-
-## aha read
-
-retrieve source context for a search result
-
-```txt
-aha read [REF] [--session ID] [--entry ID] [--repo DIR] [--before N] [--after N] [--json|--md]
-```
-
-**Flags:**
-
-- `--after`
-- `--before`
-- `--branch`
-- `--config`
-- `--corpus`
-- `--entry`
-- `--json`
-- `--live`
-- `--md`
-- `--repo`
-- `--session`
-
-**Examples:**
-
-- `aha read <ref_text> --json`
-- `aha read --session <session> --entry <entry> --json`
-
-**JSON contract:** `array<object{line_no,entry_id,timestamp,role,text,raw_json}>`
-
-## aha refresh
-
-push this machine's state to the depot (unchanged state is recognized without re-uploading), then pull every machine's latest snapshot into the corpus
-
-```txt
-aha refresh [--session MATCH ...] [--max-sessions N] [--repo DIR] [--depot DEPOT] [--force] [--progress MODE] [--json]
-```
-
-**Flags:**
-
-- `--accept-secrets`
-- `--captured-at`
-- `--config`
-- `--corpus`
-- `--depot`
-- `--force`
-- `--machine`
-- `--max-sessions`
-- `--progress`
-- `--repo`
-- `--session`
-- `--source`
-- `--json`
-
-**Examples:**
-
-- `aha refresh`
-- `aha refresh --session abc --max-sessions 1`
-
-**JSON contract:** `object{push:object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried},report,reports}`
+**JSON contract:** `check diagnostic|jsonrpc:tools/list|tools/call`
 
 ## aha search
 
-find relevant messages/artifacts; use read on returned refs before answering
+find relevant messages and artefacts; use show on returned refs before answering
 
 ```txt
-aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
+aha search [--workspace PATH] QUERY [--source NAME] [--machine ID] [--role ROLE] [--project KEY] [--path-token TOKEN] [--json|--refs|--files|--md]
 ```
 
 **Flags:**
@@ -317,7 +164,6 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `--after`
 - `--before`
 - `--config`
-- `--corpus`
 - `--files`
 - `--json`
 - `--limit`
@@ -327,9 +173,9 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 - `--path-token`
 - `--project`
 - `--refs`
-- `--repo`
 - `--role`
 - `--source`
+- `--workspace`
 
 **Examples:**
 
@@ -338,105 +184,81 @@ aha search <query> [--repo DIR] [--source NAME] [--machine ID] [--role ROLE] [--
 
 **JSON contract:** `array<object{score,timestamp,source,machine,project,role,snippet,session_key,entry_id,ref,ref_text}>`
 
-## aha serve
+## aha show
 
-run a read-only local dashboard over the corpus on loopback
+display contextual evidence for a search result
 
 ```txt
-aha serve [--addr HOST:PORT] [--allow-remote] [--allowed-hosts H1,H2] [--timeout DUR] [--token TOKEN] [--config PATH] [--repo DIR]
+aha show [--workspace PATH] REF [--session ID] [--entry ID] [--before N] [--after N] [--json|--md]
 ```
 
 **Flags:**
 
-- `--addr`
-- `--allow-remote`
-- `--allowed-hosts`
+- `--after`
+- `--before`
+- `--branch`
 - `--config`
-- `--corpus`
-- `--repo`
-- `--timeout`
-- `--token`
-
-**Examples:**
-
-- `aha serve`
-- `aha serve --addr 127.0.0.1:18428`
-- `aha serve --allow-remote --token $(openssl rand -hex 32)`
-
-**JSON contract:** `http://HOST:PORT/api/{search,read,incidents,incident_trajectory,overview,status,verify,conflicts,corpus_size,doctor}`
-
-## aha snapshot
-
-push this machine's state to the depot: upload only new file versions, publish a snapshot manifest, move the pointer (no corpus needed; never downloads other machines' data)
-
-```txt
-aha snapshot [--session MATCH ...] [--max-sessions N] [--depot DEPOT] [--force] [--progress MODE] [--json]
-```
-
-**Flags:**
-
-- `--accept-secrets`
-- `--captured-at`
-- `--config`
-- `--depot`
-- `--force`
-- `--machine`
-- `--max-sessions`
-- `--progress`
-- `--session`
-- `--source`
+- `--entry`
 - `--json`
+- `--live`
+- `--md`
+- `--session`
+- `--workspace`
 
 **Examples:**
 
-- `aha snapshot --accept-secrets --depot local:~/.aha/depot`
+- `aha show <ref_text> --json`
+- `aha show --session <session> --entry <entry> --json`
 
-**JSON contract:** `object{manifest_sha256,reused,files,blobs_uploaded,blobs_existing,blobs_carried}`
+**JSON contract:** `array<object{line_no,entry_id,timestamp,role,text,raw_json}>`
 
 ## aha status
 
-summarize corpus health
+inspect agent-history, Archive, and Workspace state with one next transition
 
 ```txt
-aha status [--repo DIR] [--depot DEPOT] [--json]
+aha status [--archive ARCHIVE] [--workspace PATH] [--json]
 ```
 
 **Flags:**
 
+- `--archive`
 - `--config`
-- `--corpus`
-- `--depot`
 - `--json`
-- `--repo`
+- `--workspace`
 
 **Examples:**
 
 - `aha status --json`
-- `aha status --depot local:~/.aha/depot --json`
+- `aha status --archive r2:team-history --workspace ~/.aha/workspace --json`
 
-**JSON contract:** `object{corpus_dir,machines,sources,sessions,session_versions,entries,messages,artifacts,images,entry_assets,files,snapshots,conflicts,tool_invocations,fts_messages,fts_artifacts,session_path_tokens,artifact_path_tokens,index_size_bytes,depot_behind_snapshots?,depot_machines_listed?,depot_fetches?,next}`
+**JSON contract:** `aha.status.v2`
 
-## aha verify
+## aha workspace
 
-verify corpus invariants and optionally repair derived FTS rows
+select, inspect, verify, repair, or inspect conflicts in a local Workspace
 
 ```txt
-aha verify [--repo DIR] [--repair-fts] [--progress MODE] [--json]
+aha workspace <set-default|status|verify|repair|conflicts> [PATH] [--repair-fts] [--backup] [--limit N] [--offset N] [--dry-run] [--progress MODE] [--json]
 ```
 
 **Flags:**
 
+- `--backup`
 - `--config`
-- `--corpus`
+- `--dry-run`
 - `--json`
+- `--limit`
+- `--offset`
 - `--progress`
 - `--repair-fts`
-- `--repo`
 
 **Examples:**
 
-- `aha verify --json`
-- `aha verify --repair-fts`
+- `aha workspace status`
+- `aha workspace verify --repair-fts`
+- `aha workspace repair --backup`
+- `aha workspace conflicts --json`
 
-**JSON contract:** `object{root,stats,problems,repaired_fts,fts_repair?}`
+**JSON contract:** `aha.workspace.status.v2|object|array`
 

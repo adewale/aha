@@ -47,7 +47,7 @@ func TestTrustDocScopesErrorNormalizationToApplicationBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(b)
-	for _, want := range []string{"application/tool failures", "SDK-owned protocol", "not normalized by aha"} {
+	for _, want := range []string{"application/tool failures", "SDK-owned protocol", "not normalised by aha"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("trust document does not scope MCP error guarantee with %q", want)
 		}
@@ -60,7 +60,7 @@ func TestRegisteredCommandsHaveAgentMetadata(t *testing.T) {
 		if cmd.Usage == "" || cmd.Docs == "" || cmd.JSONSchema == "" || len(cmd.Examples) == 0 {
 			t.Fatalf("command %s missing metadata: %+v", name, cmd)
 		}
-		if len(cmd.Flags) == 0 && name != "doctor" {
+		if len(cmd.Flags) == 0 {
 			t.Fatalf("command %s missing flag metadata", name)
 		}
 		for _, flag := range cmd.Flags {
@@ -77,15 +77,15 @@ func TestReadmeDocumentsRegisteredCommandsAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(b)
-	for _, want := range []string{"aha refresh", "aha search", "aha read", "aha incidents", "aha serve", "aha mcp"} {
+	for _, want := range []string{"aha archive upload", "aha archive download", "aha search", "aha show", "aha analyse failures", "aha dashboard", "aha mcp"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("README missing daily command %q", want)
 		}
 	}
-	if !strings.Contains(text, "Set `\"redaction\":\"v1\"`") || !strings.Contains(text, "Depot blobs remain raw provenance") {
+	if !strings.Contains(text, "Redaction") || !strings.Contains(text, "Archive preserves raw history") {
 		t.Fatalf("README privacy/redaction warning missing")
 	}
-	for _, doc := range []string{"docs/command-inventory.md", "docs/commands.md", "docs/trust.md", "docs/user-journeys.md", "docs/comparisons/claude-history-explorer.md", "docs/lessons-learned.md"} {
+	for _, doc := range []string{"docs/command-state-machine-v0.2-plan.md", "docs/command-inventory.md", "docs/commands.md", "docs/trust.md", "docs/user-journeys.md"} {
 		if !strings.Contains(text, doc) {
 			t.Fatalf("README missing link to %s", doc)
 		}

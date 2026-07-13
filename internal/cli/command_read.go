@@ -3,28 +3,27 @@ package cli
 import (
 	"errors"
 	"io"
-	"strings"
 
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/model"
 )
 
-func cmdRead(args []string, stdout, stderr io.Writer) error {
-	args = reorderReadArgs(args)
-	pf, err := parseFlagSpecs("read", args, stderr, readFlagSpecs)
+func cmdShow(args []string, stdout, stderr io.Writer) error {
+	args = reorderShowArgs(args)
+	pf, err := parseFlagSpecs("show", args, stderr, showFlagSpecs)
 	if err != nil {
 		return err
 	}
-	cf := corpusFlags{corpusDir: stringPtr(pf.String("corpus")), repoDir: stringPtr(pf.String("repo")), config: stringPtr(pf.String("config"))}
+	cf := workspaceFlags{workspaceDir: stringPtr(pf.String("workspace")), config: stringPtr(pf.String("config"))}
 	session := pf.String("session")
 	entry := pf.String("entry")
 	branch := pf.String("branch")
 	live := pf.String("live")
-	if session == "" && pf.NArg() > 0 {
-		session = pf.Arg(0)
+	if pf.NArg() > 1 {
+		return errors.New("show accepts exactly one positional REF")
 	}
-	if session == "" {
-		return errors.New("--session required")
+	if (pf.NArg() == 1) == (session != "") {
+		return errors.New("show requires exactly one of positional REF or --session")
 	}
 	if err := requireAtMostOneLeafMode(branch, live, entry); err != nil {
 		return err
@@ -33,14 +32,16 @@ func cmdRead(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	var ref model.Ref
-	useRef := false
-	if entry == "" && branch == "" && live == "" && looksLikeRef(session) {
-		parsedRef, err := model.ParseRef(session)
+	useRef := pf.NArg() == 1
+	if useRef {
+		if entry != "" || branch != "" || live != "" {
+			return errors.New("positional REF cannot be combined with --entry, --branch, or --live")
+		}
+		parsedRef, err := model.ParseRef(pf.Arg(0))
 		if err != nil {
 			return err
 		}
 		ref = parsedRef
-		useRef = true
 	}
 	cfg, err := cf.loadConfig()
 	if err != nil {
@@ -91,10 +92,6 @@ func requireAtMostOneLeafMode(branch, live, entry string) error {
 	return nil
 }
 
-func looksLikeRef(s string) bool {
-	return strings.HasPrefix(s, "msg:v1:") || strings.HasPrefix(s, "session:v1:") || strings.HasPrefix(s, "artifact:v1:") || strings.Contains(s, "#") || strings.HasPrefix(s, "artifact:")
-}
-
-func reorderReadArgs(args []string) []string {
-	return reorderArgsBySpec(args, readFlagSpecs)
+func reorderShowArgs(args []string) []string {
+	return reorderArgsBySpec(args, showFlagSpecs)
 }

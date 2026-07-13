@@ -3,9 +3,11 @@ package safety
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/adewale/aha/internal/model"
 	"github.com/adewale/aha/internal/paths"
@@ -58,83 +60,202 @@ func EnsureUnderRoot(root, target string) error {
 	return nil
 }
 
-// CorpusDestination is a write target that has been proven not to overlap a
-// source and not to repurpose an unrelated non-empty directory. Its path is
-// private so CLI mutation code must pass through PrepareCorpusDestination.
-type CorpusDestination struct{ path string }
+// WorkspaceDestination is a write target proven not to overlap a source or
+// repurpose an unrelated non-empty directory. Claim rechecks the proof while
+// holding an OS directory handle, closing symlink/rename substitution races.
+type WorkspaceDestination struct {
+	path       string
+	publicPath string
+	info       os.FileInfo
+	sources    []sourceIdentity
+	consumed   *atomic.Bool
+}
 
-func (d CorpusDestination) Path() (string, error) {
+type sourceIdentity struct {
+	path string
+	info os.FileInfo
+}
+
+// WorkspaceRoot keeps the claimed directory anchored until the Store closes.
+type WorkspaceRoot struct {
+	identityPath string
+	storagePath  string
+	anchor       io.Closer
+}
+
+func (r *WorkspaceRoot) IdentityPath() string { return r.identityPath }
+func (r *WorkspaceRoot) StoragePath() string  { return r.storagePath }
+func (r *WorkspaceRoot) Close() error {
+	if r == nil || r.anchor == nil {
+		return nil
+	}
+	return r.anchor.Close()
+}
+
+func claimWorkspaceRoot(path string) (storagePath, actualPath string, anchor io.Closer, info os.FileInfo, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", "", nil, nil, err
+	}
+	if err := os.Mkdir(path, 0o700); err != nil && !os.IsExist(err) {
+		return "", "", nil, nil, err
+	}
+	actualPath, err = ResolveExisting(path)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	file, info, err := openClaimedWorkspaceDirectory(path)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	fail := func(err error) (string, string, io.Closer, os.FileInfo, error) {
+		_ = file.Close()
+		return "", "", nil, nil, err
+	}
+	current, err := os.Lstat(path)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, current) {
+		if err == nil {
+			err = &WorkspaceDestinationError{}
+		}
+		return fail(err)
+	}
+	entries, err := file.Readdirnames(-1)
+	if err != nil {
+		return fail(err)
+	}
+	if len(entries) > 0 {
+		if _, err := os.Stat(filepath.Join(path, model.WorkspaceDatabaseFilename)); err != nil {
+			return fail(&WorkspaceDestinationError{})
+		}
+	}
+	return path, actualPath, file, info, nil
+}
+
+func (d WorkspaceDestination) Claim() (*WorkspaceRoot, error) {
+	if d.path == "" || d.publicPath == "" || d.consumed == nil || !d.consumed.CompareAndSwap(false, true) {
+		return nil, errors.New("invalid or already consumed Workspace destination capability")
+	}
+	stablePath, err := stabiliseWorkspacePath(d.publicPath, d.path, d.info)
+	if err != nil {
+		return nil, err
+	}
+	storagePath, actualPath, anchor, info, err := claimWorkspaceRoot(stablePath)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*WorkspaceRoot, error) {
+		_ = anchor.Close()
+		return nil, err
+	}
+	if d.info != nil && !os.SameFile(info, d.info) {
+		return fail(&WorkspaceDestinationError{})
+	}
+	for _, source := range d.sources {
+		if source.info != nil && os.SameFile(info, source.info) {
+			return fail(&WorkspaceDestinationError{})
+		}
+		if Contains(source.path, actualPath) || Contains(actualPath, source.path) {
+			return fail(&WorkspaceDestinationError{})
+		}
+	}
+	return &WorkspaceRoot{identityPath: stablePath, storagePath: storagePath, anchor: anchor}, nil
+}
+
+func (d WorkspaceDestination) Path() (string, error) {
 	if d.path == "" {
-		return "", errors.New("invalid corpus destination capability")
+		return "", errors.New("invalid Workspace destination capability")
 	}
 	return d.path, nil
 }
 
-// CorpusDestinationError deliberately carries no path: callers can safely
+// WorkspaceDestinationError deliberately carries no path, so callers can
 // present it without disclosing local filesystem details.
-type CorpusDestinationError struct{}
+type WorkspaceDestinationError struct{}
 
-func (*CorpusDestinationError) Error() string {
-	return "corpus destination must be a dedicated empty directory or an existing aha corpus"
+func (*WorkspaceDestinationError) Error() string {
+	return "Workspace destination must be a dedicated empty directory or an existing aha Workspace"
 }
 
-func PrepareCorpusDestination(cfg model.Config, target string) (CorpusDestination, error) {
-	if err := ValidateWriteOutsideSources(cfg, target, "corpus"); err != nil {
-		return CorpusDestination{}, err
+func PrepareWorkspaceDestination(cfg model.Config, target string) (WorkspaceDestination, error) {
+	if err := ValidateWriteOutsideSources(cfg, target, "Workspace"); err != nil {
+		return WorkspaceDestination{}, err
 	}
 	expanded, err := paths.Expand(target)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	if expanded == "" {
-		expanded, err = paths.Expand("~/.aha")
+		expanded, err = paths.Expand("~/.aha/workspace")
 		if err != nil {
-			return CorpusDestination{}, err
+			return WorkspaceDestination{}, err
 		}
 	}
-	root, err := ResolveExisting(expanded)
+	publicPath, err := filepath.Abs(expanded)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
+	}
+	requestedPath := publicPath
+	root, err := ResolveExisting(requestedPath)
+	if err != nil {
+		return WorkspaceDestination{}, err
+	}
+	publicPath = root
+	if info, err := os.Lstat(requestedPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		publicPath = requestedPath
+	} else if err != nil && !os.IsNotExist(err) {
+		return WorkspaceDestination{}, err
+	}
+	sources, err := workspaceSourceIdentities(cfg)
+	if err != nil {
+		return WorkspaceDestination{}, err
 	}
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) {
-		return CorpusDestination{path: root}, nil
+		return WorkspaceDestination{path: root, publicPath: publicPath, sources: sources, consumed: &atomic.Bool{}}, nil
 	}
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	if !info.IsDir() {
-		return CorpusDestination{}, &CorpusDestinationError{}
+		return WorkspaceDestination{}, &WorkspaceDestinationError{}
 	}
-	if _, err := os.Stat(filepath.Join(root, "corpus.db")); err == nil {
-		return CorpusDestination{path: root}, nil
+	if _, err := os.Stat(filepath.Join(root, model.WorkspaceDatabaseFilename)); err == nil {
+		return WorkspaceDestination{path: root, publicPath: publicPath, info: info, sources: sources, consumed: &atomic.Bool{}}, nil
 	} else if !os.IsNotExist(err) {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return CorpusDestination{}, err
+		return WorkspaceDestination{}, err
 	}
-	allowed := map[string]bool{"depot": true, "capture-cache.json": true, "blobs": true}
-	if cfg.Depot.Type == "local" && strings.TrimSpace(cfg.Depot.Location) != "" {
-		localDepot, expandErr := paths.Expand(cfg.Depot.Location)
-		if expandErr != nil {
-			return CorpusDestination{}, expandErr
-		}
-		localDepot, resolveErr := ResolveExisting(localDepot)
-		if resolveErr != nil {
-			return CorpusDestination{}, resolveErr
-		}
-		if rel, relErr := filepath.Rel(root, localDepot); relErr == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
-			allowed[strings.Split(rel, string(os.PathSeparator))[0]] = true
-		}
+	if len(entries) > 0 {
+		return WorkspaceDestination{}, &WorkspaceDestinationError{}
 	}
-	for _, entry := range entries {
-		if !allowed[entry.Name()] {
-			return CorpusDestination{}, &CorpusDestinationError{}
+	return WorkspaceDestination{path: root, publicPath: publicPath, info: info, sources: sources, consumed: &atomic.Bool{}}, nil
+}
+
+func workspaceSourceIdentities(cfg model.Config) ([]sourceIdentity, error) {
+	var sources []sourceIdentity
+	for _, source := range cfg.Sources {
+		if !source.Enabled || strings.TrimSpace(source.Root) == "" {
+			continue
 		}
+		expanded, err := paths.Expand(source.Root)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := ResolveExisting(expanded)
+		if err != nil {
+			return nil, err
+		}
+		identity := sourceIdentity{path: resolved}
+		if info, err := os.Stat(resolved); err == nil {
+			identity.info = info
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+		sources = append(sources, identity)
 	}
-	return CorpusDestination{path: root}, nil
+	return sources, nil
 }
 
 func ValidateWriteOutsideSources(cfg model.Config, target, label string) error {

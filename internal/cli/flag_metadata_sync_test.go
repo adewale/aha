@@ -42,7 +42,7 @@ func TestCommandFlagMetadataMatchesFlagSets(t *testing.T) {
 }
 
 func TestFlagSpecsDriveHelpText(t *testing.T) {
-	for _, name := range []string{"search", "read"} {
+	for _, name := range []string{"search", "show"} {
 		cmd := cli.Registry()[name]
 		if len(cmd.FlagSpecs) == 0 {
 			t.Fatalf("%s has no flag specs", name)
@@ -90,8 +90,8 @@ func parseCommandFlags(t *testing.T) map[string][]string {
 				}
 				if ident, ok := call.Fun.(*ast.Ident); ok {
 					funcCalls[fn.Name.Name] = append(funcCalls[fn.Name.Name], ident.Name)
-					if ident.Name == "registerCorpusFlags" {
-						for _, flag := range []string{"config", "corpus", "repo"} {
+					if ident.Name == "registerWorkspaceFlags" {
+						for _, flag := range []string{"config", "workspace"} {
 							funcFlags[fn.Name.Name][flag] = true
 						}
 						return true

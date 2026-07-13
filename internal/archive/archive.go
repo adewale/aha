@@ -466,7 +466,7 @@ func ValidateManifestSemantics(m model.Manifest) error {
 		case "artifact":
 			want := "sources/" + mf.Source + "/artifacts/"
 			if !strings.HasPrefix(mf.RelativePath, want) {
-				return fmt.Errorf("invalid manifest: artifact path %s must be under %s", mf.RelativePath, want)
+				return fmt.Errorf("invalid manifest: artefact path %s must be under %s", mf.RelativePath, want)
 			}
 		default:
 			return fmt.Errorf("invalid manifest: unsupported file kind %q", mf.Kind)

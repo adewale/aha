@@ -168,12 +168,12 @@ else
   echo >&2
   echo "progress phase=integration_test state=failed" >&2
   echo "R2 smoketest FAILED (exit $status)" >&2
-  if grep -Eiq 'authorization denied during HeadBucket and ListObjectsV2' "$smoke_log"; then
-    echo "R2 authorization denied during both HeadBucket and the bounded ListObjectsV2 fallback, before any smoke objects were written." >&2
+  if grep -Eiq 'authorisation denied during HeadBucket and ListObjectsV2' "$smoke_log"; then
+    echo "R2 authorisation denied during both HeadBucket and the bounded ListObjectsV2 fallback, before any smoke objects were written." >&2
     echo "The explicit test credential does not authorize this test bucket/account endpoint." >&2
     echo "next: create a matching Object Read & Write R2 S3 token scoped only to '$SMOKE_BUCKET', then rerun with the AHA_R2_SMOKETEST_* variables" >&2
-  elif grep -Eiq 'HeadBucket.*(StatusCode: 403|Forbidden)|StatusCode: 403.*HeadBucket|authorization denied during HeadBucket' "$smoke_log"; then
-    echo "R2 authorization denied during HeadBucket, before any smoke objects were written." >&2
+  elif grep -Eiq 'HeadBucket.*(StatusCode: 403|Forbidden)|StatusCode: 403.*HeadBucket|authorisation denied during HeadBucket' "$smoke_log"; then
+    echo "R2 authorisation denied during HeadBucket, before any smoke objects were written." >&2
     echo "The explicit test credential does not authorize this test bucket/account endpoint." >&2
     echo "next: create a matching Object Read & Write R2 S3 token scoped only to '$SMOKE_BUCKET', then rerun with the AHA_R2_SMOKETEST_* variables" >&2
   else

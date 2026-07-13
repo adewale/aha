@@ -13,8 +13,8 @@ func TestConfigWriteLoadRoundTripProperty(t *testing.T) {
 	prop := func(machine, depotName, corpusName, sourceRoot string) bool {
 		cfg := config.Default()
 		cfg.MachineID = safeConfigValue(machine, "machine")
-		cfg.CorpusDir = filepath.Join(t.TempDir(), safeConfigValue(corpusName, "corpus"))
-		cfg.Depot = model.DepotConfig{Type: "local", Location: filepath.Join(t.TempDir(), safeConfigValue(depotName, "depot"))}
+		cfg.WorkspaceDir = filepath.Join(t.TempDir(), safeConfigValue(corpusName, "corpus"))
+		cfg.Archive = model.ArchiveConfig{Type: "local", Location: filepath.Join(t.TempDir(), safeConfigValue(depotName, "depot"))}
 		cfg.Sources = []model.SourceConfig{{Type: "pi", Root: filepath.Join(t.TempDir(), safeConfigValue(sourceRoot, "source")), Enabled: true}}
 		path := filepath.Join(t.TempDir(), "config.jsonc")
 		if _, err := config.Write(path, cfg, "// property config\n"); err != nil {
@@ -24,7 +24,7 @@ func TestConfigWriteLoadRoundTripProperty(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		if got.MachineID != cfg.MachineID || got.CorpusDir != cfg.CorpusDir || got.Depot != cfg.Depot || len(got.Sources) != 1 || got.Sources[0] != cfg.Sources[0] {
+		if got.MachineID != cfg.MachineID || got.WorkspaceDir != cfg.WorkspaceDir || got.Archive != cfg.Archive || len(got.Sources) != 1 || got.Sources[0] != cfg.Sources[0] {
 			return false
 		}
 		return true

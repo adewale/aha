@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"errors"
 	"io"
 	"path/filepath"
 	"time"
@@ -21,34 +22,45 @@ type BlobOpen func(key model.BlobKey) (io.ReadCloser, error)
 //     recorded as provenance without fetching or parsing anything;
 //   - content already in the local blob store is read locally;
 //   - only genuinely unknown blobs are fetched from the depot.
+type snapshotBeginError struct{ error }
+
 func (ing Ingestor) IngestSnapshot(manifest model.SnapshotManifest, open BlobOpen) (IngestReport, error) {
+	prepared, err := model.PrepareSnapshot(manifest)
+	if err != nil {
+		return IngestReport{}, err
+	}
+	return ing.IngestPreparedSnapshot(prepared, open)
+}
+
+func (ing Ingestor) IngestPreparedSnapshot(prepared model.PreparedSnapshot, open BlobOpen) (IngestReport, error) {
+	if !prepared.Valid() {
+		return IngestReport{}, errors.New("invalid prepared snapshot")
+	}
+	if err := validateIngestAdapters(prepared.Manifest().Files, ing.Registry); err != nil {
+		return IngestReport{}, err
+	}
 	const maxBusyRetries = 20
 	for attempt := 0; ; attempt++ {
 		if err := ing.context().Err(); err != nil {
 			return IngestReport{}, err
 		}
-		rep, err := ing.ingestSnapshotOnce(manifest, open)
-		if !isSQLiteBusy(err) || attempt >= maxBusyRetries {
+		rep, err := ing.ingestPreparedSnapshotOnce(prepared, open)
+		var beginBusy snapshotBeginError
+		if !errors.As(err, &beginBusy) || !isSQLiteBusy(err) || attempt >= maxBusyRetries {
 			return rep, err
 		}
 		ing.sleeper().Sleep(ing.backoff().Delay(attempt))
 	}
 }
 
-func (ing Ingestor) ingestSnapshotOnce(manifest model.SnapshotManifest, open BlobOpen) (IngestReport, error) {
+func (ing Ingestor) ingestPreparedSnapshotOnce(prepared model.PreparedSnapshot, open BlobOpen) (IngestReport, error) {
 	if err := ing.context().Err(); err != nil {
 		return IngestReport{}, err
 	}
-	canonical, sha, err := model.EncodeSnapshotManifest(manifest)
-	if err != nil {
-		return IngestReport{}, err
-	}
-	if err := validateIngestAdapters(manifest.Files, ing.Registry); err != nil {
-		return IngestReport{}, err
-	}
+	manifest, canonical, sha := prepared.Manifest(), prepared.Canonical(), prepared.SHA()
 	tx, err := ing.Store.DB.Begin()
 	if err != nil {
-		return IngestReport{}, err
+		return IngestReport{}, snapshotBeginError{err}
 	}
 	defer tx.Rollback()
 	ingestedAt := ing.clock().Now().Format(time.RFC3339)

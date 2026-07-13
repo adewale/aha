@@ -96,7 +96,7 @@ Acceptable. Storage growth is dwarfed by the size of the bundles themselves
   cache_read > 0").
 - Index additions: one on `messages(openinference_span_kind)` for filtering
   by kind. Adds ~5 % to ingest, well within budget.
-- Read API unchanged. MCP `read` and dashboard `/api/read` return the same
+- Read API unchanged. MCP `show` and dashboard `/api/v2/show` return the same
   shapes; new fields are nullable and additive.
 
 ### Performance — export
@@ -168,7 +168,7 @@ local-first tool.
   index size by ~3×. Skip it.
 - Targeted queries on `input_value` use SQL `LIKE` and are slow (no
   index): ~100 ms per query on a 1 GB corpus.
-- Read API payloads grow proportionally: a single `read` could return
+- Read API payloads grow proportionally: a single `show` could return
   multi-MB JSON. Dashboard would need pagination or aggressive truncation
   on the wire.
 

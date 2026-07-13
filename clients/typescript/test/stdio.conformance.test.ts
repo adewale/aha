@@ -25,7 +25,7 @@ async function roundTripThreeTools(refCmd: string) {
   child.stderr.on("data", () => {}); // drain server logs
 
   try {
-    const transport = await connectStdio(child.stdin, child.stdout);
+    const transport = await connectStdio(child.stdin, child.stdout, { requiredTools: ["echo", "add", "fail"] });
 
     const echoed = (await transport.call("echo", { text: "ndjson hello" })) as string;
     assert.equal(echoed, "ndjson hello");

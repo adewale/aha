@@ -1,80 +1,60 @@
 # Command inventory
 
-This is the human command inventory for `aha`: what each command is for and when to reach for it. For generated usage strings, flags, examples, and JSON contracts, see `docs/commands.md`.
+Aha 0.2 has one lifecycle:
 
-## Daily retrieval and analysis
-
-| Command | Use when | Notes |
-|---|---|---|
-| `aha refresh` | Keep the local corpus current. | Common update path: snapshot configured sources or reuse an unchanged depot bundle, then ingest pending/new bundles. |
-| `aha search` | Find leads in messages and artifacts. | Use `--json` or `--refs` for agents/scripts. Search snippets are leads, not evidence. |
-| `aha read` | Retrieve evidence for a ref. | Pass a canonical `ref_text` from search or incidents. Use `--before`/`--after` to widen context. |
-| `aha incidents` | Find recurring tool-call failure patterns and observed fix paths. | Use `--state unresolved` for pain/backlog and `--state resolved` for fixes worth harvesting into interventions. |
-| `aha serve` | Browse the corpus locally. | Loopback dashboard with Search, Failures, and Sources journeys. |
-| `aha mcp` | Let coding agents query the corpus without shelling out per call. | Read-only stdio MCP server. Use `--dry-run` to verify host wiring. |
-
-## Capture and import
-
-| Command | Use when | Notes |
-|---|---|---|
-| `aha init` | Write starter JSONC config. | `--accept-secrets` persists the v1 privacy acknowledgement. |
-| `aha snapshot` | Push this machine's state to the depot without touching a corpus. | Uploads only new file versions and publishes a snapshot manifest; never downloads other machines' data (contribute-only machines). |
-| `aha export` | Materialize a machine's latest depot snapshot as one portable `bundle.tar.zst`. | The single-file hand-off format; re-import anywhere with `aha ingest <file>`. |
-| `aha ingest` | Pull depot snapshots into a corpus, or import v1 bundle files. | Depot pulls fetch only content the corpus does not already have. |
-
-## Health, trust, and maintenance
-
-| Command | Use when | Notes |
-|---|---|---|
-| `aha status` | Inspect corpus counts and health. | Check sessions, messages, snapshots, sources, redaction levels, and index size. |
-| `aha verify` | Check corpus invariants. | Read-only by default; `--repair-fts` repairs derived FTS projections. |
-| `aha conflicts` | Inspect quarantined merge conflicts. | Keeps conflict/trust issues out of normal search/read paths. |
-| `aha doctor` | Diagnose config, source discovery, corpus, depot, and next actions. | May create/update the private OpenCode JSONL export cache while counting OpenCode sessions. |
-| `aha corpus` | Inspect or maintain corpus storage. | Subcommands: `size`, `vacuum`, `prune-orphans`; destructive prune requires `--force`. |
-| `aha depot` | Initialize, switch, list machine snapshots, or verify the durable store. | `depot verify` is quick by default; `--deep` verifies blob contents and historical manifests. |
-
-## Typical workflows
-
-### Keep history current
-
-```bash
-aha refresh
-aha verify --json
+```text
+Agent histories --archive upload--> Archive --archive download--> Workspace
 ```
 
-### Search, then read evidence
+There are no compatibility aliases for the pre-launch command surface. See [`docs/commands.md`](commands.md) for generated flag and JSON metadata.
+
+## Initialisation
 
 ```bash
-aha search "migration bug" --refs
-aha read <ref> --before 3 --after 10 --md
+aha init --acknowledge-raw-history
 ```
 
-### Find intervention candidates
+Writes config, establishes a stable machine identity, initialises the default local Archive, and prepares (but does not create) the default Workspace destination.
+
+## Archive
 
 ```bash
-aha incidents --limit 50 --json
-aha incidents --state resolved --json
-aha incidents --state unresolved --json
-aha read <sample_ref> --before 3 --after 10 --md
+aha archive init [ARCHIVE]
+aha archive set-default ARCHIVE
+aha archive status [ARCHIVE]
+aha archive upload [ARCHIVE]
+aha archive download [ARCHIVE] --workspace PATH
+aha archive verify [ARCHIVE] [--deep]
 ```
 
-Then classify the pattern with `docs/patterns-and-interventions.md`:
+`archive upload` reads agent histories and mutates only the Archive. `archive download` reads the Archive and mutates only the Workspace. Neither operation silently performs the other.
 
-- repeatable command/check sequence → runbook;
-- reusable judgment or habit → skill;
-- broad, parallel, uncertain work → dynamic workflow;
-- repeated tool friction → tool/platform fix;
-- high-pain unresolved pattern → investigation backlog.
-
-### Let an agent query history
+## Workspace
 
 ```bash
-aha mcp --dry-run
-aha mcp
+aha workspace set-default PATH
+aha workspace status [PATH]
+aha workspace verify [PATH] [--repair-fts]
+aha workspace repair [PATH] --backup
+aha workspace conflicts [PATH]
 ```
 
-Expose `aha mcp` in the host's MCP config. Agents should prefer `search`, `read`, `incidents`, `incident_trajectory`, `overview`, `status`, `verify`, `conflicts`, `corpus_size`, and `doctor`; write-side commands are intentionally not exposed through MCP.
+A Workspace is bound to one Archive identity. Repair materialises a verified replacement, atomically exchanges it, and preserves the prior Workspace as a backup.
 
-## Global profiling
+## Inspection and processing
 
-Any command can write local Go pprof profiles with `--cpuprofile FILE` and/or `--memprofile FILE`. These flags may appear before or after the subcommand, or be supplied via `AHA_CPU_PROFILE` and `AHA_MEM_PROFILE`.
+```bash
+aha status [--archive ARCHIVE] [--workspace PATH]
+aha search [--workspace PATH] QUERY
+aha show [--workspace PATH] REF
+aha analyse failures [--workspace PATH]
+aha dashboard [--workspace PATH]
+aha mcp check [--workspace PATH]
+aha mcp serve [--workspace PATH]
+```
+
+`status` reports the independent upload and download gaps and emits at most one next action.
+
+## Deliberately absent
+
+The 0.2 surface has no `sync`, portable import/export, standalone snapshot listing, public SQLite optimisation, or unsafe no-backup repair operation. The former `snapshot`, `refresh`, `ingest`, `depot`, `corpus`, `doctor`, `read`, `incidents`, `conflicts`, `serve`, and top-level `verify` commands are removed rather than aliased.

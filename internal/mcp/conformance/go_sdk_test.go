@@ -28,16 +28,16 @@ import (
 )
 
 var expectedTools = []string{
-	"conflicts",
-	"corpus_size",
-	"doctor",
-	"incident_trajectory",
-	"incidents",
+	"aha_capabilities",
+	"analyse_failure_trajectory",
+	"analyse_failures",
 	"overview",
-	"read",
 	"search",
+	"show",
 	"status",
-	"verify",
+	"workspace_conflicts",
+	"workspace_size",
+	"workspace_verify",
 }
 
 // TestGoSDKAgainstAha drives the official Go MCP SDK Client against a
@@ -84,7 +84,7 @@ func TestGoSDKAgainstAha(t *testing.T) {
 	defer cancel()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "aha-conformance-go", Version: "0.1.0"}, nil)
-	transport := &mcp.CommandTransport{Command: exec.CommandContext(ctx, bin, "mcp", "--config", cfg)}
+	transport := &mcp.CommandTransport{Command: exec.CommandContext(ctx, bin, "mcp", "serve", "--config", cfg)}
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestGoSDKAgainstAha(t *testing.T) {
 	if err := json.Unmarshal([]byte(textBlock.Text), &status); err != nil {
 		t.Fatalf("decode status text: %v", err)
 	}
-	for _, key := range []string{"corpus_dir", "sessions", "entries", "fts_messages"} {
+	for _, key := range []string{"workspace_dir", "sessions", "entries", "fts_messages"} {
 		if _, ok := status[key]; !ok {
 			t.Fatalf("status missing %q: keys=%v", key, mapKeys(status))
 		}

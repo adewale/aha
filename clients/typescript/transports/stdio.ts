@@ -122,8 +122,48 @@ function parseFrames(buf: Bytes): { messages: unknown[]; rest: Bytes } {
   }
 }
 
+const MCP_CONTRACT = "aha.mcp.v2";
+const SUPPORTED_REQUIRED_FEATURES = new Set(["read-only-v1", "strict-input-v1", "structured-errors-v1"]);
+const REQUIRED_TOOLS = ["aha_capabilities", "analyse_failure_trajectory", "analyse_failures", "overview", "search", "show", "status", "workspace_conflicts", "workspace_size", "workspace_verify"];
+
+function validateCapabilities(value: unknown, listedTools: Set<string>, requiredTools: readonly string[]): void {
+  const caps = value as { schema?: unknown; required_features?: unknown; tools?: unknown } | null;
+  if (caps?.schema !== MCP_CONTRACT || !Array.isArray(caps.required_features) || !Array.isArray(caps.tools)) {
+    throw new AhaMcpError("aha MCP compatibility declaration is missing or unsupported", "compatibility_required");
+  }
+  for (const feature of caps.required_features) {
+    if (typeof feature !== "string" || !SUPPORTED_REQUIRED_FEATURES.has(feature)) {
+      throw new AhaMcpError(`aha MCP requires unsupported feature ${JSON.stringify(feature)}`, "compatibility_required");
+    }
+  }
+  const tools = new Set(caps.tools.filter((tool): tool is string => typeof tool === "string"));
+  for (const advertised of tools) {
+    if (!listedTools.has(advertised)) throw new AhaMcpError(`aha MCP falsely advertises ${advertised}`, "compatibility_required");
+  }
+  for (const required of requiredTools) {
+    if (!tools.has(required) || !listedTools.has(required)) throw new AhaMcpError(`aha MCP server does not provide ${required}`, "compatibility_required");
+  }
+}
+
+function decodeToolResult(value: unknown): unknown {
+  const result = value as {
+    content?: { type: string; text: string }[];
+    structuredContent?: unknown;
+    isError?: boolean;
+  };
+  if (result?.isError) {
+    const text = result?.content?.[0]?.text ?? "tool error";
+    throw new AhaMcpError(text, "tool_error");
+  }
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== "string") throw new Error("tools/call returned no text content");
+  try { return JSON.parse(text); } catch { return text; }
+}
+
 export interface StdioConnectOptions {
   initializeTimeoutMs?: number;
+  /** Defaults to the generated aha tool set; conformance harnesses may name a different required subset. */
+  requiredTools?: readonly string[];
 }
 
 // connectStdio attaches a Transport to the given stdin/stdout streams and
@@ -182,46 +222,32 @@ export function connectStdio(
     rawCall("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "aha-stdio", version: "0.1.0" },
+      clientInfo: { name: "aha-stdio", version: "0.2.0" },
     })
       .then(() => {
-        clearTimeout(timer);
         // Best-effort notification per MCP spec; no response expected.
         stdin.write(encodeFrame({ jsonrpc: "2.0", method: "notifications/initialized" }));
         const transport: Transport = {
           async call(name, args) {
-            const result = (await rawCall("tools/call", { name, arguments: args })) as {
-              content?: { type: string; text: string }[];
-              structuredContent?: unknown;
-              isError?: boolean;
-            };
-            if (result?.isError) {
-              const text = result?.content?.[0]?.text ?? "tool error";
-              throw new AhaMcpError(text, "tool_error");
-            }
-            // Per the 2025-06-18 spec, a server that emits structuredContent
-            // SHOULD also emit the serialized form in content[].text. So
-            // text is the universal channel — every conformant server has
-            // it, and its shape is whatever the tool returned. We use that
-            // exclusively; structuredContent stays on the wire as
-            // informational metadata but isn't read here (different servers
-            // wrap primitives differently: FastMCP emits {result: ...},
-            // aha emits the value directly).
-            const text = result?.content?.[0]?.text;
-            if (typeof text !== "string") {
-              throw new Error("tools/call returned no text content");
-            }
-            // Most servers JSON-encode the payload; FastMCP does too for
-            // primitives ('"hi"' rather than 'hi'). Try to parse; fall back
-            // to the raw string for the rare server that emits plain text.
-            try {
-              return JSON.parse(text);
-            } catch {
-              return text;
-            }
+            return decodeToolResult(await rawCall("tools/call", { name, arguments: args }));
           },
         };
-        resolve(transport);
+        rawCall("tools/list")
+          .then((value) => {
+            const listed = value as { tools?: { name?: unknown }[] };
+            if (!Array.isArray(listed?.tools)) throw new AhaMcpError("MCP tools/list response is invalid", "compatibility_required");
+            const names = new Set(listed.tools.flatMap((tool) => typeof tool.name === "string" ? [tool.name] : []));
+            return rawCall("tools/call", { name: "aha_capabilities", arguments: {} })
+              .then(decodeToolResult)
+              .then((capabilities) => validateCapabilities(capabilities, names, opts.requiredTools ?? REQUIRED_TOOLS));
+          })
+          .then(() => {
+            clearTimeout(timer);
+            resolve(transport);
+          }, (err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
       })
       .catch((err) => {
         clearTimeout(timer);

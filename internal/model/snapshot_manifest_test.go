@@ -9,13 +9,14 @@ import (
 
 func validSnapshotManifest() model.SnapshotManifest {
 	return model.SnapshotManifest{
-		Schema:     model.SnapshotManifestSchema,
-		MachineID:  "test-machine",
-		CapturedAt: "2026-06-09T00:00:00Z",
-		CreatedBy:  "aha test",
-		Source:     model.ManifestSource{HostOS: "linux"},
-		Policy:     model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
-		Adapters:   []model.ManifestAdapt{{Name: "pi", Version: "test"}},
+		Schema:           model.SnapshotManifestSchema,
+		RequiredFeatures: model.RequiredSnapshotFeatures(),
+		MachineID:        "test-machine",
+		CapturedAt:       "2026-06-09T00:00:00Z",
+		CreatedBy:        "aha test",
+		Source:           model.ManifestSource{HostOS: "linux"},
+		Policy:           model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
+		Adapters:         []model.ManifestAdapt{{Name: "pi", Version: "test"}},
 		Files: []model.ManifestFile{
 			{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/b.jsonl", RawPath: "/home/u/.pi/agent/sessions/b.jsonl", SHA256: strings.Repeat("b", 64), Bytes: 10, SessionID: "b", CopyState: "stable"},
 			{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/a.jsonl", RawPath: "/home/u/.pi/agent/sessions/a.jsonl", SHA256: strings.Repeat("a", 64), Bytes: 5, SessionID: "a", CopyState: "stable"},
@@ -46,6 +47,42 @@ func TestSnapshotManifestEncodeIsDeterministic(t *testing.T) {
 	}
 	if !sha1.Valid() {
 		t.Fatalf("encode returned invalid manifest sha %q", sha1)
+	}
+}
+
+func TestSnapshotManifestV2RemainsByteAndIdentityReadable(t *testing.T) {
+	manifest := validSnapshotManifest()
+	manifest.Schema = model.SnapshotManifestSchemaV2
+	manifest.RequiredFeatures = nil
+	b, sha, err := model.EncodeSnapshotManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "required_features") {
+		t.Fatalf("legacy canonical bytes gained v3 fields: %s", b)
+	}
+	got, gotSHA, err := model.DecodeSnapshotManifest(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != model.SnapshotManifestSchemaV2 || gotSHA != sha {
+		t.Fatalf("legacy round trip schema=%q sha=%s want %s", got.Schema, gotSHA, sha)
+	}
+}
+
+func TestSnapshotManifestUnknownOptionalFeatureRoundTrips(t *testing.T) {
+	manifest := validSnapshotManifest()
+	manifest.OptionalFeatures = []string{"example.com/advisory-v1"}
+	b, _, err := model.EncodeSnapshotManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := model.DecodeSnapshotManifest(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.OptionalFeatures) != 1 || got.OptionalFeatures[0] != "example.com/advisory-v1" {
+		t.Fatalf("optional features=%v", got.OptionalFeatures)
 	}
 }
 
@@ -86,6 +123,11 @@ func TestSnapshotManifestEncodeRejectsInvalid(t *testing.T) {
 		mutate func(*model.SnapshotManifest)
 	}{
 		{"wrong schema", func(m *model.SnapshotManifest) { m.Schema = "aha/bundle@1" }},
+		{"missing required features", func(m *model.SnapshotManifest) { m.RequiredFeatures = nil }},
+		{"unknown required feature", func(m *model.SnapshotManifest) { m.RequiredFeatures = append(m.RequiredFeatures, "future-parser-v9") }},
+		{"unknown path mode", func(m *model.SnapshotManifest) { m.Policy.PathMode = "future" }},
+		{"unknown redaction policy", func(m *model.SnapshotManifest) { m.Policy.Redaction = "future-v9" }},
+		{"unknown copy state", func(m *model.SnapshotManifest) { m.Files[0].CopyState = "future" }},
 		{"empty machine", func(m *model.SnapshotManifest) { m.MachineID = " " }},
 		{"empty captured_at", func(m *model.SnapshotManifest) { m.CapturedAt = "" }},
 		{"bad file sha", func(m *model.SnapshotManifest) { m.Files[0].SHA256 = "nothex" }},

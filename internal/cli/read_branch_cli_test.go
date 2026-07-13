@@ -24,21 +24,23 @@ func TestReadBranchAndLiveCLI(t *testing.T) {
 	cfg := `{
 		"machine_id":"cli-branch-test",
 		"sources":[{"type":"pi","root":"` + filepath.ToSlash(fx.PiRoot) + `","enabled":true}],
-		"corpus_dir":"` + filepath.ToSlash(corpusDir) + `",
-		"depot":{"type":"local","location":"` + filepath.ToSlash(filepath.Join(root, "bundles")) + `"},
-		"accept_secrets_warning":true
+		"workspace_dir":"` + filepath.ToSlash(corpusDir) + `",
+		"archive":{"type":"local","location":"` + filepath.ToSlash(filepath.Join(root, "archive")) + `"},
+		"acknowledged_raw_history":true
 	}`
 	if err := os.WriteFile(configPath, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.Run([]string{"refresh", "--config", configPath, "--captured-at", "2026-01-03T00:00:00Z"}, io.Discard, io.Discard); err != nil {
-		t.Fatalf("refresh: %v", err)
+	for _, args := range [][]string{{"archive", "init", "--config", configPath}, {"archive", "upload", "--config", configPath}, {"archive", "download", "--config", configPath}} {
+		if err := cli.Run(args, io.Discard, io.Discard); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
 	}
 
 	for _, mode := range []string{"--branch", "--live"} {
 		t.Run(mode, func(t *testing.T) {
 			var out bytes.Buffer
-			if err := cli.Run([]string{"read", "--corpus", corpusDir, "--session", "pi-session", mode, "p2", "--json"}, &out, io.Discard); err != nil {
+			if err := cli.Run([]string{"show", "--workspace", corpusDir, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--session", "pi-session", mode, "p2", "--json"}, &out, io.Discard); err != nil {
 				t.Fatalf("read %s: %v", mode, err)
 			}
 			s := out.String()
@@ -53,7 +55,24 @@ func TestReadBranchAndLiveCLI(t *testing.T) {
 
 	// --branch and --live are mutually exclusive.
 	var stderr bytes.Buffer
-	if err := cli.Run([]string{"read", "--corpus", corpusDir, "--session", "pi-session", "--branch", "p2", "--live", "p2"}, io.Discard, &stderr); err == nil {
+	if err := cli.Run([]string{"show", "--workspace", corpusDir, "--config", filepath.Join(t.TempDir(), "missing.jsonc"), "--session", "pi-session", "--branch", "p2", "--live", "p2"}, io.Discard, &stderr); err == nil {
 		t.Fatal("expected error combining --branch and --live")
+	}
+}
+
+func TestCLIShowEnforcesRefXORSession(t *testing.T) {
+	cases := map[string][]string{
+		"both":              {"show", "session:v1:c2Vzc2lvbg", "--session", "pi-session"},
+		"neither":           {"show"},
+		"extra positionals": {"show", "session:v1:c2Vzc2lvbg", "session:v1:b3RoZXI"},
+		"plain positional":  {"show", "pi-session"},
+		"ref with leaf":     {"show", "session:v1:c2Vzc2lvbg", "--entry", "e1"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := cli.Run(args, io.Discard, io.Discard); err == nil {
+				t.Fatalf("show accepted ambiguous args %v", args)
+			}
+		})
 	}
 }

@@ -81,7 +81,7 @@ func TestArtifactFTSTriggerFallsBackFromEmptyBodyToPreview(t *testing.T) {
 	if _, err := store.DB.Exec(`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values('` + strings.Repeat("b", 64) + `','m','2026','2026','{}')`); err != nil {
 		t.Fatal(err)
 	}
-	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path,text_preview,text_body) values(?,'pi','m','` + strings.Repeat("b", 64) + `','artifact','raw','rel','preview text','')`, strings.Repeat("a", 64))
+	res, err := store.DB.Exec(`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path,text_preview,text_body) values(?,'pi','m','`+strings.Repeat("b", 64)+`','artifact','raw','rel','preview text','')`, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ func TestSpecBackedFlagsParseAfterPositionals(t *testing.T) {
 		specs   []FlagSpec
 	}{
 		{command: "search", specs: searchFlagSpecs},
-		{command: "read", specs: readFlagSpecs},
+		{command: "show", specs: showFlagSpecs},
 	} {
 		for _, spec := range tt.specs {
 			if !spec.PostPosition {

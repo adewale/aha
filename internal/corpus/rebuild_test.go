@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/adewale/aha/internal/corpus"
+	"github.com/adewale/aha/internal/model"
 	ahaprogress "github.com/adewale/aha/internal/progress"
 	_ "modernc.org/sqlite"
 )
@@ -19,7 +20,7 @@ func writeLegacyCorpus(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "corpus.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, model.WorkspaceDatabaseFilename))
 	if err != nil {
 		t.Fatal(err)
 	}

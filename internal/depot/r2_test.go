@@ -50,7 +50,7 @@ func TestNewR2FollowsCloudflareChecksumGuidance(t *testing.T) {
 	t.Setenv("AHA_R2_ENDPOINT", "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
-	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	cfg, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestResolveR2ConfigExplicitIgnoresAmbientProductionCredentials(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := depot.ResolveR2ConfigExplicit(model.R2DepotConfig{AccountID: "0123456789abcdef0123456789abcdef"}, credentials)
+	cfg, err := depot.ResolveR2ConfigExplicit(model.R2ArchiveConfig{AccountID: "0123456789abcdef0123456789abcdef"}, credentials)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestResolveR2ConfigUsesCloudflareEndpointAndAutoRegion(t *testing.T) {
 	t.Setenv("AHA_R2_ACCOUNT_ID", accountID)
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
-	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	cfg, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestResolveR2ConfigAllowsEndpointOverrideWithoutAccount(t *testing.T) {
 	t.Setenv("AHA_R2_ENDPOINT", "http://127.0.0.1:9000")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
-	cfg, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	cfg, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestResolveR2ConfigAllowsEndpointOverrideWithoutAccount(t *testing.T) {
 func TestResolveR2ConfigErrorsDoNotLeakSecrets(t *testing.T) {
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "super-secret")
-	_, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	_, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err == nil {
 		t.Fatal("expected missing account/endpoint error")
 	}
@@ -148,7 +148,7 @@ func TestResolveR2ConfigRejectsConflictingAliasesWithoutLeakingValues(t *testing
 	t.Setenv("R2_ACCESS_KEY_ID", "access-canary-b")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret-canary-a")
 	t.Setenv("R2_SECRET_ACCESS_KEY", "secret-canary-b")
-	_, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	_, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err == nil {
 		t.Fatal("conflicting aliases were silently resolved by precedence")
 	}
@@ -172,7 +172,7 @@ func TestResolveR2ConfigRequiresCredentials(t *testing.T) {
 	t.Setenv("R2_SECRET_ACCESS_KEY", "")
 	t.Setenv("AHA_R2_ENDPOINT", "")
 	t.Setenv("R2_ENDPOINT", "")
-	_, err := depot.ResolveR2Config(model.R2DepotConfig{AccountID: "0123456789abcdef0123456789abcdef"})
+	_, err := depot.ResolveR2Config(model.R2ArchiveConfig{AccountID: "0123456789abcdef0123456789abcdef"})
 	if err == nil {
 		t.Fatal("expected missing credential error")
 	}
@@ -212,7 +212,7 @@ func TestResolveR2ConfigRejectsPlaceholderAndMalformedAccountIDs(t *testing.T) {
 			t.Setenv("R2_ENDPOINT", "")
 			t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 			t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
-			if _, err := depot.ResolveR2Config(model.R2DepotConfig{}); err == nil {
+			if _, err := depot.ResolveR2Config(model.R2ArchiveConfig{}); err == nil {
 				t.Fatalf("ResolveR2Config accepted account ID %q", accountID)
 			}
 		})
@@ -227,7 +227,7 @@ func TestResolveR2ConfigRejectsUnsafeEndpointsBeforeNetworking(t *testing.T) {
 			t.Setenv("R2_ACCOUNT_ID", "")
 			t.Setenv("AHA_R2_ACCESS_KEY_ID", "key")
 			t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "secret")
-			if _, err := depot.ResolveR2Config(model.R2DepotConfig{}); err == nil {
+			if _, err := depot.ResolveR2Config(model.R2ArchiveConfig{}); err == nil {
 				t.Fatalf("ResolveR2Config accepted unsafe endpoint %q", endpoint)
 			}
 		})
@@ -238,7 +238,7 @@ func TestResolveR2ConfigRejectsPlaceholderCredentialsWithoutLeakingThem(t *testi
 	t.Setenv("AHA_R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef")
 	t.Setenv("AHA_R2_ACCESS_KEY_ID", "<r2-access-key-id>")
 	t.Setenv("AHA_R2_SECRET_ACCESS_KEY", "<r2-secret-access-key>")
-	_, err := depot.ResolveR2Config(model.R2DepotConfig{})
+	_, err := depot.ResolveR2Config(model.R2ArchiveConfig{})
 	if err == nil {
 		t.Fatal("ResolveR2Config accepted placeholder credentials")
 	}

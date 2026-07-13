@@ -32,28 +32,121 @@ type PushOptions struct {
 	Progress *ahaprogress.Tracker
 }
 
-// PushV2 publishes one machine's state to a depot v2. The compatibility
-// wrapper keeps progress optional and allocation-free for existing callers.
-func PushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource) (PushResult, error) {
-	return PushV2WithOptions(ctx, v2, manifest, src, PushOptions{})
+// UploadPlan freezes validated publication inputs behind an opaque type.
+type UploadPlan struct {
+	writer   PreparedUpload
+	manifest model.SnapshotManifest
+	source   BlobSource
+	summary  UploadPlanSummary
 }
 
-// PushV2WithOptions computes the snapshot identity, recognizes unchanged
-// state from the parent pointer alone, uploads only blobs the parent does not
-// carry, then publishes the manifest and pointer through the typestate flow.
-func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {
+type UploadPlanSummary struct {
+	Files         int `json:"files"`
+	BlobsUpload   int `json:"blobs_upload"`
+	BlobsExisting int `json:"blobs_existing"`
+	BlobsCarried  int `json:"blobs_carried"`
+}
+
+func (p PreparedUpload) PlanUpload(ctx context.Context, manifest model.SnapshotManifest, source BlobSource) (UploadPlan, error) {
+	if _, err := p.ArchiveState(); err != nil {
+		return UploadPlan{}, err
+	}
+	if source == nil {
+		return UploadPlan{}, fmt.Errorf("Archive upload source is required")
+	}
+	if _, _, err := model.EncodeSnapshotManifest(manifest); err != nil {
+		return UploadPlan{}, err
+	}
+	machine, err := p.depot.forMachine(manifest.MachineID)
+	if err != nil {
+		return UploadPlan{}, err
+	}
+	parent, hasParent, err := machine.parent(ctx)
+	if err != nil {
+		return UploadPlan{}, err
+	}
+	if p.machines[manifest.MachineID] && !hasParent {
+		return UploadPlan{}, &DamagedArchiveError{Problems: []string{"publishing machine is indexed without a readable latest snapshot"}}
+	}
+	summary := UploadPlanSummary{Files: len(manifest.Files)}
+	seen := make(map[string]bool, len(manifest.Files))
+	for _, file := range manifest.Files {
+		if seen[file.SHA256] {
+			continue
+		}
+		seen[file.SHA256] = true
+		key, err := model.NewBlobKey(file.SHA256)
+		if err != nil {
+			return UploadPlan{}, err
+		}
+		if hasParent {
+			if _, ok := machine.carriedBlob(parent, key); ok {
+				summary.BlobsCarried++
+				continue
+			}
+		}
+		exists, err := p.depot.HasBlob(ctx, key)
+		if err != nil {
+			return UploadPlan{}, err
+		}
+		if exists {
+			summary.BlobsExisting++
+		} else {
+			summary.BlobsUpload++
+		}
+	}
+	return UploadPlan{writer: p, manifest: manifest, source: source, summary: summary}, nil
+}
+
+func (p UploadPlan) Summary() (UploadPlanSummary, error) {
+	if _, err := p.writer.ArchiveState(); err != nil || p.source == nil {
+		return UploadPlanSummary{}, fmt.Errorf("invalid Archive upload plan")
+	}
+	return p.summary, nil
+}
+
+func (p UploadPlan) Execute(ctx context.Context, opts PushOptions) (PushResult, error) {
+	if _, err := p.writer.ArchiveState(); err != nil || p.source == nil {
+		return PushResult{}, fmt.Errorf("invalid Archive upload plan")
+	}
+	return pushV2WithOptions(ctx, p.writer.depot, p.manifest, p.source, p.writer.machines[p.manifest.MachineID], opts)
+}
+
+// Push publishes through a capability constructed only after Archive marker
+// validation. Upload commands use this method rather than accepting a raw V2.
+func (p PreparedUpload) Push(ctx context.Context, manifest model.SnapshotManifest, src BlobSource, opts PushOptions) (PushResult, error) {
+	if _, err := p.ArchiveState(); err != nil {
+		return PushResult{}, err
+	}
+	if src == nil {
+		return PushResult{}, fmt.Errorf("Archive upload source is required")
+	}
+	return pushV2WithOptions(ctx, p.depot, manifest, src, p.machines[manifest.MachineID], opts)
+}
+
+func pushV2(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource) (PushResult, error) {
+	return pushV2WithOptions(ctx, v2, manifest, src, false, PushOptions{})
+}
+
+// pushV2WithOptions is deliberately package-private. The only public entry
+// points require PreparedUpload or UploadPlan, so an uninitialised or damaged
+// Archive cannot be passed to publication code.
+func pushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManifest, src BlobSource, requireParent bool, opts PushOptions) (PushResult, error) {
 	_, sha, err := model.EncodeSnapshotManifest(manifest)
 	if err != nil {
 		return PushResult{}, err
 	}
-	md, err := v2.ForMachine(manifest.MachineID)
+	md, err := v2.forMachine(manifest.MachineID)
 	if err != nil {
 		return PushResult{}, err
 	}
 	res := PushResult{manifestSHA: sha, Files: len(manifest.Files)}
-	parent, hasParent, err := md.Parent(ctx)
+	parent, hasParent, err := md.parent(ctx)
 	if err != nil {
 		return res, err
+	}
+	if requireParent && !hasParent {
+		return res, &DamagedArchiveError{Problems: []string{"publishing machine is indexed without a readable latest snapshot"}}
 	}
 	if hasParent {
 		// Reuse is decided by captured state, not capture time: an
@@ -68,10 +161,8 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 			return res, err
 		}
 		if parentState == state {
-			// A previous attempt may have published the pointer but failed
-			// while registering this machine in the discovery index. Re-run
-			// the idempotent commit step so unchanged retries heal that crash
-			// window without reading or uploading blob content.
+			// A verified parent is an immutable receipt: the Archive API has no
+			// delete operation. Deep verify owns out-of-band tamper detection.
 			if err := md.recommitParent(ctx, parent); err != nil {
 				return res, err
 			}
@@ -108,7 +199,7 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 			}
 		}
 	}()
-	receipts := make([]BlobReceipt, 0, len(manifest.Files))
+	receipts := make([]blobReceipt, 0, len(manifest.Files))
 	seen := make(map[string]bool, len(manifest.Files))
 	for _, f := range manifest.Files {
 		if seen[f.SHA256] {
@@ -120,7 +211,7 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 			return res, fmt.Errorf("manifest file %s: %w", f.RelativePath, err)
 		}
 		if hasParent {
-			if r, ok := md.CarriedBlob(parent, key); ok {
+			if r, ok := md.carriedBlob(parent, key); ok {
 				receipts = append(receipts, r)
 				res.BlobsCarried++
 				processedBlobs++
@@ -132,7 +223,7 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 		if err != nil {
 			return res, err
 		}
-		r, err := md.EnsureBlob(ctx, key, srcPath)
+		r, err := md.ensureBlob(ctx, key, srcPath)
 		if err != nil {
 			return res, err
 		}
@@ -150,11 +241,11 @@ func PushV2WithOptions(ctx context.Context, v2 *V2, manifest model.SnapshotManif
 	uploadComplete = true
 	opts.Progress.Start(ahaprogress.PhasePublish, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)
 	publishStarted = true
-	pub, err := md.PublishSnapshot(ctx, manifest, receipts, parent)
+	pub, err := md.publishSnapshot(ctx, manifest, receipts, parent)
 	if err != nil {
 		return res, err
 	}
-	if err := md.SetLatest(ctx, pub); err != nil {
+	if err := md.setLatest(ctx, pub); err != nil {
 		return res, err
 	}
 	opts.Progress.Complete(ahaprogress.PhasePublish, 1, ahaprogress.KnownTotal(1), ahaprogress.UnitSteps)

@@ -12,8 +12,8 @@ blocker:
   accident (a `cat .env` for debugging, an `Authorization:` header in a
   curl reproduction, an API key the user pasted to ask "is this scoped
   correctly?").
-- Once those bytes flow into `~/.aha/corpus/corpus.db`, every `aha search`
-  hit, every dashboard row, every MCP `tools/call`, and every `aha read`
+- Once those bytes flow into `~/.aha/corpus/workspace.db`, every `aha search`
+  hit, every dashboard row, every MCP `tools/call`, and every `aha show`
   response can echo them back — to the user, to an agent, or to a teammate
   inspecting a shared depot.
 - Tracebase, the closest neighbour, treats redaction-on-ingest as a core
@@ -28,7 +28,7 @@ in the first place.*
 ## Goals
 
 - **Indexed text is safe to surface.** Anywhere aha projects text into the
-  corpus (messages.text, messages.command, tool_invocations.*, artifacts.text_*, FTS rows) is
+  corpus (messages.text, messages.command, tool_invocations.*, artefacts.text_*, FTS rows) is
   redacted before it lands.
 - **Redactions are observable.** Per-session and per-entry hit counts,
   grouped by pattern, are persisted and surfaced via `aha status` and the
@@ -63,13 +63,13 @@ in the first place.*
 
 In scope:
 1. A user `aha search`es and a secret appears in the result snippet.
-2. A coding agent calls the MCP `search`/`read` tool and a secret shows up in
+2. A coding agent calls the MCP `search`/`show` tool and a secret shows up in
    the tool result text content.
-3. A teammate pulls a shared depot and `aha read` shows a credential that
+3. A teammate pulls a shared depot and `aha show` shows a credential that
    was never meant to leave the original machine.
 4. The dashboard renders a session and a `.env` line is visible.
 5. The user accidentally screen-shares the dashboard.
-6. The user pastes an `aha read` output into a public bug report.
+6. The user pastes an `aha show` output into a public bug report.
 
 Out of scope:
 1. An attacker with full read access to `~/.aha/`. Depot blobs and corpus
@@ -88,10 +88,10 @@ aha has two "tiers" of state. Redaction applies to *exactly one* of them.
 | ------------ | ------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------ |
 | Source       | `~/.claude/projects/*.jsonl`, `~/.codex/sessions/...`                     | No        | Read-only by design; aha never writes there.                       |
 | Depot        | `~/.aha/depot/blobs/v2/<sha>.zst` + snapshot manifests                    | No        | Content-addressed; blobs/manifests are the recovery + provenance path. |
-| Corpus index | `messages.text`, `messages.command`, `tool_invocations.command`, `tool_invocations.command_family`, `tool_invocations.error_signature`, `tool_invocations.outcome_text`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha read` consumer can observe. |
+| Corpus index | `messages.text`, `messages.command`, `tool_invocations.command`, `tool_invocations.command_family`, `tool_invocations.error_signature`, `tool_invocations.outcome_text`, `artifacts.text_*`, FTS5 virtual tables, `entries.raw_json`, `entries.source_metadata_json` | **Yes**   | Everything an agent, dashboard, or `aha show` consumer can observe. |
 
 `entries.raw_json` is included even though it is the "parsed source bytes."
-That's deliberate: `aha read --json` returns `raw_json`, and the MCP `read`
+That's deliberate: `aha show --json` returns `raw_json`, and the MCP `show`
 tool returns it via `corpus.ReadCanonical`. Leaving it raw would defeat the
 goal. The depot blob remains the unredacted source of truth.
 
@@ -162,7 +162,7 @@ Three changes to `internal/corpus/schema.go`:
    );
    ```
    `redactions` stores per-entry aggregate counts. `redaction_events` covers
-   session metadata and artifact surfaces that do not have an entry id.
+   session metadata and artefact surfaces that do not have an entry id.
    Triggers reject updates/deletes so duplicate ingest cannot inflate counts.
 
 3. **Schema migrations track redaction support** via `schema_migrations` versions
@@ -174,12 +174,12 @@ Three changes to `internal/corpus/schema.go`:
 - `aha status --json` / MCP `status` surface `redactions`,
   `redaction_events`, `redaction_hits`, `redaction_levels`, and
   `redactions_by_pattern`.
-- `aha verify` reports orphan redaction rows/events and unknown session
+- `aha workspace verify` reports orphan redaction rows/events and unknown session
   `redaction_level` values.
-- `aha read --json` returns already-redacted `raw_json` from the corpus
+- `aha show --json` returns already-redacted `raw_json` from the corpus
   projection; depot content remains raw.
-- `aha doctor --json` / MCP `doctor` include the same redaction counts and
-  level breakdown in the corpus diagnostics.
+- `aha status --json` / MCP `status` include redaction counts and level breakdowns
+  in Workspace diagnostics.
 - Dashboard integration is still follow-up UI work.
 
 ## Configuration
@@ -255,7 +255,7 @@ Match aha's existing rigor (`rapid`, fuzz, golden):
    `v1`, run `aha reindex --session X`, assert `sessions.redaction_level`
    becomes `v1` and `redactions` rows appear.
 7. **Schema test**: every column in the redactions table is queried by at
-   least one `aha status` / `aha verify` path.
+   least one `aha status` / `aha workspace verify` path.
 8. **Static test**: assert that every code path projecting text into
    `messages.text`/`tool_invocations.*`/`artifacts.text_*`/`entries.raw_json`/FTS calls the
    redactor exactly once.
@@ -290,7 +290,7 @@ For a 50,000-entry corpus with average 2 KB of indexable text per entry:
   remain at their stamped level; `aha status` warns; users opt into
   `aha reindex` when they're ready.
 - **Phase 3 — bundle redaction (optional).** If shared depots demand it,
-  add `aha snapshot --redact` that produces a parallel, redacted bundle for
+  add `aha archive upload --redact` that produces a parallel, redacted bundle for
   sharing while keeping the canonical raw bundle local.
 
 ## Open questions
@@ -338,8 +338,8 @@ it.
 
 The env-file list is glob-expanded against the session's `cwd` (which is
 already in `sessions.raw_cwd`). If a bundle preserves the env file as a
-captured artifact (it currently does not — see open questions below),
-the literal-match table is built from that artifact. Otherwise the
+captured artefact (it currently does not — see open questions below),
+the literal-match table is built from that artefact. Otherwise the
 table is empty and v1.2 collapses to v1.1 behaviour for that session.
 
 ### Schema
@@ -356,9 +356,9 @@ share that table without a schema change.
 
 - `aha status --json` adds `exact_redactions_total` and
   `exact_redactions_by_env_key`.
-- `aha doctor` reports which env files were read for the most recent
+- `aha status` reports which env files were read for the most recent
   session and how many literal substitutions resulted.
-- `aha verify` does not change.
+- `aha workspace verify` does not change.
 
 ### Test strategy
 
@@ -406,7 +406,7 @@ they later ship.
 
 Mirror that workspace into the depot, scoped to bundles that were
 explicitly produced for sharing. For every session in an
-`aha snapshot --redact` bundle, persist alongside the redacted
+`aha archive upload --redact` bundle, persist alongside the redacted
 session:
 
 - `redactor.json` — per-pattern hit counts (already known from the
@@ -440,11 +440,11 @@ only; they are not ingested.
 
 ### Surfaces
 
-- `aha snapshot --redact --audit-trail` produces the audit directory
+- `aha archive upload --redact --audit-trail` produces the audit directory
   alongside the redacted session.
-- `aha depot inspect --session <ref>` prints a summary of the audit
+- `aha archive status` prints a summary of the audit
   files inside a depot bundle.
-- `aha verify --audit-trail` confirms every shared session has a
+- `aha workspace verify --audit-trail` confirms every shared session has a
   complete audit directory and the counts match the redaction
   configuration recorded in `sessions.redaction_level`.
 
@@ -453,7 +453,7 @@ only; they are not ingested.
 1. **Round-trip**: snapshot a session with `--redact --audit-trail`,
    inspect the bundle, assert each audit file is well-formed JSON
    matching the per-session counts.
-2. **Tamper detection**: `aha verify --audit-trail` fails when an
+2. **Tamper detection**: `aha workspace verify --audit-trail` fails when an
    audit file is missing or its counts disagree with the redaction
    configuration.
 
@@ -463,7 +463,7 @@ only; they are not ingested.
    same way session JSONL is, or is filename-addressed (under
    `<sid>/audit/`) sufficient? Content addressing would defend
    against silent edits but complicates the layout.
-2. Should `aha ingest` warn (or refuse) when ingesting a bundle whose
+2. Should `aha archive download` warn (or refuse) when ingesting a bundle whose
    `audit/` directory is present but incomplete? Currently `audit/`
    is ignored on ingest.
 3. Once the postponed outputs ship, should the reserved
@@ -547,9 +547,9 @@ create table if not exists second_opinion_findings(
 
 - `aha status --json` adds `second_opinion_status_counts` (clean /
   flagged / unscanned / error) and `second_opinion_findings_total`.
-- `aha doctor` reports whether the configured detector is on `$PATH`
+- `aha status` reports whether the configured detector is on `$PATH`
   and what version.
-- `aha verify` flags sessions stamped `second_opinion_status='flagged'`
+- `aha workspace verify` flags sessions stamped `second_opinion_status='flagged'`
   whose entries are still being read.
 
 #### Test strategy
@@ -570,7 +570,7 @@ create table if not exists second_opinion_findings(
    `error` (binary missing, exec failure), or silently fall back to
    `none`? Defaulting to fail-closed matches the trust model but
    complicates first-run ergonomics.
-2. Detector versions drift; should `aha verify` re-run when the
+2. Detector versions drift; should `aha workspace verify` re-run when the
    detector version changes, or stamp the detector version into
    `sessions.second_opinion_status_meta`?
 
@@ -579,13 +579,13 @@ create table if not exists second_opinion_findings(
 Prior art: pi-share-hf's final pipeline step asks an LLM three
 questions over every redacted session before allowing the upload to
 Hugging Face. The aha analogue scopes this strictly to the **sharing
-flow** (`aha snapshot --redact`, depot publication) — not normal
+flow** (`aha archive upload --redact`, depot publication) — not normal
 local ingest, which must stay LLM-free.
 
 #### Scope
 
 Add `aha review --session <ref> [--model claude-haiku-4-5]` and gate
-`aha snapshot --redact` (and equivalent depot-publish surfaces)
+`aha archive upload --redact` (and equivalent depot-publish surfaces)
 behind a passing review. The reviewer reads the *already-redacted*
 session entries and answers three yes/no questions:
 
@@ -632,7 +632,7 @@ create table if not exists session_reviews(
 
 - `aha review --session <ref>` runs the review; prints verdict +
   rationale; exits non-zero on `blocked`.
-- `aha snapshot --redact --review-required` refuses to publish a
+- `aha archive upload --redact --review-required` refuses to publish a
   bundle if any included session lacks a passing review.
 - `aha status --json` adds `reviews_by_verdict`.
 - Dashboard adds a "Pending review" lane in the share UI (out of scope
@@ -646,7 +646,7 @@ create table if not exists session_reviews(
    Claude / OpenAI / local model and asserts a clearly-shareable
    fixture passes and a planted-secret fixture is blocked.
 3. **Verdict round-trip**: after `aha review --session X`, the
-   recorded verdict is what `aha snapshot --redact --review-required`
+   recorded verdict is what `aha archive upload --redact --review-required`
    reads.
 
 #### Open questions

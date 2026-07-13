@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/adewale/aha/internal/archive"
+	"github.com/adewale/aha/internal/config"
 	"github.com/adewale/aha/internal/corpus"
 	"github.com/adewale/aha/internal/depot"
 	"github.com/adewale/aha/internal/model"
@@ -109,17 +110,10 @@ func InvalidInput(command string, cause error) View {
 }
 
 func PrivacyAcknowledgement(command string) View {
-	if command != "snapshot" && command != "refresh" {
-		command = "snapshot"
+	if command == "init" {
+		return view(CodePrivacyAcknowledgement, "Acknowledge that raw agent histories may contain secrets before initialising aha.", command, action("aha", "init", "--acknowledge-raw-history"), "privacy_acknowledgement", false)
 	}
-	return view(
-		CodePrivacyAcknowledgement,
-		"Raw snapshot privacy acknowledgement is required before upload.",
-		command,
-		action("aha", command, "--accept-secrets"),
-		"privacy_acknowledgement",
-		false,
-	)
+	return view(CodePrivacyAcknowledgement, "Raw-history privacy acknowledgement is required before Archive upload.", "archive", action("aha", "init", "--acknowledge-raw-history"), "privacy_acknowledgement", false)
 }
 
 func Normalize(err error, command string) View {
@@ -137,11 +131,11 @@ func Normalize(err error, command string) View {
 	}
 	var explicitAddress *depot.ExplicitAddressError
 	if errors.As(err, &explicitAddress) {
-		return view(CodeInvalidInput, "Specify the depot kind explicitly: use r2:<bucket> for Cloudflare R2 or local:<path> for local storage.", command, helpAction(command), "depot_address_kind", false)
+		return view(CodeInvalidInput, "Specify the Archive kind explicitly: use r2:<bucket> for Cloudflare R2 or local:<path> for local storage.", command, helpAction(command), "depot_address_kind", false)
 	}
-	var corpusDestination *safety.CorpusDestinationError
+	var corpusDestination *safety.WorkspaceDestinationError
 	if errors.As(err, &corpusDestination) {
-		return view(CodeInvalidInput, "Choose a dedicated empty directory or an existing aha corpus for local history; an unrelated non-empty directory cannot become a corpus.", command, helpAction("ingest"), "corpus_destination", false)
+		return view(CodeInvalidInput, "Choose a dedicated empty directory or an existing aha Workspace; an unrelated non-empty directory cannot become a Workspace.", command, helpAction("workspace"), "workspace_destination", false)
 	}
 	var r2Config *depot.R2ConfigError
 	if errors.As(err, &r2Config) {
@@ -154,8 +148,8 @@ func Normalize(err error, command string) View {
 	var auth *depot.R2AuthorizationError
 	if errors.As(err, &auth) {
 		return view(CodePermissionDenied,
-			fmt.Sprintf("R2 denied both bucket access checks for %q before any depot mutation.", auth.Bucket),
-			command, action("aha", "depot", "setup", "r2:"+auth.Bucket, "--json"), "r2_authorization", false)
+			fmt.Sprintf("R2 denied both bucket access checks for %q before any Archive mutation.", auth.Bucket),
+			command, action("aha", "archive", "status", "r2:"+auth.Bucket, "--json"), "r2_authorization", false)
 	}
 	var stale *depot.StalePublicationError
 	if errors.As(err, &stale) {
@@ -163,15 +157,28 @@ func Normalize(err error, command string) View {
 	}
 	var contention *depot.ContentionError
 	if errors.As(err, &contention) {
-		return view(CodeConflict, "The depot stayed busy because other writers repeatedly changed shared state.", command, doctorAction(), "depot_contention", true)
+		return view(CodeConflict, "The Archive stayed busy because other writers repeatedly changed shared state.", command, doctorAction(), "archive_contention", true)
 	}
 	var notFound corpus.NotFoundError
 	if errors.As(err, &notFound) {
-		return view(CodeNotFound, fmt.Sprintf("The requested %s was not found.", safeKind(notFound.Kind)), command, action("aha", "status", "--json"), "corpus_not_found", false)
+		return view(CodeNotFound, fmt.Sprintf("The requested %s was not found.", safeKind(notFound.Kind)), command, action("aha", "status", "--json"), "workspace_not_found", false)
 	}
 	var ambiguous corpus.AmbiguousError
 	if errors.As(err, &ambiguous) {
 		return view(CodeAmbiguous, fmt.Sprintf("The requested %s matches more than one result.", safeKind(ambiguous.Kind)), command, helpAction(command), "ambiguous_reference", false)
+	}
+	var legacyArchive *depot.LegacyArchiveError
+	if errors.As(err, &legacyArchive) {
+		return view(CodeUnsupportedSchema, "This location contains a v1 Archive; aha 0.2 will not modify or migrate it in place.", command, action("aha", "archive", "init", "local:~/.aha/archive-v2"), "legacy_archive", false)
+	}
+	var configSchema *config.UnsupportedSchemaError
+	var archiveFeature *depot.UnsupportedArchiveFeatureError
+	var archiveFormat *depot.UnsupportedArchiveFormatError
+	var snapshotAdapter *depot.UnsupportedSnapshotAdapterError
+	var workspaceIdentity *corpus.UnsupportedWorkspaceIdentityError
+	var workspaceSchema *corpus.UnsupportedWorkspaceSchemaError
+	if errors.As(err, &configSchema) || errors.As(err, &archiveFeature) || errors.As(err, &archiveFormat) || errors.As(err, &snapshotAdapter) || errors.As(err, &workspaceIdentity) || errors.As(err, &workspaceSchema) {
+		return view(CodeUnsupportedSchema, "Stored state requires a newer aha before it can be read or changed.", command, action("aha", "version", "--json"), "upgrade_required", false)
 	}
 	var unsupportedSchema archive.UnsupportedSchemaError
 	if errors.As(err, &unsupportedSchema) {
@@ -181,8 +188,11 @@ func Normalize(err error, command string) View {
 	if errors.As(err, &unsupportedRef) {
 		return view(CodeUnsupportedRef, "The reference format is not supported by this version of aha.", command, helpAction(command), "unsupported_reference", false)
 	}
+	if errors.Is(err, corpus.ErrArchiveMismatch) {
+		return view(CodeConflict, "This Workspace is bound to a different Archive.", command, action("aha", "workspace", "status"), "archive_mismatch", false)
+	}
 	if errors.Is(err, corpus.ErrRebuildUnsupported) {
-		return view(CodeUnsupported, "Safe corpus rebuild is not supported on this platform.", command, helpAction("corpus"), "unsupported_platform", false)
+		return view(CodeUnsupported, "Safe Workspace repair is not supported on this platform.", command, helpAction("workspace"), "unsupported_platform", false)
 	}
 	if errors.Is(err, fs.ErrPermission) || errors.Is(err, os.ErrPermission) {
 		return view(CodePermissionDenied, commandMessage(command, "could not access required local storage because permission was denied"), command, doctorAction(), "filesystem_permission", false)
@@ -194,15 +204,15 @@ func Normalize(err error, command string) View {
 	if errors.As(err, &apiErr) {
 		switch strings.ToLower(apiErr.ErrorCode()) {
 		case "accessdenied", "forbidden", "403", "invalidaccesskeyid", "signaturedoesnotmatch":
-			return view(CodePermissionDenied, "The remote depot rejected the configured credentials or endpoint.", command, doctorAction(), "remote_authorization", false)
+			return view(CodePermissionDenied, "The remote Archive rejected the configured credentials or endpoint.", command, doctorAction(), "remote_authorization", false)
 		case "nosuchbucket", "nosuchkey", "notfound", "404":
-			return view(CodeNotFound, "The requested remote depot resource was not found.", command, doctorAction(), "remote_not_found", false)
+			return view(CodeNotFound, "The requested remote Archive resource was not found.", command, doctorAction(), "remote_not_found", false)
 		case "preconditionfailed", "412", "conflict":
-			return view(CodeConflict, "The remote depot changed concurrently; the operation could not safely finish.", command, doctorAction(), "remote_conflict", true)
+			return view(CodeConflict, "The remote Archive changed concurrently; the operation could not safely finish.", command, doctorAction(), "remote_conflict", true)
 		case "slowdown", "throttling", "throttlingexception", "503", "serviceunavailable":
-			return view(CodeUnavailable, "The remote depot is temporarily unavailable or throttling requests.", command, doctorAction(), "remote_throttled", true)
+			return view(CodeUnavailable, "The remote Archive is temporarily unavailable or throttling requests.", command, doctorAction(), "remote_throttled", true)
 		default:
-			return view(CodeUnavailable, "The remote depot operation failed.", command, doctorAction(), "remote_failure", true)
+			return view(CodeUnavailable, "The remote Archive operation failed.", command, doctorAction(), "remote_failure", true)
 		}
 	}
 	msg := strings.ToLower(err.Error())
@@ -221,11 +231,11 @@ func Normalize(err error, command string) View {
 	if strings.Contains(msg, "conflicting r2 environment aliases") {
 		return view(CodeInvalidInput, "Conflicting R2 environment aliases are set to different values.", command, doctorAction(), "r2_alias_conflict", false)
 	}
-	if strings.Contains(msg, "flag provided but not defined") || strings.Contains(msg, "invalid value") || strings.Contains(msg, "flag needs an argument") || strings.Contains(msg, "requires path") || strings.Contains(msg, "unknown corpus subcommand") || strings.Contains(msg, "unknown depot subcommand") {
+	if strings.Contains(msg, "flag provided but not defined") || strings.Contains(msg, "invalid value") || strings.Contains(msg, "flag needs an argument") || strings.Contains(msg, "requires path") || strings.Contains(msg, "unknown workspace subcommand") || strings.Contains(msg, "unknown archive subcommand") {
 		return view(CodeFlagParse, commandMessage(command, "received invalid command options"), command, helpAction(command), "usage", false)
 	}
 	if strings.Contains(msg, "address already in use") {
-		return view(CodeUnavailable, "The dashboard address is already in use.", command, helpAction("serve"), "address_in_use", true)
+		return view(CodeUnavailable, "The dashboard address is already in use.", command, helpAction("dashboard"), "address_in_use", true)
 	}
 	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "no such host") || strings.Contains(msg, "tls handshake") || strings.Contains(msg, "x509:") {
 		return view(CodeUnavailable, "The remote service could not be reached securely.", command, doctorAction(), "network_unavailable", true)
@@ -243,7 +253,7 @@ func Normalize(err error, command string) View {
 		return view(CodeInvalidInput, commandMessage(command, "received invalid input"), command, helpAction(command), "validation", false)
 	}
 	if strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy") {
-		return view(CodeUnavailable, "The corpus database is busy with another operation.", command, doctorAction(), "database_busy", true)
+		return view(CodeUnavailable, "The Workspace database is busy with another operation.", command, doctorAction(), "database_busy", true)
 	}
 	if strings.Contains(msg, "constraint failed") || strings.Contains(msg, "unique constraint") {
 		return view(CodeConflict, "Stored state conflicts with an existing record.", command, doctorAction(), "database_conflict", false)
@@ -267,7 +277,7 @@ func action(command string, args ...string) Action {
 
 func HelpAction(command string) Action { return helpAction(command) }
 
-func doctorAction() Action { return action("aha", "doctor", "--json") }
+func doctorAction() Action { return action("aha", "status", "--json") }
 
 func helpAction(command string) Action {
 	if command == "" {

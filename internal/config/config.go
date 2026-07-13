@@ -1,10 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -14,18 +17,41 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+const SchemaV1 = "aha.config.v1"
+
+// UnsupportedSchemaError distinguishes a valid newer config from a misspelt
+// field in the current schema. Commands must refuse it before mutation.
+type UnsupportedSchemaError struct {
+	Found     string
+	Supported string
+}
+
+// LegacyConfigError identifies removed pre-0.2 keys without echoing their
+// values. There is deliberately no compatibility alias: callers must create a
+// current config explicitly before any command may mutate durable state.
+type LegacyConfigError struct{ Fields []string }
+
+func (e *LegacyConfigError) Error() string {
+	return "config uses removed pre-0.2 fields " + strings.Join(e.Fields, ", ") + "; run `aha init` and transfer the supported settings"
+}
+
+func (e *UnsupportedSchemaError) Error() string {
+	return "config schema " + strconv.Quote(e.Found) + " is not supported; upgrade aha before using this config"
+}
+
 func Default() model.Config {
 	return model.Config{
-		MachineID:            defaultMachineID(),
-		Sources:              defaultSources(),
-		CorpusDir:            "~/.aha",
-		Depot:                model.DepotConfig{Type: "local", Location: "~/.aha/depot"},
-		PathMode:             "raw",
-		IncludeSubagents:     true,
-		IncludeImages:        true,
-		IndexToolOutput:      false,
-		Redaction:            "none-v1",
-		AcceptSecretsWarning: false,
+		Schema:                 SchemaV1,
+		MachineID:              defaultMachineID(),
+		Sources:                defaultSources(),
+		WorkspaceDir:           "~/.aha/workspace",
+		Archive:                model.ArchiveConfig{Type: "local", Location: "~/.aha/archive"},
+		PathMode:               "raw",
+		IncludeSubagents:       true,
+		IncludeImages:          true,
+		IndexToolOutput:        false,
+		Redaction:              "none-v1",
+		AcknowledgedRawHistory: false,
 	}
 }
 
@@ -75,8 +101,44 @@ func Load(path string) (model.Config, error) {
 		return cfg, err
 	}
 	ast.Standardize()
-	if err := json.Unmarshal(ast.Pack(), &cfg); err != nil {
+	packed := ast.Pack()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(packed, &raw); err != nil {
 		return cfg, err
+	}
+	legacyFields := make([]string, 0, 3)
+	for _, field := range []string{"accept_secrets_warning", "corpus_dir", "depot"} {
+		if _, exists := raw[field]; exists {
+			legacyFields = append(legacyFields, field)
+		}
+	}
+	if len(legacyFields) > 0 {
+		return cfg, &LegacyConfigError{Fields: legacyFields}
+	}
+	var envelope struct {
+		Schema string `json:"schema"`
+	}
+	if err := json.Unmarshal(packed, &envelope); err != nil {
+		return cfg, err
+	}
+	if envelope.Schema != "" && envelope.Schema != SchemaV1 {
+		return cfg, &UnsupportedSchemaError{Found: envelope.Schema, Supported: SchemaV1}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(packed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return cfg, err
+	}
+	// The current v1 shape may omit its schema during the 0.2 pre-release.
+	// Actual pre-0.2 keys were classified above and are never treated as v1.
+	if cfg.Schema == "" {
+		cfg.Schema = SchemaV1
+	}
+	for namespace := range cfg.Extensions {
+		host, name, ok := strings.Cut(namespace, "/")
+		if !ok || !strings.Contains(host, ".") || strings.TrimSpace(host) != host || strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name {
+			return cfg, fmt.Errorf("config extension key %q must use a reverse-domain namespace such as example.com/tool", namespace)
+		}
 	}
 	return cfg, nil
 }
@@ -86,14 +148,14 @@ func StarterJSONC() []byte {
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	header := "// aha config (JSONC)\n" +
 		"// machine_id defaults to the local hostname; edit it if you want a stable label across renames.\n" +
-		"// Set accept_secrets_warning to true only after reading the privacy warning.\n" +
+		"// Set acknowledged_raw_history to true only after reading the privacy warning.\n" +
 		"//\n" +
-		"// depot: where snapshots are stored. Local is the default until you configure one.\n" +
-		"//   Configure a depot with `aha depot init <addr>` (e.g. r2:aha-depot or local:/path);\n" +
-		"//   switch the default later with `aha depot use <addr>`. Either command sets the default.\n" +
-		"// R2 depots: keep the two secret keys in the environment, never in this file —\n" +
-		"//   AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY. `aha depot init`/`use` persist the\n" +
-		"//   non-secret depot.r2.account_id for you, so a flagless `aha refresh` then targets R2.\n" +
+		"// archive: durable aggregated history. Local is the default until you configure one.\n" +
+		"//   Initialise an Archive with `aha archive init <address>` (for example r2:aha-archive or local:/path).\n" +
+		"//   Select it with `aha archive set-default <address>`.\n" +
+		"// R2 Archives: keep the two secret keys in the environment, never in this file —\n" +
+		"//   AHA_R2_ACCESS_KEY_ID and AHA_R2_SECRET_ACCESS_KEY. Archive commands persist only\n" +
+		"//   the non-secret archive.r2.account_id.\n" +
 		"//   direnv (.envrc): export AHA_R2_ACCESS_KEY_ID=... ; export AHA_R2_SECRET_ACCESS_KEY=...\n"
 	return append([]byte(header), append(b, '\n')...)
 }

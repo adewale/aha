@@ -194,16 +194,16 @@ func runScenarioErr(ctx context.Context, v2 *V2) (model.ManifestSHA256, error) {
 		mfs[name] = model.ManifestFile{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/" + name, RawPath: "/r/" + name, SHA256: sha, Bytes: int64(len(content)), SessionID: strings.TrimSuffix(name, ".jsonl"), CopyState: "stable"}
 	}
 	manifest := func(files ...string) model.SnapshotManifest {
-		m := model.SnapshotManifest{Schema: model.SnapshotManifestSchema, MachineID: "fault-machine", CapturedAt: "2026-06-10T00:00:00Z", Policy: model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"}}
+		m := model.SnapshotManifest{Schema: model.SnapshotManifestSchema, RequiredFeatures: model.RequiredSnapshotFeatures(), MachineID: "fault-machine", CapturedAt: "2026-06-10T00:00:00Z", Policy: model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"}, Adapters: []model.ManifestAdapt{{Name: "pi", Version: "test"}}}
 		for _, name := range files {
 			m.Files = append(m.Files, mfs[name])
 		}
 		return m
 	}
-	if _, err := PushV2(ctx, v2, manifest("a.jsonl"), src); err != nil {
+	if _, err := pushV2(ctx, v2, manifest("a.jsonl"), src); err != nil {
 		return model.ManifestSHA256{}, err
 	}
-	res, err := PushV2(ctx, v2, manifest("a.jsonl", "b.jsonl"), src)
+	res, err := pushV2(ctx, v2, manifest("a.jsonl", "b.jsonl"), src)
 	if err != nil {
 		return model.ManifestSHA256{}, err
 	}

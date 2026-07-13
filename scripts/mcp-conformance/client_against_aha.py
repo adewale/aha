@@ -23,15 +23,15 @@ from mcp.client.stdio import stdio_client
 # internal/mcp/tools.go changes — the test asserts exact equality.
 EXPECTED_TOOLS = [
     "search",
-    "read",
-    "incidents",
-    "incident_trajectory",
+    "show",
+    "analyse_failures",
+    "analyse_failure_trajectory",
     "overview",
     "status",
-    "verify",
-    "conflicts",
-    "corpus_size",
-    "doctor",
+    "workspace_verify",
+    "workspace_conflicts",
+    "workspace_size",
+    "aha_capabilities",
 ]
 
 
@@ -60,7 +60,7 @@ async def main() -> int:
         return 77
     aha_bin, config = inputs
 
-    params = StdioServerParameters(command=aha_bin, args=["mcp", "--config", config])
+    params = StdioServerParameters(command=aha_bin, args=["mcp", "serve", "--config", config])
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -85,7 +85,7 @@ async def main() -> int:
             assert res.content, f"call_tool(status) returned no content blocks"
             text = res.content[0].text
             status = json.loads(text)
-            for key in ("corpus_dir", "sessions", "entries", "fts_messages"):
+            for key in ("workspace_dir", "sessions", "entries", "fts_messages"):
                 assert key in status, f"status missing {key!r}: {list(status.keys())[:10]}"
             print(f"tools/call status OK: sessions={status.get('sessions')} entries={status.get('entries')}")
 

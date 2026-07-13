@@ -3,10 +3,76 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adewale/aha/internal/config"
 )
+
+func TestWritePreservesExistingJSONCComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonc")
+	before := []byte("// operator note\n{\n  // keep this source note\n  \"machine_id\": \"old\",\n  \"extensions\": {\n    \"example.com/tool\": {\n      // extension-owned note\n      \"future\": true,\n    },\n  },\n  \"sources\": [],\n  \"workspace_dir\": \"/old\"\n}\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MachineID = "new"
+	cfg.Sources = nil
+	cfg.WorkspaceDir = "/new"
+	if _, err := config.Write(path, cfg, "// replacement header must not erase existing comments\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{"// operator note", "// keep this source note", "// extension-owned note"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rewritten config missing %q:\n%s", want, text)
+		}
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Schema != config.SchemaV1 || loaded.MachineID != "new" || loaded.WorkspaceDir != "/new" {
+		t.Fatalf("rewritten config=%+v", loaded)
+	}
+}
+
+func TestWriteCanRemoveOptionalConfigFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.jsonc")
+	before := []byte(`{
+  "machine_id": "m",
+  "machine_label": "old label",
+  "extensions": {"example.com/tool": {"enabled": true}},
+  "sources": [],
+  "workspace_dir": "/work"
+}`)
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MachineLabel = ""
+	cfg.Extensions = nil
+	if _, err := config.Write(path, cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "machine_label") || strings.Contains(string(body), "extensions") {
+		t.Fatalf("optional fields survived explicit removal:\n%s", body)
+	}
+}
 
 func TestWriteAtomicallyReplacesConfigSymlinkWithoutFollowingIt(t *testing.T) {
 	root := t.TempDir()

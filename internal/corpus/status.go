@@ -6,7 +6,7 @@ import (
 )
 
 func Status(db *sql.DB, root string) (map[string]any, error) {
-	stats := map[string]any{"corpus_dir": root}
+	stats := map[string]any{"workspace_dir": root}
 	for _, table := range []string{"machines", "snapshots", "sources", "files", "sessions", "session_versions", "entries", "messages", "artifacts", "images", "entry_assets", "session_path_tokens", "artifact_path_tokens", "conflicts", "tool_invocations", "redactions", "redaction_events", "fts_messages", "fts_artifacts"} {
 		var n int
 		if err := db.QueryRow("select count(*) from " + table).Scan(&n); err != nil {
@@ -119,8 +119,20 @@ func SnapshotManifestSHAs(db *sql.DB) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
+const MaxConflictsPageSize = 200
+
 func Conflicts(db *sql.DB) ([]Conflict, error) {
-	rows, err := db.Query(`select conflict_id,session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json,created_at from conflicts order by conflict_id`)
+	return ConflictsPage(db, MaxConflictsPageSize, 0)
+}
+
+func ConflictsPage(db *sql.DB, limit, offset int) ([]Conflict, error) {
+	if limit <= 0 || limit > MaxConflictsPageSize {
+		return nil, fmt.Errorf("conflict limit must be between 1 and %d", MaxConflictsPageSize)
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("conflict offset must be non-negative")
+	}
+	rows, err := db.Query(`select conflict_id,session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json,created_at from conflicts order by conflict_id limit ? offset ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}

@@ -39,13 +39,13 @@ that the corpus is always rebuildable from the depot.
 luxury the v1 depot spec took: **no migration shims, no dual-format drivers,
 no compatibility window.** The v2 layout replaces the v1 layout outright. The
 single compatibility hedge we keep is nearly free and independently useful:
-`aha ingest <bundle.tar.zst>` continues to read v1 bundle *files* (journey 4
+`aha archive download <bundle.tar.zst>` continues to read v1 bundle *files* (journey 4
 in `docs/user-journeys.md` wants this anyway), so any v1 depot ever needed
 again is recoverable by feeding its bundles through import.
 
 Vocabulary (one name per entity, as in v1): the unit of stored data is a
-**blob** (one compressed session/artifact file version, addressed by SHA-256);
-the snapshot artifact is a **manifest** (a small JSON object listing blob
+**blob** (one compressed session/artefact file version, addressed by SHA-256);
+the snapshot artefact is a **manifest** (a small JSON object listing blob
 addresses, addressed by its own SHA-256); the searchable database is the
 **corpus**. The word **bundle** is reserved for the v1 `tar.zst` file format,
 which survives only in `export`/`import`.
@@ -79,8 +79,8 @@ with the day's delta:
    (`MaxBundleBytes` = 2 GiB, `MaxBundleUncompressedBytes` = 8 GiB) are a
    hard failure every heavy user eventually hits, with no graceful path.
 
-v2 makes these states **unrepresentable** instead of optimized: there is no
-full-history artifact to re-upload, no monolith to hit a budget, no bundle
+v2 makes these states **unrepresentable** instead of optimised: there is no
+full-history artefact to re-upload, no monolith to hit a budget, no bundle
 blob to hoard, and "already stored" is an address collision rather than a
 runtime check.
 
@@ -108,7 +108,7 @@ together cost ≈ O(delta).
   a lost delta silently truncates reconstructable state. v2 rejects chains.
 - **Dynamo anti-entropy / Merkle (CRYPTO '87)**: compare states by exchanging
   small digests, fetch only differences. At aha's scale a flat manifest is
-  the digest; a Merkle tree is a deferred optimization.
+  the digest; a Merkle tree is a deferred optimisation.
 - **Log shippers (Filebeat/fluentd registries)**: for append-mostly logs,
   `(prefix-hash, parsed-offset)` bookkeeping gives O(appended bytes) parsing
   with no rolling-hash machinery. Reserved here as a *future* refinement for
@@ -127,7 +127,7 @@ Function* (CRYPTO '87); DeCandia et al., *Dynamo* (SOSP 2007); O'Neil et al.,
 1992); Korn et al., RFC 3284 (VCDIFF, 2002); Paulo & Pereira, *A Survey and
 Classification of Storage Deduplication Systems* (ACM CSUR 2014).
 
-## R2 cost model (and why it favors this design)
+## R2 cost model (and why it favours this design)
 
 From <https://developers.cloudflare.com/r2/how-r2-works/> and
 <https://developers.cloudflare.com/r2/pricing/>:
@@ -140,7 +140,7 @@ From <https://developers.cloudflare.com/r2/how-r2-works/> and
   ~$0.14/month: the classic "many small objects are expensive" objection
   mostly dissolves on R2.
 - R2 is **strongly consistent** and supports conditional writes (already used
-  by the v1 catalog).
+  by the v1 catalogue).
 
 Consequences encoded in this design:
 
@@ -157,13 +157,15 @@ Consequences encoded in this design:
 ### Object model and key layout
 
 ```text
-<depot root or bucket>/
-  aha-depot.json                                # marker (schema aha-depot/v2)
-  blobs/v2/<sha256>.zst                         # one compressed file version, write-once
-  machines/index.json                           # machine-namespace registry, conditional PUT
-  machines/<machine_id>/manifests/<sha256>.json # one snapshot manifest, write-once
-  machines/<machine_id>/latest                  # pointer {manifest_sha256}, conditional PUT
+<Archive root or bucket>/
+  aha-depot.json                                       # marker (current schema aha-depot/v3)
+  aha-v3/blobs/v2/<sha256>.zst                         # one compressed file version, write-once
+  aha-v3/machines/index.json                           # machine-namespace registry, conditional PUT
+  aha-v3/machines/<machine_id>/manifests/<sha256>.json # one snapshot manifest, write-once
+  aha-v3/machines/<machine_id>/latest                  # pointer {manifest_sha256}, conditional PUT
 ```
+
+The v3 prefix is a writer-generation fence: pre-0.2 binaries reject the v3 marker before publication, and even a previously issued legacy writer cannot move the authoritative v3 pointers. Aha still reads the exact unprefixed v2 layout and v2 snapshot bytes, but never grants it a writer capability.
 
 The **machines index** exists so pull can discover machine namespaces with a
 single GET instead of a LIST (I6). It is appended to (conditional PUT with
@@ -174,7 +176,7 @@ machine identity, capture metadata, adapter versions, policy, and the full
 file list — each entry carrying source, kind, relative/raw path, size, and
 `blob_sha256`. The manifest's own SHA-256 is the **snapshot identity**;
 `bundle_id` (a name that had to be policed for emptiness and uniqueness) is
-deleted in favor of this fact that cannot be forged or collide. Manifests are
+deleted in favour of this fact that cannot be forged or collide. Manifests are
 *logically full*: every snapshot lists the machine's complete state, so there
 are no chains and no parent references to break.
 
@@ -199,7 +201,12 @@ version") is unchanged in shape.
 - **refresh** = push + pull, unchanged as the muscle-memory command. Because
   push derives its delta from the parent manifest and pull derives its
   fetches from the corpus, a steady-state refresh with no changes is a
-  handful of small GETs and zero PUTs, zero parses, zero blob fetches.
+  handful of small GETs and zero PUTs, zero parses, zero blob fetches. This
+  budget relies on the Archive's append-only storage boundary: a verified
+  parent manifest is the receipt for carried blobs, so ordinary upload does
+  not issue one HEAD per file. Explicit deep verification detects
+  out-of-band operator deletion or storage corruption; upload is not an
+  implicit whole-Archive repair scan.
 
 ### Invariants — by construction first
 
@@ -268,11 +275,11 @@ bundles create.
 
 | Deleted | Why it existed |
 |---|---|
-| Bundle budgets + `ValidateManifestBudgets` (the 2 GiB cliff) | monolithic artifact size |
+| Bundle budgets + `ValidateManifestBudgets` (the 2 GiB cliff) | monolithic artefact size |
 | `ManifestStateSHA256`, `state_sha256` plumbing, `findDepotBundleWithSameState`, `SkipIfUnchanged` | cheap "did anything change?" — replaced by manifest diff, which also says *what* changed |
 | Bundle-level duplicate detection (`recordBundleAttempt` dedup) | duplicates are unrepresentable under I1 |
 | `PromoteBundle`, corpus bundle blobs, and their verify/prune plumbing | per-corpus copies of full-history bundles (`corpus prune-orphans` survives for file/image blobs orphaned by rolled-back ingests) |
-| Catalog shard merge/repair + `depot compact` | multi-writer catalog reconciliation — replaced by per-machine pointers (I3) + conditional PUT |
+| Catalogue shard merge/repair + `depot compact` | multi-writer catalogue reconciliation — replaced by per-machine pointers (I3) + conditional PUT |
 | Deterministic `tar.zst` writer/reader in `internal/archive` (kept only behind `export`/`import`) | the bundle file format |
 | `bundle_id` and its validity policing | naming — replaced by manifest SHA (I4) |
 
@@ -294,11 +301,11 @@ The daily journeys in `docs/user-journeys.md` (1–3, 5–8) are preserved
   they are the only place the v1 format survives, and the compatibility
   hedge for any pre-v2 depot.
 - **New journey: bootstrap a new machine** (promoted to first-class in
-  `user-journeys.md`): `aha init && aha refresh` against an existing depot =
+  `user-journeys.md`): `aha init && aha archive upload && aha archive download` against an existing depot =
   pointer GETs + manifest GETs + only-needed blob fetches + parse-once. Free
   egress makes this the multi-machine pitch made real.
 - **Deleted commands:** `depot compact` (per-machine pointers replaced
-  catalog shards). `corpus prune-orphans` survives: file/image blobs from
+  catalogue shards). `corpus prune-orphans` survives: file/image blobs from
   rolled-back ingests can still orphan. Net command count: −1 subcommand,
   +1 export.
 - `depot verify` reworked: quick = pointers resolve to manifests, manifests
@@ -430,9 +437,9 @@ generation, `user-journeys.md` gains the bootstrap journey,
 
 **Phase 7 — the deletion (pure refactor, suite stays green).**
 Remove everything in the deletion table: v1 drivers, budgets, state
-signatures, bundle dedup, `PromoteBundle`/`prune-orphans`/`compact`, catalog
+signatures, bundle dedup, `PromoteBundle`/`prune-orphans`/`compact`, catalogue
 merge, `bundle_id`. Each removal is demanded by a test *changing or
-disappearing first* where behavior changes (e.g. `prune-orphans` golden
+disappearing first* where behaviour changes (e.g. `prune-orphans` golden
 tests deleted in the same commit), and `testquality`'s debt inventory is
 updated so nothing creeps back. The drift tests force `architecture.html`
 and the docs to track the shrinkage.

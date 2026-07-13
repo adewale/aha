@@ -5,7 +5,7 @@ Branch: `claude/correctness-by-construction-cgcFx`
 Baseline branch point: pre-performance-plan notes in `docs/performance-scalability-plan.md`
 Machine: Apple M2 Ultra, darwin/arm64
 
-*Historical capture: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The catalog/bundle depot benchmarks recorded here measured the v1 bundle store, which was replaced by content-addressed snapshots in June 2026.*
+*Historical capture: predates depot v2 ([docs/depot-v2-spec.md](depot-v2-spec.md)). The catalogue/bundle depot benchmarks recorded here measured the v1 bundle store, which was replaced by content-addressed snapshots in June 2026.*
 
 These numbers are directional benchmark captures, not CI thresholds. Unit tests guard algorithmic hazards with query plans, property tests, and fake-driver operation counters; benchmarks show magnitude and regressions.
 
@@ -42,14 +42,14 @@ go test ./internal/depot -run=^$ -bench='BenchmarkPathologicalCatalogMergeManyTr
 | Search normal bench, path-token filter | new | `7.17ms`, `38.6KB`, `730 allocs` over `10x` | Comparable to exact project/path filters on small corpora. |
 | Status counts | ~`1.9ms` | `2.0ms`, `9.8KB`, `260 allocs` | Slightly worse in this run due extra path-token table counts; still metadata-only and cheap. |
 | Bundle SHA set | `1.8ms`, `1.25MB` | `1.66ms`, `1.25MB`, `25k allocs` | Similar; still grows with ingested bundle count. |
-| Depot catalog merge, 4k refs/1k unique | linear-scan duplicate risk | `1.51ms`, `1.49MB`, `9.8k allocs` | Map-backed dedupe removes bad duplicate scaling; small memory cost accepted. |
+| Depot catalogue merge, 4k refs/1k unique | linear-scan duplicate risk | `1.51ms`, `1.49MB`, `9.8k allocs` | Map-backed dedupe removes bad duplicate scaling; small memory cost accepted. |
 | Local depot list, 250 refs | ~`0.7ms` | `0.95ms`, `374KB`, `2k allocs` | Slightly slower but still metadata-only. |
-| Local depot append, growing catalog | ~`2.0ms` | `2.25ms`, `880KB`, `2.2k allocs` | Slightly slower; catalog JSON rewrite remains per-machine. |
+| Local depot append, growing catalogue | ~`2.0ms` | `2.25ms`, `880KB`, `2.2k allocs` | Slightly slower; catalogue JSON rewrite remains per-machine. |
 | Local depot deep verify, 250 refs | ~`24.9ms`, `20MB` | `28.2ms`, `21.6MB`, `34k allocs` | Slightly worse; deep verify is intentionally byte-linear and explicit. |
 
 ## Profiling run
 
-Profile artifacts were written under `/tmp` during the run and intentionally not committed. The latest repeat run used `/tmp/aha-profile-20260525T184450Z/`:
+Profile artefacts were written under `/tmp` during the run and intentionally not committed. The latest repeat run used `/tmp/aha-profile-20260525T184450Z/`:
 
 - `ingest.cpu`, `ingest.mem`
 - `search.cpu`, `search.mem`
@@ -92,7 +92,7 @@ Top findings:
 
 - Query-plan tests for rowid-backed FTS verification and actual search SQL using indexed project/path-token filters.
 - Fake-R2 operation-budget tests for quick verify, deep verify, repair, list, and compact.
-- Property tests for depot behind counts and map-backed catalog merge semantics.
+- Property tests for depot behind counts and map-backed catalogue merge semantics.
 - Contract tests for duplicate bundle parse skipping and known file-blob no-recompression.
 - CLI/status/verify counters for depot refs/fetches, depot bytes read/downloaded, verify row counts, and FTS repair rows.
 - Pathological benchmarks for ingest/search/status/verify/depot plus optional 50k/100k ingest scales.
@@ -102,7 +102,7 @@ Top findings:
 - `corpus.Verify` allocs rose from about `119` to `188` after adding user-facing row-count stats. The runtime remains ~milliseconds and the former seconds-scale cliff is gone.
 - Ingest is faster than the first baseline but slower than an intermediate best run (~`1.01s`) because path-token maintenance adds derived index writes. The accepted tradeoff buys indexed path filters.
 - Status counts are slightly slower because it now counts path-token tables too.
-- Depot catalog merge/list/deep-verify constants are slightly worse than the first rough run because map-backed dedupe and byte counters preserve more metadata. Deep verify remains explicit.
+- Depot catalogue merge/list/deep-verify constants are slightly worse than the first rough run because map-backed dedupe and byte counters preserve more metadata. Deep verify remains explicit.
 - Broad-term search time did not materially improve; SQLite FTS candidate ranking dominates. The plan improved bounded output/cost, not broad-term ranking latency.
 
 ## Finished vs deferred
@@ -110,7 +110,7 @@ Top findings:
 Finished for v1:
 
 - remove redundant hot-path hash/read passes where the writer already knows bundle identity;
-- keep no-op refresh and status metadata-only when state/catalog metadata is present;
+- keep no-op refresh and status metadata-only when state/catalogue metadata is present;
 - validate expected depot SHA during ingest staging instead of pre-hashing separately;
 - rowid-backed FTS verification;
 - prepared-statement ingest and per-session duplicate/conflict prefetch;
@@ -123,6 +123,6 @@ Finished for v1:
 Deferred because they need real-world evidence or product policy:
 
 - true multi-row ingest inserts: current scaling is linear; add only if profiles show SQLite step overhead dominates;
-- depot summary/status cache: add only if raw catalog scans become a real bottleneck after compaction;
+- depot summary/status cache: add only if raw catalogue scans become a real bottleneck after compaction;
 - retention/export/delete policies beyond orphan pruning: requires explicit product/trust decisions;
 - large real-corpus and real-R2 validation: needs private data/credentials and should be run before release announcements.

@@ -44,7 +44,7 @@ func TestEnsureInMachinesIndexRetriesUntilCASConverges(t *testing.T) {
 		remaining:   forcedConflicts,
 	}
 	v2 := &V2{store: store}
-	machine := &MachineDepot{v: v2, machine: "first-machine"}
+	machine := &machineDepot{v: v2, machine: "first-machine"}
 	if err := machine.ensureInMachinesIndex(t.Context()); err != nil {
 		t.Fatalf("ensureInMachinesIndex: %v", err)
 	}
@@ -74,12 +74,12 @@ func TestSetLatestRetriesUntilCASConverges(t *testing.T) {
 		remaining:   forcedConflicts,
 	}
 	v2 := &V2{store: store}
-	machine := &MachineDepot{v: v2, machine: machineID}
+	machine := &machineDepot{v: v2, machine: machineID}
 	sha, err := model.NewManifestSHA256(strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := machine.SetLatest(t.Context(), PublishedSnapshot{machine: machineID, sha: sha, expected: latestExpectation{kind: expectLatestAbsent}}); err != nil {
+	if err := machine.setLatest(t.Context(), publishedSnapshot{machine: machineID, sha: sha, expected: latestExpectation{kind: expectLatestAbsent}}); err != nil {
 		t.Fatalf("SetLatest: %v", err)
 	}
 	if store.conflicts != forcedConflicts {
@@ -105,7 +105,7 @@ func TestEnsureInMachinesIndexReturnsTypedContentionError(t *testing.T) {
 		remaining:   1000,
 	}
 	v2 := &V2{store: store}
-	err := (&MachineDepot{v: v2, machine: "blocked-machine"}).ensureInMachinesIndex(t.Context())
+	err := (&machineDepot{v: v2, machine: "blocked-machine"}).ensureInMachinesIndex(t.Context())
 	var contention *ContentionError
 	if !errors.As(err, &contention) {
 		t.Fatalf("ensureInMachinesIndex error=%v want *ContentionError", err)
@@ -141,7 +141,7 @@ func TestContentionExhaustionDoesNotSleepOrReplaceContentionWithLateCancellation
 		remaining:   conditionalRetryAttempts,
 		cancel:      cancel,
 	}
-	err := (&MachineDepot{v: &V2{store: store}, machine: "blocked-machine"}).ensureInMachinesIndex(ctx)
+	err := (&machineDepot{v: &V2{store: store}, machine: "blocked-machine"}).ensureInMachinesIndex(ctx)
 	var contention *ContentionError
 	if !errors.As(err, &contention) {
 		t.Fatalf("terminal error=%v want *ContentionError despite cancellation after final write", err)
@@ -157,6 +157,22 @@ func TestWaitForConditionalRetryHonorsCancellation(t *testing.T) {
 	if err := waitForConditionalRetry(ctx, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForConditionalRetry error=%v want context.Canceled", err)
 	}
+}
+
+type countingGetStore struct {
+	objectStore
+	gets        map[string]int
+	existsCalls int
+}
+
+func (s *countingGetStore) get(ctx context.Context, key string) ([]byte, string, error) {
+	s.gets[key]++
+	return s.objectStore.get(ctx, key)
+}
+
+func (s *countingGetStore) exists(ctx context.Context, key string) (bool, error) {
+	s.existsCalls++
+	return s.objectStore.exists(ctx, key)
 }
 
 type internalBlobSource struct {
@@ -175,7 +191,7 @@ func (s *internalBlobSource) BlobPath(model.BlobKey) (string, error) {
 func singleFileManifest(machine, content string) (model.SnapshotManifest, model.BlobKey) {
 	key, _ := model.NewBlobKey(hash.SHA256Bytes([]byte(content)))
 	manifest := model.SnapshotManifest{
-		Schema: model.SnapshotManifestSchema, MachineID: machine, CapturedAt: "2026-07-10T00:00:00Z", CreatedBy: "test",
+		Schema: model.SnapshotManifestSchema, RequiredFeatures: model.RequiredSnapshotFeatures(), MachineID: machine, CapturedAt: "2026-07-10T00:00:00Z", CreatedBy: "test",
 		Source:   model.ManifestSource{HostOS: "linux"},
 		Policy:   model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
 		Adapters: []model.ManifestAdapt{{Name: "pi", Version: "test"}},
@@ -193,6 +209,190 @@ func writeInternalBlob(t *testing.T, content string) string {
 	return path
 }
 
+func TestArchiveMetadataInspectionDoesNotHeadEveryBlob(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := singleFileManifest("a", "alpha")
+	if _, err := pushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, "alpha")}); err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingGetStore{objectStore: v2.markerObjects(), gets: map[string]int{}}
+	v2.markerStore = counter
+	v2.store = &prefixedStore{base: counter, prefix: currentArchiveDataPrefix}
+	report, err := v2.InspectMetadata(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Initialised || len(report.Latest) != 1 || counter.existsCalls != 0 {
+		t.Fatalf("report=%+v blob HEADs=%d", report, counter.existsCalls)
+	}
+}
+
+func TestPrepareUploadDoesNotReadUnrelatedMachinePointersOrManifests(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, machine := range []string{"a", "b", "c"} {
+		manifest, _ := singleFileManifest(machine, machine)
+		if _, err := pushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, machine)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counter := &countingGetStore{objectStore: v2.markerObjects(), gets: map[string]int{}}
+	v2.markerStore = counter
+	if _, err := v2.PrepareUpload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for key, count := range counter.gets {
+		if count > 0 && (strings.HasSuffix(key, "/latest") || strings.Contains(key, "/manifests/")) {
+			t.Fatalf("PrepareUpload fetched unrelated metadata %s %d time(s)", key, count)
+		}
+	}
+}
+
+func TestDownloadSummaryExaminesOnlyChangedMachineSnapshots(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	baseline := map[string]string{}
+	for _, tc := range []struct{ machine, content string }{{"a", "alpha"}, {"b", "bravo"}} {
+		manifest, _ := singleFileManifest(tc.machine, tc.content)
+		source := &internalBlobSource{path: writeInternalBlob(t, tc.content)}
+		result, err := pushV2(t.Context(), v2, manifest, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.machine == "a" {
+			baseline[tc.machine] = result.ManifestSHA256().String()
+		}
+	}
+	counter := &countingGetStore{objectStore: v2.markerObjects(), gets: map[string]int{}}
+	v2.markerStore = counter
+	v2.store = &prefixedStore{base: counter, prefix: currentArchiveDataPrefix}
+	reader, err := v2.PreparePull(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := reader.PlanDownload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookups := 0
+	materialisation, err := plan.PrepareMaterialisation(t.Context(), baseline, map[string]string{"pi": "test"}, func(model.BlobKey) (bool, error) {
+		lookups++
+		return false, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer materialisation.Close()
+	summary, err := materialisation.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 1 || summary.UnknownBlobs != 1 || summary.Machines != 2 {
+		t.Fatalf("lookups=%d summary=%+v want only machine b delta", lookups, summary)
+	}
+	if err := materialisation.ForEachManifest(t.Context(), func(string, model.PreparedSnapshot, func(model.BlobKey) (io.ReadCloser, error)) error {
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manifestKey := ManifestObjectKey("b", plan.latest["b"])
+	if got := counter.gets[currentArchiveDataPrefix+manifestKey]; got != 1 {
+		t.Fatalf("manifest GETs=%d want 1 across summary and execution", got)
+	}
+}
+
+func TestMaterialisationPlanScopesBlobsAndSpoolsManifestsOffHeap(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, key := singleFileManifest("a", "alpha")
+	if _, err := pushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, "alpha")}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := v2.PreparePull(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	download, err := reader.PlanDownload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := download.PrepareMaterialisation(t.Context(), nil, map[string]string{"pi": "test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tempRoot := plan.tempRoot
+	unknown, _ := model.NewBlobKey(strings.Repeat("f", 64))
+	if unknown == key {
+		t.Fatal("bad test key")
+	}
+	if err := plan.ForEachManifest(t.Context(), func(_ string, _ model.PreparedSnapshot, open func(model.BlobKey) (io.ReadCloser, error)) error {
+		_, err := open(unknown)
+		if err == nil || !strings.Contains(err.Error(), "outside") {
+			t.Fatalf("out-of-vector blob error=%v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tempRoot); !os.IsNotExist(err) {
+		t.Fatalf("materialisation spool survived close: %v", err)
+	}
+}
+
+func TestDownloadPlanRejectsUnsupportedAdaptersBeforeMaterialisation(t *testing.T) {
+	v2, err := NewLocalV2(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Init(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := singleFileManifest("a", "alpha")
+	manifest.Files[0].Source = "future-adapter"
+	manifest.Files[0].RelativePath = "sources/future-adapter/sessions/one.jsonl"
+	manifest.Adapters = []model.ManifestAdapt{{Name: "future-adapter", Version: "v9"}}
+	if _, err := pushV2(t.Context(), v2, manifest, &internalBlobSource{path: writeInternalBlob(t, "alpha")}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := v2.PreparePull(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := reader.PlanDownload(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = plan.RequireAdapters(t.Context(), nil, map[string]string{"pi": "test"})
+	var unsupported *UnsupportedSnapshotAdapterError
+	if !errors.As(err, &unsupported) || unsupported.Adapter != "future-adapter" {
+		t.Fatalf("RequireAdapters error=%v want future-adapter rejection", err)
+	}
+}
+
 func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T) {
 	base := &localStoreV2{root: t.TempDir()}
 	v2 := &V2{store: base}
@@ -204,7 +404,7 @@ func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T
 	v2.store = conflicts
 	firstSource := &internalBlobSource{path: writeInternalBlob(t, "steady bytes")}
 	err := func() error {
-		_, err := PushV2(t.Context(), v2, manifest, firstSource)
+		_, err := pushV2(t.Context(), v2, manifest, firstSource)
 		return err
 	}()
 	var contention *ContentionError
@@ -216,7 +416,7 @@ func TestUnchangedRetryRepairsMissingMachineIndexWithoutReadingBlob(t *testing.T
 	}
 	conflicts.remaining = 0
 	retrySource := &internalBlobSource{}
-	result, err := PushV2(t.Context(), v2, manifest, retrySource)
+	result, err := pushV2(t.Context(), v2, manifest, retrySource)
 	if err != nil {
 		t.Fatalf("unchanged retry: %v", err)
 	}
@@ -239,15 +439,15 @@ func TestPushCountsOnlyNewlyCreatedBlobObjectsAsUploaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest, key := singleFileManifest("existing-blob-machine", "already present")
-	machine, err := v2.ForMachine("existing-blob-machine")
+	machine, err := v2.forMachine("existing-blob-machine")
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := writeInternalBlob(t, "already present")
-	if _, err := machine.EnsureBlob(t.Context(), key, path); err != nil {
+	if _, err := machine.ensureBlob(t.Context(), key, path); err != nil {
 		t.Fatal(err)
 	}
-	result, err := PushV2(t.Context(), v2, manifest, &internalBlobSource{path: path})
+	result, err := pushV2(t.Context(), v2, manifest, &internalBlobSource{path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +463,7 @@ type cancelAfterMachinesStore struct {
 
 func (s *cancelAfterMachinesStore) get(ctx context.Context, key string) ([]byte, string, error) {
 	body, etag, err := s.objectStore.get(ctx, key)
-	if key == MachinesIndexKey && err == nil {
+	if strings.HasSuffix(key, MachinesIndexKey) && err == nil {
 		s.cancel()
 	}
 	return body, etag, err
@@ -279,11 +479,11 @@ func TestDeepVerifyChecksCancellationBeforeSuccessfulCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.putBytesIfAbsent(t.Context(), MachinesIndexKey, "application/json", index); err != nil {
+	if _, err := v2.store.putBytesIfAbsent(t.Context(), MachinesIndexKey, "application/json", index); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	v2.store = &cancelAfterMachinesStore{objectStore: base, cancel: cancel}
+	v2.markerStore = &cancelAfterMachinesStore{objectStore: base, cancel: cancel}
 	recorder := &progressRecorder{}
 	tracker := ahaprogress.NewTracker(recorder, clock.RealClock{})
 	_, err = v2.VerifyWithOptions(ctx, true, VerifyOptions{Progress: tracker})
@@ -344,30 +544,30 @@ func TestDeepVerifyReturnsCancellationInsteadOfCorruptionReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, err := v2.ForMachine("cancel-machine")
+	machine, err := v2.forMachine("cancel-machine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := machine.EnsureBlob(t.Context(), key, path)
+	receipt, err := machine.ensureBlob(t.Context(), key, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest := model.SnapshotManifest{
-		Schema: model.SnapshotManifestSchema, MachineID: "cancel-machine", CapturedAt: "2026-07-10T00:00:00Z", CreatedBy: "test",
+		Schema: model.SnapshotManifestSchema, RequiredFeatures: model.RequiredSnapshotFeatures(), MachineID: "cancel-machine", CapturedAt: "2026-07-10T00:00:00Z", CreatedBy: "test",
 		Source:   model.ManifestSource{HostOS: "linux"},
 		Policy:   model.ManifestPolicy{PathMode: "raw", IncludeSubagents: true, IncludeImages: true, Redaction: "none-v1"},
 		Adapters: []model.ManifestAdapt{{Name: "pi", Version: "test"}},
 		Files:    []model.ManifestFile{{Source: "pi", Kind: "session", RelativePath: "sources/pi/sessions/one.jsonl", RawPath: "/one.jsonl", SHA256: key.String(), Bytes: int64(len(content)), SessionID: "one", CopyState: "stable"}},
 	}
-	published, err := machine.PublishSnapshot(t.Context(), manifest, []BlobReceipt{receipt}, nil)
+	published, err := machine.publishSnapshot(t.Context(), manifest, []blobReceipt{receipt}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := machine.SetLatest(t.Context(), published); err != nil {
+	if err := machine.setLatest(t.Context(), published); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	v2.store = &cancelOnReadStore{objectStore: base, cancel: cancel}
+	v2.markerStore = &cancelOnReadStore{objectStore: base, cancel: cancel}
 	recorder := &progressRecorder{}
 	tracker := ahaprogress.NewTracker(recorder, clock.RealClock{})
 	_, err = v2.VerifyWithOptions(ctx, true, VerifyOptions{Progress: tracker})
