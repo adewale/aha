@@ -109,11 +109,10 @@ marker, no per-step usage. The format is flat by construction.
   `content_version`, `config_hash`, and the final ClickHouse
   `record_index`. It is an internal ingestion row format for one vendor's
   pipeline, not a neutral interchange target. Revisit only if a second
-  independent producer adopts it. (Its `source_identity_kind` enum —
-  `native | location | content | synthetic` — is nonetheless a better name
-  for a distinction we already make via
-  `AdapterCapabilities.HasStableEntryIDs`, and is worth stealing
-  independently.)
+  independent producer adopts it. Its `source_identity_kind` **vocabulary**
+  is the one exception: we adopt it as `EntryIdentityKind` (§Correctness by
+  construction item 8), because it names a distinction we already make
+  badly. Adopting four words is not adopting a format.
 - **No replay.** We do not reconstruct a runnable session from a
   trajectory. Harbor's ATIF exists for full-fidelity replay; we are not
   competing with it.
@@ -261,6 +260,13 @@ mirroring the existing `line-%06d-<sha>` fallback. Same document re-imported
 ID-less source we already support: inserting a record shifts the ordinals of
 everything after it, so those entries get new IDs. Documented, not hidden.
 
+This adapter is also the forcing function for replacing
+`AdapterCapabilities.HasStableEntryIDs` with an identity ladder — see
+§Correctness by construction item 8. With one boolean, the trajectory
+adapter and Pi are both `false`, which is exactly wrong: Pi's fallback is
+anchored to a stable file position, the trajectory adapter's is anchored to
+content, and those two support different downstream operations.
+
 ### aha → trajectory-v1 (export)
 
 Assistant entries carrying both prose and tool calls — routine in Claude
@@ -369,6 +375,63 @@ ambient time (`internal/clock`), stable key order. Two exports of the same
 session are byte-identical — which is what makes golden tests meaningful
 and lets the sidecar carry a content hash.
 
+**8. Entry-identity confidence is a closed variant, not a boolean.**
+`AdapterCapabilities.HasStableEntryIDs bool` collapses four materially
+different situations into one bit. Replace it with a ladder, adopted from
+the vocabulary in `trajectory-canonical-v1`, where each level names the
+downstream operation it supports:
+
+```go
+type EntryIdentityKind string
+
+const (
+	// The manifest predates this field; the kind was not recorded.
+	EntryIdentityUnknown   EntryIdentityKind = "unknown"
+	// Source-native per-record IDs. Supports dedup and conflict detection.
+	EntryIdentityNative    EntryIdentityKind = "native"
+	// Stable location anchor (line number, byte offset). Supports
+	// append-only assembly; breaks under insertion.
+	EntryIdentityLocation  EntryIdentityKind = "location"
+	// Content-addressed fallback. Supports exact-duplicate dedup only.
+	EntryIdentityContent   EntryIdentityKind = "content"
+	// Deterministic identity for synthesised records (e.g. `meta`).
+	EntryIdentitySynthetic EntryIdentityKind = "synthetic"
+)
+```
+
+Why this is scoped into this work rather than left as a wish: the
+trajectory importer is the first adapter whose message identity is
+content-derived and whose session header is synthetic. Landing it under the
+boolean would put it in the same bucket as Pi, whose IDs are native for
+wrapper rows and location-anchored otherwise. The distinction is not
+cosmetic — `docs/redaction-spec.md` and the conflict-quarantine path both
+ask "can these two entries from two machines be the same entry?", and the
+honest answer differs per level. It is worth doing on its own merits; the
+importer is what makes deferring it cost something.
+
+Three construction details:
+
+- **The boolean does not survive as a second source of truth.**
+  `HasStableEntryIDs` becomes a method, `func (c AdapterCapabilities)
+  HasStableEntryIDs() bool { return c.EntryIdentity == EntryIdentityNative }`,
+  so the two can never disagree. A stored bool alongside a stored kind is
+  precisely the runtime-check-instead-of-construction pattern `agents.md`
+  rules out.
+- **Manifest compatibility is additive, per `docs/compatibility-policy.md`.**
+  `AdapterCapabilities` is serialised into `ManifestAdapt`, so this touches
+  a written Archive format. `MarshalJSON` emits both the new
+  `entry_identity_kind` and the derived `has_stable_entry_ids`, so an older
+  binary keeps reading what it always read. That is additive optional
+  metadata, which the policy already permits — no new required feature, no
+  format major bump.
+- **Legacy manifests read back as `unknown`, not as a guess.**
+  `UnmarshalJSON` maps a legacy `has_stable_entry_ids: true` to `native`,
+  but `false` to `unknown` — because `false` genuinely cannot distinguish
+  location from content from synthetic. Inventing precision the bytes do
+  not carry would be worse than admitting the gap, and `unknown` being a
+  member of the closed set forces every consumer to handle it explicitly
+  rather than defaulting into a wrong answer.
+
 ## Surfaces
 
 **CLI.** `aha workspace export` as above. Registered in the command registry
@@ -440,7 +503,7 @@ Mapped onto the layers table in `docs/correctness-by-construction-spec.md`.
 
 | Layer | What it covers here | Where |
 | --- | --- | --- |
-| Schema contract | L1 — every emitted document and every fixture validates | `internal/trajectory/schema_test.go` |
+| Schema contract | L1 — every document validates through **both** validators, and the two agree | `internal/trajectory/schema_test.go` |
 | Example/contract | each record variant, each mapping row, each refusal | `internal/adapters/trajectory_test.go`, `internal/trajectory/project_test.go` |
 | Conformance fixtures | the existing table-driven adapter harness | `internal/adapters/testdata/conformance/` |
 | Golden | byte-stable exported documents and sidecars | `internal/trajectory/testdata/golden/` |
@@ -470,6 +533,8 @@ convention documents a fantasy.
 | Export/source overlap | export to a fresh directory succeeds | export to a directory inside a configured source root, inside the Workspace, and inside the Archive each refuse **before creating any file** — asserted by checking the directory is still empty after the error |
 | Non-empty document | a one-entry session exports | a session projecting to zero records returns a typed error and writes nothing |
 | Workspace transition | export allowed from `Current`/`Behind` | export refused from all five other states, each with the state's `NextAction` |
+| Validator agreement | both validators accept every valid fixture and every exported document | a document that only `ValidateDocument` rejects (`args` decoding to an array; an unresolved `tool_call_id`) is classified in the committed exception list; an unclassified disagreement fails |
+| Identity ladder | each builtin reports its expected `EntryIdentityKind`; `HasStableEntryIDs()` is true exactly for `native` | a legacy manifest with `has_stable_entry_ids: false` reads back as `unknown` and **not** as `content` or `location`; a manifest carrying both fields with contradictory values cannot be constructed, because the boolean is a method with no setter |
 
 ### Fixtures and corpora
 
@@ -499,21 +564,53 @@ Phase 0, and `corpusAdapterFor` gains a `trajectory-*` dirname pattern —
 it already `t.Fatalf`s on an unmapped corpus path, so a new corpus
 directory cannot land unmapped.
 
-### The schema conformance gate
+### The conformance gate: two independent validators
 
 The single highest-value test. **No new direct dependency is needed:**
 `github.com/google/jsonschema-go v0.4.3` is already in `go.mod` as an
 indirect dependency of the MCP SDK and supports draft 2020-12. Phase 0
 promotes it to direct.
 
-Three uses:
+We validate every document **twice, through two independently written
+implementations**, and assert they agree:
+
+- `ValidateSchema(doc)` — the vendored JSON Schema, executed by
+  `jsonschema-go`. Declarative, and exactly what an external consumer
+  would run.
+- `ValidateDocument(doc)` — a hand-written Go validator over our own
+  types, checking the same contract imperatively.
+
+This is borrowed directly from the reference implementation, which asserts
+both `validateSchema(result.records)` and `validateTranscript(result.records)`
+on the same fixtures. The redundancy is the point: a schema can pass
+something semantically wrong (`args` that parses as a JSON *array* rather
+than an object satisfies `"type": "string"` perfectly), and a hand-written
+validator drifts from the schema the moment upstream revises it. Each
+catches the other's blind spot, and a disagreement between them is itself
+a test failure — the strongest signal available that our understanding of
+the contract has diverged from the contract.
+
+`ValidateDocument` additionally carries what the schema structurally
+cannot: `tool_call.args` must decode to a JSON **object** (the reference
+implementation throws `"tool-call args must encode a JSON object"` here),
+and every `tool_call_id` must resolve, which is a cross-record property no
+JSON Schema can express.
+
+Four uses:
 
 - **Positive:** every fixture in tier 1 and tier 3, and every document
-  produced by `Export` in any test in the suite, validates. Implemented as
-  a shared `t.Helper()` so that *every* export test gets the gate for free
-  rather than remembering to ask for it.
-- **Negative:** every tier-2 fixture fails validation, proving the
-  validator is actually engaged and not silently passing everything.
+  produced by `Export` in any test in the suite, passes both validators.
+  Implemented as one shared `t.Helper()` that runs both, so *every* export
+  test gets the gate for free rather than remembering to ask for it.
+- **Negative:** every tier-2 fixture fails. The fixture records **which**
+  validator is expected to reject it, so a fixture that only the
+  hand-written validator catches proves the schema's limits rather than
+  silently passing one of the two.
+- **Agreement:** over generated documents (`GenTrajectoryDocument`, plus
+  mutations of it), `ValidateSchema(d) == ValidateDocument(d)` except for
+  the documented set of properties the schema cannot express. That
+  exception set is a committed list, not a loose comment — a new
+  disagreement fails until it is classified.
 - **Meta:** the vendored schema's own SHA-256 matches
   `PROVENANCE.md`, so an upstream refresh is a visible, reviewed diff.
 
@@ -579,6 +676,32 @@ sessions, following the golden-update discipline already specified in the
 CBC spec: goldens are regenerated only via the documented `UPDATE_GOLDEN=1`
 path, and a golden diff in review is a prompt to explain the change, not to
 re-run the updater.
+
+**Goldens must not pin a version constant.** The sidecar carries
+`model.Version`, the exporter version, and the vendored schema hash — all
+of which change on release cadence rather than on behaviour. If goldens
+compared them literally, every version bump would rewrite every golden
+file, and the resulting noise is precisely what stops a reviewer reading
+golden diffs at all. So:
+
+- the golden comparison **excludes** the version fields, via an explicit
+  redaction step in the comparison helper — not by omitting them from the
+  sidecar, which would weaken the artefact to make the test easy;
+- those fields are asserted **separately and by rule**: the exporter
+  version equals `model.Version`, and the schema hash equals the one in
+  `PROVENANCE.md`. A wrong version still fails, just not in the goldens.
+
+The reference implementation reaches the same conclusion — its canonical
+tests state that goldens must not pin the package version while a separate
+test asserts `NORMALIZER_VERSION` matches `package.json`. Two assertions,
+each about one thing, instead of one assertion about everything.
+
+The same rule applies to any other field that changes on a cadence
+unrelated to the behaviour under test. Machine ID and capture timestamp are
+already excluded for this reason; version constants join them for the same
+reason, and the exclusion list is a named constant in the helper so it can
+be reviewed as a whole rather than discovered one `UPDATE_GOLDEN=1` at a
+time.
 
 ### CLI journey
 
@@ -652,18 +775,22 @@ Each phase is red-green-refactor: the failing tests land first and are
 observed failing for the right reason.
 
 **Phase 0 — gates before code.** Vendor the schema + `PROVENANCE.md`;
-promote `jsonschema-go` to a direct dependency; write the schema validation
-helper; land tier-1 and tier-2 fixtures; extend the fixture-discovery
-helpers to `.json`; add the naming rule to the vocabulary test. Everything
-red except the negative fixtures.
+promote `jsonschema-go` to a direct dependency; write **both** validators
+and the shared helper that runs them together, plus the agreement property
+and its committed exception list; land tier-1 and tier-2 fixtures, each
+recording which validator is expected to reject it; extend the
+fixture-discovery helpers to `.json`; add the naming rule to the vocabulary
+test. Everything red except the negative fixtures.
 
 **Phase 1 — importer.** `internal/adapters/trajectory.go`; `RoleReasoning`
 and its `ShouldIndexRoleText` row plus the extended exhaustive check;
-conformance fixtures; the fidelity table row; `projection-table.json`
-classification for every trajectory key path; `FuzzTrajectoryParse`.
-Definition of done: a trajectory document ingests through
-`aha archive upload`/`download` and is findable by `aha search`, with no new
-command.
+`EntryIdentityKind` replacing `HasStableEntryIDs`, with the derived-method
+construction, the additive manifest marshalling, the `unknown` legacy read,
+and a declared kind for all five adapters; conformance fixtures; the
+fidelity table row; `projection-table.json` classification for every
+trajectory key path; `FuzzTrajectoryParse`. Definition of done: a
+trajectory document ingests through `aha archive upload`/`download` and is
+findable by `aha search`, with no new command.
 
 **Phase 2 — exporter as a library.** `internal/trajectory` with the sum
 type, the pairing builder, the opaque timestamp, the corpus-only
@@ -684,6 +811,12 @@ mutation list and the survivors triaged.
 
 - Every law L1–L9 has a passing test, named in the test file after the law.
 - Every row of the Type A / Type B inventory has both tests.
+- Every document produced anywhere in the suite passes both validators, and
+  every disagreement between them is in the committed exception list.
+- No golden compares a version constant; the version constants are asserted
+  by separate rule-based tests.
+- Every adapter in `Builtins()` declares an `EntryIdentityKind`, and no
+  stored boolean duplicates it.
 - Every trajectory key path observed in any fixture is classified in
   `projection-table.json`.
 - The loss table matches what the round-trip test observes, enforced in
@@ -714,7 +847,11 @@ mutation list and the survivors triaged.
 4. **Truncation budget defaults per source.** 4096 bytes is a guess until
    the benchmarks in Phase 4 exist. Set them from measured data, not from
    Letta's numbers.
-5. **`source_identity_kind`.** Their canonical schema's
-   `native | location | content | synthetic` is a strictly better
-   vocabulary than our boolean `HasStableEntryIDs`. Worth adopting
-   independently of this work.
+5. **Does the identity ladder change conflict quarantine?** The ladder
+   (§Correctness by construction item 8) gives the quarantine path better
+   information than it has today — `native` supports genuine conflict
+   detection, `content` supports only exact-duplicate dedup. Whether
+   `internal/corpus` should *act* on that, rather than merely record it, is
+   not settled here and should not be settled by whoever happens to be
+   implementing the importer. Deliberately left open; the ladder is
+   additive until someone specifies the behaviour change.
