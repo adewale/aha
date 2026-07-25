@@ -42,6 +42,27 @@ var versionSignalCases = []struct {
 	},
 }
 
+// TestVersionSignalCasesCoverEveryBuiltin makes the table above exhaustive
+// rather than illustrative: a new adapter forces a row, so its kind and the
+// field its version is read from are both stated somewhere a reviewer looks.
+func TestVersionSignalCasesCoverEveryBuiltin(t *testing.T) {
+	covered := map[string]struct{}{}
+	for _, tc := range versionSignalCases {
+		if _, dup := covered[tc.source]; dup {
+			t.Fatalf("source %q has two cases; one row per adapter keeps the table readable as a registry", tc.source)
+		}
+		covered[tc.source] = struct{}{}
+	}
+	for name := range Builtins() {
+		if _, ok := covered[name]; !ok {
+			t.Fatalf("adapter %q is registered but has no version-signal case; add a row stating its kind and the field its version is read from", name)
+		}
+	}
+	if len(covered) != len(Builtins()) {
+		t.Fatalf("%d version-signal cases for %d registered adapters", len(covered), len(Builtins()))
+	}
+}
+
 func TestAdapterVersionSignalReadsTheDeclaredField(t *testing.T) {
 	for _, tc := range versionSignalCases {
 		t.Run(tc.source, func(t *testing.T) {
