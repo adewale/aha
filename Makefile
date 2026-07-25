@@ -1,6 +1,6 @@
 OUTPUT ?= aha
 
-.PHONY: help build verify verify-quick verify-full verify-ci verify-fuzz verify-ts verify-race verify-build verify-mutation-dry verify-mutation gen-ts gen-docs
+.PHONY: help build verify verify-quick verify-full verify-ci verify-fuzz verify-ts verify-race verify-build verify-mutation-dry verify-mutation gen-ts gen-docs gen-version-audit
 
 help:
 	@printf '%s\n' \
@@ -17,7 +17,8 @@ help:
 	  '  verify-mutation-dry gremlins dry-run inventory' \
 	  '  verify-mutation     gremlins mutation run on critical packages' \
 	  '  gen-ts              regenerate clients/typescript/aha-mcp.ts' \
-	  '  gen-docs            regenerate docs/commands.md'
+	  '  gen-docs            regenerate docs/commands.md' \
+	  '  gen-version-audit   regenerate the source-version audit from the fixtures'
 
 build:
 	@commit="$$(git rev-parse --short=12 HEAD 2>/dev/null || printf development)"; \
@@ -47,6 +48,12 @@ gen-ts:
 
 gen-docs:
 	go run ./cmd/aha-gen-docs -out docs/commands.md
+
+gen-version-audit:
+	go run ./cmd/aha-gen-version-audit \
+	  -fixtures internal/adapters/testdata \
+	  -json internal/adapters/testdata/source-version-audit.json \
+	  -markdown docs/source-version-audit.md
 
 verify-race:
 	./scripts/verify.sh race

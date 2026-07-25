@@ -163,6 +163,7 @@ Every change follows red-green-refactor TDD and correctness by construction; see
 - [`docs/onboarding.md`](docs/onboarding.md) — local and R2 setup.
 - [`docs/user-journeys.md`](docs/user-journeys.md) — end-to-end journeys.
 - [`docs/architecture.md`](docs/architecture.md) — implementation architecture.
+- [`docs/source-version-audit.md`](docs/source-version-audit.md) — generated record of how much of each agent's release history the adapter fixtures cover.
 - [`docs/trust.md`](docs/trust.md) — privacy and safety boundaries.
 - [`docs/mcp-spec.md`](docs/mcp-spec.md) — read-only MCP surface.
 - [`docs/serve-ui-spec.md`](docs/serve-ui-spec.md) — dashboard specification.
