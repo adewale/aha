@@ -214,6 +214,9 @@ func (a cancellingAdapter) ParseSession(ctx context.Context, _ model.SessionFile
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+func (a cancellingAdapter) VersionSignal(model.ParsedEntry) model.VersionSignal {
+	return model.NoVersion()
+}
 
 type countingAdapter struct{ calls *atomic.Int64 }
 
@@ -231,4 +234,7 @@ func (a countingAdapter) ParseSession(ctx context.Context, file model.SessionFil
 	a.calls.Add(1)
 	_, _ = io.Copy(io.Discard, r)
 	return &model.ParsedSession{Source: "counting", SourceSessionID: file.SessionID, CWD: "/repo/project", StartedAt: "2026-01-01T00:00:00Z", Metadata: map[string]any{}, Entries: []model.ParsedEntry{{EntryID: "entry-1", LineNo: 1, EntryType: "message", Timestamp: "2026-01-01T00:00:01Z", Role: "user", RawJSON: `{"id":"entry-1"}`, Text: "needle"}}}, nil
+}
+func (a countingAdapter) VersionSignal(model.ParsedEntry) model.VersionSignal {
+	return model.NoVersion()
 }

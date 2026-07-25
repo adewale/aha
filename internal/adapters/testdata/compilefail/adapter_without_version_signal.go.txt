@@ -1,0 +1,47 @@
+// This file is a compile-fail case, not production code. It is stored with a
+// .go.txt suffix so the normal build never sees it, and is copied into a
+// temporary package by TestAdapterWithoutVersionSignalDoesNotCompile.
+//
+// It declares a fifth adapter that implements every SourceAdapter method
+// except VersionSignal and then asserts it satisfies the interface. Building
+// it must fail: that failure is the compiler enforcing that a new adapter
+// declares where its version lives, or declares that it has none.
+package compilefail
+
+import (
+	"context"
+	"io"
+
+	"github.com/adewale/aha/internal/adapters"
+	"github.com/adewale/aha/internal/model"
+)
+
+type adapterWithoutVersionSignal struct{}
+
+func (adapterWithoutVersionSignal) Name() string    { return "no-version-signal" }
+func (adapterWithoutVersionSignal) Version() string { return "v1" }
+
+func (adapterWithoutVersionSignal) DefaultRoots() []model.DefaultRoot {
+	return []model.DefaultRoot{{OS: "all", Path: "~/.no-version-signal"}}
+}
+
+func (adapterWithoutVersionSignal) Capabilities() model.AdapterCapabilities {
+	return model.AdapterCapabilities{}
+}
+
+func (adapterWithoutVersionSignal) Discover(ctx context.Context, config model.SourceConfig) ([]model.SessionFile, error) {
+	return nil, nil
+}
+
+func (adapterWithoutVersionSignal) DiscoverArtifacts(ctx context.Context, session model.SessionFile) ([]model.ArtifactFile, error) {
+	return nil, nil
+}
+
+func (adapterWithoutVersionSignal) ParseSession(ctx context.Context, file model.SessionFile, r io.Reader) (*model.ParsedSession, error) {
+	return &model.ParsedSession{}, nil
+}
+
+// Deliberately missing:
+//
+//	func (adapterWithoutVersionSignal) VersionSignal(entry model.ParsedEntry) model.VersionSignal
+var _ adapters.SourceAdapter = adapterWithoutVersionSignal{}
