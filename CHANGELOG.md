@@ -4,6 +4,55 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Adapter version coverage (July 2026)
+
+#### Added
+
+- `model.VersionSignal` and a `VersionSignal` method on `SourceAdapter`: every
+  adapter declares where its version lives and what that version measures
+  (`producer`, `schema`, or `none`). The kinds are a closed set by
+  construction — the type's fields are unexported and its only constructors are
+  `NoVersion`, `ProducerVersion` and `SchemaVersion` — so a signal cannot pair
+  "this source has no version" with a version value. Pi's `version` is declared
+  a schema revision rather than a producer version, because stratifying
+  coverage by it would give one bucket on the wrong axis.
+- A generated source-version audit, committed as
+  `internal/adapters/testdata/source-version-audit.json` and rendered to
+  [`docs/source-version-audit.md`](docs/source-version-audit.md), recording per
+  source: the declared version kind, every distinct version observed, the band
+  those versions span, file and record counts, and the version band in which
+  each key path was first and last seen. Regenerate with
+  `make gen-version-audit`.
+- Three CI gates over that audit: a corpus carrying a version outside the
+  recorded band fails with a message naming the source, the version and the
+  band; a stale audit fails a regenerate-and-diff check; and a static guard
+  fails if either artefact is deleted or emptied. Vendoring a newer corpus is
+  now a deliberate act that re-derives the calibration.
+- Privacy tests over the audit's own output, derived from the fixtures rather
+  than hand-kept, plus a whitelist check that every string in the generated
+  JSON is a source name, a version kind, an observed version, or a key path.
+  The audit is aggregate structure and counts only.
+
+#### Changed
+
+- `internal/adapters/testdata/projection-table.json` is now keyed by
+  `(source, path)` rather than by key-path alone. Fixtures carry a declared
+  source, and attribution fails loudly on an unattributed fixture, an unknown
+  corpus directory, or a declared fixture that has gone missing.
+- `opencode_realish.jsonl` and `codex_modern_realish.jsonl` joined the coverage
+  gate, adding 28 newly classified `(source, path)` pairs — the entire OpenCode
+  projection surface plus two Codex modern fields.
+
+#### Fixed
+
+- Two projection-table collisions, both of which attributed one producer's
+  decision to another. `version` was classified once as Pi session-header
+  metadata, silently governing Claude Code's producer version.
+  `message.content[].thinking` was recorded as projected into `messages.text`
+  via `projectPiContentBlocks`, a pass that runs for Pi alone; under Claude
+  Code the thinking-block body reaches neither `messages.text` nor FTS, so the
+  table asserted a reasoning field was searchable when it is raw-only.
+
 ### Command/state model 0.2 (July 2026)
 
 #### Changed

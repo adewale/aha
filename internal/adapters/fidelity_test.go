@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/adewale/aha/internal/adapters/fixtureaudit"
 	"github.com/adewale/aha/internal/model"
 )
 
@@ -51,20 +53,28 @@ func TestRawJSONIsVerbatimAcrossAdapters(t *testing.T) {
 // Per-session size is logged so a regression that explodes RawJSON growth is
 // visible.
 func TestRawJSONIsVerbatimAcrossCorpora(t *testing.T) {
-	paths := corpusJSONLPaths(t)
-	if len(paths) == 0 {
-		t.Skip("no corpus fixtures vendored")
+	fixtures, err := fixtureaudit.Inventory("testdata")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			adapter, file := corpusAdapterFor(t, path)
-			sourceLines := readNonEmptyLines(t, path)
-			f, err := os.Open(path)
+	corpora := 0
+	for _, fx := range fixtures {
+		if !strings.HasPrefix(fx.Label, "corpora/") {
+			continue
+		}
+		corpora++
+		adapter := Builtins()[fx.Source]
+		if adapter == nil {
+			t.Fatalf("corpus %s is attributed to unknown source %q", fx.Label, fx.Source)
+		}
+		t.Run(fx.Label, func(t *testing.T) {
+			sourceLines := readNonEmptyLines(t, fx.Path)
+			f, err := os.Open(fx.Path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer f.Close()
-			ps, err := adapter.ParseSession(t.Context(), file, f)
+			ps, err := adapter.ParseSession(t.Context(), model.SessionFile{Source: fx.Source, SessionID: filepath.Base(fx.Path)}, f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,32 +82,9 @@ func TestRawJSONIsVerbatimAcrossCorpora(t *testing.T) {
 			assertMultisetEqual(t, preserved, parseJSONLines(t, sourceLines))
 		})
 	}
-}
-
-// corpusAdapterFor returns the adapter to use for a vendored corpus file
-// based on its parent directory under testdata/corpora/.
-func corpusAdapterFor(t *testing.T, path string) (SourceAdapter, model.SessionFile) {
-	t.Helper()
-	rel := path
-	if abs, err := os.Getwd(); err == nil {
-		_ = abs
+	if corpora == 0 {
+		t.Fatal("no corpus fixtures vendored")
 	}
-	parts := strings.Split(rel, string(os.PathSeparator))
-	// Find the dirname directly under testdata/corpora.
-	for i := 0; i < len(parts)-1; i++ {
-		if parts[i] == "corpora" && i+1 < len(parts)-1 {
-			switch {
-			case strings.HasPrefix(parts[i+1], "pi-mono"):
-				return Pi{}, model.SessionFile{Source: "pi", SessionID: parts[len(parts)-1]}
-			case strings.HasPrefix(parts[i+1], "claude"):
-				return ClaudeCode{}, model.SessionFile{Source: "claude-code", SessionID: parts[len(parts)-1]}
-			case strings.HasPrefix(parts[i+1], "codex"):
-				return CodexCLI{}, model.SessionFile{Source: "codex", SessionID: parts[len(parts)-1]}
-			}
-		}
-	}
-	t.Fatalf("no adapter mapping for corpus path %s — add a dirname pattern in corpusAdapterFor", path)
-	return nil, model.SessionFile{}
 }
 
 // TestRawJSONIsVerbatimNoHeaderStrip exercises a synthetic input every adapter

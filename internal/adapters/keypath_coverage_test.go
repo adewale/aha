@@ -1,215 +1,199 @@
-package adapters
+package adapters_test
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/adewale/aha/internal/adapters/fixtureaudit"
 )
 
-// TestKeyPathCoverage walks every JSON key-path observed in committed
-// adapter fixtures and asserts each one has an entry in
-// testdata/projection-table.json describing what the corpus does with
-// it (projected, preserved, or intentionally raw-only). A new fixture
-// or a source-format addition fails this test until the field is
-// classified, which surfaces silent data-shape changes that would
-// otherwise pass through unnoticed via entries.raw_json.
+const projectionTablePath = "testdata/projection-table.json"
+
+const fixtureRoot = "testdata"
+
+// TestKeyPathCoverage walks every JSON key-path observed in committed adapter
+// fixtures and asserts each one has an entry in
+// testdata/projection-table.json describing what the corpus does with it
+// (projected, preserved, or intentionally raw-only). A new fixture or a
+// source-format addition fails this test until the field is classified, which
+// surfaces silent data-shape changes that would otherwise pass through
+// unnoticed via entries.raw_json.
+//
+// Classification is keyed by (source, path), not by path alone: two producers
+// can spell a field the same way and mean different things, and one shared
+// entry would silently attribute one producer's decision to the other.
 func TestKeyPathCoverage(t *testing.T) {
-	table := loadProjectionTable(t, "testdata/projection-table.json")
-	fixtures := append(discoverFixturePaths(t, "testdata", fixtureBasenames()), corpusJSONLPaths(t)...)
-	observed := map[string]string{}
-	for _, fx := range fixtures {
-		for _, path := range observedKeyPaths(t, fx) {
-			if _, seen := observed[path]; !seen {
-				observed[path] = fx
-			}
-		}
-	}
+	table := loadProjectionTable(t)
+	observed := observedSourcePaths(t)
 	var missing []string
-	for path, fx := range observed {
-		if _, ok := table[path]; !ok {
-			missing = append(missing, path+"   (first seen in "+fx+")")
+	for pair, label := range observed {
+		if _, ok := table.Classification(pair.Source, pair.Path); !ok {
+			missing = append(missing, pair.Source+"  "+pair.Path+"   (first seen in "+label+")")
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) > 0 {
-		t.Fatalf("%d key-path(s) observed in fixtures but missing from testdata/projection-table.json — classify each as projected/preserved/raw_only and add it:\n  %s", len(missing), strings.Join(missing, "\n  "))
+		t.Fatalf("%d (source, key-path) pair(s) observed in fixtures but missing from %s — classify each as projected/preserved/raw_only under its source and add it:\n  %s", len(missing), projectionTablePath, strings.Join(missing, "\n  "))
 	}
 }
 
-// TestProjectionTableHasNoStaleEntries fails if the table lists paths
-// that no fixture actually carries. Keeps the table honest as fixtures
-// rotate; stale entries become invisible documentation otherwise.
+// TestProjectionTableSeparatesVersionAcrossSources is the regression test for
+// the collision the (source, path) key removes. Pi's `version` is an on-disk
+// schema revision (integer 3); Claude Code's `version` is a producer version
+// (string 2.1.92). Both fixtures carry a field spelled `version`, so a table
+// keyed by path alone gives one of them the other's classification. They are
+// different fields with different meanings and each needs its own reviewed
+// entry.
+func TestProjectionTableSeparatesVersionAcrossSources(t *testing.T) {
+	observed := observedSourcePaths(t)
+	for _, source := range []string{"pi", "claude-code"} {
+		if _, ok := observed[fixtureaudit.SourcePath{Source: source, Path: "version"}]; !ok {
+			t.Fatalf("no %s fixture carries `version`, so this regression test proves nothing", source)
+		}
+	}
+	table := loadProjectionTable(t)
+	pi, okPi := table.Classification("pi", "version")
+	claude, okClaude := table.Classification("claude-code", "version")
+	if !okPi || !okClaude {
+		t.Fatalf("%s must classify `version` under both pi (%t) and claude-code (%t)", projectionTablePath, okPi, okClaude)
+	}
+	if pi == claude {
+		t.Fatalf("%s gives pi and claude-code the same `version` classification %q; Pi's on-disk schema revision and Claude Code's producer version are different fields and must be classified separately", projectionTablePath, pi)
+	}
+	if !strings.Contains(pi, "schema") {
+		t.Fatalf("pi `version` is an on-disk schema revision but is classified %q", pi)
+	}
+	if !strings.Contains(claude, "producer") {
+		t.Fatalf("claude-code `version` is a producer version but is classified %q", claude)
+	}
+}
+
+// TestProjectionTableLookupDoesNotLeakAcrossSources is the construction-level
+// half of the same invariant: classifying a path under one source must leave
+// it unclassified under every other, so a fixture that introduces an existing
+// path name under a different source fails the coverage gate until the new
+// field is separately reviewed.
+func TestProjectionTableLookupDoesNotLeakAcrossSources(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "one-source.json")
+	if err := os.WriteFile(path, []byte(`{"version":2,"doc":"synthetic","sources":{"pi":{"version":"raw_only:Pi on-disk schema revision"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	table, err := fixtureaudit.LoadProjectionTable(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := table.Classification("pi", "version"); !ok {
+		t.Fatal("pi `version` should be classified")
+	}
+	for _, source := range []string{"claude-code", "codex", "opencode"} {
+		if classification, ok := table.Classification(source, "version"); ok {
+			t.Fatalf("%s `version` resolved to %q from Pi's entry; classification must not leak across sources", source, classification)
+		}
+	}
+}
+
+// TestProjectionTableHasNoStaleEntries fails if the table classifies
+// (source, path) pairs that no fixture actually carries. Keeps the table
+// honest as fixtures rotate; stale entries become invisible documentation
+// otherwise.
 func TestProjectionTableHasNoStaleEntries(t *testing.T) {
-	table := loadProjectionTable(t, "testdata/projection-table.json")
-	fixtures := append(discoverFixturePaths(t, "testdata", fixtureBasenames()), corpusJSONLPaths(t)...)
-	observed := map[string]struct{}{}
-	for _, fx := range fixtures {
-		for _, path := range observedKeyPaths(t, fx) {
-			observed[path] = struct{}{}
-		}
-	}
+	table := loadProjectionTable(t)
+	observed := observedSourcePaths(t)
 	var stale []string
-	for path := range table {
-		if _, ok := observed[path]; !ok {
-			stale = append(stale, path)
+	for _, pair := range table.Pairs() {
+		if _, ok := observed[pair]; !ok {
+			stale = append(stale, pair.Source+"  "+pair.Path)
 		}
 	}
-	sort.Strings(stale)
 	if len(stale) > 0 {
-		t.Fatalf("%d projection-table path(s) not observed in any fixture — either add a fixture that exercises the path, or remove it from the table:\n  %s", len(stale), strings.Join(stale, "\n  "))
+		t.Fatalf("%d projection-table (source, key-path) pair(s) not observed in any fixture — either add a fixture that exercises the path, or remove it from the table:\n  %s", len(stale), strings.Join(stale, "\n  "))
 	}
 }
 
 func TestProjectionTableClassifiesImplementedColumns(t *testing.T) {
-	table := loadProjectionTable(t, "testdata/projection-table.json")
-	wantProjected := []string{
-		"firstKeptEntryId",
-		"tokensBefore",
-		"modelId",
-		"provider",
-		"thinkingLevel",
-		"message.excludeFromContext",
-		"message.content[].mimeType",
-		"message.content[].data",
+	table := loadProjectionTable(t)
+	// Every one of these is a Pi-native shape that projectPiNativeShapes now
+	// fills into a typed column, so none may still be recorded as raw_only.
+	wantProjected := []fixtureaudit.SourcePath{
+		{Source: "pi", Path: "firstKeptEntryId"},
+		{Source: "pi", Path: "tokensBefore"},
+		{Source: "pi", Path: "modelId"},
+		{Source: "pi", Path: "provider"},
+		{Source: "pi", Path: "thinkingLevel"},
+		{Source: "pi", Path: "message.excludeFromContext"},
+		{Source: "pi", Path: "message.content[].mimeType"},
+		{Source: "pi", Path: "message.content[].data"},
 	}
-	for _, path := range wantProjected {
-		classification, ok := table[path]
+	for _, pair := range wantProjected {
+		classification, ok := table.Classification(pair.Source, pair.Path)
 		if !ok {
-			t.Fatalf("projection table missing %s", path)
+			t.Fatalf("projection table missing %s %s", pair.Source, pair.Path)
 		}
 		if strings.HasPrefix(classification, "raw_only:") {
-			t.Fatalf("projection table says %s is raw_only after implementation: %s", path, classification)
+			t.Fatalf("projection table says %s %s is raw_only after implementation: %s", pair.Source, pair.Path, classification)
 		}
 	}
 }
 
-func fixtureBasenames() []string {
-	return []string{
-		"pi_realish.jsonl",
-		"claude_realish.jsonl",
-		"codex_realish.jsonl",
-		"coverage_pi.jsonl",
-		"coverage_claude.jsonl",
-		"coverage_codex.jsonl",
+// TestFixtureInventoryAttributesEveryCommittedFixture pins the precondition
+// the whole coverage gate rests on: every committed fixture is attributed to
+// exactly one adapter, and every adapter that owns fixtures is represented.
+func TestFixtureInventoryAttributesEveryCommittedFixture(t *testing.T) {
+	fixtures, err := fixtureaudit.Inventory(fixtureRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("fixture inventory is empty")
+	}
+	bySource := map[string]int{}
+	for _, fx := range fixtures {
+		if fx.Source == "" {
+			t.Fatalf("fixture %s has no source", fx.Label)
+		}
+		bySource[fx.Source]++
+	}
+	for _, source := range fixtureaudit.Sources() {
+		if bySource[source] == 0 {
+			t.Fatalf("source %s is declared but owns no fixture", source)
+		}
 	}
 }
 
-// corpusJSONLPaths returns every .jsonl file under testdata/corpora/.
-// These come from vendored real-world sessions (pi-mono today, others
-// later) and exercise the projection surface far beyond what hand-
-// crafted fixtures cover.
-func corpusJSONLPaths(t *testing.T) []string {
+func loadProjectionTable(t *testing.T) fixtureaudit.ProjectionTable {
 	t.Helper()
-	var out []string
-	root := filepath.Join("testdata", "corpora")
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	table, err := fixtureaudit.LoadProjectionTable(projectionTablePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return table
+}
+
+// observedSourcePaths returns every (source, key-path) the committed fixtures
+// carry, mapped to the label of the first fixture that carried it.
+func observedSourcePaths(t *testing.T) map[fixtureaudit.SourcePath]string {
+	t.Helper()
+	fixtures, err := fixtureaudit.Inventory(fixtureRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := map[fixtureaudit.SourcePath]string{}
+	for _, fx := range fixtures {
+		records, err := fixtureaudit.ReadRecords(fx.Path)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return filepath.SkipDir
+			t.Fatal(err)
+		}
+		for _, rec := range records {
+			for _, path := range fixtureaudit.KeyPaths(rec.Value) {
+				pair := fixtureaudit.SourcePath{Source: fx.Source, Path: path}
+				if _, seen := observed[pair]; !seen {
+					observed[pair] = fx.Label
+				}
 			}
-			return err
-		}
-		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
-			return nil
-		}
-		out = append(out, path)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func loadProjectionTable(t *testing.T, path string) map[string]string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Version int               `json:"version"`
-		Paths   map[string]string `json:"paths"`
-	}
-	if err := json.Unmarshal(b, &doc); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-	if doc.Version == 0 {
-		t.Fatalf("%s missing version", path)
-	}
-	if len(doc.Paths) == 0 {
-		t.Fatalf("%s has no paths", path)
-	}
-	return doc.Paths
-}
-
-func discoverFixturePaths(t *testing.T, dir string, basenames []string) []string {
-	t.Helper()
-	var out []string
-	for _, name := range basenames {
-		p := filepath.Join(dir, name)
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("missing fixture %s: %v", p, err)
-		}
-		out = append(out, p)
-	}
-	return out
-}
-
-// observedKeyPaths returns every distinct dotted key-path observed in
-// the JSONL file at path. Array steps are marked '[]'.
-func observedKeyPaths(t *testing.T, path string) []string {
-	t.Helper()
-	lines := readNonEmptyLines(t, path)
-	seen := map[string]struct{}{}
-	for i, l := range lines {
-		var v any
-		if err := json.Unmarshal([]byte(l), &v); err != nil {
-			t.Fatalf("%s:%d: %v", path, i+1, err)
-		}
-		walkKeyPaths(v, "", seen)
-	}
-	out := make([]string, 0, len(seen))
-	for p := range seen {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func walkKeyPaths(v any, prefix string, out map[string]struct{}) {
-	switch x := v.(type) {
-	case map[string]any:
-		if len(x) == 0 {
-			if prefix != "" {
-				out[prefix] = struct{}{}
-			}
-			return
-		}
-		for k, child := range x {
-			next := k
-			if prefix != "" {
-				next = prefix + "." + k
-			}
-			walkKeyPaths(child, next, out)
-		}
-	case []any:
-		if len(x) == 0 {
-			if prefix != "" {
-				out[prefix+"[]"] = struct{}{}
-			}
-			return
-		}
-		for _, child := range x {
-			walkKeyPaths(child, prefix+"[]", out)
-		}
-	default:
-		if prefix != "" {
-			out[prefix] = struct{}{}
 		}
 	}
+	return observed
 }

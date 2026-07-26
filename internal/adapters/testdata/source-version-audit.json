@@ -1,0 +1,1990 @@
+{
+  "version": 1,
+  "doc": "Generated record of how much of each source's release history the committed adapter fixtures actually cover. Regenerate with `make gen-version-audit`; never hand-edit. Per source: the kind of version the adapter declares it can read, every distinct version value observed, the band those values span, and the version band in which each key path was first and last seen. A source declaring kind 'none' carries no version anywhere, so its coverage is known to be unstratified. Counts are of files and records; the audit reports aggregate structure only and never fixture content.",
+  "sources": [
+    {
+      "source": "claude-code",
+      "version_kind": "producer",
+      "band": {
+        "first": "2.1.92",
+        "last": "2.1.92"
+      },
+      "versions": [
+        {
+          "version": "2.1.92",
+          "files": 1,
+          "records": 3
+        }
+      ],
+      "files": 3,
+      "files_with_version": 1,
+      "records": 12,
+      "records_with_version": 3,
+      "key_paths": [
+        {
+          "path": "cwd",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "entrypoint",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "gitBranch",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "isSidechain",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "isSnapshotUpdate",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content",
+          "files": 2,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].content",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].input.command",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].input.file_path",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].input.pattern",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].is_error",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].name",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].signature",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].source.data",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content[].source.media_type",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].source.mime_type",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].source.type",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content[].text",
+          "files": 2,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].thinking",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].tool_use_id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.content[].type",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content[].url",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.id",
+          "files": 2,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.model",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.role",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.stop_details",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.stop_reason",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.stop_sequence",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.type",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cache_creation.ephemeral_1h_input_tokens",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cache_creation.ephemeral_5m_input_tokens",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cache_creation_input_tokens",
+          "files": 2,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.usage.cache_read_input_tokens",
+          "files": 2,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.usage.inference_geo",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.input_tokens",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.usage.iterations[]",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.output_tokens",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.usage.server_tool_use.web_fetch_requests",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.server_tool_use.web_search_requests",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.service_tier",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.speed",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.uuid",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "messageId",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "parentUuid",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "permissionMode",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "promptId",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "requestId",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "sessionId",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "snapshot.messageId",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "snapshot.timestamp",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "snapshot.trackedFileBackups",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "timestamp",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "type",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "userType",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        },
+        {
+          "path": "uuid",
+          "files": 3,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 2
+        },
+        {
+          "path": "version",
+          "files": 1,
+          "first_version": "2.1.92",
+          "last_version": "2.1.92",
+          "unversioned_files": 0
+        }
+      ]
+    },
+    {
+      "source": "codex",
+      "version_kind": "producer",
+      "band": {
+        "first": "0.116.0",
+        "last": "0.130.0"
+      },
+      "versions": [
+        {
+          "version": "0.116.0",
+          "files": 2,
+          "records": 2
+        },
+        {
+          "version": "0.130.0",
+          "files": 1,
+          "records": 1
+        }
+      ],
+      "files": 5,
+      "files_with_version": 3,
+      "records": 145,
+      "records_with_version": 3,
+      "key_paths": [
+        {
+          "path": "content",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "cwd",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "id",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content[].text",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.content[].type",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "message.role",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "message.uuid",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "model",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parent_id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "payload.action.pattern",
+          "files": 1,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.action.queries[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.action.query",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.action.type",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.action.url",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.approval_policy",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.arguments",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.base_instructions.text",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.call_id",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.cli_version",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.collaboration_mode.mode",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.collaboration_mode.settings.developer_instructions",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.collaboration_mode.settings.model",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.collaboration_mode.settings.reasoning_effort",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.collaboration_mode_kind",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.content",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.content[].text",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.content[].type",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.current_date",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.cwd",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.effort",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.encrypted_content",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.git",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.id",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.images[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.last_token_usage.cached_input_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.last_token_usage.input_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.last_token_usage.output_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.last_token_usage.reasoning_output_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.last_token_usage.total_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.model_context_window",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_token_usage.cached_input_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_token_usage.input_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_token_usage.output_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_token_usage.reasoning_output_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_token_usage.total_tokens",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.info.total_tokens",
+          "files": 1,
+          "first_version": "0.130.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.last_agent_message",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.local_images[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.memory_citation",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.message",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.model",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.model_context_window",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.model_provider",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.name",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.originator",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.output",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.personality",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.phase",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.credits",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.limit_id",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.limit_name",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.plan_type",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.primary.resets_at",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.primary.used_percent",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.primary.window_minutes",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.secondary.resets_at",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.secondary.used_percent",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.rate_limits.secondary.window_minutes",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.realtime_active",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.role",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy",
+          "files": 1,
+          "first_version": "0.130.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy.exclude_slash_tmp",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy.exclude_tmpdir_env_var",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy.network_access",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy.type",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.sandbox_policy.writable_roots[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.source",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.status",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.summary",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.summary[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.text_elements[]",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.timestamp",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.timezone",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.truncation_policy.limit",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.truncation_policy.mode",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.turn_id",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.type",
+          "files": 3,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "payload.user_instructions",
+          "files": 2,
+          "first_version": "0.116.0",
+          "last_version": "0.116.0",
+          "unversioned_files": 0
+        },
+        {
+          "path": "role",
+          "files": 2,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 2
+        },
+        {
+          "path": "timestamp",
+          "files": 5,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 2
+        },
+        {
+          "path": "type",
+          "files": 5,
+          "first_version": "0.116.0",
+          "last_version": "0.130.0",
+          "unversioned_files": 2
+        }
+      ]
+    },
+    {
+      "source": "opencode",
+      "version_kind": "none",
+      "band": null,
+      "versions": null,
+      "files": 1,
+      "files_with_version": 0,
+      "records": 3,
+      "records_with_version": 0,
+      "key_paths": [
+        {
+          "path": "id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.callID",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.mime",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.state.input.command",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.state.output",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.state.status",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.text",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.tool",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.type",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].data.url",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].message_id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "parts[].session_id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.cost",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.directory",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.modelID",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.providerID",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.role",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.time.created",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.title",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.tokens.cache.read",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.tokens.cache.write",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.tokens.input",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.tokens.output",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.data.tokens.reasoning",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "row.session_id",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        },
+        {
+          "path": "type",
+          "files": 1,
+          "first_version": "",
+          "last_version": "",
+          "unversioned_files": 1
+        }
+      ]
+    },
+    {
+      "source": "pi",
+      "version_kind": "schema",
+      "band": {
+        "first": "3",
+        "last": "3"
+      },
+      "versions": [
+        {
+          "version": "3",
+          "files": 22,
+          "records": 22
+        }
+      ],
+      "files": 22,
+      "files_with_version": 22,
+      "records": 707,
+      "records_with_version": 22,
+      "key_paths": [
+        {
+          "path": "cwd",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "firstKeptEntryId",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "fromId",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "id",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "image.data",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "image.mimeType",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.api",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.cancelled",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.command",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[]",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.command",
+          "files": 12,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.content",
+          "files": 2,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.context",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.edits[].newText",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.edits[].oldText",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.limit",
+          "files": 10,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.literal",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.newText",
+          "files": 9,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.offset",
+          "files": 7,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.oldText",
+          "files": 9,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.path",
+          "files": 16,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.pattern",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].arguments.timeout",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].content",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].data",
+          "files": 2,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].id",
+          "files": 17,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].input.command",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].input.file_path",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].input.pattern",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].is_error",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].mimeType",
+          "files": 2,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].name",
+          "files": 17,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].partialJson",
+          "files": 10,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].text",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].textSignature",
+          "files": 8,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].thinking",
+          "files": 19,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].thinkingSignature",
+          "files": 18,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].tool_use_id",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.content[].type",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details",
+          "files": 8,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.diff",
+          "files": 9,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.firstChangedLine",
+          "files": 9,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.fullOutputPath",
+          "files": 2,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.content",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.firstLineExceedsLimit",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.lastLinePartial",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.maxBytes",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.maxLines",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.outputBytes",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.outputLines",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.totalBytes",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.totalLines",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.truncated",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.details.truncation.truncatedBy",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.errorMessage",
+          "files": 8,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.excludeFromContext",
+          "files": 4,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.exitCode",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.fullOutputPath",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.isError",
+          "files": 16,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.model",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.output",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.provider",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.responseId",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.role",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.stopReason",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.timestamp",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.toolCallId",
+          "files": 16,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.toolName",
+          "files": 18,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.truncated",
+          "files": 3,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cacheRead",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cacheWrite",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cost.cacheRead",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cost.cacheWrite",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cost.input",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cost.output",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.cost.total",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.input",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.output",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "message.usage.totalTokens",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "model",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "modelId",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "name",
+          "files": 6,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "parentId",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "parent_id",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "provider",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "role",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "summary",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "text",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "thinkingLevel",
+          "files": 20,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "timestamp",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "tokensBefore",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "toolName",
+          "files": 1,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "type",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        },
+        {
+          "path": "version",
+          "files": 22,
+          "first_version": "3",
+          "last_version": "3",
+          "unversioned_files": 0
+        }
+      ]
+    }
+  ]
+}
