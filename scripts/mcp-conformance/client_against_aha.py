@@ -13,8 +13,8 @@ verify script supplies that path after building a fixture corpus.
 import asyncio
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -82,7 +82,7 @@ async def main() -> int:
 
             # Round-trip a no-arg tool that always succeeds against an empty corpus.
             res = await session.call_tool("status", {})
-            assert res.content, f"call_tool(status) returned no content blocks"
+            assert res.content, "call_tool(status) returned no content blocks"
             text = res.content[0].text
             status = json.loads(text)
             for key in ("workspace_dir", "sessions", "entries", "fts_messages"):
@@ -112,7 +112,7 @@ async def main() -> int:
             res = await session.call_tool("search", {"query": "definitelynotinthecorpus", "limit": 5})
             empty = json.loads(res.content[0].text)
             assert empty == [], f"empty search result not []: {empty!r}"
-            print(f"tools/call search empty-result OK: payload is []")
+            print("tools/call search empty-result OK: payload is []")
 
             # Strict-validation: unknown arg must be rejected. Per the spec,
             # tool-level errors are signalled by isError on the result, not
@@ -121,7 +121,7 @@ async def main() -> int:
             assert res.isError, f"unknown-arg search call was accepted (no isError): {res}"
             err = res.content[0].text if res.content else ""
             assert "unexpected argument" in err or "bogus" in err, f"unexpected error message: {err!r}"
-            print(f"tools/call unknown-arg rejection OK")
+            print("tools/call unknown-arg rejection OK")
 
             # Unknown tool must error. The SDK *does* raise for tools missing
             # from the registry (transport-level "tool not found"), so accept
@@ -131,7 +131,7 @@ async def main() -> int:
                 assert res.isError, "unknown tool call was accepted (no isError)"
             except Exception:
                 pass
-            print(f"tools/call unknown-tool rejection OK")
+            print("tools/call unknown-tool rejection OK")
 
     print("aha MCP server is conformant under the official Python SDK client.")
     return 0

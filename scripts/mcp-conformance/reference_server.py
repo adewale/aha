@@ -18,7 +18,6 @@ The harness spawns it as a child and reads/writes over stdio.
 
 from mcp.server.fastmcp import FastMCP
 
-
 mcp = FastMCP("reference-mcp")
 
 
