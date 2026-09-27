@@ -128,12 +128,14 @@ func TestCodexNativeProjectionRealCorpus(t *testing.T) {
 	dir := filepath.Join("testdata", "corpora", "codex-sample")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Skipf("codex corpus not vendored: %v", err)
+		t.Fatalf("vendored codex corpus is missing (it is committed test data: restore it; do not skip): %v", err)
 	}
+	sessions := 0
 	for _, de := range entries {
 		if de.IsDir() || !strings.HasSuffix(de.Name(), ".jsonl") {
 			continue
 		}
+		sessions++
 		t.Run(de.Name(), func(t *testing.T) {
 			f, err := os.Open(filepath.Join(dir, de.Name()))
 			if err != nil {
@@ -166,6 +168,9 @@ func TestCodexNativeProjectionRealCorpus(t *testing.T) {
 				t.Fatalf("%s: no assistant-role entry after projection", de.Name())
 			}
 		})
+	}
+	if sessions == 0 {
+		t.Fatal("vendored codex corpus has no .jsonl sessions (it is committed test data: restore it; do not skip)")
 	}
 }
 

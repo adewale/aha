@@ -53,7 +53,7 @@ func TestRawJSONIsVerbatimAcrossAdapters(t *testing.T) {
 func TestRawJSONIsVerbatimAcrossCorpora(t *testing.T) {
 	paths := corpusJSONLPaths(t)
 	if len(paths) == 0 {
-		t.Skip("no corpus fixtures vendored")
+		t.Fatal("no vendored corpus sessions under testdata/corpora (they are committed test data: restore them; do not skip)")
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
