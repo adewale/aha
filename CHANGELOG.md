@@ -4,6 +4,15 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Verification gates (September 2026)
+
+#### Changed
+
+- CI now installs the Python (`scripts/mcp-conformance/requirements.txt`, pinned) and TypeScript (`scripts/mcp-conformance`) conformance dependencies and runs `scripts/verify.sh ci` with `AHA_MCP_REQUIRE_ALL_LEGS=1`, so all eight MCP conformance legs run and a leg that cannot run fails the build. Previously five legs skipped in CI and the step still exited 0. Locally, missing toolchains are still reported as skipped unless the variable is set.
+- The fuzz-list drift guard now checks both directions: every `func Fuzz*` must be fuzzed by `verify.sh fuzz` (or be listed as seed-only with a reason), and every fuzz command must name a target defined in the package it runs. `FuzzDecodeSnapshotManifest`, `FuzzVerifyReader` and `FuzzApplyNoPanic` were never actively fuzzed and now are.
+- Tests over the vendored corpora under `internal/adapters/testdata/corpora` fail instead of skipping when the corpus is missing or empty.
+- `docs/verification.md` lists the real CI profile, and `TestVerificationDocListsEveryCIProfileStep` keeps it in step with `full()` in `verify.sh`.
+
 ### Command/state model 0.2 (July 2026)
 
 #### Changed

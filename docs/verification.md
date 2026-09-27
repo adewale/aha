@@ -6,7 +6,7 @@ This project keeps one verification entrypoint in `scripts/verify.sh`, with Make
 
 ```bash
 make verify-quick       # go test ./... + whitespace checks
-make verify-full        # quick + vet + race + fuzz + build
+make verify-full        # the CI profile below
 make verify-fuzz        # bounded fuzz suite
 make verify-mutation-dry
 make verify-mutation
@@ -35,14 +35,25 @@ GitHub Actions runs:
 scripts/verify.sh ci
 ```
 
-That profile currently includes:
+That profile (`full()` in `scripts/verify.sh`) runs these steps in order. The
+list is kept in sync with `full()` by
+`TestVerificationDocListsEveryCIProfileStep` in `internal/testquality`:
 
-- `go test ./...`
-- whitespace checks for the PR/commit diff and local worktree
+- `quick`: `go test ./...` plus whitespace checks for the PR/commit diff and local worktree
 - `go vet ./...`
 - `go test -race ./...`
-- bounded fuzz targets for model refs, archive walk/write, adapter JSONL parsing, depot addresses, and depot bundle keys;
-- `go build -o /tmp/aha ./cmd/aha`
+- `fuzz`: every `func Fuzz*` target for `FUZZTIME` (default 2s) each; `TestVerifyFuzzListMatchesFuzzTargetsInBothDirections` fails if a target is missing from the list
+- `ts`: typecheck and runtime-test the generated TypeScript client (fails if its locked dependencies are not installed)
+- `build_private`: build `cmd/aha` in a private temporary workspace
+- `./scripts/compat-n-minus-one.sh`: the pinned previous release must read data written by the current binary, and vice versa
+- `cross_compile`: build for Linux, macOS and Windows, and compile the Windows platform-contract test binaries
+- `mcp_conformance`: the eight cross-SDK MCP conformance legs (Python, TypeScript and Go SDK clients against `aha mcp`; aha's TS client against Python, TS and Go reference servers; the Code Mode workflow; HTTP/MCP consistency)
+
+CI installs the conformance dependencies (`npm ci --prefix scripts/mcp-conformance` and
+`pip install -r scripts/mcp-conformance/requirements.txt`) and sets
+`AHA_MCP_REQUIRE_ALL_LEGS=1`, so a conformance leg that cannot run fails the build.
+Locally, legs whose toolchain is missing are skipped and reported as skipped;
+set `AHA_MCP_REQUIRE_ALL_LEGS=1` to reproduce CI.
 
 ## Correctness-by-construction guardrails
 

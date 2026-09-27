@@ -19,6 +19,9 @@ Modes:
 
 Environment:
   FUZZTIME      fuzz duration per target (default: 2s)
+  AHA_MCP_REQUIRE_ALL_LEGS
+                1 = every MCP conformance leg must run; a missing toolchain or
+                dependency fails instead of skipping (CI sets this)
   GREMLINS     gremlins command (default: go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0)
 USAGE
 }
@@ -97,6 +100,9 @@ cross_compile() {
   run env GOOS=windows GOARCH=amd64 go test -c -o "$root/safety-windows.test.exe" ./internal/safety
 }
 
+# Every func Fuzz* in the repository must appear here (or in the seed-only
+# allowlist in internal/testquality/infrastructure_isolation_test.go); that test
+# checks both directions and that each target is run in its own package.
 fuzz() {
   run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
   run go test ./internal/model -run=^$ -fuzz=FuzzDecodeSnapshotManifest -fuzztime="$FUZZTIME"
@@ -152,7 +158,24 @@ ts() {
 #     8. HTTP<->MCP consistency -> internal/mcp TestHTTPAndMCPPathsAreConsistent
 #
 # Each leg skips gracefully when its toolchain is missing, so this mode
-# still does *something* useful on a Python-only or Go-only box.
+# still does *something* useful on a Python-only or Go-only box. With
+# AHA_MCP_REQUIRE_ALL_LEGS=1 (set in CI) a leg that cannot run is a failure,
+# because the Python and TS legs are the ones that have found real bugs.
+require_all_mcp_legs() {
+  [[ "${AHA_MCP_REQUIRE_ALL_LEGS:-0}" == "1" ]]
+}
+
+# skip_mcp_leg reports a leg that cannot run: a skip normally, a failure when
+# all legs are required.
+skip_mcp_leg() {
+  local leg="$1" reason="$2"
+  if require_all_mcp_legs; then
+    printf '\n==> %s: FAILED: cannot run (%s) and AHA_MCP_REQUIRE_ALL_LEGS=1\n' "$leg" "$reason" >&2
+    exit 1
+  fi
+  printf '\n==> %s: skipped (%s)\n' "$leg" "$reason" >&2
+}
+
 mcp_conformance() {
   # The Go-SDK leg needs no external toolchain. Python/TS legs run only when
   # their already-prepared dependencies are present; verification never runs
@@ -165,6 +188,18 @@ mcp_conformance() {
   fi
   if (( have_node )) && [[ -d scripts/mcp-conformance/node_modules/@modelcontextprotocol/sdk ]]; then
     have_ts_sdk=1
+  fi
+  if require_all_mcp_legs; then
+    local -a missing=()
+    (( have_python )) || missing+=("python3 with the mcp package (scripts/mcp-conformance/requirements.txt)")
+    (( have_node )) || missing+=("node")
+    (( have_tsc )) || missing+=("tsc (clients/typescript dependencies)")
+    (( have_ts_sdk )) || missing+=("scripts/mcp-conformance dependencies (@modelcontextprotocol/sdk)")
+    if (( ${#missing[@]} > 0 )); then
+      printf '\n==> mcp: AHA_MCP_REQUIRE_ALL_LEGS=1 but these are missing:\n' >&2
+      printf '      - %s\n' "${missing[@]}" >&2
+      exit 1
+    fi
   fi
 
   new_workspace
@@ -209,13 +244,13 @@ JSONC
   if (( have_python )); then
     run env "${attested_env[@]}" python3 scripts/mcp-conformance/client_against_aha.py
   else
-    printf '\n==> mcp leg 1 (python client -> aha): skipped (python3 mcp not available)\n' >&2
+    skip_mcp_leg "mcp leg 1 (python client -> aha)" "python3 mcp not available"
   fi
 
   if (( have_ts_sdk )); then
     run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types client_against_aha.ts"
   else
-    printf '\n==> mcp leg 2 (typescript client -> aha): skipped (prepared TS SDK dependencies not available; prepare scripts/mcp-conformance dependencies explicitly)\n' >&2
+    skip_mcp_leg "mcp leg 2 (typescript client -> aha)" "prepared TS SDK dependencies not available; prepare scripts/mcp-conformance dependencies explicitly"
   fi
 
   run env "${attested_env[@]}" go test -count=1 ./internal/mcp/conformance/...
@@ -223,7 +258,7 @@ JSONC
   if (( have_ts_sdk )); then
     run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types codemode_workflow.ts"
   else
-    printf '\n==> mcp code-mode workflow: skipped (prepared TS SDK dependencies not available)\n' >&2
+    skip_mcp_leg "mcp leg 7 (code-mode workflow)" "prepared TS SDK dependencies not available"
   fi
 
   if (( have_node && have_tsc )); then
@@ -237,7 +272,7 @@ JSONC
     ref_env+=("AHA_REF_SERVER_GO=$ref_bin")
     run env "${ref_env[@]}" node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts
   else
-    printf '\n==> mcp legs 4-6 (aha client -> reference servers): skipped (need node + tsc)\n' >&2
+    skip_mcp_leg "mcp legs 4-6 (aha client -> reference servers)" "need node + tsc"
   fi
 }
 

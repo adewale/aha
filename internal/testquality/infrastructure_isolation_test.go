@@ -1,9 +1,11 @@
 package testquality_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -32,33 +34,249 @@ func TestVerifyUsesPrivateRunWorkspaceAndNeverInstallsDependencies(t *testing.T)
 	}
 }
 
-func TestVerifyFuzzCommandsNameRealFuzzTargets(t *testing.T) {
-	verify := readProjectFile(t, "scripts", "verify.sh")
-	names := regexp.MustCompile(`-fuzz=(Fuzz[[:alnum:]_]+)`).FindAllStringSubmatch(verify, -1)
-	if len(names) == 0 {
-		t.Fatal("verify.sh does not run any fuzz targets")
+// seedOnlyFuzzTargets lists fuzz targets that deliberately run only their seed
+// corpus (as ordinary tests via go test ./...) and are never actively fuzzed by
+// scripts/verify.sh fuzz. Every entry needs a reason. It is empty: every target
+// is fuzzed. Prefer adding a target to fuzz() over adding it here.
+var seedOnlyFuzzTargets = map[string]string{}
+
+// fuzzCommand is one `go test <pkg> ... -fuzz=<target>` line from verify.sh.
+type fuzzCommand struct {
+	pkg    string // e.g. "internal/model"
+	target string // e.g. "FuzzRefParseFormat"
+}
+
+var (
+	verifyFuzzCommandPattern = regexp.MustCompile(`go test \./(\S+) [^\n]*-fuzz=\^?(Fuzz[[:alnum:]_]+)\$?`)
+	fuzzFuncPattern          = regexp.MustCompile(`(?m)^func (Fuzz[[:alnum:]_]+)\(`)
+)
+
+// fuzzListDrift compares the fuzz commands in verify.sh with the fuzz targets
+// defined in the repository (package dir -> target names) in both directions:
+// every command must name a target defined in that package, and every defined
+// target must be fuzzed or explicitly listed as seed-only.
+func fuzzListDrift(commands []fuzzCommand, defined map[string][]string, seedOnly map[string]string) []string {
+	var problems []string
+	definedIn := map[string]string{}
+	for pkg, targets := range defined {
+		for _, target := range targets {
+			definedIn[target] = pkg
+		}
 	}
-	var tests strings.Builder
-	err := filepath.Walk(filepath.Join("..", "..", "internal"), func(path string, info os.FileInfo, err error) error {
+	fuzzed := map[string]bool{}
+	for _, cmd := range commands {
+		fuzzed[cmd.target] = true
+		pkg, ok := definedIn[cmd.target]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("verify.sh fuzzes %s, which is not defined anywhere", cmd.target))
+		case pkg != cmd.pkg:
+			problems = append(problems, fmt.Sprintf("verify.sh fuzzes %s in ./%s, but it is defined in ./%s (go test would fuzz nothing and pass)", cmd.target, cmd.pkg, pkg))
+		}
+	}
+	for target, pkg := range definedIn {
+		_, seedOnlyTarget := seedOnly[target]
+		switch {
+		case fuzzed[target] && seedOnlyTarget:
+			problems = append(problems, fmt.Sprintf("%s is both fuzzed by verify.sh and listed as seed-only", target))
+		case !fuzzed[target] && !seedOnlyTarget:
+			problems = append(problems, fmt.Sprintf("./%s defines %s, but verify.sh fuzz() never fuzzes it; add it there or to seedOnlyFuzzTargets with a reason", pkg, target))
+		}
+	}
+	for target, reason := range seedOnly {
+		if _, ok := definedIn[target]; !ok {
+			problems = append(problems, fmt.Sprintf("seedOnlyFuzzTargets lists %s, which is not defined anywhere", target))
+		}
+		if strings.TrimSpace(reason) == "" {
+			problems = append(problems, fmt.Sprintf("seedOnlyFuzzTargets entry %s has no reason", target))
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+func verifyFuzzCommands(t *testing.T) []fuzzCommand {
+	t.Helper()
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	var commands []fuzzCommand
+	for _, match := range verifyFuzzCommandPattern.FindAllStringSubmatch(verify, -1) {
+		commands = append(commands, fuzzCommand{pkg: match[1], target: match[2]})
+	}
+	return commands
+}
+
+func definedFuzzTargets(t *testing.T) map[string][]string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	defined := map[string][]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.HasSuffix(path, "_test.go") {
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" {
+				return filepath.SkipDir
 			}
-			tests.Write(body)
+			return nil
+		}
+		if !strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		for _, match := range fuzzFuncPattern.FindAllStringSubmatch(string(body), -1) {
+			defined[filepath.ToSlash(rel)] = append(defined[filepath.ToSlash(rel)], match[1])
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, match := range names {
-		if !strings.Contains(tests.String(), "func "+match[1]+"(") {
-			t.Fatalf("verify.sh names missing fuzz target %s", match[1])
+	return defined
+}
+
+func TestVerifyFuzzListMatchesFuzzTargetsInBothDirections(t *testing.T) {
+	commands := verifyFuzzCommands(t)
+	if len(commands) == 0 {
+		t.Fatal("verify.sh does not run any fuzz targets")
+	}
+	defined := definedFuzzTargets(t)
+	if len(defined) == 0 {
+		t.Fatal("found no fuzz targets in the repository; the scan is broken")
+	}
+	if problems := fuzzListDrift(commands, defined, seedOnlyFuzzTargets); len(problems) > 0 {
+		t.Fatalf("verify.sh fuzz list has drifted from the fuzz targets:\n  %s", strings.Join(problems, "\n  "))
+	}
+}
+
+// TestFuzzListDriftDetectsBothDirections gives the drift guard teeth: each
+// case is a drift that the guard above must report.
+func TestFuzzListDriftDetectsBothDirections(t *testing.T) {
+	defined := map[string][]string{
+		"internal/a": {"FuzzA", "FuzzA2"},
+		"internal/b": {"FuzzB"},
+	}
+	all := []fuzzCommand{{"internal/a", "FuzzA"}, {"internal/a", "FuzzA2"}, {"internal/b", "FuzzB"}}
+	cases := []struct {
+		name     string
+		commands []fuzzCommand
+		seedOnly map[string]string
+		want     string // substring of the single expected problem; "" means no problems
+	}{
+		{"in sync", all, nil, ""},
+		{"defined but never fuzzed", all[:2], nil, "./internal/b defines FuzzB, but verify.sh fuzz() never fuzzes it"},
+		{"seed-only with a reason", all[:2], map[string]string{"FuzzB": "slow"}, ""},
+		{"fuzzed target no longer exists", append(all[:3:3], fuzzCommand{"internal/b", "FuzzGone"}), nil, "verify.sh fuzzes FuzzGone, which is not defined anywhere"},
+		{"fuzzed in the wrong package", []fuzzCommand{{"internal/a", "FuzzA"}, {"internal/a", "FuzzA2"}, {"internal/a", "FuzzB"}}, nil, "verify.sh fuzzes FuzzB in ./internal/a, but it is defined in ./internal/b"},
+		{"both fuzzed and seed-only", all, map[string]string{"FuzzA": "slow"}, "FuzzA is both fuzzed by verify.sh and listed as seed-only"},
+		{"stale seed-only entry", all, map[string]string{"FuzzGone": "slow"}, "seedOnlyFuzzTargets lists FuzzGone, which is not defined anywhere"},
+		{"seed-only without a reason", all[:2], map[string]string{"FuzzB": " "}, "seedOnlyFuzzTargets entry FuzzB has no reason"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := fuzzListDrift(tc.commands, defined, tc.seedOnly)
+			if tc.want == "" {
+				if len(problems) != 0 {
+					t.Fatalf("problems = %q, want none", problems)
+				}
+				return
+			}
+			if len(problems) != 1 || !strings.Contains(problems[0], tc.want) {
+				t.Fatalf("problems = %q, want exactly one containing %q", problems, tc.want)
+			}
+		})
+	}
+}
+
+// TestVerifyFuzzCommandPatternParsesVerifyScript pins the parser to the real
+// command shape in verify.sh, so a reformatted fuzz() cannot silently yield an
+// empty or partial command list.
+func TestVerifyFuzzCommandPatternParsesVerifyScript(t *testing.T) {
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	if got, want := len(verifyFuzzCommands(t)), strings.Count(verify, "-fuzz="); got != want {
+		t.Fatalf("parsed %d fuzz commands but verify.sh contains %d -fuzz= flags", got, want)
+	}
+}
+
+// TestCIRequiresEveryMCPConformanceLeg keeps the cross-SDK conformance legs
+// that have found real bugs (Python and TS) mandatory in CI: CI must install
+// their pinned dependencies and set AHA_MCP_REQUIRE_ALL_LEGS=1, so a leg that
+// cannot run fails the build instead of skipping with exit 0.
+func TestCIRequiresEveryMCPConformanceLeg(t *testing.T) {
+	ci := readProjectFile(t, ".github", "workflows", "ci.yml")
+	for _, required := range []string{
+		"npm ci --prefix clients/typescript",
+		"npm ci --prefix scripts/mcp-conformance",
+		"pip install -r scripts/mcp-conformance/requirements.txt",
+		`AHA_MCP_REQUIRE_ALL_LEGS: "1"`,
+		"scripts/verify.sh ci",
+	} {
+		if !strings.Contains(ci, required) {
+			t.Errorf("ci.yml missing %q", required)
 		}
+	}
+	requirements := readProjectFile(t, "scripts", "mcp-conformance", "requirements.txt")
+	if !regexp.MustCompile(`(?m)^mcp==[0-9][^\s]*$`).MatchString(requirements) {
+		t.Errorf("scripts/mcp-conformance/requirements.txt must pin the Python mcp SDK with ==; got:\n%s", requirements)
+	}
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	if !strings.Contains(verify, "AHA_MCP_REQUIRE_ALL_LEGS") {
+		t.Error("verify.sh no longer honours AHA_MCP_REQUIRE_ALL_LEGS")
+	}
+}
+
+// ciProfileSteps returns the steps of full() in verify.sh (what CI runs), with
+// the `run` logging prefix removed.
+func ciProfileSteps(t *testing.T) []string {
+	t.Helper()
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	body := regexp.MustCompile(`(?s)\nfull\(\) \{\n(.*?)\n\}`).FindStringSubmatch(verify)
+	if body == nil {
+		t.Fatal("verify.sh has no full() function")
+	}
+	var steps []string
+	for _, line := range strings.Split(body[1], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		steps = append(steps, strings.TrimPrefix(line, "run "))
+	}
+	return steps
+}
+
+// documentedCIProfileSteps returns the leading `code` span of each bullet in
+// the "## CI profile" section of docs/verification.md.
+func documentedCIProfileSteps(t *testing.T) []string {
+	t.Helper()
+	doc := readProjectFile(t, "docs", "verification.md")
+	section := regexp.MustCompile(`(?s)\n## CI profile\n(.*?)(\n## |$)`).FindStringSubmatch(doc)
+	if section == nil {
+		t.Fatal("docs/verification.md has no \"## CI profile\" section")
+	}
+	var steps []string
+	for _, match := range regexp.MustCompile("(?m)^- `([^`]+)`").FindAllStringSubmatch(section[1], -1) {
+		steps = append(steps, match[1])
+	}
+	return steps
+}
+
+// TestVerificationDocListsEveryCIProfileStep keeps docs/verification.md's CI
+// profile identical to what `scripts/verify.sh ci` actually runs, in order.
+func TestVerificationDocListsEveryCIProfileStep(t *testing.T) {
+	script, doc := ciProfileSteps(t), documentedCIProfileSteps(t)
+	if len(script) == 0 {
+		t.Fatal("parsed no steps from verify.sh full(); the parser is broken")
+	}
+	if strings.Join(script, "\n") != strings.Join(doc, "\n") {
+		t.Fatalf("docs/verification.md CI profile has drifted from verify.sh full().\nverify.sh full():\n  %s\ndocs/verification.md:\n  %s",
+			strings.Join(script, "\n  "), strings.Join(doc, "\n  "))
 	}
 }
 
