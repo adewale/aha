@@ -92,12 +92,24 @@ Profiles are never written by default. Inspect them with `go tool pprof`. Captur
 
 ## Mutation testing
 
-Mutation testing is intentionally not part of normal CI. Run it before release or after invariant-critical refactors:
+Mutation testing is not part of CI and is not scheduled. Run it on the package you changed, before a release or after an invariant-critical refactor:
 
 ```bash
+MUTATION_PKGS=./internal/model scripts/verify.sh mutation   # one package
+MUTATION_DIFF=origin/main scripts/verify.sh mutation         # only lines changed since origin/main
 make verify-mutation-dry
-make verify-mutation
+make verify-mutation                                         # all five packages: about 2-2.5 hours
 ```
+
+`MUTATION_PKGS` takes space-separated packages (default: the critical packages below). `MUTATION_DIFF` takes a git ref: gremlins mutates only lines changed since it, and selected packages with no changes are skipped. Both also apply to `mutation-dry`. Do not call `gremlins unleash ./internal/<pkg> --diff <ref>` directly from the repository root: gremlins v0.6.0 then matches no changed line and reports every mutant SKIPPED, and with an empty diff it mutates the whole package. `verify.sh` runs it inside the package directory with `diff.relative` set, and skips unchanged packages.
+
+Measured cost (gremlins v0.6.0, `--workers 2`, September 2026):
+
+- 1,849 runnable mutants plus 287 not covered: `internal/model` 95, `internal/archive` 214, `internal/adapters` 237, `internal/depot` 380, `internal/corpus` 923.
+- `internal/model` takes 1-1.5 minutes, `internal/corpus` about 1.7 hours, and all five packages about 2-2.5 hours (partly extrapolated).
+- About 30% of sampled `internal/corpus` mutants lived, which projects to roughly 275 survivors there. A full run produces a triage list, not a pass/fail answer.
+
+`scripts/verify.sh mutation` clears the Go test cache first. gremlins sets each mutant's timeout from how long its coverage run took, and a cached run returns in milliseconds. With a warm cache the `internal/model` coverage run took 0.26 s, 87 of 95 mutants were reported TIMED OUT, none lived, and efficacy read 100%; after `go clean -testcache` the same run gave 89 killed, 5 lived and 1 timed out.
 
 The script uses:
 
@@ -113,4 +125,4 @@ Critical packages:
 - `./internal/depot`
 - `./internal/adapters`
 
-A surviving mutant in ref parsing, archive validation, depot key validation, path safety, or conflict quarantine should be treated as a release blocker unless it is a documented equivalent mutant.
+Triage survivors before release. A survivor blocks the release only if it is non-equivalent and plausibly a bypass in identity or ingest code: ref parsing, archive validation, depot key validation, path safety, or conflict quarantine. Record equivalent and accepted survivors with a one-line reason.

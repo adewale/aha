@@ -23,6 +23,10 @@ Environment:
                 1 = every MCP conformance leg must run; a missing toolchain or
                 dependency fails instead of skipping (CI sets this)
   GREMLINS     gremlins command (default: go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0)
+  MUTATION_PKGS space-separated packages for mutation and mutation-dry
+                (default: model, corpus, archive, depot and adapters)
+  MUTATION_DIFF git ref: mutate only lines changed since it (gremlins --diff)
+                and skip selected packages that have no changes
 USAGE
 }
 
@@ -296,16 +300,52 @@ mutation_packages=(
   ./internal/adapters
 )
 
-mutation_dry() {
-  for pkg in "${mutation_packages[@]}"; do
-    run_shell "$GREMLINS unleash '$pkg' --dry-run --workers 2"
+# Run gremlins over MUTATION_PKGS (default: mutation_packages) with the given
+# extra arguments. A whole-scope run takes about 2-2.5 hours (see
+# docs/verification.md), so name the package you changed.
+#
+# With MUTATION_DIFF, only lines changed since that ref are mutated. Two
+# gremlins v0.6.0 behaviours shape this:
+# - --diff compares `git diff` paths, which are relative to the repository
+#   root, with file names relative to the package directory. Given
+#   ./internal/model from the root it matches nothing and reports every mutant
+#   SKIPPED, even on changed lines. Running it inside the package directory
+#   with diff.relative makes the two agree.
+# - An empty diff makes gremlins mutate the whole package, so a package with
+#   no changes since the ref is skipped here instead.
+unleash_packages() {
+  local pkgs pkg dir n="${GIT_CONFIG_COUNT:-0}"
+  read -r -a pkgs <<< "${MUTATION_PKGS:-${mutation_packages[*]}}"
+  if [[ -n "${MUTATION_DIFF:-}" ]] && ! git rev-parse --verify --quiet "${MUTATION_DIFF}^{commit}" >/dev/null; then
+    printf 'MUTATION_DIFF=%s does not name a commit\n' "$MUTATION_DIFF" >&2
+    exit 2
+  fi
+  for pkg in "${pkgs[@]}"; do
+    if [[ -z "${MUTATION_DIFF:-}" ]]; then
+      run_shell "$GREMLINS unleash '$pkg' $*"
+      continue
+    fi
+    dir="${pkg#./}"
+    if git diff --quiet --merge-base "$MUTATION_DIFF" -- "$dir"; then
+      printf '\n==> skip %s: no changes since %s\n' "$pkg" "$MUTATION_DIFF" >&2
+      continue
+    fi
+    # Adds diff.relative=true to any git config already passed in the environment.
+    run_shell "cd '$dir' && GIT_CONFIG_COUNT=$((n + 1)) GIT_CONFIG_KEY_$n=diff.relative GIT_CONFIG_VALUE_$n=true $GREMLINS unleash --diff '$MUTATION_DIFF' $*"
   done
 }
 
+mutation_dry() {
+  unleash_packages --dry-run --workers 2
+}
+
 mutation() {
-  for pkg in "${mutation_packages[@]}"; do
-    run_shell "$GREMLINS unleash '$pkg' --workers 2"
-  done
+  # gremlins sets each mutant's timeout from how long its coverage run took.
+  # With a warm Go test cache that run is replayed in milliseconds, and nearly
+  # every mutant is then reported TIMED OUT (87 of 95 in internal/model), so
+  # clear the test cache first.
+  run go clean -testcache
+  unleash_packages --workers 2
 }
 
 case "$mode" in

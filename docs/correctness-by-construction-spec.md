@@ -495,7 +495,9 @@ Small finite spaces should be exhaustive, not sampled:
 
 ### Mutation testing
 
-Run `gremlins` outside normal CI on invariant-critical packages:
+Run `gremlins` outside CI, on the invariant-critical package you changed. It is
+not scheduled; `docs/verification.md` records the measured cost (about 2-2.5
+hours for all five packages) and the `MUTATION_PKGS`/`MUTATION_DIFF` options:
 
 ```bash
 scripts/verify.sh mutation-dry
@@ -510,8 +512,10 @@ Start with dry-run to inventory covered mutants. Then run mutation tests on:
 - `./internal/depot`
 - `./internal/adapters`
 
-A surviving mutant in identity/ref parsing, archive validation, conflict
-quarantine, depot key validation, or path safety is a release blocker.
+Triage survivors before release. A survivor blocks the release only if it is
+non-equivalent and plausibly a bypass in identity or ingest code: identity/ref
+parsing, archive validation, conflict quarantine, depot key validation, or path
+safety.
 
 ### Static debt inventory
 
@@ -762,9 +766,10 @@ As corpus/depot verifier queries mature, tests should call the same verifier cod
 - Parser fuzzing asserts postconditions, not only “does not panic.”
 - Corpus and depot state machines cover duplicate, conflicting, interrupted,
   repair, and concurrent sequences.
-- `gremlins` has no surviving mutants in identity/ref/archive/path/depot-key/
-  conflict-quarantine critical paths, or surviving mutants are documented with
-  justified equivalent-mutant rationale.
+- `gremlins` survivors in the changed identity/ref/archive/path/depot-key/
+  conflict-quarantine code have been triaged: none is non-equivalent and
+  plausibly a bypass in identity or ingest, and equivalent or accepted
+  survivors are recorded with a one-line reason.
 - Bundle/corpus v2 ships with tested rejection of unsupported schemas and no legacy identity aliases.
 
 ## Highest-leverage order
