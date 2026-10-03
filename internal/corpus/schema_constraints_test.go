@@ -1,6 +1,7 @@
 package corpus_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,13 +51,14 @@ func TestSchemaAppendOnlyTriggersRejectMutation(t *testing.T) {
 		{`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,'first','second','{}')`, []any{session, entry}},
 		{`insert into tool_invocations(session_key,entry_id,tool_key,tool_name) values(?,?,'tool-key','bash')`, []any{session, entry}},
 		{`insert into redactions(session_key,entry_id,pattern,count) values(?,?,'aws-access-key',1)`, []any{session, entry}},
+		{`insert into redaction_events(session_key,subject_kind,subject_id,entry_id,surface,pattern,count) values(?,'entry',?,?,'text','aws-access-key',1)`, []any{session, entry, entry}},
 	}
 	for _, seed := range seeds {
 		if _, err := store.DB.Exec(seed.query, seed.args...); err != nil {
 			t.Fatalf("seed %q: %v", seed.query, err)
 		}
 	}
-	for _, tc := range []struct {
+	cases := []struct {
 		table  string
 		update string
 	}{
@@ -66,7 +68,33 @@ func TestSchemaAppendOnlyTriggersRejectMutation(t *testing.T) {
 		{"conflicts", `update conflicts set details_json='{"rewritten":true}'`},
 		{"tool_invocations", `update tool_invocations set tool_name='rewritten'`},
 		{"redactions", `update redactions set count=0`},
-	} {
+		{"redaction_events", `update redaction_events set surface='rewritten'`},
+	}
+	// The schema, not this list, decides which tables are append-only: a new
+	// table with append-only triggers must be added to the cases above.
+	tested := map[string]bool{}
+	for _, tc := range cases {
+		tested[tc.table] = true
+	}
+	declared := map[string]bool{}
+	triggers, err := store.DB.Query(`select distinct tbl_name from sqlite_master where type='trigger' and sql like '%are append-only%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for triggers.Next() {
+		var table string
+		if err := triggers.Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		declared[table] = true
+	}
+	if err := triggers.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(declared, tested) {
+		t.Fatalf("append-only tables in the schema %v, tested %v", declared, tested)
+	}
+	for _, tc := range cases {
 		t.Run(tc.table, func(t *testing.T) {
 			rows := func() int {
 				t.Helper()
