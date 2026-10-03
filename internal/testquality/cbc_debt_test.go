@@ -1,6 +1,7 @@
 package testquality_test
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,10 +17,50 @@ func TestAmbientTimeDebtInventoryDoesNotGrow(t *testing.T) {
 	want := map[string]int{
 		"internal/clock/clock.go:Now:Now":     1,
 		"internal/clock/clock.go:Sleep:Sleep": 1,
+		// Context-cancellable waits. clock.Sleeper has no context, so these
+		// timers are recorded debt rather than routed through the clock.
+		"internal/corpus/lifecycle_lock_unix.go:waitForLifecycleLock:NewTimer": 1,
+		"internal/depot/depot_v2.go:waitForConditionalRetry:NewTimer":          1,
 	}
 	got := ambientTimeCalls(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ambient time debt inventory changed\ngot:  %#v\nwant: %#v\nIf this is new debt, do not add it. If a refactor removed debt, shrink the allowlist.", got, want)
+	}
+}
+
+// TestAmbientTimeScannerReportsEveryAmbientTimeShape gives the inventory above
+// teeth: each known-bad source must be reported, and each known-good source
+// must not be.
+func TestAmbientTimeScannerReportsEveryAmbientTimeShape(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want map[string]int
+	}{
+		{"call inside a function", "package p\nimport \"time\"\nfunc f() { _ = time.Now() }\n", map[string]int{"p.go:f:Now": 1}},
+		{"package-level function value", "package p\nimport \"time\"\nvar now = time.Now\n", map[string]int{"p.go:<package>:Now": 1}},
+		{"package-level call", "package p\nimport \"time\"\nvar started = time.Now()\n", map[string]int{"p.go:<package>:Now": 1}},
+		{"renamed import", "package p\nimport clk \"time\"\nfunc f() { clk.Sleep(1) }\n", map[string]int{"p.go:f:Sleep": 1}},
+		{"timer", "package p\nimport \"time\"\nfunc f() { _ = time.NewTimer(1) }\n", map[string]int{"p.go:f:NewTimer": 1}},
+		{"ticker", "package p\nimport \"time\"\nfunc f() { _ = time.NewTicker(1) }\n", map[string]int{"p.go:f:NewTicker": 1}},
+		{"tick", "package p\nimport \"time\"\nfunc f() { _ = time.Tick(1) }\n", map[string]int{"p.go:f:Tick": 1}},
+		{"after func", "package p\nimport \"time\"\nfunc f() { time.AfterFunc(1, func() {}) }\n", map[string]int{"p.go:f:AfterFunc": 1}},
+		{"until", "package p\nimport \"time\"\nfunc f(d time.Time) { _ = time.Until(d) }\n", map[string]int{"p.go:f:Until": 1}},
+		{"function literal in a package-level var", "package p\nimport \"time\"\nvar f = func() { _ = time.Since(time.Time{}) }\n", map[string]int{"p.go:<package>:Since": 1}},
+		{"dot import", "package p\nimport . \"time\"\nfunc f() { _ = Now() }\n", map[string]int{"p.go:<import>:dot": 1}},
+		{"injected clock and durations are fine", "package p\nimport \"time\"\ntype clock interface{ Now() time.Time }\nfunc f(c clock) time.Duration { _ = c.Now(); return 2 * time.Second }\n", map[string]int{}},
+		{"no time import", "package p\nfunc Now() int { return 1 }\nfunc f() { _ = Now() }\n", map[string]int{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := map[string]int{}
+			if err := addAmbientTimeUses(got, "p.go", []byte(tc.src)); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -57,51 +98,70 @@ func TestRawIdentityConcatDebtInventoryDoesNotGrow(t *testing.T) {
 func ambientTimeCalls(t *testing.T) map[string]int {
 	t.Helper()
 	out := map[string]int{}
-	walkProductionGo(t, func(rel, path string, b []byte) {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, b, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", rel, err)
-		}
-		timeNames := map[string]bool{}
-		for _, imp := range file.Imports {
-			if strings.Trim(imp.Path.Value, `"`) != "time" {
-				continue
-			}
-			name := "time"
-			if imp.Name != nil {
-				name = imp.Name.Name
-			}
-			if name != "_" && name != "." {
-				timeNames[name] = true
-			}
-		}
-		if len(timeNames) == 0 {
-			return
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				sel, ok := n.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				ident, ok := sel.X.(*ast.Ident)
-				if !ok || !timeNames[ident.Name] {
-					return true
-				}
-				switch sel.Sel.Name {
-				case "Now", "Sleep", "Since", "After":
-					out[rel+":"+fn.Name.Name+":"+sel.Sel.Name]++
-				}
-				return true
-			})
+	walkProductionGo(t, func(rel, _ string, b []byte) {
+		if err := addAmbientTimeUses(out, rel, b); err != nil {
+			t.Fatal(err)
 		}
 	})
 	return out
+}
+
+// ambientTimeNames are the package time identifiers that read the wall clock
+// or wait on it. A reference counts even without a call, so `var now =
+// time.Now` is reported.
+var ambientTimeNames = map[string]bool{
+	"Now": true, "Since": true, "Until": true,
+	"Sleep": true, "After": true, "AfterFunc": true, "Tick": true, "NewTicker": true, "NewTimer": true,
+}
+
+// addAmbientTimeUses counts ambient time references in one Go source file,
+// keyed by file, enclosing top-level function ("<package>" for package-level
+// declarations) and identifier. A dot import of time is reported on its own,
+// because its uses cannot be told apart from local identifiers.
+func addAmbientTimeUses(out map[string]int, rel string, src []byte) error {
+	file, err := parser.ParseFile(token.NewFileSet(), rel, src, 0)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", rel, err)
+	}
+	timeNames := map[string]bool{}
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != "time" {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			timeNames["time"] = true
+		case imp.Name.Name == ".":
+			out[rel+":<import>:dot"]++
+		case imp.Name.Name != "_":
+			timeNames[imp.Name.Name] = true
+		}
+	}
+	if len(timeNames) == 0 {
+		return nil
+	}
+	for _, decl := range file.Decls {
+		scope := "<package>"
+		var node ast.Node = decl
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if fn.Body == nil {
+				continue
+			}
+			scope, node = fn.Name.Name, fn.Body
+		}
+		ast.Inspect(node, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*ast.Ident)
+			if ok && timeNames[ident.Name] && ambientTimeNames[sel.Sel.Name] {
+				out[rel+":"+scope+":"+sel.Sel.Name]++
+			}
+			return true
+		})
+	}
+	return nil
 }
 
 func manualFTSWrites(t *testing.T) map[string]int {
