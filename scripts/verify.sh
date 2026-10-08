@@ -99,13 +99,16 @@ cross_compile() {
 
 fuzz() {
   run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
+  run go test ./internal/model -run=^$ -fuzz=FuzzDecodeSnapshotManifest -fuzztime="$FUZZTIME"
   # This target performs a real compressed-file round trip per input. Keep it
   # single-worker so constrained CI runners can finish the in-flight case when
   # fuzztime expires instead of failing teardown with context deadline exceeded.
   run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="$FUZZTIME" -parallel=1
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
+  run go test ./internal/cas -run=^$ -fuzz=FuzzVerifyReader -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeLatestPointer -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeMachinesIndex -fuzztime="$FUZZTIME"
+  run go test ./internal/redact -run=^$ -fuzz=FuzzApplyNoPanic -fuzztime="$FUZZTIME"
   # The MCP framer is owned by github.com/modelcontextprotocol/go-sdk and
   # fuzzed in that repo's mcp/*_test.go. Wire-format regressions land in
   # the conformance suite (`scripts/verify.sh mcp`) before they could

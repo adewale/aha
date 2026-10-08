@@ -120,6 +120,13 @@ earned.
   the oracle had to check meaning (decompressed content, independently
   decoded) rather than representation (compressed framing). Keep the
   counterexample as seed corpus.
+- Seed replay is not fuzz discovery, and the presence of a native target is
+  not proof that CI exercises it. The ordinary Go suite replayed all seeds
+  while `scripts/verify.sh fuzz` silently omitted snapshot-manifest decoding,
+  CAS reader verification, and redaction. The executable inventory guard now
+  parses every `Fuzz*(f *testing.F)` declaration and requires an exact bounded
+  command for it. When a campaign is an explicit list, test that list against
+  the source inventory so a newly added target cannot become replay-only.
 - Deleting a test class is a debt even when its subject is gone. The v1
   driver contract, state-machine, and fuzz tests were deleted with v1;
   confidence only recovered when each got a v2 successor at equal or higher
