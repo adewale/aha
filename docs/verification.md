@@ -6,7 +6,7 @@ This project keeps one verification entrypoint in `scripts/verify.sh`, with Make
 
 ```bash
 make verify-quick       # go test ./... + whitespace checks
-make verify-full        # quick + vet + race + fuzz + build
+make verify-full        # the CI profile below
 make verify-fuzz        # bounded fuzz suite
 make verify-mutation-dry
 make verify-mutation
@@ -27,6 +27,11 @@ scripts/verify.sh mutation-dry
 FUZZTIME=10s scripts/verify.sh fuzz
 ```
 
+`FuzzWalkBundleRoundTrip` does a real compressed-file round trip per input, so
+it is bounded by iteration count instead (`FUZZ_BUNDLE_EXECS`, default 300). A
+wall-time budget let slow CI runners hit "context deadline exceeded" during
+teardown while still inside an input.
+
 ## CI profile
 
 GitHub Actions runs:
@@ -35,14 +40,25 @@ GitHub Actions runs:
 scripts/verify.sh ci
 ```
 
-That profile currently includes:
+That profile (`full()` in `scripts/verify.sh`) runs these steps in order. The
+list is kept in sync with `full()` by
+`TestVerificationDocListsEveryCIProfileStep` in `internal/testquality`:
 
-- `go test ./...`
-- whitespace checks for the PR/commit diff and local worktree
+- `quick`: `go test ./...` plus whitespace checks for the PR/commit diff and local worktree
 - `go vet ./...`
 - `go test -race ./...`
-- bounded fuzz targets for model refs, archive walk/write, adapter JSONL parsing, depot addresses, and depot bundle keys;
-- `go build -o /tmp/aha ./cmd/aha`
+- `fuzz`: every `func Fuzz*` target for `FUZZTIME` (default 2s) each, except `FuzzWalkBundleRoundTrip`, which runs `FUZZ_BUNDLE_EXECS` iterations; `TestVerifyFuzzListMatchesFuzzTargetsInBothDirections` fails if a target is missing from the list
+- `ts`: typecheck and runtime-test the generated TypeScript client (fails if its locked dependencies are not installed)
+- `build_private`: build `cmd/aha` in a private temporary workspace
+- `./scripts/compat-n-minus-one.sh`: the pinned previous release must read data written by the current binary, and vice versa
+- `cross_compile`: build for Linux, macOS and Windows, and compile the Windows platform-contract test binaries
+- `mcp_conformance`: the eight cross-SDK MCP conformance legs (Python, TypeScript and Go SDK clients against `aha mcp`; aha's TS client against Python, TS and Go reference servers; the Code Mode workflow; HTTP/MCP consistency)
+
+CI installs the conformance dependencies (`npm ci --prefix scripts/mcp-conformance` and
+`pip install -r scripts/mcp-conformance/requirements.txt`) and sets
+`AHA_MCP_REQUIRE_ALL_LEGS=1`, so a conformance leg that cannot run fails the build.
+Locally, legs whose toolchain is missing are skipped and reported as skipped;
+set `AHA_MCP_REQUIRE_ALL_LEGS=1` to reproduce CI.
 
 ## Correctness-by-construction guardrails
 
@@ -81,12 +97,24 @@ Profiles are never written by default. Inspect them with `go tool pprof`. Captur
 
 ## Mutation testing
 
-Mutation testing is intentionally not part of normal CI. Run it before release or after invariant-critical refactors:
+Mutation testing is not part of CI and is not scheduled. Run it on the package you changed, before a release or after an invariant-critical refactor:
 
 ```bash
+MUTATION_PKGS=./internal/model scripts/verify.sh mutation   # one package
+MUTATION_DIFF=origin/main scripts/verify.sh mutation         # only lines changed since origin/main
 make verify-mutation-dry
-make verify-mutation
+make verify-mutation                                         # all five packages: about 2-2.5 hours
 ```
+
+`MUTATION_PKGS` takes space-separated packages (default: the critical packages below). `MUTATION_DIFF` takes a git ref: gremlins mutates only lines changed since it, and selected packages with no changes are skipped. Both also apply to `mutation-dry`. Do not call `gremlins unleash ./internal/<pkg> --diff <ref>` directly from the repository root: gremlins v0.6.0 then matches no changed line and reports every mutant SKIPPED, and with an empty diff it mutates the whole package. `verify.sh` runs it inside the package directory with `diff.relative` set, and skips unchanged packages.
+
+Measured cost (gremlins v0.6.0, `--workers 2`, September 2026):
+
+- 1,849 runnable mutants plus 287 not covered: `internal/model` 95, `internal/archive` 214, `internal/adapters` 237, `internal/depot` 380, `internal/corpus` 923.
+- `internal/model` takes 1-1.5 minutes, `internal/corpus` about 1.7 hours, and all five packages about 2-2.5 hours (partly extrapolated).
+- About 30% of sampled `internal/corpus` mutants lived, which projects to roughly 275 survivors there. A full run produces a triage list, not a pass/fail answer.
+
+`scripts/verify.sh mutation` clears the Go test cache first. gremlins sets each mutant's timeout from how long its coverage run took, and a cached run returns in milliseconds. With a warm cache the `internal/model` coverage run took 0.26 s, 87 of 95 mutants were reported TIMED OUT, none lived, and efficacy read 100%; after `go clean -testcache` the same run gave 89 killed, 5 lived and 1 timed out.
 
 The script uses:
 
@@ -102,4 +130,4 @@ Critical packages:
 - `./internal/depot`
 - `./internal/adapters`
 
-A surviving mutant in ref parsing, archive validation, depot key validation, path safety, or conflict quarantine should be treated as a release blocker unless it is a documented equivalent mutant.
+Triage survivors before release. A survivor blocks the release only if it is non-equivalent and plausibly a bypass in identity or ingest code: ref parsing, archive validation, depot key validation, path safety, or conflict quarantine. Record equivalent and accepted survivors with a one-line reason.

@@ -1,6 +1,7 @@
 package corpus_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -31,15 +32,92 @@ func TestSchemaRejectsInvalidStates(t *testing.T) {
 	}
 }
 
+// TestSchemaAppendOnlyTriggersRejectMutation is the Type B test for the
+// append-only tables listed in docs/correctness-by-construction-spec.md: each
+// one carries BEFORE UPDATE/DELETE triggers, so direct SQL cannot rewrite or
+// remove a row. Every table is seeded with a row first, because a trigger
+// never fires for a statement that matches no rows.
 func TestSchemaAppendOnlyTriggersRejectMutation(t *testing.T) {
 	store, ref := corpusWithOneEntry(t)
 	defer store.Close()
 	session, entry := ref.Session.String(), ref.Entry.String()
-	if _, err := store.DB.Exec(`update entries set role='assistant' where session_key=? and entry_id=?`, session, entry); err == nil || !strings.Contains(err.Error(), "append-only") {
-		t.Fatalf("update entries err=%v", err)
+	manifest, artifact := strings.Repeat("b", 64), strings.Repeat("a", 64)
+	seeds := []struct {
+		query string
+		args  []any
+	}{
+		{`insert into snapshots(manifest_sha256,machine_id,captured_at,ingested_at,manifest_json) values(?,'m','2026','2026','{}')`, []any{manifest}},
+		{`insert into artifacts(artifact_sha256,source_name,machine_id,manifest_sha256,kind,raw_path,relative_path,text_preview) values(?,'pi','m',?,'artifact','raw','rel','preview')`, []any{artifact, manifest}},
+		{`insert into conflicts(session_key,entry_id,first_entry_sha256,second_entry_sha256,details_json) values(?,?,'first','second','{}')`, []any{session, entry}},
+		{`insert into tool_invocations(session_key,entry_id,tool_key,tool_name) values(?,?,'tool-key','bash')`, []any{session, entry}},
+		{`insert into redactions(session_key,entry_id,pattern,count) values(?,?,'aws-access-key',1)`, []any{session, entry}},
+		{`insert into redaction_events(session_key,subject_kind,subject_id,entry_id,surface,pattern,count) values(?,'entry',?,?,'text','aws-access-key',1)`, []any{session, entry, entry}},
 	}
-	if _, err := store.DB.Exec(`delete from entries where session_key=? and entry_id=?`, session, entry); err == nil || !strings.Contains(err.Error(), "append-only") {
-		t.Fatalf("delete entries err=%v", err)
+	for _, seed := range seeds {
+		if _, err := store.DB.Exec(seed.query, seed.args...); err != nil {
+			t.Fatalf("seed %q: %v", seed.query, err)
+		}
+	}
+	cases := []struct {
+		table  string
+		update string
+	}{
+		{"entries", `update entries set role='assistant'`},
+		{"messages", `update messages set text='rewritten'`},
+		{"artifacts", `update artifacts set text_preview='rewritten'`},
+		{"conflicts", `update conflicts set details_json='{"rewritten":true}'`},
+		{"tool_invocations", `update tool_invocations set tool_name='rewritten'`},
+		{"redactions", `update redactions set count=0`},
+		{"redaction_events", `update redaction_events set surface='rewritten'`},
+	}
+	// The schema, not this list, decides which tables are append-only: a new
+	// table with append-only triggers must be added to the cases above.
+	tested := map[string]bool{}
+	for _, tc := range cases {
+		tested[tc.table] = true
+	}
+	declared := map[string]bool{}
+	triggers, err := store.DB.Query(`select distinct tbl_name from sqlite_master where type='trigger' and sql like '%are append-only%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for triggers.Next() {
+		var table string
+		if err := triggers.Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		declared[table] = true
+	}
+	if err := triggers.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(declared, tested) {
+		t.Fatalf("append-only tables in the schema %v, tested %v", declared, tested)
+	}
+	for _, tc := range cases {
+		t.Run(tc.table, func(t *testing.T) {
+			rows := func() int {
+				t.Helper()
+				var n int
+				if err := store.DB.QueryRow(`select count(*) from ` + tc.table).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			before := rows()
+			if before == 0 {
+				t.Fatalf("%s has no rows, so its triggers would never fire", tc.table)
+			}
+			if _, err := store.DB.Exec(tc.update); err == nil || !strings.Contains(err.Error(), "append-only") {
+				t.Errorf("update %s err=%v, want append-only rejection", tc.table, err)
+			}
+			if _, err := store.DB.Exec(`delete from ` + tc.table); err == nil || !strings.Contains(err.Error(), "append-only") {
+				t.Errorf("delete from %s err=%v, want append-only rejection", tc.table, err)
+			}
+			if after := rows(); after != before {
+				t.Errorf("%s rows=%d after rejected mutations, want %d", tc.table, after, before)
+			}
+		})
 	}
 }
 

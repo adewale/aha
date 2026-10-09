@@ -4,6 +4,16 @@ All notable changes to `aha` are documented here. `aha` has not had a tagged rel
 
 ## Unreleased
 
+### Verification gates (September 2026)
+
+#### Changed
+
+- CI now installs the Python (`scripts/mcp-conformance/requirements.txt`, pinned) and TypeScript (`scripts/mcp-conformance`) conformance dependencies and runs `scripts/verify.sh ci` with `AHA_MCP_REQUIRE_ALL_LEGS=1`, so all eight MCP conformance legs run and a leg that cannot run fails the build. Previously five legs skipped in CI and the step still exited 0. Locally, missing toolchains are still reported as skipped unless the variable is set.
+- The fuzz-list drift guard now checks both directions: every `func Fuzz*` must be fuzzed by `verify.sh fuzz` (or be listed as seed-only with a reason), and every fuzz command must name a target defined in the package it runs. `FuzzDecodeSnapshotManifest`, `FuzzVerifyReader` and `FuzzApplyNoPanic` were never actively fuzzed and now are.
+- Tests over the vendored corpora under `internal/adapters/testdata/corpora` fail instead of skipping when the corpus is missing or empty.
+- `docs/verification.md` lists the real CI profile, and `TestVerificationDocListsEveryCIProfileStep` keeps it in step with `full()` in `verify.sh`.
+- Mutation testing stays out of CI and is not scheduled; `docs/verification.md` records its measured cost (1,849 runnable mutants, about 2-2.5 hours for all five packages). `scripts/verify.sh mutation` clears the Go test cache first, because a cached coverage run made gremlins report 87 of 95 `internal/model` mutants TIMED OUT. `MUTATION_PKGS` narrows a run to named packages, and `MUTATION_DIFF=<ref>` mutates only lines changed since the ref and skips unchanged packages. Survivors are triaged before release instead of every survivor being a release blocker.
+
 ### Command/state model 0.2 (July 2026)
 
 #### Changed

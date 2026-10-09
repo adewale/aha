@@ -19,7 +19,17 @@ Modes:
 
 Environment:
   FUZZTIME      fuzz duration per target (default: 2s)
+  FUZZ_BUNDLE_EXECS
+                iterations for FuzzWalkBundleRoundTrip, which is bounded by
+                count rather than FUZZTIME (default: 300)
+  AHA_MCP_REQUIRE_ALL_LEGS
+                1 = every MCP conformance leg must run; a missing toolchain or
+                dependency fails instead of skipping (CI sets this)
   GREMLINS     gremlins command (default: go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0)
+  MUTATION_PKGS space-separated packages for mutation and mutation-dry
+                (default: model, corpus, archive, depot and adapters)
+  MUTATION_DIFF git ref: mutate only lines changed since it (gremlins --diff)
+                and skip selected packages that have no changes
 USAGE
 }
 
@@ -97,13 +107,17 @@ cross_compile() {
   run env GOOS=windows GOARCH=amd64 go test -c -o "$root/safety-windows.test.exe" ./internal/safety
 }
 
+# Every func Fuzz* in the repository must appear here (or in the seed-only
+# allowlist in internal/testquality/infrastructure_isolation_test.go); that test
+# checks both directions and that each target is run in its own package.
 fuzz() {
   run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
   run go test ./internal/model -run=^$ -fuzz=FuzzDecodeSnapshotManifest -fuzztime="$FUZZTIME"
   # This target performs a real compressed-file round trip per input. Keep it
-  # single-worker so constrained CI runners can finish the in-flight case when
-  # fuzztime expires instead of failing teardown with context deadline exceeded.
-  run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="$FUZZTIME" -parallel=1
+  # single-worker, and bound it by iteration count rather than wall time: with
+  # a wall-time budget a slow CI runner can still be inside an input when the
+  # budget expires and go test fails teardown with context deadline exceeded.
+  run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="${FUZZ_BUNDLE_EXECS:-300}x" -parallel=1
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/cas -run=^$ -fuzz=FuzzVerifyReader -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeLatestPointer -fuzztime="$FUZZTIME"
@@ -152,7 +166,24 @@ ts() {
 #     8. HTTP<->MCP consistency -> internal/mcp TestHTTPAndMCPPathsAreConsistent
 #
 # Each leg skips gracefully when its toolchain is missing, so this mode
-# still does *something* useful on a Python-only or Go-only box.
+# still does *something* useful on a Python-only or Go-only box. With
+# AHA_MCP_REQUIRE_ALL_LEGS=1 (set in CI) a leg that cannot run is a failure,
+# because the Python and TS legs are the ones that have found real bugs.
+require_all_mcp_legs() {
+  [[ "${AHA_MCP_REQUIRE_ALL_LEGS:-0}" == "1" ]]
+}
+
+# skip_mcp_leg reports a leg that cannot run: a skip normally, a failure when
+# all legs are required.
+skip_mcp_leg() {
+  local leg="$1" reason="$2"
+  if require_all_mcp_legs; then
+    printf '\n==> %s: FAILED: cannot run (%s) and AHA_MCP_REQUIRE_ALL_LEGS=1\n' "$leg" "$reason" >&2
+    exit 1
+  fi
+  printf '\n==> %s: skipped (%s)\n' "$leg" "$reason" >&2
+}
+
 mcp_conformance() {
   # The Go-SDK leg needs no external toolchain. Python/TS legs run only when
   # their already-prepared dependencies are present; verification never runs
@@ -165,6 +196,18 @@ mcp_conformance() {
   fi
   if (( have_node )) && [[ -d scripts/mcp-conformance/node_modules/@modelcontextprotocol/sdk ]]; then
     have_ts_sdk=1
+  fi
+  if require_all_mcp_legs; then
+    local -a missing=()
+    (( have_python )) || missing+=("python3 with the mcp package (scripts/mcp-conformance/requirements.txt)")
+    (( have_node )) || missing+=("node")
+    (( have_tsc )) || missing+=("tsc (clients/typescript dependencies)")
+    (( have_ts_sdk )) || missing+=("scripts/mcp-conformance dependencies (@modelcontextprotocol/sdk)")
+    if (( ${#missing[@]} > 0 )); then
+      printf '\n==> mcp: AHA_MCP_REQUIRE_ALL_LEGS=1 but these are missing:\n' >&2
+      printf '      - %s\n' "${missing[@]}" >&2
+      exit 1
+    fi
   fi
 
   new_workspace
@@ -209,13 +252,13 @@ JSONC
   if (( have_python )); then
     run env "${attested_env[@]}" python3 scripts/mcp-conformance/client_against_aha.py
   else
-    printf '\n==> mcp leg 1 (python client -> aha): skipped (python3 mcp not available)\n' >&2
+    skip_mcp_leg "mcp leg 1 (python client -> aha)" "python3 mcp not available"
   fi
 
   if (( have_ts_sdk )); then
     run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types client_against_aha.ts"
   else
-    printf '\n==> mcp leg 2 (typescript client -> aha): skipped (prepared TS SDK dependencies not available; prepare scripts/mcp-conformance dependencies explicitly)\n' >&2
+    skip_mcp_leg "mcp leg 2 (typescript client -> aha)" "prepared TS SDK dependencies not available; prepare scripts/mcp-conformance dependencies explicitly"
   fi
 
   run env "${attested_env[@]}" go test -count=1 ./internal/mcp/conformance/...
@@ -223,7 +266,7 @@ JSONC
   if (( have_ts_sdk )); then
     run_shell "cd scripts/mcp-conformance && env AHA_BIN='$aha_bin' AHA_CONFIG='$cfg' AHA_MCP_CONFORMANCE_ROOT='$root' AHA_MCP_CONFORMANCE_TOKEN='$token' node --experimental-strip-types codemode_workflow.ts"
   else
-    printf '\n==> mcp code-mode workflow: skipped (prepared TS SDK dependencies not available)\n' >&2
+    skip_mcp_leg "mcp leg 7 (code-mode workflow)" "prepared TS SDK dependencies not available"
   fi
 
   if (( have_node && have_tsc )); then
@@ -237,7 +280,7 @@ JSONC
     ref_env+=("AHA_REF_SERVER_GO=$ref_bin")
     run env "${ref_env[@]}" node --experimental-strip-types --test clients/typescript/test/stdio.conformance.test.ts
   else
-    printf '\n==> mcp legs 4-6 (aha client -> reference servers): skipped (need node + tsc)\n' >&2
+    skip_mcp_leg "mcp legs 4-6 (aha client -> reference servers)" "need node + tsc"
   fi
 }
 
@@ -261,16 +304,52 @@ mutation_packages=(
   ./internal/adapters
 )
 
-mutation_dry() {
-  for pkg in "${mutation_packages[@]}"; do
-    run_shell "$GREMLINS unleash '$pkg' --dry-run --workers 2"
+# Run gremlins over MUTATION_PKGS (default: mutation_packages) with the given
+# extra arguments. A whole-scope run takes about 2-2.5 hours (see
+# docs/verification.md), so name the package you changed.
+#
+# With MUTATION_DIFF, only lines changed since that ref are mutated. Two
+# gremlins v0.6.0 behaviours shape this:
+# - --diff compares `git diff` paths, which are relative to the repository
+#   root, with file names relative to the package directory. Given
+#   ./internal/model from the root it matches nothing and reports every mutant
+#   SKIPPED, even on changed lines. Running it inside the package directory
+#   with diff.relative makes the two agree.
+# - An empty diff makes gremlins mutate the whole package, so a package with
+#   no changes since the ref is skipped here instead.
+unleash_packages() {
+  local pkgs pkg dir n="${GIT_CONFIG_COUNT:-0}"
+  read -r -a pkgs <<< "${MUTATION_PKGS:-${mutation_packages[*]}}"
+  if [[ -n "${MUTATION_DIFF:-}" ]] && ! git rev-parse --verify --quiet "${MUTATION_DIFF}^{commit}" >/dev/null; then
+    printf 'MUTATION_DIFF=%s does not name a commit\n' "$MUTATION_DIFF" >&2
+    exit 2
+  fi
+  for pkg in "${pkgs[@]}"; do
+    if [[ -z "${MUTATION_DIFF:-}" ]]; then
+      run_shell "$GREMLINS unleash '$pkg' $*"
+      continue
+    fi
+    dir="${pkg#./}"
+    if git diff --quiet --merge-base "$MUTATION_DIFF" -- "$dir"; then
+      printf '\n==> skip %s: no changes since %s\n' "$pkg" "$MUTATION_DIFF" >&2
+      continue
+    fi
+    # Adds diff.relative=true to any git config already passed in the environment.
+    run_shell "cd '$dir' && GIT_CONFIG_COUNT=$((n + 1)) GIT_CONFIG_KEY_$n=diff.relative GIT_CONFIG_VALUE_$n=true $GREMLINS unleash --diff '$MUTATION_DIFF' $*"
   done
 }
 
+mutation_dry() {
+  unleash_packages --dry-run --workers 2
+}
+
 mutation() {
-  for pkg in "${mutation_packages[@]}"; do
-    run_shell "$GREMLINS unleash '$pkg' --workers 2"
-  done
+  # gremlins sets each mutant's timeout from how long its coverage run took.
+  # With a warm Go test cache that run is replayed in milliseconds, and nearly
+  # every mutant is then reported TIMED OUT (87 of 95 in internal/model), so
+  # clear the test cache first.
+  run go clean -testcache
+  unleash_packages --workers 2
 }
 
 case "$mode" in
