@@ -331,3 +331,30 @@ func TestGeneratorsRequireExplicitOutputAndDocsTestsStayReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestBundleRoundTripFuzzIsBoundedByIterations keeps FuzzWalkBundleRoundTrip,
+// which does a real compressed-file round trip per input, bounded by an
+// iteration count rather than wall time. With a wall-time budget a slow CI
+// runner can still be inside an input when the budget expires, and go test
+// then fails teardown with "context deadline exceeded" even though no input
+// failed.
+func TestBundleRoundTripFuzzIsBoundedByIterations(t *testing.T) {
+	verify := readProjectFile(t, "scripts", "verify.sh")
+	iterationBudget := regexp.MustCompile(`-fuzztime="?\$\{FUZZ_BUNDLE_EXECS:-[1-9][0-9]*\}x"?`)
+	var found bool
+	for _, line := range strings.Split(verify, "\n") {
+		if !strings.Contains(line, "-fuzz=FuzzWalkBundleRoundTrip") {
+			continue
+		}
+		found = true
+		if !iterationBudget.MatchString(line) {
+			t.Fatalf("FuzzWalkBundleRoundTrip must use an iteration budget (-fuzztime=\"${FUZZ_BUNDLE_EXECS:-N}x\"), got:\n  %s", strings.TrimSpace(line))
+		}
+		if !strings.Contains(line, "-parallel=1") {
+			t.Fatalf("FuzzWalkBundleRoundTrip must stay single-worker (-parallel=1), got:\n  %s", strings.TrimSpace(line))
+		}
+	}
+	if !found {
+		t.Fatal("verify.sh no longer fuzzes FuzzWalkBundleRoundTrip")
+	}
+}

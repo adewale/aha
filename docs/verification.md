@@ -27,6 +27,11 @@ scripts/verify.sh mutation-dry
 FUZZTIME=10s scripts/verify.sh fuzz
 ```
 
+`FuzzWalkBundleRoundTrip` does a real compressed-file round trip per input, so
+it is bounded by iteration count instead (`FUZZ_BUNDLE_EXECS`, default 300). A
+wall-time budget let slow CI runners hit "context deadline exceeded" during
+teardown while still inside an input.
+
 ## CI profile
 
 GitHub Actions runs:
@@ -42,7 +47,7 @@ list is kept in sync with `full()` by
 - `quick`: `go test ./...` plus whitespace checks for the PR/commit diff and local worktree
 - `go vet ./...`
 - `go test -race ./...`
-- `fuzz`: every `func Fuzz*` target for `FUZZTIME` (default 2s) each; `TestVerifyFuzzListMatchesFuzzTargetsInBothDirections` fails if a target is missing from the list
+- `fuzz`: every `func Fuzz*` target for `FUZZTIME` (default 2s) each, except `FuzzWalkBundleRoundTrip`, which runs `FUZZ_BUNDLE_EXECS` iterations; `TestVerifyFuzzListMatchesFuzzTargetsInBothDirections` fails if a target is missing from the list
 - `ts`: typecheck and runtime-test the generated TypeScript client (fails if its locked dependencies are not installed)
 - `build_private`: build `cmd/aha` in a private temporary workspace
 - `./scripts/compat-n-minus-one.sh`: the pinned previous release must read data written by the current binary, and vice versa

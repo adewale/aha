@@ -19,6 +19,9 @@ Modes:
 
 Environment:
   FUZZTIME      fuzz duration per target (default: 2s)
+  FUZZ_BUNDLE_EXECS
+                iterations for FuzzWalkBundleRoundTrip, which is bounded by
+                count rather than FUZZTIME (default: 300)
   AHA_MCP_REQUIRE_ALL_LEGS
                 1 = every MCP conformance leg must run; a missing toolchain or
                 dependency fails instead of skipping (CI sets this)
@@ -111,9 +114,10 @@ fuzz() {
   run go test ./internal/model -run=^$ -fuzz=FuzzRefParseFormat -fuzztime="$FUZZTIME"
   run go test ./internal/model -run=^$ -fuzz=FuzzDecodeSnapshotManifest -fuzztime="$FUZZTIME"
   # This target performs a real compressed-file round trip per input. Keep it
-  # single-worker so constrained CI runners can finish the in-flight case when
-  # fuzztime expires instead of failing teardown with context deadline exceeded.
-  run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="$FUZZTIME" -parallel=1
+  # single-worker, and bound it by iteration count rather than wall time: with
+  # a wall-time budget a slow CI runner can still be inside an input when the
+  # budget expires and go test fails teardown with context deadline exceeded.
+  run go test ./internal/archive -run=^$ -fuzz=FuzzWalkBundleRoundTrip -fuzztime="${FUZZ_BUNDLE_EXECS:-300}x" -parallel=1
   run go test ./internal/adapters -run=^$ -fuzz=FuzzParseGenericJSONL -fuzztime="$FUZZTIME"
   run go test ./internal/cas -run=^$ -fuzz=FuzzVerifyReader -fuzztime="$FUZZTIME"
   run go test ./internal/depot -run=^$ -fuzz=FuzzDecodeLatestPointer -fuzztime="$FUZZTIME"
