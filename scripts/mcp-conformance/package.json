@@ -9,7 +9,7 @@
     "reference-server": "node --experimental-strip-types reference_server.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.21.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "zod": "^3.23.0"
   }
 }
