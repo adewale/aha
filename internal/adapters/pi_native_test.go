@@ -107,7 +107,7 @@ func TestPiNativeProjectionRealCorpus(t *testing.T) {
 	dir := filepath.Join("testdata", "corpora", "pi-mono-sample")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Skipf("pi-mono corpus not vendored: %v", err)
+		t.Fatalf("vendored pi-mono corpus is missing (it is committed test data: restore it; do not skip): %v", err)
 	}
 	sawToolCall := false
 	sawTokens := false

@@ -6,7 +6,8 @@
 //
 // Each is skipped if its env var isn't set, so this file can run in
 // Python-only, TS-only, or no-reference-server environments without
-// failing.
+// failing. With AHA_MCP_REQUIRE_ALL_LEGS=1 (set in CI) nothing is skipped:
+// a missing reference server fails its test instead.
 //
 // Run via `scripts/verify.sh mcp`, or directly:
 //   AHA_REF_SERVER="python3 .../reference_server.py" \
@@ -49,21 +50,29 @@ async function roundTripThreeTools(refCmd: string) {
 const refPy = process.env.AHA_REF_SERVER;
 const refTs = process.env.AHA_REF_SERVER_TS;
 const refGo = process.env.AHA_REF_SERVER_GO;
+const requireAllLegs = process.env.AHA_MCP_REQUIRE_ALL_LEGS === "1";
+
+function referenceLeg(envName: string, refCmd: string | undefined) {
+  return async () => {
+    assert.ok(refCmd, `${envName} is not set, but AHA_MCP_REQUIRE_ALL_LEGS=1 requires this leg`);
+    await roundTripThreeTools(refCmd);
+  };
+}
 
 test(
   "aha stdio transport against official Python SDK FastMCP reference",
-  { skip: !refPy },
-  async () => roundTripThreeTools(refPy ?? ""),
+  { skip: !refPy && !requireAllLegs },
+  referenceLeg("AHA_REF_SERVER", refPy),
 );
 
 test(
   "aha stdio transport against official TypeScript SDK McpServer reference",
-  { skip: !refTs },
-  async () => roundTripThreeTools(refTs ?? ""),
+  { skip: !refTs && !requireAllLegs },
+  referenceLeg("AHA_REF_SERVER_TS", refTs),
 );
 
 test(
   "aha stdio transport against official Go SDK reference",
-  { skip: !refGo },
-  async () => roundTripThreeTools(refGo ?? ""),
+  { skip: !refGo && !requireAllLegs },
+  referenceLeg("AHA_REF_SERVER_GO", refGo),
 );

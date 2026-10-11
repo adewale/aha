@@ -36,7 +36,7 @@ func TestLiveContextMatchesReferenceImpl(t *testing.T) {
 	corpusDir := filepath.Join("..", "adapters", "testdata", "corpora", "pi-mono-sample")
 	dirEntries, err := os.ReadDir(corpusDir)
 	if err != nil {
-		t.Skipf("pi-mono corpus not vendored: %v", err)
+		t.Fatalf("vendored pi-mono corpus is missing (it is committed test data: restore it; do not skip): %v", err)
 	}
 	tested := 0
 	for _, de := range dirEntries {
@@ -79,7 +79,7 @@ func TestLiveContextMatchesReferenceImpl(t *testing.T) {
 		tested++
 	}
 	if tested == 0 {
-		t.Skip("no .jsonl files in corpus")
+		t.Fatal("vendored pi-mono corpus has no .jsonl sessions (it is committed test data: restore it; do not skip)")
 	}
 }
 

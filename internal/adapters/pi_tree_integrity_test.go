@@ -36,7 +36,7 @@ func TestPiCorpusTreeIntegrity(t *testing.T) {
 	dir := filepath.Join("testdata", "corpora", "pi-mono-sample")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Skipf("pi-mono corpus not vendored: %v", err)
+		t.Fatalf("vendored pi-mono corpus is missing (it is committed test data: restore it; do not skip): %v", err)
 	}
 	piPaths := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -45,7 +45,7 @@ func TestPiCorpusTreeIntegrity(t *testing.T) {
 		}
 	}
 	if len(piPaths) == 0 {
-		t.Skip("pi-mono corpus is empty")
+		t.Fatal("vendored pi-mono corpus has no .jsonl sessions (it is committed test data: restore it; do not skip)")
 	}
 	for _, path := range piPaths {
 		t.Run(filepath.Base(path), func(t *testing.T) {

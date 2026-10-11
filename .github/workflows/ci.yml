@@ -19,6 +19,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: clients/typescript/package-lock.json
+          cache-dependency-path: |
+            clients/typescript/package-lock.json
+            scripts/mcp-conformance/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/mcp-conformance/requirements.txt
       - run: npm ci --prefix clients/typescript
+      # Dependencies for the Python and TypeScript MCP conformance legs.
+      # verify.sh never installs anything itself.
+      - run: npm ci --prefix scripts/mcp-conformance
+      - run: python -m pip install -r scripts/mcp-conformance/requirements.txt
       - run: scripts/verify.sh ci
+        env:
+          # Every MCP conformance leg must run: a missing toolchain fails the
+          # build instead of skipping with exit 0.
+          AHA_MCP_REQUIRE_ALL_LEGS: "1"

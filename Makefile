@@ -8,7 +8,7 @@ help:
 	  '  build               build aha with commit/time/dirty identity' \
 	  '  verify              full local verification' \
 	  '  verify-quick        go test ./... + whitespace checks' \
-	  '  verify-full         quick + vet + race + fuzz + build' \
+	  '  verify-full         CI profile (see docs/verification.md)' \
 	  '  verify-ci           same as full, used by CI' \
 	  '  verify-fuzz         bounded fuzz suite' \
 	  '  verify-ts           typecheck + runtime-test the TypeScript client' \

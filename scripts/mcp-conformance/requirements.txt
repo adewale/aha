@@ -1,0 +1,6 @@
+# Python SDK for the MCP conformance legs (verify.sh mcp legs 1 and 4).
+# CI installs this and runs with AHA_MCP_REQUIRE_ALL_LEGS=1. Pinned so an SDK
+# release cannot change the oracle silently: mcp 2.x renamed the result
+# attributes these scripts read (serverInfo -> server_info), so move to 2.x as
+# a deliberate change.
+mcp==1.30.0
